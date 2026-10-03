@@ -1,16 +1,14 @@
 """A referral survives guest checkout and email claim without granting public ownership."""
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from threading import Barrier
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from sqlalchemy.schema import CreateSchema, DropSchema
 
 from impactgraph.donors import (
     DonorAccessDenied,
@@ -28,7 +26,6 @@ from impactgraph.donors import (
     sign_out,
 )
 from impactgraph.persistence import (
-    Base,
     DonorCheckoutRecord,
     DonorLoginRecord,
     DonorRecord,
@@ -39,31 +36,6 @@ from impactgraph.persistence import (
 NOW = datetime(2026, 12, 17, 12, tzinfo=UTC)
 
 
-@pytest.fixture(params=["sqlite"] + (["postgres"] if os.getenv("TEST_POSTGRES_URL") else []))
-def engine(request, tmp_path):
-    postgres = request.param == "postgres"
-    engine = create_engine(os.environ["TEST_POSTGRES_URL"] if postgres else
-                           f"sqlite+pysqlite:///{tmp_path / 'donors.db'}")
-    schema = f"donors_{uuid4().hex}" if postgres else None
-    if postgres:
-        with engine.begin() as connection:
-            connection.execute(CreateSchema(schema))
-        engine = engine.execution_options(schema_translate_map={None: schema})
-    else:
-        @event.listens_for(engine, "connect")
-        def foreign_keys(connection, _):
-            connection.execute("PRAGMA foreign_keys=ON")
-
-    tables = [table for table in Base.metadata.sorted_tables
-              if table.name == "donors" or table.name.startswith("donor_")]
-    try:
-        Base.metadata.create_all(engine, tables=tables)
-        yield engine
-    finally:
-        if postgres:
-            with engine.begin() as connection:
-                connection.execute(DropSchema(schema, cascade=True))
-        engine.dispose()
 
 
 @pytest.fixture

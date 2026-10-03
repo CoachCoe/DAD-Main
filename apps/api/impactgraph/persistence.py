@@ -103,6 +103,56 @@ class DonorCheckoutRecord(EntityMixin, Base):
     referral_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class StripeCheckoutRecord(EntityMixin, Base):
+    """A committed attempt precedes the network call, allowing safe retry after a crash."""
+
+    __tablename__ = "donor_stripe_checkouts"
+    checkout_id: Mapped[UUID] = mapped_column(ForeignKey("donor_checkouts.id"), unique=True)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    request_params: Mapped[dict] = mapped_column(JSON, default=dict)
+    stripe_session_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    hosted_url: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="PENDING")
+
+
+class DonorRecurringReservationRecord(EntityMixin, Base):
+    """One in-flight or active monthly checkout per donor; expiry/cancellation releases it."""
+
+    __tablename__ = "donor_recurring_reservations"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), unique=True)
+    attempt_id: Mapped[UUID] = mapped_column(ForeignKey("donor_stripe_checkouts.id"), unique=True)
+
+
+class StripeEventRecord(EntityMixin, Base):
+    """Verified, allowlisted fields only; no raw card/customer webhook payloads."""
+
+    __tablename__ = "donor_stripe_events"
+    stripe_event_id: Mapped[str] = mapped_column(String(255), unique=True)
+    event_type: Mapped[str] = mapped_column(String(80))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    data: Mapped[dict] = mapped_column(JSON)
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(String(80))
+
+
+class DonorGiftRecord(EntityMixin, Base):
+    """Individual collected money, linked to the checkout's pre-account attribution."""
+
+    __tablename__ = "donor_gifts"
+    __table_args__ = (
+        CheckConstraint("amount_minor > 0 AND currency = 'USD'", name="ck_donor_gift_money"),
+    )
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    checkout_id: Mapped[UUID] = mapped_column(ForeignKey("donor_checkouts.id"), index=True)
+    stripe_object_id: Mapped[str] = mapped_column(String(255), unique=True)
+    amount_minor: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(String(3))
+    frequency: Mapped[str] = mapped_column(String(8))
+    paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class ProgramRecord(EntityMixin, Base):
     __tablename__ = "programs"
     slug: Mapped[str] = mapped_column(String(120), unique=True)

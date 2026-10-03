@@ -28,6 +28,7 @@ dependencies = [
   # detection is a core check, and a deployment that silently cannot run it would be
   # claiming a safeguard it does not have.
   "pillow>=11,<13",
+  "stripe==16.0.0",
 ]
 
 [project.optional-dependencies]
@@ -47,4 +48,3 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-

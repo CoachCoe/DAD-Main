@@ -14,7 +14,9 @@ import { type NextRequest } from "next/server";
  */
 export const dynamic = "force-dynamic";
 
-const apiBase = () => process.env.API_BASE_URL ?? "http://localhost:8000";
+const apiBase = (path: string[]) => path[0] === "donor"
+  ? process.env.DONOR_API_BASE_URL ?? "http://localhost:8001"
+  : process.env.API_BASE_URL ?? "http://localhost:8000";
 
 // Headers that describe a single hop and must not be forwarded.
 const HOP_BY_HOP = new Set([
@@ -40,7 +42,7 @@ function forwardHeaders(source: Headers): Headers {
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
-  const target = new URL(`${apiBase()}/${path.join("/")}`);
+  const target = new URL(`${apiBase(path)}/${path.join("/")}`);
   target.search = request.nextUrl.search;
 
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
@@ -60,7 +62,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
       {
         detail: {
           code: "API_UNREACHABLE",
-          message: "The transparency API could not be reached.",
+          message: "The requested service could not be reached.",
         },
       },
       { status: 502 },

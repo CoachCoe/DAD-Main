@@ -100,7 +100,8 @@ unconfirmed. They must be verified before live donations.
 
 `impactgraph.donors` implements guest identity, hashed login/session credentials,
 explicit sharing activation, first-touch capture, and attributed checkout drafts.
-`donor_checkouts` are not gifts: there is no paid status or public charge endpoint.
+`donor_checkouts` are drafts, not gifts. The sandbox-only donor API creates hosted Stripe
+checkout sessions; verified Stripe payment events produce individual `donor_gifts`.
 Claiming an account proves email control but does not establish Founding Donor status.
 The module neither depends on blockchain RPC nor grants staff permissions.
 
@@ -111,8 +112,78 @@ same-origin protection, secure cookies, and a confirmation step that prevents em
 link scanners from consuming credentials. It must not expose these services before
 those controls and delivery exist.
 
-The Stripe integration must persist verified events and individual gifts, enforce the
-attribution deadline at payment time, establish the permanent first-gift relationship,
-and apply it to subsequent gifts. Do not use checkout drafts or aggregated transparency
-funding as proof of collection. Payment idempotency, subscription enforcement, refunds,
-streaks, badges, staff MFA, and outbound messaging are outside this initial service slice.
+The Stripe integration persists verified events and individual gifts. Checkout and event
+deduplication, one monthly checkout/subscription reservation per donor, and invoice
+renewals are covered. The next domain projection must enforce the attribution deadline
+at successful payment time, establish the permanent first-gift relationship, and apply
+it to subsequent gifts. Until then, gifts link to the original candidate attribution
+on the checkout; those fields are not awarded referral credit. Do not use checkout
+drafts or aggregated transparency funding as proof of collection. Refund processing,
+subscription editing, streaks, badges, staff MFA, and outbound messaging remain unshipped.
+
+## Running the Stripe sandbox
+
+Install the API dependencies and run migrations through `0017_stripe_checkout`. Set
+`STRIPE_SECRET_KEY` to a Stripe test key and `STRIPE_WEBHOOK_SECRET` to the signing
+secret of the sandbox endpoint. No secrets belong in git. Live keys/events and Connect
+events are refused. The receiving organization and account still require verification.
+
+Run from `apps/api` in separate terminals:
+
+```sh
+.venv/bin/uvicorn impactgraph.donor_api:app --port 8001
+.venv/bin/python -m impactgraph.stripe_payments
+```
+
+Start the existing web app and visit `/donate`. `DONOR_PUBLIC_ORIGIN` must match the
+browser origin exactly (default `http://localhost:3000`); Next uses
+`DONOR_API_BASE_URL` (default `http://localhost:8001`) for `/api/donor/*`. Card entry
+happens on Stripe. This first sandbox surface supports USD card payments from $1 to
+$999,999.99; that technical upper bound is not an approved organizational gift-limit
+policy. The donor API uses the same database but its health check does not depend on
+evidence storage, AI credentials, or blockchain RPC. It is not yet wired into production
+Compose or a production ingress.
+
+Configure the sandbox webhook at `/donor/stripe/webhook` directly, or at
+`/api/donor/stripe/webhook` through Next. Use snapshot events at API version
+`2026-09-30.endive`, matching the pinned Stripe Python SDK 16.0.0. Subscribe to:
+
+- `payment_intent.succeeded` for one-time gifts.
+- `invoice.payment_succeeded` for initial and renewed monthly gifts.
+- `checkout.session.completed` and `checkout.session.expired` for checkout lifecycle.
+- `customer.subscription.deleted` to release the monthly reservation.
+
+The receiver verifies signatures over the raw body, rejects stale signatures and live
+events, stores only allowlisted fields, and acknowledges only after commit. The worker
+handles duplicate event IDs and duplicate underlying payments. Recurring invoice events
+can arrive before checkout completion. Checkout completion alone never records a gift.
+Unrelated account events without DAD checkout metadata are ignored.
+
+Monthly invoice credits, manual/offline payment, prorations, changed amounts, and currency
+mismatches are not accepted as ordinary gifts. They stay pending for reconciliation.
+This is intentionally narrower than all possible Stripe Billing behavior; extend the
+adapter and tests before enabling subscription edits or alternative payment methods.
+
+After ten failed processing attempts, an inbox event stays unprocessed with its error
+class. Inspect `donor_stripe_events` and reconcile the cause before resetting its budget:
+
+```sh
+.venv/bin/python -m impactgraph.stripe_payments --retry-event evt_example --once
+```
+
+`--once` processes the oldest eligible event, which may not be the reset event. Keep the
+worker running to drain the queue. Event processing uses row locks and supports multiple
+PostgreSQL workers; the lightweight SQLite test database is not a deployment target.
+
+Checkout attempts are committed before the Stripe call and retry with frozen parameters
+and the same idempotency key. Uncertain attempts older than 23 hours require operator
+reconciliation rather than creating another remote session after Stripe's idempotency
+retention window. A reserved monthly checkout is released only by confirmed expiry or
+subscription cancellation, not by guessing whether a timeout meant creation failed.
+
+The `/donate/thanks` page is a return destination, not proof of payment. No receipt email,
+tax claim, or Founding Donor award is produced by this sandbox UI. Real account-claim
+delivery/screens, financial adjustments, event monitoring and reconciliation UI,
+distributed abuse controls, and the release acceptance gates are required before live
+giving. Browser rate limiting here is process-local; configure trusted ingress limits
+before deploying it beyond a controlled sandbox.

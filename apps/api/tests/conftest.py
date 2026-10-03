@@ -40,6 +40,8 @@ os.environ["DEMO_MODE"] = "local"
 
 import pytest
 
+pytest_plugins = ["tests.donor_support"]
+
 from impactgraph.auth import DEMO_PASSWORD, seed_demo_accounts
 from impactgraph.database import create_session_factory
 from impactgraph.evidence import FileEvidenceStorage
