@@ -125,7 +125,7 @@ remain unshipped.
 
 ## Running the Stripe sandbox
 
-Install the API dependencies and run migrations through `0017_stripe_checkout`. Set
+Install the API dependencies and run migrations through `0018_donor_login_email`. Set
 `STRIPE_SECRET_KEY` to a Stripe test key and `STRIPE_WEBHOOK_SECRET` to the signing
 secret of the sandbox endpoint. No secrets belong in git. Live keys/events and Connect
 events are refused. The receiving organization and account still require verification.
@@ -234,3 +234,51 @@ Tests use an injected mailbox and do not send external email. Verify delivery wi
 controlled mailbox before inviting sandbox users. Account emails are functional access
 messages, not donation receipts. Tax receipts, annual summaries, recovery emails, and
 referral notifications require their own implementations and approved copy.
+
+
+## Financial calculation boundary
+
+`impactgraph.donor_metrics` is the side-effect-free R1 calculation layer. Its inputs
+are successful `Gift` facts, the current verified state of each `Refund`, and explicit
+monthly `BillingPeriod` facts, plus an aware `as_of` timestamp. It is not yet connected
+to the Stripe worker or a donor dashboard endpoint. Existing stored gifts lack the
+billing-period and refund-state information necessary to wire it safely.
+
+- `relationships` selects the earliest successful payment per donor by processor
+  timestamp, with stable payment ID breaking exact timestamp ties. The first gift can
+  establish a direct arrival with no referrer; later gifts cannot create attribution.
+  The referral expiry is exclusive, consistent with captured-touch expiry. Earlier
+  facts arriving late correct derived history; webhook arrival order is never a rule.
+- `referral_totals` applies that relationship to subsequent collected gifts, subtracts
+  successful refunds, and produces separate Link/IRL counts and USD cents. It never
+  follows the referrer's own relationship. Full refunds remove the current count but
+  leave the relationship; later collection restores the same count.
+- `founding_donor` tests successful payment against the Eastern-time launch cutoff,
+  excluding exactly midnight on launch day. The adapter must persist an award and pass
+  `previously_awarded` on subsequent calculation, including after cutoff changes.
+- `streak` counts distinct billing periods. Renewal grace ends exactly 14 days after
+  the scheduled date; a charge at that boundary starts a new streak. Intentional skips
+  break continuity when due, not when requested. A fully refunded period is disqualified
+  immediately, without failed-payment grace; another unrefunded recurring payment for
+  the same period can qualify it. Subsequent periods are recalculated.
+
+The adapter must preserve the monotonically increasing historical best and pass it as
+`previous_best`. Reconstructing best-ever streaks by ignoring all refunds is incorrect:
+a refund before a later renewal may have prevented that longer streak from ever being
+achieved. Initial historical backfills must replay verified changes in chronological
+order and retain the best at each step. Award and best persistence are still pending.
+
+Duplicate identical facts are idempotent. Conflicting versions of the same ID, excess
+successful refunds, unknown refund targets, overlapping periods, and missing current
+renewal data are errors, not zero-valued fallbacks. Refund inputs are a state snapshot,
+not a stream of updates: the ingestion adapter must resolve retries and out-of-order
+status changes first. A snapshot containing a refund state later than `as_of` is rejected;
+historical reporting must supply the state actually known at that time. Facts must use
+USD integer cents and aware timestamps. Do not infer monthly billing dates from charge
+dates, assume every missing invoice was a cancellation, or feed checkout drafts here.
+
+Integration requires persisted invoice periods, failed-renewal and intentional-skip
+facts, reconciled refund states, permanent awards and historical bests, and a replayable
+projection. This module operates on supplied history; the eventual dashboard should
+read indexed projections rather than repeatedly load every donor's financial history.
+Sandbox calculations must stay visibly labeled and cannot confer live donor recognition.
