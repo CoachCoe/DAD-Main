@@ -7,6 +7,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -29,6 +30,77 @@ class Base(DeclarativeBase):
 class EntityMixin:
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DonorRecord(EntityMixin, Base):
+    """A guest donor can own checkout records before proving control of their email."""
+
+    __tablename__ = "donors"
+    email: Mapped[str] = mapped_column(String(320), unique=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    public_name: Mapped[str | None] = mapped_column(String(80))
+    referral_code: Mapped[str | None] = mapped_column(String(64), unique=True)
+
+
+class DonorLoginRecord(EntityMixin, Base):
+    __tablename__ = "donor_login_links"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DonorSessionRecord(EntityMixin, Base):
+    __tablename__ = "donor_sessions"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ReferralTouchRecord(EntityMixin, Base):
+    """An opaque visitor token preserves first touch without requiring an account."""
+
+    __tablename__ = "donor_referral_touches"
+    __table_args__ = (
+        CheckConstraint("kind IN ('LINK', 'IRL')", name="ck_donor_touch_kind"),
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    referrer_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(4))
+    touched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DonorCheckoutRecord(EntityMixin, Base):
+    """A checkout draft is not a payment. Only the future processor integration can pay it.
+
+    Attribution is snapshotted, never resolved from a browser cookie at webhook time.
+    The expiry travels with it so conversion can enforce the first-gift deadline.
+    """
+
+    __tablename__ = "donor_checkouts"
+    __table_args__ = (
+        CheckConstraint("amount_minor >= 100", name="ck_donor_checkout_minimum"),
+        CheckConstraint("currency = 'USD'", name="ck_donor_checkout_currency"),
+        CheckConstraint("frequency IN ('MONTHLY', 'ONE_TIME')", name="ck_donor_frequency"),
+        CheckConstraint(
+            "(referrer_id IS NULL AND referral_kind IS NULL AND referral_expires_at IS NULL) "
+            "OR (referrer_id IS NOT NULL AND referral_kind IS NOT NULL "
+            "AND referral_kind IN ('LINK', 'IRL') AND referral_expires_at IS NOT NULL)",
+            name="ck_donor_checkout_attribution",
+        ),
+        CheckConstraint("referrer_id IS NULL OR referrer_id <> donor_id",
+                        name="ck_donor_checkout_self_referral"),
+    )
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    amount_minor: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(String(3), default="USD", server_default="USD")
+    frequency: Mapped[str] = mapped_column(String(8))
+    referrer_id: Mapped[UUID | None] = mapped_column(ForeignKey("donors.id"), index=True)
+    referral_kind: Mapped[str | None] = mapped_column(String(4))
+    referral_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ProgramRecord(EntityMixin, Base):

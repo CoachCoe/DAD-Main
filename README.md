@@ -8,6 +8,11 @@ Ethereum is used for immutable commitments, provenance, and identified attestati
 for moving the program's fiat money or storing documents. AI extracts and correlates; it
 cannot establish verification.
 
+The DAD R1 donor product is being built alongside this transparency layer. Its
+[donor domain contract](docs/donor-domain.md) records the agreed giving, identity,
+referral, streak, and refund rules. The initial backend services support guest checkout
+drafts and email-claim credentials; Stripe charging and email delivery are not yet wired.
+
 ```text
 Donor / Operator / Verifier UI
               ↓
