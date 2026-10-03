@@ -10,12 +10,24 @@ from uuid import UUID
 
 import stripe
 from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt
-from sqlalchemy import text
+from sqlalchemy import select, text
 from starlette.concurrency import run_in_threadpool
 
 from .database import create_session_factory
-from .donors import DonorAccessDenied, GiftFrequency, ReferralKind, capture_referral
+from .donor_email import EmailSettings, queue_login_email
+from .donors import (
+    DonorAccessDenied,
+    GiftFrequency,
+    ReferralKind,
+    authenticated_donor,
+    capture_referral,
+    claim_account,
+    sign_out,
+)
+from .persistence import DonorGiftRecord
 from .public_api import RateLimiter
 from .stripe_payments import (
     CheckoutConflict,
@@ -28,6 +40,7 @@ from .stripe_payments import (
 )
 
 VISITOR_COOKIE = "dad_referral"
+SESSION_COOKIE = "dad_donor_session"
 MAX_BODY_BYTES = 256 * 1024
 
 
@@ -43,11 +56,27 @@ class ReferralRequest(BaseModel):
     kind: ReferralKind = ReferralKind.LINK
 
 
-def create_app(*, factory=None, settings=None, gateway=None):
+class LoginRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(max_length=320)
+
+
+class ClaimRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=32, max_length=128)
+
+
+def create_app(*, factory=None, settings=None, gateway=None, email_settings=None):
     settings = settings or PaymentSettings.from_env()
     factory = factory or create_session_factory()
+    email_settings = email_settings or EmailSettings.from_env()
     app = FastAPI(title="DAD Donor API", version="0.1.0")
     limiter = RateLimiter(requests=20, window=60)
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request, exc):
+        # Pydantic's default error includes the supplied value, potentially a token.
+        return JSONResponse(status_code=422, content={"detail": "Invalid request fields"})
 
     def browser_request(request):
         if request.headers.get("origin") != settings.origin:
@@ -60,7 +89,61 @@ def create_app(*, factory=None, settings=None, gateway=None):
     async def private_responses(request, call_next):
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
         return response
+
+    @app.post("/donor/login", status_code=202)
+    def login(body: LoginRequest, request: Request):
+        browser_request(request)
+        if not email_settings.configured:
+            raise HTTPException(503, "Account email is not configured yet")
+        try:
+            with factory.begin() as session:
+                queue_login_email(session, body.email)
+        except ValueError as exc:
+            raise HTTPException(422, "Enter a valid email address") from exc
+        return {"message": "If this email matches a donor account, a sign-in link will arrive shortly."}
+
+    @app.post("/donor/claim")
+    def claim(body: ClaimRequest, request: Request, response: Response):
+        browser_request(request)
+        try:
+            with factory.begin() as session:
+                token = claim_account(session, body.token)
+                # Replace this browser's old session, leaving other devices alone.
+                sign_out(session, request.cookies.get(SESSION_COOKIE, ""))
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "This link is invalid or expired. Request a new link.") from exc
+        response.set_cookie(SESSION_COOKIE, token, max_age=30 * 86400, httponly=True,
+                            secure=settings.origin.startswith("https:"), samesite="lax", path="/")
+        return {"claimed": True}
+
+    @app.post("/donor/logout")
+    def logout(request: Request, response: Response):
+        browser_request(request)
+        with factory.begin() as session:
+            sign_out(session, request.cookies.get(SESSION_COOKIE, ""))
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return {"signed_out": True}
+
+    @app.get("/donor/me/gifts")
+    def gifts(request: Request, offset: int = 0):
+        if offset < 0:
+            raise HTTPException(422, "Invalid offset")
+        try:
+            with factory() as session:
+                donor = authenticated_donor(session, request.cookies.get(SESSION_COOKIE, ""))
+                rows = session.scalars(select(DonorGiftRecord).where(
+                    DonorGiftRecord.donor_id == donor.id,
+                ).order_by(DonorGiftRecord.paid_at.desc(), DonorGiftRecord.id.desc())
+                    .offset(offset).limit(51)).all()
+                return {"email": donor.email, "mode": "test", "gifts": [
+                    {"id": str(gift.id), "amount_minor": gift.amount_minor,
+                     "currency": gift.currency, "frequency": gift.frequency,
+                     "paid_at": gift.paid_at} for gift in rows[:50]
+                ], "next_offset": offset + 50 if len(rows) > 50 else None}
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
 
     @app.get("/health/live")
     def live():

@@ -43,6 +43,19 @@ class DonorRecord(EntityMixin, Base):
     referral_code: Mapped[str | None] = mapped_column(String(64), unique=True)
 
 
+class DonorLoginEmailRecord(EntityMixin, Base):
+    """Delivery outbox; login secrets are encrypted separately from credential hashes."""
+
+    __tablename__ = "donor_login_emails"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    encrypted_token: Mapped[bytes | None] = mapped_column(LargeBinary)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(String(80))
+
+
 class DonorLoginRecord(EntityMixin, Base):
     __tablename__ = "donor_login_links"
     donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)

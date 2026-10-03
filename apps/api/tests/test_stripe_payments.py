@@ -371,3 +371,18 @@ def test_sdk_adapter_uses_pinned_version_without_a_global_api_key(monkeypatch):
     assert StripeGateway(SETTINGS).create_checkout({"mode": "payment"}, "stable")["id"]
     assert calls[0][1]["stripe_version"] == API_VERSION
     assert calls[1][1] == {"idempotency_key": "stable"}
+
+
+def test_first_gift_queues_one_claim_email_not_renewals_or_replays(factory, gateway):
+    from impactgraph.persistence import DonorLoginEmailRecord
+
+    result = checkout(factory, gateway, frequency=GiftFrequency.MONTHLY)
+    first = event_for(result, "invoice.payment_succeeded", object_id="in_first")
+    deliver(factory, first)
+    deliver(factory, event_for(result, "invoice.payment_succeeded", object_id="in_first"))
+    renewal = event_for(result, "invoice.payment_succeeded", object_id="in_renewal")
+    renewal["data"]["object"]["billing_reason"] = "subscription_cycle"
+    deliver(factory, renewal)
+    with factory() as session:
+        assert session.scalar(select(func.count()).select_from(DonorGiftRecord)) == 2
+        assert session.scalar(select(func.count()).select_from(DonorLoginEmailRecord)) == 1

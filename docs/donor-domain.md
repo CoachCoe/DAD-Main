@@ -20,7 +20,8 @@ merge verifies both. Never infer identity from a shared card, device, or postal 
 The initial implementation accepts ASCII mailbox names and IDNA domains.
 
 Email claim and sign-in links last 15 minutes and are single-use. Sessions last at most
-30 days and can be revoked. Tokens are stored hashed. Changing email requires fresh
+30 days and can be revoked. Credentials are stored hashed; the email delivery queue temporarily holds an encrypted
+copy of the login token until delivery or expiry. Changing email requires fresh
 authentication through the existing address and verification of the new address.
 Knowing an email or checkout ID never grants access to giving history.
 
@@ -107,10 +108,10 @@ The module neither depends on blockchain RPC nor grants staff permissions.
 
 Call services inside a caller-owned database transaction. Deliver login secrets only
 through a trusted email adapter; never return or log them from an anonymous HTTP route.
-The future HTTP layer must provide uniform login-request responses, abuse controls,
-same-origin protection, secure cookies, and a confirmation step that prevents email
-link scanners from consuming credentials. It must not expose these services before
-those controls and delivery exist.
+The donor HTTP layer provides uniform login-request responses, same-origin protection,
+private cookies, basic rate limits, and a confirmation step that prevents ordinary email
+link scanners from consuming credentials. Production ingress abuse controls and
+controlled-mailbox delivery verification remain release gates.
 
 The Stripe integration persists verified events and individual gifts. Checkout and event
 deduplication, one monthly checkout/subscription reservation per donor, and invoice
@@ -119,7 +120,8 @@ at successful payment time, establish the permanent first-gift relationship, and
 it to subsequent gifts. Until then, gifts link to the original candidate attribution
 on the checkout; those fields are not awarded referral credit. Do not use checkout
 drafts or aggregated transparency funding as proof of collection. Refund processing,
-subscription editing, streaks, badges, staff MFA, and outbound messaging remain unshipped.
+subscription editing, streaks, badges, staff MFA, and messaging beyond account access
+remain unshipped.
 
 ## Running the Stripe sandbox
 
@@ -182,8 +184,53 @@ retention window. A reserved monthly checkout is released only by confirmed expi
 subscription cancellation, not by guessing whether a timeout meant creation failed.
 
 The `/donate/thanks` page is a return destination, not proof of payment. No receipt email,
-tax claim, or Founding Donor award is produced by this sandbox UI. Real account-claim
-delivery/screens, financial adjustments, event monitoring and reconciliation UI,
+tax claim, or Founding Donor award is produced by this sandbox UI. Financial adjustments, event monitoring and reconciliation UI,
 distributed abuse controls, and the release acceptance gates are required before live
 giving. Browser rate limiting here is process-local; configure trusted ingress limits
 before deploying it beyond a controlled sandbox.
+
+
+## Donor account access and email
+
+`/account/sign-in` requests an email link; `/account/claim` requires an explicit click
+before redeeming it. The token travels in the URL fragment (not the server request URL)
+and is removed from browser history on page initialization. Never add analytics that
+collect fragments or request bodies on these routes. The API uses a separate HttpOnly,
+SameSite=Lax donor cookie, Secure on HTTPS; it never returns credentials in JSON.
+`/account/giving` shows only the authenticated donor's confirmed sandbox payments, in
+pages of 50. Sign-out revokes the server session. Staff identity remains separate.
+
+Set `DONOR_SMTP_HOST`, `DONOR_SMTP_PORT` (587 by default), `DONOR_EMAIL_FROM`, and
+`DONOR_EMAIL_ENCRYPTION_KEY`; set username/password if required by your SMTP provider.
+Use a dedicated Fernet key from `cryptography.fernet.Fernet.generate_key()` stored in
+secret management. This is a vendor-neutral SMTP adapter, not a vendor selection.
+TLS with certificate validation is mandatory. No email is sent by the API process.
+Run the sender separately after migrating:
+
+```bash
+cd apps/api
+.venv/bin/python -m impactgraph.donor_email
+```
+
+The first recorded successful gift queues a claim email in the same transaction as the
+gift, unless the donor has already claimed their account. Repeat webhook delivery and
+renewals do not send additional automatic claim emails. The public sign-in endpoint
+returns the same accepted response for known and unknown emails, and limits each known
+donor to one queued request per minute across API processes. Unknown addresses never
+create accounts. Address rate limits still need a trusted ingress before public release.
+
+The sender commits a hashed login credential plus an encrypted delivery token before
+contacting SMTP. Retries reuse that token and Message-ID, at most five attempts with a
+one-minute delay. Delivery is at least once: an ambiguous SMTP acknowledgement can
+produce a duplicate email. Links expire 15 minutes after worker preparation, not queue
+creation. Successful or expired jobs discard the encrypted token. Rows reaching five
+failures remain parked for operator investigation (`last_error` stores only the exception
+class). A donor can request a fresh link. Do not log tokens or SMTP message bodies;
+rotate keys only after draining pending jobs. Monitor queue age, parked jobs, and worker
+health; automated alerting and a staff retry interface are still required for release.
+
+Email is disabled when settings are absent; the sign-in screen reports unavailability.
+Tests use an injected mailbox and do not send external email. Verify delivery with a
+controlled mailbox before inviting sandbox users. Account emails are functional access
+messages, not donation receipts. Tax receipts, annual summaries, recovery emails, and
+referral notifications require their own implementations and approved copy.

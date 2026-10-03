@@ -23,6 +23,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from .database import create_session_factory
+from .donor_email import queue_login_email
 from .donors import GiftFrequency, normalize_email, prepare_checkout
 from .persistence import (
     DonorCheckoutRecord,
@@ -287,10 +288,16 @@ def _apply_event(session, event):
         paid_at = datetime.fromtimestamp(data["paid_at"], UTC)
     if (type(amount) is not int or amount != draft.amount_minor or data.get("currency") != "usd"):
         raise ValueError("Payment amount or currency differs from checkout")
+    donor = session.scalar(select(DonorRecord).where(DonorRecord.id == draft.donor_id)
+                           .with_for_update().execution_options(populate_existing=True))
+    had_gift = session.scalar(select(DonorGiftRecord.id).where(
+        DonorGiftRecord.donor_id == donor.id).limit(1)) is not None
     session.execute(_insert(session, DonorGiftRecord).values(
         donor_id=draft.donor_id, checkout_id=draft.id, stripe_object_id=data["id"],
         amount_minor=amount, currency="USD", frequency=draft.frequency, paid_at=paid_at,
     ).on_conflict_do_nothing(index_elements=["stripe_object_id"]))
+    if not had_gift and donor.claimed_at is None:
+        queue_login_email(session, donor.email)
 
 
 def _bind_subscription(attempt, subscription):
