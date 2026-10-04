@@ -32,7 +32,7 @@ def reconcile_subscription(session, attempt, gateway, *, remote=None):
         raise ValueError("Subscription ownership or shape mismatch")
     item = lines[0]
     price = item.get("price") or {}
-    if (price.get("currency") != "usd" or price.get("unit_amount") != draft.amount_minor
+    if (price.get("currency") != "usd"
             or (price.get("recurring") or {}).get("interval") != "month"
             or (price.get("recurring") or {}).get("interval_count") != 1
             or item.get("quantity") != 1):
@@ -48,6 +48,8 @@ def reconcile_subscription(session, attempt, gateway, *, remote=None):
         raise ValueError("Unsupported subscription schedule")
     if remote.get("cancel_at") not in {None, end}:
         raise ValueError("Cancellation must occur at the monthly boundary")
+    from .donor_amounts import reconcile_amount
+    reconcile_amount(session, draft, item)
     from .donor_pauses import reconcile_pause
     reconcile_pause(session, attempt, remote)
     row = session.scalar(select(DonorSubscriptionRecord).where(
@@ -87,9 +89,10 @@ def _attempt(session, donor_id, attempt_id=None):
 
 
 def _view(session, attempt, row):
+    from .donor_amounts import next_amount
     draft = session.get(DonorCheckoutRecord, attempt.checkout_id)
     return {"mode": "test", "state": "ready", "subscription": {
-        "id": str(attempt.id), "amount_minor": draft.amount_minor, "currency": "USD",
+        "id": str(attempt.id), "amount_minor": next_amount(session, draft), "currency": "USD",
         "status": row.status, "period_end": row.period_end, "stops_at": row.stops_at,
     }}
 

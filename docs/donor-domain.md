@@ -580,3 +580,25 @@ boundary. Test doubles exercise orchestration and calculations but do not establ
 Stripe end-to-end acceptance. Immediate charging and retroactive collection are outside
 this donor control. Amount changes, operational reconciliation, receipts and recovery
 messaging remain unfinished.
+
+## Monthly amount changes (sandbox)
+
+`/account/amount` previews and confirms a new USD monthly amount at the next renewal.
+GET and POST `/donor/me/recurring/amount` require an owned claimed session; POST also
+requires the configured Origin, a UUID v4 idempotency key, the previous amount and the
+exact previewed renewal date. Only integer cents from $1 through $999,999.99 are accepted.
+Active pauses and conflicting schedules must finish before an amount change.
+
+Migration 0025 retains each donor-authorized command and provider acknowledgement.
+The original checkout and collected gifts remain immutable. Invoice validation uses
+its billing-period start to select the applicable confirmed amount, so delayed original
+invoices retain their original value. Multiple changes before one renewal use the last
+confirmed amount. A subscription price outside that history requires reconciliation.
+
+The adapter updates the existing Stripe subscription item with the same currency and
+monthly interval, disables proration, and does not change the billing anchor. It retrieves
+the subscription to confirm the result. Lost responses reconcile before another mutation;
+unresolved commands older than 23 hours require operator reconciliation. Changes in the
+final minute before renewal are refused; uncertain changes spanning renewal require
+invoice reconciliation. Real Stripe sandbox testing at the billing boundary is required
+before activation. Local adapter tests do not establish provider end-to-end acceptance.

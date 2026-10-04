@@ -110,6 +110,13 @@ class StripeGateway:
     def retrieve_refund(self, refund_id: str) -> dict:
         return self.client.v1.refunds.retrieve(refund_id).to_dict()
 
+    def change_monthly_amount(self, subscription_id, item_id, product_id, amount_minor, key):
+        return self.client.v1.subscriptions.update(subscription_id, {
+            "items": [{"id": item_id, "quantity": 1, "price_data": {"currency": "usd", "product": product_id,
+                       "recurring": {"interval": "month"}, "unit_amount": amount_minor}}],
+            "proration_behavior": "none",
+        }, options={"idempotency_key": key}).to_dict()
+
     def pause_collection(self, subscription_id: str, resumes_at: int, key: str) -> dict:
         return self.client.v1.subscriptions.update(
             subscription_id, {"pause_collection": {"behavior": "void", "resumes_at": resumes_at},
@@ -324,9 +331,18 @@ def _apply_event(session, event, gateway=None):
         _bind_subscription(attempt, data["id"])
         reconcile_subscription(session, attempt, gateway or StripeGateway(PaymentSettings.from_env()))
         return
+    expected_amount = draft.amount_minor
+    if kind.startswith("invoice."):
+        from .donor_amounts import invoice_amount, latest_change
+        change = latest_change(session, draft.id)
+        if change and change.confirmed_at is None:
+            from .donor_subscriptions import reconcile_subscription
+            _bind_subscription(attempt, data.get("subscription"))
+            reconcile_subscription(session, attempt, gateway or StripeGateway(PaymentSettings.from_env()))
+        expected_amount = invoice_amount(session, draft, data)
     if kind == "invoice.payment_failed":
         if (draft.frequency != "MONTHLY" or data.get("status") != "open"
-                or data.get("currency") != "usd" or data.get("amount_due") != draft.amount_minor
+                or data.get("currency") != "usd" or data.get("amount_due") != expected_amount
                 or data.get("billing_reason") not in {"subscription_create", "subscription_cycle"}):
             raise ValueError("Unexpected failed recurring invoice")
         _bind_subscription(attempt, data.get("subscription"))
@@ -351,7 +367,7 @@ def _apply_event(session, event, gateway=None):
         paid_at = datetime.fromtimestamp(data["paid_at"], UTC)
         payment_intent = invoice_payment_intent(data, amount)
         period = record_period(session, draft, data, paid=True)
-    if (type(amount) is not int or amount != draft.amount_minor or data.get("currency") != "usd"):
+    if (type(amount) is not int or amount != expected_amount or data.get("currency") != "usd"):
         raise ValueError("Payment amount or currency differs from checkout")
     donor = session.scalar(select(DonorRecord).where(DonorRecord.id == draft.donor_id)
                            .with_for_update().execution_options(populate_existing=True))

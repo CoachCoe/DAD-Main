@@ -72,7 +72,8 @@ export default function RecurringPage() {
         </>}
         <p><Link href="/account/payment-method">Update payment method</Link></p>
         <p><Link href="/account/pause">Pause monthly giving</Link></p>
-        <p>Amount changes and receipts are not available in this preview yet.</p>
+        <p><Link href="/account/amount">Change monthly amount</Link></p>
+        <p>Tax receipts are not available in this preview yet.</p>
       </>}
       {error && <p role="alert">{error}</p>}
       <button disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh billing details</button>

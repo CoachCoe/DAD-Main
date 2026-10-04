@@ -208,6 +208,20 @@ class DonorRefundObservationRecord(EntityMixin, Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DonorAmountChangeRecord(EntityMixin, Base):
+    __tablename__ = "donor_amount_changes"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    checkout_id: Mapped[UUID] = mapped_column(ForeignKey("donor_checkouts.id"), index=True)
+    previous_minor: Mapped[int] = mapped_column(BigInteger)
+    amount_minor: Mapped[int] = mapped_column(BigInteger)
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    item_id: Mapped[str] = mapped_column(String(255))
+    product_id: Mapped[str] = mapped_column(String(255))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (CheckConstraint("amount_minor >= 100 AND amount_minor <= 99999999 AND previous_minor >= 100",
+                                     name="ck_donor_amount_change_minor"),)
+
+
 class DonorResumeRecord(EntityMixin, Base):
     __tablename__ = "donor_resumptions"
     donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)

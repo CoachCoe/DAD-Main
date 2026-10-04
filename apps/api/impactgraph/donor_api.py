@@ -18,6 +18,7 @@ from sqlalchemy import select, text
 from starlette.concurrency import run_in_threadpool
 
 from .database import create_session_factory
+from .donor_amounts import amount_options, change_amount
 from .donor_email import EmailSettings, queue_login_email
 from .donor_pauses import pause_options, pause_recurring
 from .donor_payment_methods import begin_payment_update, payment_method_status
@@ -98,6 +99,14 @@ class ResumeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     pause_id: UUID
     next_renewal: datetime
+
+
+class AmountRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subscription_id: UUID
+    amount_minor: StrictInt = Field(ge=100, le=99_999_999)
+    previous_minor: StrictInt = Field(ge=100, le=99_999_999)
+    effective_at: datetime
 
 
 def create_app(*, factory=None, settings=None, gateway=None, email_settings=None):
@@ -255,6 +264,17 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
     @app.get("/donor/me/recurring")
     def recurring(request: Request):
         return subscription_request(request, lambda provider, token: recurring_details(factory, provider, token))
+
+    @app.get("/donor/me/recurring/amount")
+    def amount_dates(request: Request):
+        return subscription_request(request, lambda provider, token: amount_options(factory, provider, token))
+
+    @app.post("/donor/me/recurring/amount")
+    def amount_change(body: AmountRequest, request: Request, idempotency_key: Annotated[UUID, Header()]):
+        browser_request(request)
+        return subscription_request(request, lambda provider, token: change_amount(
+            factory, provider, token, request_id=idempotency_key, attempt_id=body.subscription_id,
+            amount_minor=body.amount_minor, previous_minor=body.previous_minor, effective_at=body.effective_at))
 
     @app.get("/donor/me/recurring/pause")
     def pause_dates(request: Request):

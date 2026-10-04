@@ -40,12 +40,14 @@ def invoice_fields(obj):
 
 
 def record_period(session, draft, data, *, paid):
+    from .donor_amounts import invoice_amount
+    expected_amount = invoice_amount(session, draft, data)
     if not data.get("lines_complete") or len(data.get("lines", [])) != 1:
         raise ValueError("Expected the complete single-line monthly invoice")
     line = data["lines"][0]
     if (line["parent_type"] != "subscription_item_details" or line["proration"] is not False
             or line["subscription"] != data["subscription"] or line["currency"] != "usd"
-            or type(line["amount"]) is not int or line["amount"] != draft.amount_minor):
+            or type(line["amount"]) is not int or line["amount"] != expected_amount):
         raise ValueError("Invoice line does not match the recurring gift")
     bounds = line["period"] or {}
     if type(bounds.get("start")) is not int or type(bounds.get("end")) is not int:
