@@ -99,7 +99,8 @@ Unknown streak state displays Updating; it must not silently become zero.
 
 SMTP requires STARTTLS, certificate validation, and configured sender credentials.
 Delivery is at least once; acknowledgement loss may cause a duplicate. Stable Message-IDs
-and encrypted payloads support retries, not exactly-once guarantees. Login links expire
+support retries, not exactly-once guarantees. Login payloads are encrypted; financial
+message bodies require the database's access and backup protections. Login links expire
 15 minutes after preparation. Jobs park after five failures. Optional referral notices
 recheck consent before each send; recovery stops after payment or cancellation.
 

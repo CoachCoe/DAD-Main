@@ -35,7 +35,8 @@ Domain calculations in `internal/recognition` are independent of HTTP and Stripe
 financial replay runs in event/projection workers. Projection expiry makes incomplete
 streaks explicitly unavailable instead of showing invented zeroes.
 
-SMTP is at least once. Encrypted delivery payloads and stable Message-IDs survive retries;
+SMTP is at least once. Login payloads are encrypted; financial message bodies are stored
+in the access-controlled database. Stable Message-IDs survive retries;
 provider acknowledgement loss can still cause duplicate mail. Optional messages check
 current consent before delivery. Logs avoid payloads and donor identifiers.
 

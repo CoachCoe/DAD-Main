@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -33,10 +32,6 @@ func run(ctx context.Context, args []string) error {
 	}
 	if os.Getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
 		return errors.New("workers require DONOR_GO_WORKERS_ENABLED=true")
-	}
-	gateway, err := payments.NewStripeGateway(os.Getenv("STRIPE_SECRET_KEY"))
-	if err != nil {
-		return err
 	}
 	dsn := os.Getenv("DONOR_GO_DATABASE_URL")
 	if dsn == "" {
@@ -65,24 +60,21 @@ func run(ctx context.Context, args []string) error {
 	}
 	var step func(context.Context) (bool, error)
 	if *kind == "stripe" {
+		gateway, err := payments.NewStripeGateway(os.Getenv("STRIPE_SECRET_KEY"))
+		if err != nil {
+			return err
+		}
 		step = store.EventWorker{DB: pool, Gateway: gateway}.ProcessNext
 	} else if *kind == "projections" {
 		step = func(ctx context.Context) (bool, error) {
 			return store.RefreshNextProjection(ctx, pool, time.Now().UTC())
 		}
 	} else {
-		port := 587
-		if value := os.Getenv("DONOR_SMTP_PORT"); value != "" {
-			var err error
-			port, err = strconv.Atoi(value)
-			if err != nil {
-				return mail.ErrConfiguration
-			}
+		configured, err := mail.FromEnvironment(os.Getenv)
+		if err != nil || configured == nil {
+			return mail.ErrConfiguration
 		}
-		settings := mail.Settings{Host: os.Getenv("DONOR_SMTP_HOST"), Port: port, Username: os.Getenv("DONOR_SMTP_USERNAME"), Password: os.Getenv("DONOR_SMTP_PASSWORD"), Sender: os.Getenv("DONOR_EMAIL_FROM"), EncryptionKey: os.Getenv("DONOR_EMAIL_ENCRYPTION_KEY")}
-		if err := settings.Validate(); err != nil {
-			return err
-		}
+		settings := *configured
 		origin := os.Getenv("DONOR_PUBLIC_ORIGIN")
 		if origin == "" {
 			origin = "http://localhost:3000"

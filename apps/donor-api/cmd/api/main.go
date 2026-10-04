@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"impactgraph/donor-api/internal/httpapi"
+	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
@@ -31,7 +32,11 @@ func run() error {
 		}
 		services.TrustedProxies = append(services.TrustedProxies, prefix)
 	}
-	services.EmailConfigured = os.Getenv("DONOR_SMTP_HOST") != "" && os.Getenv("DONOR_EMAIL_FROM") != "" && os.Getenv("DONOR_EMAIL_ENCRYPTION_KEY") != ""
+	email, err := mail.FromEnvironment(os.Getenv)
+	if err != nil {
+		return err
+	}
+	services.EmailConfigured = email != nil
 	services.Origin = os.Getenv("DONOR_PUBLIC_ORIGIN")
 	if services.Origin == "" {
 		services.Origin = "http://localhost:3000"
