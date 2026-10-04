@@ -379,3 +379,44 @@ A downgrade with recognition rows is refused because those rows contain permanen
 and historical bests. Preserve and migrate recognition explicitly rather than dropping
 or truncating the projection table. Load/spike validation and production operations
 remain release gates; the dashboard itself does no financial-history replay.
+
+## Referral sharing and landing pages
+
+`/account/share` lets a claimed donor choose the public first name/nickname before
+sharing. The screen explains that anyone opening the link or scanning the code can see
+that name. It never substitutes an email or billing name. The share action uses the
+native share sheet when available and otherwise copies the invitation; editable
+messaging and manual copying remain available in the user's chosen messaging app.
+No message is sent automatically. The sharing screen contains no QR image.
+
+`/account/code` displays an authenticated, non-cacheable SVG code with the same referral
+URL plus `?via=irl`. The server generates a plain black-on-white QR with a four-module
+quiet zone and high error correction using pinned `qrcode` 8.2. The page offers browser
+full-screen mode and manual brightness instructions. No print/download action exists;
+print CSS hides the code. Replacing a link requires an explicit confirmation in the UI
+and also changes the code. Old codes stop accepting new visits; already-captured valid
+first-touch attribution remains intact. QR generation stays server-side and does not
+send donor information to a third-party image service.
+
+`/r/[code]` saves the referral through a same-origin POST before enabling the normal
+checkout link. The IRL query marker selects IRL; other entries use Link. An existing
+valid first touch retains both its referrer and channel, including its original expiry.
+The landing page names the saved referrer using only their public nickname. Thus opening
+a different person's link does not display that person while silently crediting someone
+else. Unavailable codes and failed capture have separate states and an explicit path to
+continue giving even when capture cannot be confirmed. The existing opaque first-party cookie carries
+the saved attribution into guest checkout and the payment record before account claim.
+
+The API exposes authenticated GET/POST `/donor/me/sharing` and GET
+`/donor/me/referral-code.svg`; mutations require the expected Origin and the existing
+rate limits. Shared URLs use configured `DONOR_PUBLIC_ORIGIN`, never a supplied Host
+header. The public capture response exposes only capture status and the public name,
+not donor email, IDs, or financial details. Sharing and landing copy disclose $30/month
+alongside approximate daily framing and label the flow as a sandbox.
+
+Wallet pass issuance is not implemented; it requires Apple/Google account setup,
+certificates, and pass integrations. This web slice does not claim automatic hardware
+brightness control. Full-screen fallback, manual brightness instructions, and an
+unobstructed code are implemented; reliable scanning under glare, low brightness, angles,
+and damaged screens still requires physical-device acceptance tests. Analytics for share
+attempts/completion and conversion funnels also remains a separate required integration.

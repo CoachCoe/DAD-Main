@@ -68,6 +68,8 @@ export default function DashboardPage() {
       <div className="uploadActions">
         <button onClick={() => setRetry((value) => value + 1)}>Refresh dashboard</button>
         <Link href="/account/giving">My giving and sign-out</Link>
+        <Link href="/account/share">Share and invite</Link>
+        <Link href="/account/code">My referral code</Link>
       </div>
     </>}
   </section>;

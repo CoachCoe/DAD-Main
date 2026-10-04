@@ -12,17 +12,19 @@ import stripe
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 from sqlalchemy import select, text
 from starlette.concurrency import run_in_threadpool
 
 from .database import create_session_factory
 from .donor_email import EmailSettings, queue_login_email
 from .donor_projections import dashboard, refresh_projection
+from .donor_sharing import captured_name, referral_svg, sharing_details
 from .donors import (
     DonorAccessDenied,
     GiftFrequency,
     ReferralKind,
+    activate_sharing,
     authenticated_donor,
     capture_referral,
     claim_account,
@@ -55,6 +57,12 @@ class CheckoutRequest(BaseModel):
 class ReferralRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: ReferralKind = ReferralKind.LINK
+
+
+class SharingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    public_name: str = Field(min_length=1, max_length=80)
+    replace_code: StrictBool = False
 
 
 class LoginRequest(BaseModel):
@@ -129,6 +137,40 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
         response.delete_cookie(SESSION_COOKIE, path="/")
         return {"signed_out": True}
 
+    @app.get("/donor/me/sharing")
+    def get_sharing(request: Request):
+        try:
+            with factory() as session:
+                return sharing_details(session, request.cookies.get(SESSION_COOKIE, ""), settings.origin)
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
+
+    @app.post("/donor/me/sharing")
+    def save_sharing(body: SharingRequest, request: Request):
+        browser_request(request)
+        try:
+            with factory.begin() as session:
+                token = request.cookies.get(SESSION_COOKIE, "")
+                activate_sharing(session, token, body.public_name, replace_code=body.replace_code)
+                return sharing_details(session, token, settings.origin)
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @app.get("/donor/me/referral-code.svg")
+    def code_image(request: Request):
+        try:
+            with factory() as session:
+                sharing = sharing_details(session, request.cookies.get(SESSION_COOKIE, ""), settings.origin)
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
+        if sharing["irl_link"] is None:
+            raise HTTPException(409, "Choose a public nickname before showing your referral code")
+        return Response(referral_svg(sharing["irl_link"]), media_type="image/svg+xml",
+                        headers={"Content-Disposition": "inline", "X-Content-Type-Options": "nosniff",
+                                 "Content-Security-Policy": "default-src 'none'; sandbox"})
+
     @app.get("/donor/me/dashboard")
     def donor_dashboard(request: Request):
         try:
@@ -177,13 +219,14 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
         with factory.begin() as session:
             token = capture_referral(session, code, body.kind,
                                      visitor_token=request.cookies.get(VISITOR_COOKIE))
+            public_name = captured_name(session, token)
         if token:
             response.set_cookie(VISITOR_COOKIE, token, max_age=30 * 86400,
                                 httponly=True, secure=settings.origin.startswith("https:"),
                                 samesite="lax", path="/")
         else:
             response.delete_cookie(VISITOR_COOKIE, path="/")
-        return {"captured": token is not None}
+        return {"captured": token is not None, "public_name": public_name}
 
     @app.post("/donor/checkouts", status_code=201)
     def checkout(body: CheckoutRequest, request: Request,

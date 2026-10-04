@@ -538,3 +538,8 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
 .donorMetricValue{font-family:var(--font-display);font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
 .donorMetrics summary{cursor:pointer;padding:12px 0}
 @media(max-width:600px){.donorMetrics{grid-template-columns:1fr}}
+
+.donorCodePanel{text-align:center;max-width:680px;margin-inline:auto}
+.donorCodePanel:fullscreen{overflow:auto;background:#fff;color:#111;padding:24px}
+.donorReferralCode{display:block;width:min(100%,360px);height:auto;margin:24px auto;background:#fff}
+@media print{.donorReferralCode{display:none}}
