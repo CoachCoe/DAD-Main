@@ -42,6 +42,7 @@ from impactgraph.stripe_payments import (
     verify_event,
 )
 
+INVOICE_PERIOD_START = int(time.time())
 SETTINGS = PaymentSettings("sk_test_example", "whsec_example", "http://localhost:3000")
 
 
@@ -87,6 +88,17 @@ def event_for(result, kind="payment_intent.succeeded", *, object_id=None, event_
                "status_transitions": {"paid_at": int(time.time())},
                "parent": {"subscription_details": {"subscription": "sub_example",
                           "metadata": {"dad_checkout_id": result["checkoutId"]}}}}
+    if kind == "invoice.payment_succeeded":
+        start = INVOICE_PERIOD_START
+        obj["lines"] = {"has_more": False, "data": [{
+            "amount": 3000, "currency": "usd", "period": {"start": start, "end": start + 30 * 86400},
+            "parent": {"type": "subscription_item_details", "subscription_item_details": {
+                "subscription": "sub_example", "proration": False}},
+        }]}
+        obj["payments"] = {"has_more": False, "data": [{
+            "status": "paid", "amount_paid": 3000, "currency": "usd", "invoice": obj["id"],
+            "livemode": False, "payment": {"type": "payment_intent", "payment_intent": "pi_" + obj["id"]},
+        }]}
     return {"id": event_id or "evt_" + uuid4().hex, "type": kind, "created": int(time.time()),
             "object": "event", "api_version": API_VERSION, "livemode": False,
             "data": {"object": obj}}

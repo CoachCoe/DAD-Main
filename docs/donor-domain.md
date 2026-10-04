@@ -119,13 +119,13 @@ renewals are covered. The next domain projection must enforce the attribution de
 at successful payment time, establish the permanent first-gift relationship, and apply
 it to subsequent gifts. Until then, gifts link to the original candidate attribution
 on the checkout; those fields are not awarded referral credit. Do not use checkout
-drafts or aggregated transparency funding as proof of collection. Refund processing,
-subscription editing, streaks, badges, staff MFA, and messaging beyond account access
-remain unshipped.
+drafts or aggregated transparency funding as proof of collection. Refund-state reconciliation is implemented; issuing refunds, subscription editing,
+dashboard projections, permanent badge/best-streak persistence, staff MFA, and messaging
+beyond account access remain unshipped.
 
 ## Running the Stripe sandbox
 
-Install the API dependencies and run migrations through `0018_donor_login_email`. Set
+Install the API dependencies and run migrations through `0019_donor_financial_facts`. Set
 `STRIPE_SECRET_KEY` to a Stripe test key and `STRIPE_WEBHOOK_SECRET` to the signing
 secret of the sandbox endpoint. No secrets belong in git. Live keys/events and Connect
 events are refused. The receiving organization and account still require verification.
@@ -152,6 +152,8 @@ Configure the sandbox webhook at `/donor/stripe/webhook` directly, or at
 
 - `payment_intent.succeeded` for one-time gifts.
 - `invoice.payment_succeeded` for initial and renewed monthly gifts.
+- `invoice.payment_failed` for failed renewal billing periods.
+- `refund.created`, `refund.updated`, and `refund.failed` for refund reconciliation.
 - `checkout.session.completed` and `checkout.session.expired` for checkout lifecycle.
 - `customer.subscription.deleted` to release the monthly reservation.
 
@@ -240,9 +242,10 @@ referral notifications require their own implementations and approved copy.
 
 `impactgraph.donor_metrics` is the side-effect-free R1 calculation layer. Its inputs
 are successful `Gift` facts, the current verified state of each `Refund`, and explicit
-monthly `BillingPeriod` facts, plus an aware `as_of` timestamp. It is not yet connected
-to the Stripe worker or a donor dashboard endpoint. Existing stored gifts lack the
-billing-period and refund-state information necessary to wire it safely.
+monthly `BillingPeriod` facts, plus an aware `as_of` timestamp. The Stripe worker now persists billing periods and reconciled refunds;
+`donor_financial_facts.load_history` translates owner-scoped records to these inputs.
+Dashboard endpoints and durable projections remain pending. Legacy gifts may still lack
+billing-period and payment-link information until reconciled.
 
 - `relationships` selects the earliest successful payment per donor by processor
   timestamp, with stable payment ID breaking exact timestamp ties. The first gift can
@@ -277,8 +280,55 @@ historical reporting must supply the state actually known at that time. Facts mu
 USD integer cents and aware timestamps. Do not infer monthly billing dates from charge
 dates, assume every missing invoice was a cancellation, or feed checkout drafts here.
 
-Integration requires persisted invoice periods, failed-renewal and intentional-skip
-facts, reconciled refund states, permanent awards and historical bests, and a replayable
-projection. This module operates on supplied history; the eventual dashboard should
+Remaining integration requires intentional-skip/schedule facts, permanent awards and
+historical bests, and a replayable projection. This module operates on supplied history; the eventual dashboard should
 read indexed projections rather than repeatedly load every donor's financial history.
 Sandbox calculations must stay visibly labeled and cannot confer live donor recognition.
+
+
+## Stripe billing and refund facts
+
+Migration `0019_donor_financial_facts` adds invoice billing periods, payment links on
+gifts, reconciled refund records, and append-only refund observations. The worker reads
+periods from the invoice's subscription line, not the invoice creation or webhook date.
+It accepts one complete, non-prorated subscription line and one complete paid test
+PaymentIntent covering the gift. Truncated, split, offline, or inconsistent invoice
+payments stay in the inbox for reconciliation. Failed invoices record their scheduled
+period without creating a gift. A delayed failure cannot overwrite a paid period.
+
+This mapping follows Stripe's [invoice line item](https://docs.stripe.com/api/invoice-line-item/object),
+[invoice payment](https://docs.stripe.com/api/invoice-payment/object), and
+[refund](https://docs.stripe.com/api/refunds/object) object definitions. The integration
+still pins the SDK and snapshot event version described above.
+
+Refund webhook payloads are reduced to ID, PaymentIntent, amount, currency, and status.
+The worker links the PaymentIntent to a gift, locks that gift, then retrieves the current
+refund through the test-key Stripe client. It validates identity, amount, and currency
+before storing the state and an observation linked to the inbox event. The event's old
+status never overrides the retrieved current state. Only successful refunds reduce
+collection; pending, requires-action, canceled, or failed refunds do not. Excess refunds
+roll back both the state update and observation. This path observes processor refunds;
+it does not yet provide a staff action to issue one.
+
+The receiving Stripe account may contain unrelated refunds. Unknown PaymentIntents,
+refunds that arrive before their gifts, and provider failures remain unprocessed. The
+existing ten-attempt inbox limit and explicit retry procedure apply. Inspect and classify
+unrelated events instead of attaching them by email or guessing a checkout. Provider
+lookups are read-only and have the existing bounded network timeout/retries. Operations
+must monitor parked events; automatic dependency-aware retry/backoff is still pending.
+
+The migration backfills one-time PaymentIntent IDs from existing gifts. Legacy recurring
+gifts need a verified complete invoice redelivery to fill their period/payment links;
+a new event ID is required because already-processed event IDs are deduplicated. Merely
+replaying the old minimized inbox row cannot recover fields it never captured. Enrichment
+checks ownership and amount, and never collects the gift twice. Financial facts block a
+destructive downgrade. Do not delete old gifts or fabricate period dates to migrate.
+
+`load_history` returns calculation inputs for one donor, including refund observation
+times. This is a current-state view, not a tax-reporting history: observations record
+when reconciliation happened, not a guessed processor status-transition timestamp.
+Cancellation/pause schedule facts, historical best replay, permanent badge awards, and
+materialized referral/dashboard projections are still required. Until those exist, a
+missing current billing period remains explicitly unavailable rather than an invented
+zero streak. No live giving, live donor badges, or new donor-dashboard UI is enabled by
+this migration.

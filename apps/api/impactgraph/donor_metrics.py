@@ -76,6 +76,7 @@ class Gift:
 
 class RefundStatus(StrEnum):
     PENDING = "PENDING"
+    REQUIRES_ACTION = "REQUIRES_ACTION"
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     CANCELED = "CANCELED"

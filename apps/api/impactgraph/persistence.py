@@ -150,6 +150,21 @@ class StripeEventRecord(EntityMixin, Base):
     last_error: Mapped[str | None] = mapped_column(String(80))
 
 
+class DonorBillingPeriodRecord(EntityMixin, Base):
+    __tablename__ = "donor_billing_periods"
+    __table_args__ = (
+        CheckConstraint("ends_at > due_at", name="ck_donor_period_dates"),
+        CheckConstraint("status IN ('EXPECTED', 'FAILED', 'PAID')", name="ck_donor_period_status"),
+    )
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    checkout_id: Mapped[UUID] = mapped_column(ForeignKey("donor_checkouts.id"))
+    stripe_invoice_id: Mapped[str] = mapped_column(String(255), unique=True)
+    stripe_subscription_id: Mapped[str] = mapped_column(String(255))
+    due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(8))
+
+
 class DonorGiftRecord(EntityMixin, Base):
     """Individual collected money, linked to the checkout's pre-account attribution."""
 
@@ -164,6 +179,33 @@ class DonorGiftRecord(EntityMixin, Base):
     currency: Mapped[str] = mapped_column(String(3))
     frequency: Mapped[str] = mapped_column(String(8))
     paid_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    period_id: Mapped[UUID | None] = mapped_column(ForeignKey("donor_billing_periods.id"))
+
+
+class DonorRefundRecord(EntityMixin, Base):
+    __tablename__ = "donor_refunds"
+    __table_args__ = (
+        CheckConstraint("amount_minor > 0 AND currency = 'USD'", name="ck_donor_refund_money"),
+        CheckConstraint("status IN ('PENDING', 'REQUIRES_ACTION', 'SUCCEEDED', 'FAILED', 'CANCELED')",
+                        name="ck_donor_refund_status"),
+    )
+    gift_id: Mapped[UUID] = mapped_column(ForeignKey("donor_gifts.id"), index=True)
+    stripe_refund_id: Mapped[str] = mapped_column(String(255), unique=True)
+    amount_minor: Mapped[int] = mapped_column(BigInteger)
+    currency: Mapped[str] = mapped_column(String(3))
+    status: Mapped[str] = mapped_column(String(16))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DonorRefundObservationRecord(EntityMixin, Base):
+    """Keep each authoritative retrieval for reconciliation; never rewrite this history."""
+
+    __tablename__ = "donor_refund_observations"
+    refund_id: Mapped[UUID] = mapped_column(ForeignKey("donor_refunds.id"), index=True)
+    source_event_id: Mapped[UUID] = mapped_column(ForeignKey("donor_stripe_events.id"), unique=True)
+    status: Mapped[str] = mapped_column(String(16))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ProgramRecord(EntityMixin, Base):
