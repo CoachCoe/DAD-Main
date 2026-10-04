@@ -18,6 +18,18 @@ type Donor struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorBillingPeriod struct {
+	DonorID              pgtype.UUID        `json:"donor_id"`
+	CheckoutID           pgtype.UUID        `json:"checkout_id"`
+	StripeInvoiceID      string             `json:"stripe_invoice_id"`
+	StripeSubscriptionID string             `json:"stripe_subscription_id"`
+	DueAt                pgtype.Timestamptz `json:"due_at"`
+	EndsAt               pgtype.Timestamptz `json:"ends_at"`
+	Status               string             `json:"status"`
+	ID                   pgtype.UUID        `json:"id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorLoginLink struct {
 	DonorID    pgtype.UUID        `json:"donor_id"`
 	TokenHash  string             `json:"token_hash"`
@@ -25,4 +37,21 @@ type DonorLoginLink struct {
 	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
 	ID         pgtype.UUID        `json:"id"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorMetricProjection struct {
+	DonorID           pgtype.UUID        `json:"donor_id"`
+	ReferrerID        pgtype.UUID        `json:"referrer_id"`
+	ReferralKind      pgtype.Text        `json:"referral_kind"`
+	FirstGiftID       pgtype.Text        `json:"first_gift_id"`
+	NetMinor          pgtype.Int8        `json:"net_minor"`
+	FoundingAwardedAt pgtype.Timestamptz `json:"founding_awarded_at"`
+	BestStreak        int32              `json:"best_streak"`
+	CurrentStreak     pgtype.Int4        `json:"current_streak"`
+	AtRisk            bool               `json:"at_risk"`
+	GraceEndsAt       pgtype.Timestamptz `json:"grace_ends_at"`
+	ComputedAt        pgtype.Timestamptz `json:"computed_at"`
+	NextRefreshAt     pgtype.Timestamptz `json:"next_refresh_at"`
+	ID                pgtype.UUID        `json:"id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }

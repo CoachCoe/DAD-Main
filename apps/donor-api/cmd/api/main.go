@@ -20,6 +20,7 @@ func run() error {
 		address = "127.0.0.1:8002"
 	}
 	var content httpapi.ContentSource
+	var dashboard httpapi.DashboardSource
 	if dsn := os.Getenv("DONOR_GO_DATABASE_URL"); dsn != "" {
 		startup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		pool, err := store.Open(startup, dsn)
@@ -29,8 +30,9 @@ func run() error {
 		}
 		defer pool.Close()
 		content = store.ContentReader{DB: pool}
+		dashboard = store.DashboardReader{DB: pool}
 	}
-	server := httpapi.NewServer(address, content)
+	server := httpapi.NewServer(address, content, dashboard)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	failures := make(chan error, 1)
