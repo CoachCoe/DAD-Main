@@ -5,6 +5,7 @@ Run with uvicorn impactgraph.donor_api:app. Checkout remains Stripe sandbox-only
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -20,6 +21,7 @@ from .database import create_session_factory
 from .donor_email import EmailSettings, queue_login_email
 from .donor_projections import dashboard, refresh_projection
 from .donor_sharing import captured_name, referral_svg, sharing_details
+from .donor_subscriptions import SubscriptionConflict, cancel_recurring, recurring_details
 from .donors import (
     DonorAccessDenied,
     GiftFrequency,
@@ -73,6 +75,12 @@ class LoginRequest(BaseModel):
 class ClaimRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     token: str = Field(min_length=32, max_length=128)
+
+
+class CancellationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subscription_id: UUID
+    period_end: datetime
 
 
 def create_app(*, factory=None, settings=None, gateway=None, email_settings=None):
@@ -198,6 +206,33 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
                 ], "next_offset": offset + 50 if len(rows) > 50 else None}
         except DonorAccessDenied as exc:
             raise HTTPException(401, "Sign in required") from exc
+
+    def subscription_request(request, operation):
+        try:
+            token = request.cookies.get(SESSION_COOKIE, "")
+            with factory() as session:
+                authenticated_donor(session, token)
+            return operation(gateway or StripeGateway(settings), token)
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
+        except SubscriptionConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (stripe.StripeError, PaymentUnavailable) as exc:
+            raise HTTPException(503, "Stripe is unavailable. Retry to check your monthly gift.") from exc
+        except ValueError as exc:
+            raise HTTPException(409, "Billing details need reconciliation. No change is confirmed.") from exc
+
+    @app.get("/donor/me/recurring")
+    def recurring(request: Request):
+        return subscription_request(request, lambda provider, token: recurring_details(factory, provider, token))
+
+    @app.post("/donor/me/recurring/cancel")
+    def cancel(body: CancellationRequest, request: Request,
+               idempotency_key: Annotated[UUID, Header()]):
+        browser_request(request)
+        return subscription_request(request, lambda provider, token: cancel_recurring(
+            factory, provider, token, request_id=idempotency_key,
+            attempt_id=body.subscription_id, period_end=body.period_end))
 
     @app.get("/health/live")
     def live():

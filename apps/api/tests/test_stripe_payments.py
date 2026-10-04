@@ -112,10 +112,10 @@ def signed(event, *, timestamp=None):
     return body, f"t={timestamp},v1={digest}"
 
 
-def deliver(factory, event):
+def deliver(factory, event, *, gateway=None):
     body, signature = signed(event)
     accept_event(factory, verify_event(body, signature, SETTINGS))
-    assert process_next_event(factory)
+    assert process_next_event(factory, gateway=gateway)
 
 
 def test_checkout_uses_hosted_stripe_and_monthly_metadata(factory, gateway):
@@ -292,7 +292,10 @@ def test_cancellation_before_completion_is_not_undone(factory, gateway):
     result = checkout(factory, gateway, frequency=GiftFrequency.MONTHLY)
     event = event_for(result, "customer.subscription.deleted")
     event["data"]["object"].update(id="sub_example", status="canceled")
-    deliver(factory, event)
+    from tests.test_donor_subscriptions import BillingGateway, subscription
+    billing = BillingGateway()
+    billing.remote = subscription(result, status="canceled")
+    deliver(factory, event, gateway=billing)
     complete = event_for(result, "checkout.session.completed")
     complete["data"]["object"].update(id="cs_test_" + gateway.calls[0][1], status="complete",
                                        subscription="sub_example")

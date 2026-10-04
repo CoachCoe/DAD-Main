@@ -420,3 +420,42 @@ brightness control. Full-screen fallback, manual brightness instructions, and an
 unobstructed code are implemented; reliable scanning under glare, low brightness, angles,
 and damaged screens still requires physical-device acceptance tests. Analytics for share
 attempts/completion and conversion funnels also remains a separate required integration.
+
+## Recurring cancellation (sandbox)
+
+`/account/recurring`, linked from My Giving, reads the donor's monthly subscription
+from Stripe and offers an explicit cancellation confirmation with the billing boundary.
+GET `/donor/me/recurring` and POST `/donor/me/recurring/cancel` require a claimed donor
+session. The POST also requires the configured Origin, a UUID v4 Idempotency-Key, and
+the displayed subscription attempt ID and period-end timestamp. Ownership is resolved
+through the donor's checkout, never from a supplied customer ID or email.
+
+Migration 0021 stores the latest verified schedule and durable cancellation commands.
+Each command records the authenticated donor, subscription attempt, confirmed billing
+boundary, request time, and completion time. Authorization commits before the external
+mutation. Retries first retrieve Stripe's current state; a lost success response can be
+reconciled without issuing another mutation. An unresolved command older than 23 hours
+requires reconciliation instead of risking reuse after Stripe's idempotency retention.
+A changed billing boundary requires a new confirmation. Stripe receives the fixed
+confirmed `cancel_at` timestamp with `proration_behavior=none`, rather than a moving
+"end of whichever period is current" instruction. No refund or immediate cancellation
+is requested. Outstanding invoices are not forgiven by this action.
+
+Subscribe the inbox to `customer.subscription.updated` as well as
+`customer.subscription.deleted`. Both retrieve current Stripe state under the donor
+lock, so delayed events cannot restore an obsolete cancellation schedule. The adapter
+accepts the verified single-item monthly USD schedule and rejects unsupported changes
+for reconciliation. Only terminal cancellation releases the monthly reservation;
+scheduling a future cancellation does not allow a second active subscription.
+The projection worker evaluates the verified stop boundary: a paid month retains its
+streak until the first skipped renewal, then current streak becomes zero. Best streak,
+gift history, referral money, and an earned Founding Donor badge remain intact.
+
+Run both inbox and projection workers; schedule accuracy depends on consuming Stripe
+updates, with account visits also reconciling current state. There is not yet a periodic
+Stripe-wide reconciliation job. Pending commands are retained for explicit retry and
+operational inspection; a staff reconciliation interface is still required. The migration
+refuses to discard nonempty schedule/audit tables. Payment-method updates, pause/resume,
+amount changes, staff cancellation permissions, and receipts are separate unfinished
+surfaces. This remains test-mode only and requires real Stripe sandbox acceptance before
+production activation.

@@ -19,6 +19,7 @@ from .persistence import (
     DonorRecord,
     DonorRefundObservationRecord,
     DonorRefundRecord,
+    DonorSubscriptionRecord,
 )
 
 
@@ -78,6 +79,8 @@ def refresh_projection(session, donor_id, *, now=None):
                                           computed_at=now, next_refresh_at=now)
         session.add(row)
     gifts, refunds, periods = load_history(session, donor_id)
+    stopped = [_utc(end) for end in session.scalars(select(DonorSubscriptionRecord.stops_at).where(
+        DonorSubscriptionRecord.donor_id == donor_id, DonorSubscriptionRecord.stops_at.is_not(None)))]
     relation = relationships(gifts, as_of=now).get(str(donor_id))
     row.first_gift_id = relation.first_gift_id if relation else None
     row.referrer_id = UUID(relation.referrer_id) if relation and relation.referrer_id else None
@@ -93,13 +96,14 @@ def refresh_projection(session, donor_id, *, now=None):
         row.net_minor = None
     row.best_streak = _historical_best(session, donor_id, gifts, refunds, periods, now, row.best_streak)
     try:
-        result = streak(gifts, refunds, periods, str(donor_id), as_of=now, previous_best=row.best_streak)
+        result = streak(gifts, refunds, periods, str(donor_id), as_of=now, previous_best=row.best_streak,
+                        stopped_period_ends=stopped)
         row.current_streak, row.best_streak = result.current, result.best
         row.at_risk, row.grace_ends_at = result.at_risk, result.grace_ends_at
     except ValueError:
         row.next_refresh_at = now + timedelta(minutes=5)
     boundaries = [*(_utc(p.due_at) for p in periods), *(_utc(p.ends_at) for p in periods),
-                  *(_utc(g.paid_at) for g in gifts)]
+                  *(_utc(g.paid_at) for g in gifts), *stopped]
     if row.grace_ends_at:
         boundaries.append(row.grace_ends_at)
     row.next_refresh_at = min([row.next_refresh_at, *(t for t in boundaries if t > now)])

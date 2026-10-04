@@ -232,13 +232,14 @@ class IncompleteBillingHistory(ValueError):
     pass
 
 
-def streak(gifts, refunds, periods, donor_id, *, as_of, previous_best=0):
+def streak(gifts, refunds, periods, donor_id, *, as_of, previous_best=0, stopped_period_ends=()):
     """Count distinct scheduled recurring periods, not calendar months or retries.
 
     The adapter supplies failed/skipped periods and the current schedule. No monthly
     dates are guessed from charge timestamps. Preserve previously achieved bests.
     """
     as_of = _time(as_of)
+    stopped = {_time(end) for end in stopped_period_ends}
     if type(previous_best) is not int or previous_best < 0:
         raise ValueError("Historical best must be a nonnegative integer")
     gifts = _unique(gifts)
@@ -262,7 +263,7 @@ def streak(gifts, refunds, periods, donor_id, *, as_of, previous_best=0):
         payments[gift.period_id].append(gift)
     elapsed = [p for p in periods if _time(p.due_at) <= as_of]
     if elapsed and _time(elapsed[-1].ends_at) <= as_of \
-            and elapsed[-1].status != PeriodStatus.SKIPPED:
+            and elapsed[-1].status != PeriodStatus.SKIPPED and _time(elapsed[-1].ends_at) not in stopped:
         raise IncompleteBillingHistory("Current renewal or skipped-period fact is missing")
 
     def calculate():
@@ -295,5 +296,7 @@ def streak(gifts, refunds, periods, donor_id, *, as_of, previous_best=0):
         return Streak(current, best, risk, deadline)
 
     actual = calculate()
+    if elapsed and _time(elapsed[-1].ends_at) <= as_of and _time(elapsed[-1].ends_at) in stopped:
+        return Streak(0, max(previous_best, actual.best), False, None)
     return Streak(actual.current, max(previous_best, actual.best),
                   actual.at_risk, actual.grace_ends_at)

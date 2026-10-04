@@ -208,6 +208,28 @@ class DonorRefundObservationRecord(EntityMixin, Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DonorSubscriptionRecord(EntityMixin, Base):
+    """Latest verified schedule, including the first renewal skipped on cancellation."""
+
+    __tablename__ = "donor_subscriptions"
+    attempt_id: Mapped[UUID] = mapped_column(ForeignKey("donor_stripe_checkouts.id"), unique=True)
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    status: Mapped[str] = mapped_column(String(32))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    stops_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DonorCancellationRecord(EntityMixin, Base):
+    """Durable donor-authorized command; identity and confirmation survive HTTP retries."""
+
+    __tablename__ = "donor_cancellations"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    attempt_id: Mapped[UUID] = mapped_column(ForeignKey("donor_stripe_checkouts.id"))
+    confirmed_period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class DonorMetricProjectionRecord(EntityMixin, Base):
     __tablename__ = "donor_metric_projections"
     __table_args__ = (

@@ -47,6 +47,7 @@ EVENT_TYPES = {
     "payment_intent.succeeded", "invoice.payment_succeeded", "invoice.payment_failed",
     "refund.created", "refund.updated", "refund.failed",
     "checkout.session.completed", "checkout.session.expired", "customer.subscription.deleted",
+    "customer.subscription.updated",
 }
 
 
@@ -96,6 +97,15 @@ class StripeGateway:
 
     def retrieve_refund(self, refund_id: str) -> dict:
         return self.client.v1.refunds.retrieve(refund_id).to_dict()
+
+    def retrieve_subscription(self, subscription_id: str) -> dict:
+        return self.client.v1.subscriptions.retrieve(subscription_id).to_dict()
+
+    def schedule_cancellation(self, subscription_id: str, cancel_at: int, key: str) -> dict:
+        return self.client.v1.subscriptions.update(
+            subscription_id, {"cancel_at": cancel_at, "proration_behavior": "none"},
+            options={"idempotency_key": key},
+        ).to_dict()
 
     def create_checkout(self, params: dict, key: str) -> dict:
         return self.client.v1.checkout.sessions.create(
@@ -281,13 +291,11 @@ def _apply_event(session, event, gateway=None):
             if data.get("subscription"):
                 _bind_subscription(attempt, data["subscription"])
         return  # Completion/redirect never records a gift.
-    if kind == "customer.subscription.deleted":
+    if kind.startswith("customer.subscription."):
+        from .donor_subscriptions import reconcile_subscription
+
         _bind_subscription(attempt, data["id"])
-        if data.get("status") != "canceled":
-            raise ValueError("Expected a canceled subscription")
-        attempt.status = "CANCELLED"
-        session.execute(delete(DonorRecurringReservationRecord).where(
-            DonorRecurringReservationRecord.attempt_id == attempt.id))
+        reconcile_subscription(session, attempt, gateway or StripeGateway(PaymentSettings.from_env()))
         return
     if kind == "invoice.payment_failed":
         if (draft.frequency != "MONTHLY" or data.get("status") != "open"
