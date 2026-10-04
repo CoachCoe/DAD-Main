@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -78,4 +80,51 @@ func TestFinancialOutboxDeduplicationYearBoundaryAndRollback(t *testing.T) {
 	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 OR donor_id=$2", id, referrer).Scan(&count); err != nil || count != 0 {
 		t.Fatal("rolled back financial messages persisted")
 	}
+}
+
+func TestFinancialOutboxBatchesLongHistoryAndExcludesFutureGifts(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	id, checkout := testID(t), testID(t)
+	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id.String()+"@example.org")
+	mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')", checkout, id)
+	now := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
+	mustExec(t, tx, `INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at)
+ SELECT gen_random_uuid(),$1,$2,'pi_'||($1::uuid)::text||'_'||n,3000,'USD','ONE_TIME',$3::timestamptz+n*interval '1 minute' FROM generate_series(-999,1) n`, id, checkout, now)
+	db := &countedOutbox{DBTX: tx}
+	for i := range 2 {
+		if err = QueueFinancialMessages(ctx, queries.New(db), id, now); err != nil {
+			t.Fatal(err)
+		}
+		var count int
+		if err = tx.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1", id).Scan(&count); err != nil || count != 1000 {
+			t.Fatal(count, err)
+		}
+		if db.calls != i+1 {
+			t.Fatal("queue cost grows with gift history", db.calls)
+		}
+	}
+}
+
+type countedOutbox struct {
+	queries.DBTX
+	calls int
+}
+
+func (db *countedOutbox) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+	db.calls++
+	return db.DBTX.Exec(ctx, sql, args...)
+}
+func (db *countedOutbox) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	db.calls++
+	return db.DBTX.Query(ctx, sql, args...)
+}
+func (db *countedOutbox) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	db.calls++
+	return db.DBTX.QueryRow(ctx, sql, args...)
 }

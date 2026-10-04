@@ -85,7 +85,13 @@ func historicalBest(ctx context.Context, q *queries.Queries, id pgtype.UUID, h H
 			history = append(history, r)
 		}
 	}
+	return replayBest(ctx, id.String(), h, history, now, previous)
+}
+
+func replayBest(ctx context.Context, donorID string, h History, history []recognition.Refund, now time.Time, previous int64) (int64, error) {
 	sort.SliceStable(history, func(i, j int) bool { return history[i].UpdatedAt.Before(history[j].UpdatedAt) })
+	gifts := append([]recognition.Gift(nil), h.Gifts...)
+	sort.SliceStable(gifts, func(i, j int) bool { return gifts[i].PaidAt.Before(gifts[j].PaidAt) })
 	points := map[time.Time]bool{}
 	for _, g := range h.Gifts {
 		if !g.PaidAt.After(now) {
@@ -101,18 +107,34 @@ func historicalBest(ctx context.Context, q *queries.Queries, id pgtype.UUID, h H
 	}
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Before(ordered[j]) })
 	best := previous
+	latest := map[string]recognition.Refund{}
+	paidPeriods := map[string]bool{}
+	refundIndex, giftIndex := 0, 0
 	for _, point := range ordered {
-		latest := map[string]recognition.Refund{}
-		for _, r := range history {
-			if !r.UpdatedAt.After(point) {
-				latest[r.ID] = r
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		for refundIndex < len(history) && !history[refundIndex].UpdatedAt.After(point) {
+			r := history[refundIndex]
+			latest[r.ID] = r
+			refundIndex++
+		}
+		for giftIndex < len(gifts) && !gifts[giftIndex].PaidAt.After(point) {
+			g := gifts[giftIndex]
+			if g.DonorID == donorID && g.Frequency == "MONTHLY" {
+				paidPeriods[g.PeriodID] = true
 			}
+			giftIndex++
+		}
+		// No history at this point can exceed its number of paid recurring periods.
+		if int64(len(paidPeriods)) <= best {
+			continue
 		}
 		refunds := make([]recognition.Refund, 0, len(latest))
 		for _, r := range latest {
 			refunds = append(refunds, r)
 		}
-		value, err := recognition.GivingStreak(h.Gifts, refunds, h.Periods, id.String(), point, best, nil, nil)
+		value, err := recognition.GivingStreak(h.Gifts, refunds, h.Periods, donorID, point, best, nil, nil)
 		if err == nil && value.Best > best {
 			best = value.Best
 		}
