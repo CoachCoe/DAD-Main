@@ -10,9 +10,12 @@ from .persistence import (
     DonorAmountChangeRecord,
     DonorBillingPeriodRecord,
     DonorCancellationRecord,
+    DonorContentPublicationRecord,
+    DonorContentSourceRecord,
     DonorGiftRecord,
     DonorMessageRecord,
     DonorMetricProjectionRecord,
+    DonorPartnerSignupRecord,
     DonorPauseRecord,
     DonorPreferenceEventRecord,
     DonorPreferenceRecord,
@@ -47,6 +50,9 @@ DATASETS = {
     "staff-actions": (DonorStaffActionRecord, "id actor_id donor_id kind target_id amount_minor period_end reason status stripe_refund_id completed_at created_at", "data.export"),
     "staff": (DonorStaffRecord, "id name email role disabled created_at", "staff.manage"),
     "audit": (DonorStaffAuditRecord, "id actor_id action target created_at", "audit.read"),
+    "partner-signups": (DonorPartnerSignupRecord, "id organization name email website message consent_version created_at", "content.publish"),
+    "content-sources": (DonorContentSourceRecord, "id actor_id name sha256 created_at", "content.publish"),
+    "publications": (DonorContentPublicationRecord, "id actor_id payload created_at", "content.publish"),
     "enrolments": (None, "enrolment_id program_id submitted_at status", "data.export"),
 }
 

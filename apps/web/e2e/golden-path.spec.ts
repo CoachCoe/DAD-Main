@@ -61,7 +61,7 @@ async function navigateByHeader(page: Page, name: RegExp): Promise<void> {
  * money they are following. Both are real deployments and the journey must work on either.
  */
 async function openProgram(page: Page): Promise<void> {
-  await page.goto("/");
+  await page.goto("/impactgraph");
   const chooser = page.getByRole("heading", { name: "Choose a program" });
   if (await chooser.isVisible().catch(() => false)) {
     await page.locator(".programRow").first().click();
@@ -171,7 +171,7 @@ test("every header destination is reachable at this viewport", async ({
   // The regression this guards: below 800px the navigation was hidden and nothing
   // replaced it, so /about -- the page explaining how any of this can be checked --
   // could not be reached on a phone at all. Issue #22.
-  await page.goto("/");
+  await page.goto("/impactgraph");
 
   await navigateByHeader(page, /^How it works$/);
   await expect(page).toHaveURL(/\/about/);
@@ -182,13 +182,13 @@ test("every header destination is reachable at this viewport", async ({
   await expect(page).toHaveURL(/\/financial/);
 
   await navigateByHeader(page, /^Donor$/);
-  await expect(page).toHaveURL(/\/$|\/\?/);
+  await expect(page).toHaveURL(/\/impactgraph(?:\?|$)/);
 });
 
 test("the menu button announces its state, and Escape closes it", async ({
   page,
 }) => {
-  await page.goto("/");
+  await page.goto("/impactgraph");
   const menu = page.getByRole("button", { name: "Menu" });
   test.skip(
     !(await menu.isVisible()),
@@ -220,7 +220,7 @@ test("an operator can move between their screens on a phone", async ({
   // The journey most likely to happen on a phone, and the one the hidden navigation
   // broke hardest: an operator in the field had no way off whichever page they landed on.
   await signIn(page, OPERATOR);
-  await page.goto("/");
+  await page.goto("/impactgraph");
 
   await navigateByHeader(page, /^Operator$/);
   await expect(page).toHaveURL(/\/operator/);

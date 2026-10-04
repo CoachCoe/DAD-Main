@@ -191,7 +191,7 @@ export default async function ProofPage({ params }: Params) {
       <EmbedBadge claimId={claim.id} statement={claim.statement} />
 
       <p className="proofFooter">
-        Verified on <Link href="/">ImpactGraph</Link> · this page shows the
+        Verified on <Link href="/impactgraph">ImpactGraph</Link> · this page shows the
         claim&rsquo;s current status, not the status on the day it was shared.
       </p>
     </div>

@@ -67,7 +67,9 @@ make api                        # terminal 2
 make web                        # terminal 3
 ```
 
-Open <http://localhost:3000>. Local Anvil deployment needs `DEPLOYER_PRIVATE_KEY` from a
+Open <http://localhost:3000/impactgraph> for the transparency demonstration. The root
+URL hosts the donor release; its separate API setup is documented in
+[the donor domain guide](docs/donor-domain.md). Local Anvil deployment needs `DEPLOYER_PRIVATE_KEY` from a
 development account in the shell environment; never commit it.
 
 `make bootstrap-chain` is required. Deployment alone leaves the registry empty, so the program

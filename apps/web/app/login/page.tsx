@@ -8,7 +8,7 @@ const ROLE_HOME: Record<string, string> = {
   OPERATOR: "/operator",
   VERIFIER: "/verifier",
   ADMIN: "/admin",
-  DONOR: "/",
+  DONOR: "/impactgraph",
 };
 
 function LoginForm() {
@@ -26,7 +26,7 @@ function LoginForm() {
     setError(null);
     try {
       const session = await signIn(email, password);
-      router.push(next ?? ROLE_HOME[session.role] ?? "/");
+      router.push(next ?? ROLE_HOME[session.role] ?? "/impactgraph");
       router.refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Sign in failed.");

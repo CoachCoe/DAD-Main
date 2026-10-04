@@ -32,6 +32,38 @@ class EntityMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DonorContentSourceRecord(EntityMixin, Base):
+    __tablename__ = "donor_content_sources"
+    actor_id: Mapped[UUID] = mapped_column(ForeignKey("donor_staff.id"))
+    name: Mapped[str] = mapped_column(String(120))
+    sha256: Mapped[str] = mapped_column(String(64))
+    encrypted_data: Mapped[bytes] = mapped_column(LargeBinary)
+
+
+class DonorContentPublicationRecord(EntityMixin, Base):
+    __tablename__ = "donor_content_publications"
+    actor_id: Mapped[UUID] = mapped_column(ForeignKey("donor_staff.id"))
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class DonorContentHeadRecord(Base):
+    __tablename__ = "donor_content_head"
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    publication_id: Mapped[UUID | None] = mapped_column(ForeignKey("donor_content_publications.id"))
+
+
+class DonorPartnerSignupRecord(EntityMixin, Base):
+    __tablename__ = "donor_partner_signups"
+    organization: Mapped[str] = mapped_column(String(200))
+    name: Mapped[str] = mapped_column(String(100))
+    email: Mapped[str] = mapped_column(String(320), index=True)
+    website: Mapped[str] = mapped_column(String(500))
+    message: Mapped[str] = mapped_column(String(2000))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    consent_version: Mapped[str] = mapped_column(String(80))
+
+
 class DonorStaffRecord(EntityMixin, Base):
     __tablename__ = "donor_staff"
     email: Mapped[str] = mapped_column(String(320), unique=True)

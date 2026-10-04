@@ -137,13 +137,16 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
         if not limiter.check(address)[0]:
             raise HTTPException(429, "Too many requests", headers={"Retry-After": "60"})
 
+    from .donor_content_api import install_content_routes
+    install_content_routes(app, factory, browser_request)
     from .donor_staff_api import install_staff_routes
     install_staff_routes(app, factory, settings, browser_request, gateway)
 
     @app.middleware("http")
     async def private_responses(request, call_next):
         response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = ("public, max-age=60" if request.url.path == "/donor/public/content"
+                                               and response.status_code == 200 else "no-store")
         response.headers["Referrer-Policy"] = "no-referrer"
         return response
 

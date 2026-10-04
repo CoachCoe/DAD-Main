@@ -543,3 +543,27 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
 .donorCodePanel:fullscreen{overflow:auto;background:#fff;color:#111;padding:24px}
 .donorReferralCode{display:block;width:min(100%,360px);height:auto;margin:24px auto;background:#fff}
 @media print{.donorReferralCode{display:none}}
+
+/* R1 donor and staff surfaces share the existing tokens and native control semantics. */
+.dadHeader .brand{min-width:0;flex-shrink:1}
+.dadHeader .brandMark{flex:none}
+.dadHeader nav{gap:18px;margin-right:18px}
+.donorSurface{overflow-wrap:anywhere}
+.donorSurface>.panel{max-width:1120px;margin:24px auto;width:calc(100% - 32px)}
+.donorSurface>h1,.donorSurface>p{max-width:1088px;margin:24px auto;padding:0 16px}
+.donorSurface form{max-width:44rem}
+.donorSurface label{display:block;margin:16px 0 10px}
+.donorSurface fieldset{min-width:0;border:1px solid var(--line);padding:16px;margin:16px 0}
+.donorSurface input:not([type="checkbox"]),.donorSurface textarea,.donorSurface select{display:block;width:100%;min-height:44px;margin-top:6px;padding:10px;border:1px solid var(--muted);border-radius:8px;background:var(--field);color:var(--ink);font:inherit;font-size:16px}
+.donorSurface textarea{min-height:7rem}
+.donorSurface input[type="checkbox"]{width:24px;height:24px;vertical-align:middle;accent-color:var(--brand-ink);margin-right:8px}
+.donorSurface button{min-height:44px;margin:4px 8px 4px 0;padding:10px 16px;border:1px solid var(--ink);border-radius:8px;background:var(--ink);color:var(--card);font:inherit;cursor:pointer}
+.donorSurface button:disabled{opacity:.55;cursor:default}
+.donorSurface a:not(.button):not(.secondary){text-decoration:underline;text-underline-offset:3px}
+.donorSurface :is(button,input,select,textarea,a,summary):focus-visible{outline:3px solid var(--brand-ink);outline-offset:3px}
+.donorSurface summary{cursor:pointer;padding:10px 0;min-height:44px}
+.donorSurface details{margin:16px 0}
+.donorSurface pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.donorSurface article+article{margin-top:24px}
+@media (max-width:800px){.dadHeader .brand{max-width:210px;font-size:16px;line-height:1.2}.dadHeader nav{margin-right:0}.donorSurface>.panel{padding:20px 16px}}
+@media print{.donorSurface button,.donorSurface form{display:none!important}}

@@ -74,7 +74,7 @@ export default async function ClaimInspector({ params }: { params: Promise<{ id:
   return (
     <div className="inspector">
       <div className="breadcrumbs">
-        <Link href="/">Programs</Link> <span aria-hidden>/</span> {claim.projectId}{" "}
+        <Link href="/impactgraph">Programs</Link> <span aria-hidden>/</span> {claim.projectId}{" "}
         <span aria-hidden>/</span> Claim
       </div>
 

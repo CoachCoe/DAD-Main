@@ -33,13 +33,13 @@ export function Header() {
 
   const out = async () => {
     await signOut();
-    router.push("/");
+    router.push("/impactgraph");
     router.refresh();
   };
 
   return (
     <header className="header">
-      <Link className="brand" href="/">
+      <Link className="brand" href="/impactgraph">
         <span className="brandMark" aria-hidden>
           I
         </span>
@@ -70,7 +70,7 @@ export function Header() {
       */}
       <div className="headerMenu" id={MENU} data-open={open}>
         <nav aria-label="Primary navigation">
-          <Link href="/">Donor</Link>
+          <Link href="/impactgraph">Donor</Link>
           <Link href="/financial">Money trail</Link>
           <Link href="/about">How it works</Link>
           {session?.role === "OPERATOR" && <Link href="/operator">Operator</Link>}

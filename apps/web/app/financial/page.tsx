@@ -270,7 +270,7 @@ function ChooseProgramFirst({ state }: { state: "choose" | "none" | "unavailable
             ? "A money trail belongs to one program. Pick the one you want to follow."
             : "There is nothing to total until a program exists and its ledger has been imported."}
         </p>
-        <Link className="button" href="/">
+        <Link className="button" href="/impactgraph">
           {state === "choose" ? "See the programs" : "Back to the record"}
         </Link>
       </section>

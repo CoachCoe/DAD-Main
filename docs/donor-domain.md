@@ -794,3 +794,43 @@ enabled/disabled state, revoke existing sessions, and audit old/new roles. Concu
 access changes lock staff records in a consistent order and recheck that the actor is
 still an active administrator. Neither workflow permits a staff member to change their
 own access or bypass MFA. No plaintext password or authenticator secret is sent by mail.
+
+## Public website and staff-published spreadsheet snapshots
+
+The root URL is the donor website. The existing transparency demonstration remains at
+`/impactgraph`; its operator, evidence, and proof routes remain available. Donor pages
+use their own navigation and do not require the legacy session API. Giving and partner
+interest remain explicitly marked as test operations until production activation.
+
+Administrators use `/staff/content` to upload private source documents and publish a
+complete pair of CSV spreadsheet exports. This is a manual snapshot workflow, not a
+CMS or automatic connection to a spreadsheet account. Configure a dedicated Fernet
+`DONOR_CONTENT_ENCRYPTION_KEY` and retain it securely with backups. Source uploads are
+limited to 10 MB, encrypted at rest, SHA-256 checked on download, and audited. Source
+records cannot be accessed through the public API. Publishing requires the named
+`content.publish` permission and a same-origin request.
+
+Initiative CSV columns, in order:
+`slug,title,summary,partner,planned_start,board_approval_source_id,approved_on`.
+Dates use YYYY-MM-DD. Every initiative must reference an uploaded board-approval source.
+Slugs are unique lowercase words separated by hyphens. Ledger CSV columns, in order:
+`metric,value,unit,source_id,illustrative`. Values are nonnegative integers; supported
+units are `USD_CENTS`, `PEOPLE`, `INITIATIVES`, and `PARTNERS`. Every real figure requires
+an uploaded source. Examples require `illustrative=true`, which is visibly displayed
+beside the figure. Uploading a document records provenance; staff remain responsible
+for its accuracy and actual board approval.
+
+Each CSV is limited to 512 KB and 500 rows. Staff supply the ledger's as-of date and
+update cadence. Invalid publications leave the current snapshot intact. Publication
+history is retained; a singleton database lock switches both public views atomically.
+`GET /donor/public/content` omits private source references and may be cached for 60
+seconds. Unpublished content displays an empty state without fabricated figures.
+
+`/partners` accepts a contact inquiry with explicit contact consent and a stable UUID v4
+request key. Retrying the same request does not create a duplicate; changing its body
+requires a new key. This creates no partner account, portal, enrolment, or funding
+promise. Administrators can view inquiries at `/staff/partners` and export them, source
+metadata, and publication snapshots as CSV. Source files are retrieved separately from
+the permission-protected source endpoint. The legal surface reports unpublished policy
+status until approved Terms, Privacy, and donor-consent text is supplied; it does not
+represent legal approval or production readiness.

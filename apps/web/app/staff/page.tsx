@@ -55,6 +55,7 @@ export default function StaffPage() {
     {signedOut ? <Link href="/staff/sign-in">Staff sign-in</Link> : actor ? <>
       <p>{actor.name} · {actor.role}</p>
       {actor.permissions.includes("data.export") && <p><Link href="/staff/exports">Exports and enrolment queue</Link></p>}
+      {actor.permissions.includes("content.publish") && <p><Link href="/staff/content">Publish spreadsheet content</Link> · <Link href="/staff/partners">Partner inquiries</Link></p>}
       {actor.permissions.includes("audit.read") && <p><Link href="/staff/audit">Audit history</Link></p>}
       <button disabled={busy} onClick={() => action(async () => { await api("/donor/staff/sign-out", { method: "POST" }); setSignedOut(true); })}>Sign out</button>
       <form onSubmit={(event) => { event.preventDefault(); search(); }}>
