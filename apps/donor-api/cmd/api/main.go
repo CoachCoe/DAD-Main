@@ -73,6 +73,9 @@ func run() error {
 		services.Webhook = payments.Receiver{Secret: os.Getenv("STRIPE_WEBHOOK_SECRET"), Inbox: store.StripeInbox{DB: pool}}
 		services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
 		services.Account = store.AccountService{DB: pool}
+		if email != nil {
+			services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKey: email.EncryptionKey}
+		}
 		services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
 		services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
 		if key := os.Getenv("DONOR_STAFF_ENCRYPTION_KEY"); key != "" {

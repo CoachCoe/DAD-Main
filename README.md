@@ -66,6 +66,7 @@ terminal with the environment loaded:
 make worker KIND=stripe
 make worker KIND=projections
 make worker KIND=login-email
+make worker KIND=email-changes
 make worker KIND=messages
 ```
 

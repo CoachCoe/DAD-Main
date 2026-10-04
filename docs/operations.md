@@ -93,7 +93,10 @@ confirmation, reasons, and audit records. Never edit processor identifiers by ha
 
 ## Email and projections
 
-Run projection, login-email, and message workers separately. Projection refresh handles
+Run projection, login-email, email-changes, and message workers separately. Email changes
+use the same mail configuration, require current-address proof before new-address proof,
+and park delivery after five failures. Requesting a replacement invalidates prior proofs.
+Projection refresh handles
 grace expiry, recurring boundaries, permanent recognition, and prior-year summaries.
 Unknown streak state displays Updating; it must not silently become zero.
 

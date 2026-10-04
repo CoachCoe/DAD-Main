@@ -111,8 +111,12 @@ Terms, Privacy, and donor consent need approved content. Wallet pass issuance, a
 instrumentation, app design deliverables, physical-device QR acceptance, and operational
 release acceptance remain separate from the backend rewrite. The web referral-code page
 offers full screen and manual brightness instructions; it cannot promise hardware
-brightness control. An email change is not implemented; the profile shows a read-only
-address rather than an insecure identity replacement.
+brightness control. Email changes require single-use confirmations at both the current
+and proposed address, each expiring after 15 minutes. Completing a change preserves the
+donor ID, revokes existing sessions and sign-in links, and records identity audit events.
+An address already attached to another donor is rejected after verification; accounts
+are never merged automatically. Historical checkout and processor billing records retain
+their original details.
 
 The inactive enrolment queue and header-only export exist at R1. There is no enrolment
 trigger until R2; the [prepared confirmation wording](messaging.md) does not promise funds.

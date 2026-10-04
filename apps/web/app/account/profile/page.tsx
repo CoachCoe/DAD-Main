@@ -12,6 +12,7 @@ export default function ProfilePage() {
   const [signedOut, setSignedOut] = useState(false);
   const [busy, setBusy] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [newEmail, setNewEmail] = useState("");
   useEffect(() => {
     let active = true;
     setData(null); setError(""); setMessage("");
@@ -41,6 +42,16 @@ export default function ProfilePage() {
     catch { setError("Sign-out was not confirmed. Retry when connected."); }
     finally { setBusy(false); }
   }
+  async function changeEmail(event: React.FormEvent) {
+    event.preventDefault(); if (busy) return;
+    setBusy(true); setError(""); setMessage("");
+    try {
+      await api("/donor/me/email-change", { method: "POST", body: JSON.stringify({email: newEmail}) });
+      setMessage("Check your current email address first. After you confirm there, we’ll send a second confirmation to your new address. Each link expires after 15 minutes.");
+      setNewEmail("");
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not request the change. Please retry."); }
+    finally { setBusy(false); }
+  }
   return <section className="panel">
     <h1>Profile and notification preferences</h1>
     <p><Link href="/account/dashboard">Donor dashboard</Link></p>
@@ -48,6 +59,11 @@ export default function ProfilePage() {
       {!data && !error && <p role="status">Loading profile…</p>}
       {data && <>
         <p>Account email: {data.email}</p>
+        <details><summary>Change account email</summary>
+          <p>You must confirm both addresses. Completing the change signs out every device. Existing accounts will not be merged.</p>
+          <form onSubmit={changeEmail}><label>New email address<input type="email" autoComplete="email" maxLength={320} required value={newEmail} onChange={(event) => setNewEmail(event.target.value)} disabled={busy} /></label>
+            <button type="submit" disabled={busy}>Send confirmation to current address</button></form>
+        </details>
         <p>Public nickname: {data.public_name || "Not shared"}. <Link href="/account/share">Manage sharing and public nickname</Link></p>
         <form onSubmit={save}>
           <fieldset disabled={busy}><legend>Optional email notifications</legend>

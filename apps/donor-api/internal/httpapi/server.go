@@ -49,6 +49,7 @@ type Services struct {
 	ContentAdmin    ContentAdminSource
 	Partner         PartnerSource
 	EmailConfigured bool
+	EmailChange     EmailChangeSource
 }
 
 func NewServer(address string, services Services) *http.Server {
@@ -66,6 +67,7 @@ func NewServer(address string, services Services) *http.Server {
 		writeJSON(w, status, body)
 	}
 	installAccountRoutes(mux, services, guard, reply)
+	installEmailChangeRoutes(mux, services, guard, reply)
 	installDonorRoutes(mux, services, guard, reply)
 	installRecurringRoutes(mux, services, guard, reply)
 	installStaffRoutes(mux, services, guard, reply)

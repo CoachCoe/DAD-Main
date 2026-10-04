@@ -21,13 +21,13 @@ import (
 
 func run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("donor-worker", flag.ContinueOnError)
-	kind := flags.String("kind", "", "stripe, projections, login-email, or messages")
+	kind := flags.String("kind", "", "stripe, projections, login-email, email-changes, or messages")
 	once := flags.Bool("once", false, "process at most one item")
 	retry := flags.String("retry-event", "", "reset an unprocessed Stripe event's attempt budget")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || (*kind != "stripe" && *kind != "projections" && *kind != "login-email" && *kind != "messages") || (*retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_"))) {
+	if flags.NArg() != 0 || (*kind != "stripe" && *kind != "projections" && *kind != "login-email" && *kind != "email-changes" && *kind != "messages") || (*retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_"))) {
 		return errors.New("invalid worker arguments")
 	}
 	if os.Getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
@@ -80,7 +80,10 @@ func run(ctx context.Context, args []string) error {
 			origin = "http://localhost:3000"
 		}
 		transport := mail.SMTPTransport{Settings: settings}
-		if *kind == "login-email" {
+		if *kind == "email-changes" {
+			worker := store.EmailChangeWorker{DB: pool, Settings: settings, Origin: origin, Transport: transport}
+			step = func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }
+		} else if *kind == "login-email" {
 			worker := store.LoginEmailWorker{DB: pool, Settings: settings, Origin: origin, Transport: transport}
 			step = func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }
 		} else {

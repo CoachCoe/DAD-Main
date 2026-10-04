@@ -11,6 +11,7 @@ configured provider before enabling live donations. SMTP delivery is at least on
 | Payment recovery | Failed renewal, then days 7 and 13; giving donor | Essential payment notice; stop after recovery or cancellation | `internal/store/messages.go` and `outbox.go` |
 | Referral converted | First qualifying referred gift; direct referrer | Optional; recheck referral-email preference before sending | `internal/store/messages.go` |
 | Account claim/sign-in | Requested access or initial checkout claim; address owner | Essential authentication; single-use link, 15-minute expiry | `internal/store/email.go` |
+| Email change | Signed-in request, then current-address confirmation; current/new address respectively | Essential security confirmation; two single-use proofs, each valid 15 minutes | `internal/store/email_change_delivery.go` |
 | Enrolment confirmation | Program submission; enrolled person | R2 activation only; final preference classification requires approval | Prepared copy below; no R1 sending trigger |
 
 Implementation paths are relative to `apps/donor-api`. Marketing consent is independent

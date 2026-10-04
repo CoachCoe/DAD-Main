@@ -8,7 +8,7 @@ case "${1:-help}" in
   migrate) compose up -d --wait postgres; compose run --rm migrate ;;
   adopt) compose up -d --wait postgres; compose run --rm migrate migrate --adopt-existing ;;
   up) compose up -d --wait api web ;;
-  workers) compose --profile workers up -d stripe-worker projection-worker login-email-worker message-worker ;;
+  workers) compose --profile workers up -d stripe-worker projection-worker login-email-worker email-change-worker message-worker ;;
   down) compose down ;;
   logs) shift; compose logs -f "$@" ;;
   smoke)

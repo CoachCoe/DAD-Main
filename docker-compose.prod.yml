@@ -70,6 +70,12 @@ services:
     profiles: [workers]
     restart: unless-stopped
 
+  email-change-worker:
+    <<: *donor
+    command: [worker, --kind, email-changes]
+    profiles: [workers]
+    restart: unless-stopped
+
   web:
     image: ${IMAGE_PREFIX:-impactgraph}/web:${IMAGE_TAG:-latest}
     build:

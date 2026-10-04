@@ -73,6 +73,22 @@ type DonorContentSource struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorEmailChange struct {
+	ID             pgtype.UUID        `json:"id"`
+	DonorID        pgtype.UUID        `json:"donor_id"`
+	OldEmail       string             `json:"old_email"`
+	NewEmail       string             `json:"new_email"`
+	Stage          string             `json:"stage"`
+	TokenHash      string             `json:"token_hash"`
+	EncryptedToken []byte             `json:"encrypted_token"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	SentAt         pgtype.Timestamptz `json:"sent_at"`
+	Attempts       int32              `json:"attempts"`
+	AvailableAt    pgtype.Timestamptz `json:"available_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+}
+
 type DonorGift struct {
 	DonorID               pgtype.UUID        `json:"donor_id"`
 	CheckoutID            pgtype.UUID        `json:"checkout_id"`
