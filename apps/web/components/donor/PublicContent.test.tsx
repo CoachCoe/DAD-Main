@@ -3,8 +3,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { PublicContent } from "./PublicContent";
 
 const published = { state: "published", ledger_as_of: "2026-09-01", cadence: "monthly", initiatives: [],
-  ledger: [{ metric: "Collected", value: 3000, unit: "USD_CENTS", illustrative: false },
-    { metric: "Example reach", value: 100, unit: "PEOPLE", illustrative: true }] };
+  ledger: [{ id: "snapshot:0", metric: "Collected", value: 3000, unit: "USD_CENTS", illustrative: false },
+    { id: "snapshot:1", metric: "Example reach", value: 100, unit: "PEOPLE", illustrative: true }] };
 afterEach(() => vi.unstubAllGlobals());
 
 it("labels illustrative figures alongside real figures and their as-of date", async () => {

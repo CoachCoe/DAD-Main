@@ -12,7 +12,7 @@ export default function ReferralLanding({ code }: { code: string }) {
     const controller = new AbortController();
     setResult(null); setError("");
     const kind = new URLSearchParams(window.location.search).get("via") === "irl" ? "IRL" : "LINK";
-    api<{ captured: boolean; public_name: string | null }>(`/donor/referrals/${encodeURIComponent(code)}`, {
+    api<{ captured: boolean; public_name: string | null }>(`/donor/referrals/${encodeURIComponent(code)}`, { cache: retry > 0 ? "reload" : "default",
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind }),
       signal: controller.signal,
     }).then((value) => { if (!controller.signal.aborted) setResult(value); })
@@ -30,7 +30,7 @@ export default function ReferralLanding({ code }: { code: string }) {
     {result?.captured && <Link className="button" href="/donate">Continue to giving</Link>}
     {result && !result.captured && <><p>This referral link is no longer available.</p>
       <Link href="/donate">Continue without a referral</Link></>}
-    {error && <><p role="alert">{error}</p><button onClick={() => setRetry((value) => value + 1)}>Retry referral</button>
+    {error && <><p role="alert">{error}</p><button type="button" onClick={() => setRetry((value) => value + 1)}>Retry referral</button>
       <p><Link href="/donate">Continue to giving anyway</Link></p></>}
   </section>;
 }

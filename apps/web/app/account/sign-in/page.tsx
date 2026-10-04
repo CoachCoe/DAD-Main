@@ -24,7 +24,7 @@ export default function SignInPage() {
     <p>Use the email you entered when giving. We’ll email a single-use link to claim your account or sign in.</p>
     <label className="field">Email<input type="email" autoComplete="email" required maxLength={320}
       value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-    <button className="button" disabled={busy}>{busy ? "Requesting…" : "Email me a sign-in link"}</button>
+    <button type="submit" className="button" disabled={busy}>{busy ? "Requesting…" : "Email me a sign-in link"}</button>
     {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
   </form></div>;
 }

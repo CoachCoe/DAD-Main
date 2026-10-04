@@ -31,7 +31,7 @@ test-api test-donor-go:
 	cd apps/donor-api && test -z "$$(gofmt -l .)" && go vet ./... && go test -race ./... && go build ./...
 
 test-web:
-	cd apps/web && npm test -- --run && npm run typecheck && npm run build
+	cd apps/web && npm run lint && npm test -- --run && npm exec next typegen && npm run typecheck && npm run build
 
 test-browser-e2e:
 	cd apps/web && npm run test:e2e

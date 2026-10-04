@@ -20,7 +20,7 @@ export default function RecurringPage() {
   useEffect(() => {
     let active = true;
     setData(null); setError(""); setConfirm(false);
-    api<Recurring>("/donor/me/recurring").then((value) => {
+    api<Recurring>("/donor/me/recurring", { cache: retry > 0 ? "reload" : "default" }).then((value) => {
       if (active) { setData(value); command.current = null; }
     }).catch((cause) => {
       if (!active) return;
@@ -60,15 +60,13 @@ export default function RecurringPage() {
           .format(subscription.amount_minor / 100)}/month</p>
         {subscription.stops_at ? <p role="status">Renewals cancelled. Your current billing period ends {date(subscription.stops_at)}.</p> : <>
           <p>Current billing period ends <time dateTime={subscription.period_end}>{date(subscription.period_end)}</time>.</p>
-          {["active", "past_due", "unpaid"].includes(subscription.status) ? <>
-            {!confirm ? <button onClick={() => setConfirm(true)}>Cancel monthly giving</button> : <div>
+          {["active", "past_due", "unpaid"].includes(subscription.status) ? !confirm ? <button type="button" onClick={() => setConfirm(true)}>Cancel monthly giving</button> : <div>
               <h2>Confirm cancellation</h2>
               <p>Stop future renewals at {date(subscription.period_end)}? This does not refund past gifts or forgive an outstanding invoice.
                 Your streak ends at the first skipped renewal. An earned Founding Donor badge stays yours.</p>
-              <button disabled={busy} onClick={cancel}>{busy ? "Checking cancellation…" : "Confirm cancel renewals"}</button>
-              <button disabled={busy} onClick={() => { setConfirm(false); }}>Back</button>
-            </div>}
-          </> : <p>This monthly gift is not ready for cancellation. Refresh once checkout finishes.</p>}
+              <button type="button" disabled={busy} onClick={cancel}>{busy ? "Checking cancellation…" : "Confirm cancel renewals"}</button>
+              <button type="button" disabled={busy} onClick={() => { setConfirm(false); }}>Back</button>
+            </div> : <p>This monthly gift is not ready for cancellation. Refresh once checkout finishes.</p>}
         </>}
         <p><Link href="/account/payment-method">Update payment method</Link></p>
         <p><Link href="/account/pause">Pause monthly giving</Link></p>
@@ -76,7 +74,7 @@ export default function RecurringPage() {
         <p>Tax receipts are not available in this preview yet.</p>
       </>}
       {error && <p role="alert">{error}</p>}
-      <button disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh billing details</button>
+      <button type="button" disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh billing details</button>
     </>}
   </section>;
 }

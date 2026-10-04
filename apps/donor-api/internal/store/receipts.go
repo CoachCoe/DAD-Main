@@ -16,6 +16,7 @@ import (
 var ErrReceipt = errors.New("gift record unavailable")
 
 type RefundRecord struct {
+	ID         string `json:"id"`
 	Amount     int64  `json:"amount_minor"`
 	Status     string `json:"status"`
 	ObservedAt string `json:"observed_at"`
@@ -85,7 +86,7 @@ func ReadGiftRecord(ctx context.Context, q *queries.Queries, donor, gift pgtype.
 			}
 			out.Refunded += r.AmountMinor
 		}
-		out.Refunds = append(out.Refunds, RefundRecord{Amount: r.AmountMinor, Status: r.Status, ObservedAt: iso(r.ObservedAt.Time)})
+		out.Refunds = append(out.Refunds, RefundRecord{ID: r.ID.String(), Amount: r.AmountMinor, Status: r.Status, ObservedAt: iso(r.ObservedAt.Time)})
 	}
 	out.Net = out.Amount - out.Refunded
 	return out, nil

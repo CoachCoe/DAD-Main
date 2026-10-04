@@ -35,7 +35,7 @@ export default function ClaimPage() {
     {done ? <><p><Link href="/account/dashboard">View my dashboard</Link></p>
       <p><Link href="/account/payment-method">Update payment method</Link></p></> : <>
       <p>Confirm to sign in to the donor account associated with this email link.</p>
-      {ready ? <button className="button" disabled={busy} onClick={claim}>
+      {ready ? <button type="button" className="button" disabled={busy} onClick={claim}>
         {busy ? "Signing in…" : "Confirm and sign in"}</button>
         : <p>This page needs the link from your email.</p>}
       {error && <p role="alert">{error}</p>}

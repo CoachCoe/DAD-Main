@@ -20,7 +20,7 @@ export default function AmountPage() {
   useEffect(() => {
     let active = true;
     setData(null); setError(""); setConfirmation(null);
-    api<Options>("/donor/me/recurring/amount").then((value) => {
+    api<Options>("/donor/me/recurring/amount", { cache: retry > 0 ? "reload" : "default" }).then((value) => {
       if (!active) return;
       setData(value); key.current = null;
       if (value.state === "ready") {
@@ -36,7 +36,7 @@ export default function AmountPage() {
   }, [retry]);
   function review(event: React.FormEvent) {
     event.preventDefault(); setError("");
-    if (!data || data.state !== "ready") return;
+    if (data?.state !== "ready") return;
     if (!/^\d+(\.\d{1,2})?$/.test(amount)) { setError("Enter a dollar amount with up to two decimal places."); return; }
     const [dollars, cents = ""] = amount.split(".");
     const minor = Number(dollars) * 100 + Number(cents.padEnd(2, "0"));
@@ -46,7 +46,7 @@ export default function AmountPage() {
     setConfirmation({ request_id: "", amount_minor: minor, previous_minor: data.amount_minor, effective_at: data.effective_at, confirmed: false });
   }
   async function save() {
-    if (!data || data.state !== "ready" || !confirmation || busy) return;
+    if (data?.state !== "ready" || !confirmation || busy) return;
     key.current ??= crypto.randomUUID(); setBusy(true); setError("");
     try {
       const result = await api<Change>("/donor/me/recurring/amount", { method: "POST",
@@ -73,8 +73,8 @@ export default function AmountPage() {
           <h2>Confirm new monthly amount</h2>
           <p>{money(confirmation.previous_minor)}/month → {money(confirmation.amount_minor)}/month, starting {new Date(confirmation.effective_at).toLocaleString()}.</p>
           <p>Past gifts and outstanding invoices keep their original amounts. Your streak continues with successful monthly charges.</p>
-          <button disabled={busy} onClick={save}>{busy ? "Checking change…" : "Confirm amount change"}</button>
-          <button disabled={busy || key.current !== null} onClick={() => setConfirmation(null)}>Back</button>
+          <button type="button" disabled={busy} onClick={save}>{busy ? "Checking change…" : "Confirm amount change"}</button>
+          <button type="button" disabled={busy || key.current !== null} onClick={() => setConfirmation(null)}>Back</button>
         </div> : <form onSubmit={review}>
           <p>{[30, 90, 150].map((value) => <button key={value} type="button" onClick={() => setAmount(String(value))}>
             {money(value * 100)}/month · about ${value / 30}/day
@@ -84,7 +84,7 @@ export default function AmountPage() {
         </form>}
       </>}
       {error && <p role="alert">{error}</p>}
-      <button disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh amount details</button>
+      <button type="button" disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh amount details</button>
     </>}
   </section>;
 }

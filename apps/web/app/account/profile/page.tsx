@@ -15,7 +15,7 @@ export default function ProfilePage() {
   useEffect(() => {
     let active = true;
     setData(null); setError(""); setMessage("");
-    api<Profile>("/donor/me/profile").then((result) => { if (active) setData(result); }).catch((cause) => {
+    api<Profile>("/donor/me/profile", { cache: retry > 0 ? "reload" : "default" }).then((result) => { if (active) setData(result); }).catch((cause) => {
       if (!active) return;
       if (cause instanceof ApiError && cause.status === 401) setSignedOut(true);
       else setError("Could not load your profile. Check your connection and retry.");
@@ -59,10 +59,10 @@ export default function ProfilePage() {
         </form>
         <details><summary>Sign out on every device</summary>
           <p>This ends all existing donor sessions, including this one. You can sign in again with a new email link.</p>
-          <button disabled={busy} onClick={logoutAll}>Confirm sign out everywhere</button>
+          <button type="button" disabled={busy} onClick={logoutAll}>Confirm sign out everywhere</button>
         </details>
       </>}
-      <button disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh profile</button>
+      <button type="button" disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh profile</button>
     </>}
     {message && !signedOut && <p role="status">{message}</p>}
     {error && <p role="alert">{error}</p>}

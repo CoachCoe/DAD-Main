@@ -18,7 +18,7 @@ export default function ResumePage() {
   useEffect(() => {
     let active = true;
     setData(null); setError(""); setConfirm(false);
-    api<Options>("/donor/me/recurring/resume").then((value) => {
+    api<Options>("/donor/me/recurring/resume", { cache: retry > 0 ? "reload" : "default" }).then((value) => {
       if (active) { setData(value); key.current = value.state === "saved" ? value.request_id ?? null : null; }
     }).catch((cause) => {
       if (!active) return;
@@ -53,16 +53,16 @@ export default function ResumePage() {
           <p>Resume at your next regular renewal: <time dateTime={data.next_renewal}>{new Date(data.next_renewal).toLocaleString()}</time>.</p>
           {data.state === "saved" && <p role="status">Your resumption request is not confirmed yet.</p>}
           <p>This does not charge you immediately or collect renewals skipped during your pause.</p>
-          {!confirm && data.state !== "saved" ? <button onClick={() => setConfirm(true)}>Resume at next renewal</button> : <>
+          {!confirm && data.state !== "saved" ? <button type="button" onClick={() => setConfirm(true)}>Resume at next renewal</button> : <>
             <h2>Confirm resumption</h2>
-            <button disabled={busy} onClick={resume}>{busy ? "Checking resumption…" : "Confirm resume giving"}</button>
+            <button type="button" disabled={busy} onClick={resume}>{busy ? "Checking resumption…" : "Confirm resume giving"}</button>
           </>}
         </>}
         <p>If you already skipped a renewal, your streak restarts only after a successful recurring charge.
           If no renewal was skipped, successful giving can continue the existing streak.</p>
       </>}
       {error && <p role="alert">{error}</p>}
-      <button disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh resumption status</button>
+      <button type="button" disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh resumption status</button>
     </>}
   </section>;
 }

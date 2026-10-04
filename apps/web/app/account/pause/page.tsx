@@ -19,7 +19,7 @@ export default function PausePage() {
   useEffect(() => {
     let active = true;
     setData(null); setChoice(null); setError("");
-    api<Options>("/donor/me/recurring/pause").then((value) => {
+    api<Options>("/donor/me/recurring/pause", { cache: retry > 0 ? "reload" : "default" }).then((value) => {
       if (active) { setData(value); key.current = value.pause?.request_id ?? null; }
     }).catch((cause) => {
       if (!active) return;
@@ -55,23 +55,23 @@ export default function PausePage() {
         <p role="status">{data.pause.confirmed ? "Pause confirmed." : "Pause not yet confirmed."}</p>
         <p>Original pause starts {date(data.pause.starts_at)}.
           Giving automatically resumes {date(data.pause.resumes_at)}.</p>
-        {!data.pause.confirmed && <button disabled={busy} onClick={() => confirm(data.pause!)}>Retry saved pause</button>}
+        {!data.pause.confirmed && <button type="button" disabled={busy} onClick={() => data.pause && confirm(data.pause)}>Retry saved pause</button>}
       </> : data && data.options.length === 0 ? <p>No monthly gift is currently available to pause.</p> : data && <>
-        {!choice ? <div>{data.options.map((option) => <button key={option.months} onClick={() => setChoice(option)}>
+        {!choice ? <div>{data.options.map((option) => <button type="button" key={option.months} onClick={() => setChoice(option)}>
           Skip {option.months} renewal{option.months === 1 ? "" : "s"}
         </button>)}</div> : <div>
           <h2>Confirm your pause</h2>
           <p>Skip {choice.months} renewal{choice.months === 1 ? "" : "s"}, starting <time dateTime={choice.starts_at}>{date(choice.starts_at)}</time>.</p>
           <p>Giving automatically resumes <time dateTime={choice.resumes_at}>{date(choice.resumes_at)}</time>.</p>
-          <button disabled={busy} onClick={() => confirm(choice)}>{busy ? "Checking pause…" : "Confirm pause"}</button>
-          <button disabled={busy || key.current !== null} onClick={() => setChoice(null)}>Back</button>
+          <button type="button" disabled={busy} onClick={() => confirm(choice)}>{busy ? "Checking pause…" : "Confirm pause"}</button>
+          <button type="button" disabled={busy || key.current !== null} onClick={() => setChoice(null)}>Back</button>
         </div>}
       </>}
       <p>Your streak ends at the first skipped renewal. Your Founding Donor badge stays yours.
         Pausing does not refund gifts or forgive an outstanding invoice.</p>
       <p><Link href="/account/resume">Resume at next renewal</Link></p>
       {error && <p role="alert">{error}</p>}
-      <button disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh pause dates</button>
+      <button type="button" disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh pause dates</button>
     </>}
   </section>;
 }

@@ -18,7 +18,7 @@ export default function SharePage() {
   useEffect(() => {
     let active = true;
     setError("");
-    api<Sharing>("/donor/me/sharing").then((result) => {
+    api<Sharing>("/donor/me/sharing", { cache: retry > 0 ? "reload" : "default" }).then((result) => {
       if (active) { setSharing(result); setName(result.public_name ?? ""); }
     }).catch((cause) => {
       if (!active) return;
@@ -63,18 +63,18 @@ export default function SharePage() {
             <input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} /></label>
           <p>This name appears to anyone who opens your referral link or scans your code. Choose a name you’re comfortable sharing publicly.</p>
           {replaceCode && <p role="alert">Replacing your link also changes your on-screen code. Previously shared links stop working for new visitors.</p>}
-          <button disabled={busy}>{busy ? "Saving…" : replaceCode ? "Confirm replacement" : "Save public name"}</button>
+          <button type="submit" disabled={busy}>{busy ? "Saving…" : replaceCode ? "Confirm replacement" : "Save public name"}</button>
           {replaceCode && <button type="button" onClick={() => setReplaceCode(false)}>Keep current link</button>}
         </form>
         {sharing.link && <>
           <label className="field">Your referral link<input readOnly value={sharing.link} onFocus={(event) => event.target.select()} /></label>
           <label className="field">Invitation<textarea readOnly rows={5} value={`${text}\n${sharing.link}`} /></label>
-          <p><button onClick={share}>Share invitation</button></p>
+          <p><button type="button" onClick={share}>Share invitation</button></p>
           <p><Link href="/account/code">Show my referral code in person</Link></p>
-          <button onClick={() => setReplaceCode(true)}>Replace my link and code</button>
+          <button type="button" onClick={() => setReplaceCode(true)}>Replace my link and code</button>
         </>}
       </>}
-      {error && <><p role="alert">{error}</p><button onClick={() => setRetry((value) => value + 1)}>Retry loading</button></>}
+      {error && <><p role="alert">{error}</p><button type="button" onClick={() => setRetry((value) => value + 1)}>Retry loading</button></>}
       {message && <p role="status">{message}</p>}
       <p><Link href="/account/dashboard">My dashboard</Link></p>
     </>}

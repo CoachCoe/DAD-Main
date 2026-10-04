@@ -30,7 +30,7 @@ export default function StaffPage() {
   useEffect(() => {
     let active = true;
     setError("");
-    api<Staff>("/donor/staff/me").then((value) => { if (active) setActor(value); }).catch((cause) => {
+    api<Staff>("/donor/staff/me", { cache: retry > 0 ? "reload" : "default" }).then((value) => { if (active) setActor(value); }).catch((cause) => {
       if (!active) return;
       if (cause instanceof ApiError && cause.status === 401) setSignedOut(true);
       else setError("Staff access could not be loaded. Retry when connected.");
@@ -57,15 +57,15 @@ export default function StaffPage() {
       {actor.permissions.includes("data.export") && <p><Link href="/staff/exports">Exports and enrolment queue</Link></p>}
       {actor.permissions.includes("content.publish") && <p><Link href="/staff/content">Publish spreadsheet content</Link> · <Link href="/staff/partners">Partner inquiries</Link></p>}
       {actor.permissions.includes("audit.read") && <p><Link href="/staff/audit">Audit history</Link></p>}
-      <button disabled={busy} onClick={() => action(async () => { await api("/donor/staff/sign-out", { method: "POST" }); setSignedOut(true); })}>Sign out</button>
+      <button type="button" disabled={busy} onClick={() => action(async () => { await api("/donor/staff/sign-out", { method: "POST" }); setSignedOut(true); })}>Sign out</button>
       <form onSubmit={(event) => { event.preventDefault(); search(); }}>
         <label>Find donor by email<input type="search" maxLength={320} value={q} onChange={(event) => setQ(event.target.value)} /></label>
-        <button disabled={busy}>Search donors</button>
+        <button type="submit" disabled={busy}>Search donors</button>
       </form>
       {results && <><h2>Donors</h2>{results.donors.length ? <ul>{results.donors.map((donor) => <li key={donor.id}>
-        <button disabled={busy} onClick={() => open(donor.id)}>{donor.email}</button> · {donor.claimed ? "Claimed" : "Guest"}{donor.disabled ? " · Disabled" : ""}
+        <button type="button" disabled={busy} onClick={() => open(donor.id)}>{donor.email}</button> · {donor.claimed ? "Claimed" : "Guest"}{donor.disabled ? " · Disabled" : ""}
       </li>)}</ul> : <p>No matching donors.</p>}
-        {results.next_offset !== null && <button disabled={busy} onClick={() => search(results.next_offset!)}>Next donor page</button>}
+        {results.next_offset !== null && <button type="button" disabled={busy} onClick={() => search(results.next_offset ?? 0)}>Next donor page</button>}
       </>}
       {detail && <article><h2>{detail.email}</h2><p><Link href={`/staff/messages?donor=${detail.id}`}>Delivery history and resends</Link></p><p>Public nickname: {detail.public_name || "Not shared"}</p>
         <p>Streak: {detail.streak?.current ?? "Updating"} · Best: {detail.streak?.best ?? "Updating"}{detail.streak?.at_risk ? " · At risk" : ""}</p>
@@ -74,29 +74,29 @@ export default function StaffPage() {
         <h3>Gifts</h3>{actor.permissions.includes("gift.cancel") && <p><Link href={`/staff/finance?donor=${detail.id}`}>Cancel monthly giving</Link></p>}{detail.gifts.length ? <ul>{detail.gifts.map((gift) => <li key={gift.id}>
           {money(gift.amount_minor)} · {gift.frequency} · {new Date(gift.paid_at).toLocaleString()} · <code>{gift.id}</code>{actor.permissions.includes("gift.refund") && <> · <Link href={`/staff/finance?donor=${detail.id}&gift=${gift.id}`}>Refund gift</Link></>}
         </li>)}</ul> : <p>No gifts recorded.</p>}
-        {detail.next_gifts_offset !== null && <button disabled={busy} onClick={() => open(detail.id, detail.next_gifts_offset!)}>Older gifts</button>}
+        {detail.next_gifts_offset !== null && <button type="button" disabled={busy} onClick={() => open(detail.id, detail.next_gifts_offset ?? 0)}>Older gifts</button>}
         <h3>People referred</h3>{detail.referred.length ? <ul>{detail.referred.map((person) => <li key={person.id}>
           {person.email} · {person.type} · Net {person.net_minor === null ? "Updating" : money(person.net_minor)}
         </li>)}</ul> : <p>No converting referrals recorded.</p>}
-        {detail.next_referrals_offset !== null && <button disabled={busy} onClick={() => open(detail.id, 0, detail.next_referrals_offset!)}>More referrals</button>}
+        {detail.next_referrals_offset !== null && <button type="button" disabled={busy} onClick={() => open(detail.id, 0, detail.next_referrals_offset ?? 0)}>More referrals</button>}
       </article>}
       {actor.permissions.includes("staff.manage") && <section><h2>Staff access</h2>
-        <button disabled={busy} onClick={() => action(async () => { setAccounts(await api<Staff[]>("/donor/staff/accounts")); })}>Refresh staff accounts</button>
+        <button type="button" disabled={busy} onClick={() => action(async () => { setAccounts(await api<Staff[]>("/donor/staff/accounts")); })}>Refresh staff accounts</button>
         {accounts && <ul>{accounts.map((account) => <li key={account.id}>{account.name} · {account.email} · {account.role} · {account.disabled ? "Disabled" : account.active ? "Active" : "Invited"}
           {account.id !== actor.id && <>
             <details><summary>Replace credentials or invitation</summary>
               <p>This revokes existing sessions and invitations. The staff member must choose a new password and authenticator. Disabled accounts are restored only after completing setup.</p>
-              <button disabled={busy} onClick={() => action(async () => { const result = await api<{ invitation_url: string }>(`/donor/staff/accounts/${account.id}/recovery`, { method: "POST" }); setInvitation(result.invitation_url); setAccounts(await api<Staff[]>("/donor/staff/accounts")); })}>Confirm replacement invitation</button>
+              <button type="button" disabled={busy} onClick={() => action(async () => { const result = await api<{ invitation_url: string }>(`/donor/staff/accounts/${account.id}/recovery`, { method: "POST" }); setInvitation(result.invitation_url); setAccounts(await api<Staff[]>("/donor/staff/accounts")); })}>Confirm replacement invitation</button>
             </details>
             <details><summary>Change role</summary>
               <form onSubmit={(event) => { event.preventDefault(); const chosen = new FormData(event.currentTarget).get("role"); action(async () => { await api(`/donor/staff/accounts/${account.id}/role`, { method: "POST", body: JSON.stringify({ role: chosen }) }); setAccounts(await api<Staff[]>("/donor/staff/accounts")); }); }}>
                 <label>New role for {account.name}<select name="role" defaultValue={account.role}><option>SUPPORT</option><option>FINANCE</option><option>ADMIN</option></select></label>
-                <p>A role change ends existing sessions and requires a new sign-in.</p><button disabled={busy}>Confirm role change</button>
+                <p>A role change ends existing sessions and requires a new sign-in.</p><button type="submit" disabled={busy}>Confirm role change</button>
               </form>
             </details>
           </>}
           {!account.disabled && account.id !== actor.id && <details><summary>Disable account</summary><p>This immediately revokes staff access.</p>
-            <button disabled={busy} onClick={() => action(async () => { await api(`/donor/staff/accounts/${account.id}/disable`, { method: "POST" }); setAccounts(await api<Staff[]>("/donor/staff/accounts")); })}>Confirm disable {account.name}</button>
+            <button type="button" disabled={busy} onClick={() => action(async () => { await api(`/donor/staff/accounts/${account.id}/disable`, { method: "POST" }); setAccounts(await api<Staff[]>("/donor/staff/accounts")); })}>Confirm disable {account.name}</button>
           </details>}
         </li>)}</ul>}
         <form onSubmit={(event) => { event.preventDefault(); action(async () => { const result = await api<{ invitation_url: string }>("/donor/staff/accounts", { method: "POST", body: JSON.stringify({ email, name, role }) }); setInvitation(result.invitation_url); }); }}>
@@ -110,6 +110,6 @@ export default function StaffPage() {
       </section>}
     </> : !error && <p role="status">Checking staff access…</p>}
     {error && <p role="alert">{error}</p>}{busy && <p role="status">Working…</p>}
-    {!signedOut && <button disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh access</button>}
+    {!signedOut && <button type="button" disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh access</button>}
   </section>;
 }

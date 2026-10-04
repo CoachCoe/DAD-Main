@@ -4,10 +4,8 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 
 export function DonorHeader() {
-  const path = usePathname();
   const [open, setOpen] = useState(false);
   const toggle = useRef<HTMLButtonElement>(null);
-  useEffect(() => setOpen(false), [path]);
   useEffect(() => {
     if (!open) return;
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); toggle.current?.focus(); } };
@@ -25,7 +23,8 @@ export function DonorHeader() {
 }
 
 export function SiteFrame({ children }: { children: React.ReactNode }) {
-  return <><a className="skipLink" href="#main">Skip to content</a><DonorHeader />
+  const path = usePathname();
+  return <><a className="skipLink" href="#main">Skip to content</a><DonorHeader key={path} />
     <main id="main" className="donorSurface">{children}</main>
     <footer>Dynamic Aid Delivery · Donor release preview<span>DAD launches in April 2027. Giving in this environment uses Stripe test payments.</span>
       <span><Link href="/about">About DAD</Link> · <Link href="/partners">Partner interest</Link> · <Link href="/legal">Terms, privacy, and donor consent</Link></span></footer>

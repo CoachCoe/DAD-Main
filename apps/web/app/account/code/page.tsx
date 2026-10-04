@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { api, ApiError } from "@/lib/api";
 
 export default function CodePage() {
@@ -15,7 +16,7 @@ export default function CodePage() {
   useEffect(() => {
     let active = true;
     setError(""); setReady(false);
-    api<{ irl_link: string | null }>("/donor/me/sharing").then((result) => {
+    api<{ irl_link: string | null }>("/donor/me/sharing", { cache: retry > 0 ? "reload" : "default" }).then((result) => {
       if (active) { setReady(Boolean(result.irl_link)); setNeedsName(!result.irl_link); }
     }).catch((cause) => {
       if (!active) return;
@@ -43,16 +44,16 @@ export default function CodePage() {
         {!ready && !error && <p role="status">Loading your code…</p>}
         {ready && <>
           <p>Ask someone to scan this with their phone’s camera. They don’t need an account or an app.</p>
-          <img className="donorReferralCode" src={`/api/donor/me/referral-code.svg?view=${retry}`}
+          <Image unoptimized className="donorReferralCode" src={`/api/donor/me/referral-code.svg?view=${retry}`}
             alt="Your scannable in-person DAD referral code" width={360} height={360}
             onError={() => { setReady(false); setError("The code image could not be loaded. Please retry."); }} />
           <p>Increase your screen brightness and keep the whole code visible.</p>
-          <button onClick={fullscreen}>{full ? "Exit full screen" : "Show full screen"}</button>
+          <button type="button" onClick={fullscreen}>{full ? "Exit full screen" : "Show full screen"}</button>
           <p>About a dollar a day · $30/month. DAD launches in April 2027.</p>
           <p>This preview collects no real donations.</p>
         </>}
       </>}
-    {error && <><p role="alert">{error}</p><button onClick={() => setRetry((value) => value + 1)}>Retry code</button></>}
+    {error && <><p role="alert">{error}</p><button type="button" onClick={() => setRetry((value) => value + 1)}>Retry code</button></>}
     <p><Link href="/account/share">Share by link</Link> · <Link href="/account/dashboard">My dashboard</Link></p>
   </section>;
 }

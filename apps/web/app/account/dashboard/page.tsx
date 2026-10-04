@@ -22,7 +22,7 @@ export default function DashboardPage() {
   useEffect(() => {
     const controller = new AbortController();
     setData(null); setError(""); setSignedOut(false);
-    api<Dashboard>("/donor/me/dashboard", { signal: controller.signal }).then((result) => {
+    api<Dashboard>("/donor/me/dashboard", { cache: retry > 0 ? "reload" : "default",  signal: controller.signal }).then((result) => {
       if (!controller.signal.aborted) setData(result);
     }).catch((cause) => {
       if (controller.signal.aborted) return;
@@ -66,7 +66,7 @@ export default function DashboardPage() {
         {!data.referrals && <p role="status">Referral totals are updating. Please refresh shortly.</p>}
       </>}
       <div className="uploadActions">
-        <button onClick={() => setRetry((value) => value + 1)}>Refresh dashboard</button>
+        <button type="button" onClick={() => setRetry((value) => value + 1)}>Refresh dashboard</button>
         <Link href="/account/giving">My giving and sign-out</Link>
         <Link href="/account/share">Share and invite</Link>
         <Link href="/account/code">My referral code</Link>

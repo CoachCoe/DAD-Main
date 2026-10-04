@@ -7,14 +7,19 @@ import { describe, expect, it } from "vitest";
 import nextConfig from "../next.config";
 
 async function headerMap(): Promise<Map<string, string>> {
-  const groups = await nextConfig.headers!();
+  const groups = await configuredHeaders();
   const all = groups.flatMap((group) => group.headers);
   return new Map(all.map((header) => [header.key, header.value]));
 }
 
+async function configuredHeaders() {
+  if (!nextConfig.headers) throw new Error("Missing security headers configuration");
+  return nextConfig.headers();
+}
+
 describe("security headers", () => {
   it("applies to every path rather than a subset", async () => {
-    const groups = await nextConfig.headers!();
+    const groups = await configuredHeaders();
     expect(groups).toHaveLength(1);
     expect(groups[0].source).toBe("/:path*");
   });
@@ -48,8 +53,9 @@ describe("security headers", () => {
      * and are documented as the ceiling. Anything further -- a wildcard host, or data:
      * as a script source -- would be a real loosening rather than the same concession.
      */
-    const policy = (await headerMap()).get("Content-Security-Policy")!;
-    const scriptSrc = policy.split(";").find((part) => part.trim().startsWith("script-src"))!;
+    const policy = (await headerMap()).get("Content-Security-Policy");
+    const scriptSrc = policy?.split(";").find((part) => part.trim().startsWith("script-src"));
+    if (!scriptSrc) throw new Error("Missing script policy");
 
     expect(scriptSrc).not.toContain("*");
     expect(scriptSrc).not.toContain("data:");
@@ -57,7 +63,7 @@ describe("security headers", () => {
   });
 
   it("does not hand the camera or microphone to an embedded third party", async () => {
-    const policy = (await headerMap()).get("Permissions-Policy")!;
+    const policy = (await headerMap()).get("Permissions-Policy");
     expect(policy).toContain("geolocation=()");
     expect(policy).toContain("microphone=()");
     // R1 displays a referral code; scanning is done with the visitor's native camera.

@@ -14,8 +14,11 @@ it("shows the five elements with separate channels and collected-dollar breakdow
   respond(data); render(<DashboardPage />);
   expect(await screen.findByRole("heading", { name: "Link Referrals" })).toBeVisible();
   expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(5);
-  expect(within(screen.getByRole("heading", { name: "Link Referrals" }).closest("article")!).getByText("2")).toBeVisible();
-  expect(within(screen.getByRole("heading", { name: "IRL Referrals" }).closest("article")!).getByText("3")).toBeVisible();
+  const link = screen.getByRole("heading", { name: "Link Referrals" }).closest("article");
+  const irl = screen.getByRole("heading", { name: "IRL Referrals" }).closest("article");
+  if (!link || !irl) throw new Error("Missing referral cards");
+  expect(within(link).getByText("2")).toBeVisible();
+  expect(within(irl).getByText("3")).toBeVisible();
   expect(screen.getByText("$123.45")).toBeVisible();
   fireEvent.click(screen.getByText("View Link and IRL breakdown"));
   expect(screen.getByText("Link: $100.00")).toBeVisible();

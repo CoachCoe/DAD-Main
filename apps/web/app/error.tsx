@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-export default function Error({
+export default function PageError({
   error,
   reset,
 }: {
@@ -24,7 +24,7 @@ export default function Error({
           </p>
         ) : null}
         <div className="actionRow">
-          <button className="button" onClick={reset}>
+          <button type="button" className="button" onClick={reset}>
             Try again
           </button>
           <Link className="secondary" href="/">

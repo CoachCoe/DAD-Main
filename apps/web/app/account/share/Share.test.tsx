@@ -46,7 +46,9 @@ it("requires a confirmation step before replacing the link", async () => {
 it("shows an on-screen code with brightness instructions and no download control", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(sharing)));
   render(<CodePage />);
-  expect(await screen.findByRole("img")).toHaveAttribute("src", "/api/donor/me/referral-code.svg?view=0");
+  const image = await screen.findByRole("img");
+  expect(image).toHaveAttribute("src");
+  expect(new URL(image.getAttribute("src") ?? "", window.location.href).href).toBe(`${window.location.origin}/api/donor/me/referral-code.svg?view=0`);
   expect(screen.getByText(/Increase your screen brightness/)).toBeVisible();
   expect(screen.queryByRole("link", { name: /download/i })).not.toBeInTheDocument();
   fireEvent.error(screen.getByRole("img"));

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
 	"impactgraph/donor-api/internal/store/queries"
@@ -40,8 +41,9 @@ func (reader ContentReader) PublicContent(ctx context.Context) (map[string]inter
 		}
 		initiatives = append(initiatives, public)
 	}
-	for _, item := range snapshot.Ledger {
+	for position, item := range snapshot.Ledger {
 		public := map[string]json.RawMessage{}
+		public["id"] = json.RawMessage(strconv.Quote(row.ID.String() + ":" + strconv.Itoa(position)))
 		for _, key := range []string{"metric", "value", "unit", "illustrative"} {
 			if value, ok := item[key]; ok {
 				public[key] = value

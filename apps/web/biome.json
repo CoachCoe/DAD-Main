@@ -1,0 +1,23 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true,
+		"root": "../.."
+	},
+	"files": {
+		"includes": ["**", "!!.next", "!!node_modules", "!!next-env.d.ts"]
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended"
+		},
+		"domains": {
+			"react": "recommended",
+			"next": "recommended",
+			"test": "recommended"
+		}
+	}
+}

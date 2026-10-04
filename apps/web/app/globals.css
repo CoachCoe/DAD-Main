@@ -114,6 +114,7 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
 :focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:4px}
 .button:focus-visible{outline-color:var(--card);outline-offset:3px}
 @media(max-width:800px){
+  footer>span{display:block;margin-top:6px}
   .header{padding:0 16px;gap:12px}
   .burger{display:grid;place-content:center;gap:5px;width:40px;height:40px;margin-left:auto;padding:0;border:0;background:transparent;cursor:pointer}
   .burger span{display:block;width:22px;height:2px;border-radius:2px;background:var(--paper)}
@@ -130,10 +131,9 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
   .workspace{padding:40px 16px}
   .authLayout{padding:40px 16px}
   footer{padding:28px 16px 40px;display:block}
-  footer>span{display:block;margin-top:6px}
 }
 @media print{
-  header,footer,.uploadActions{display:none!important}
+  body>.header,footer,.uploadActions{display:none}
   body{background:#fff;color:#000}
   .panel{border:1px solid #bbb;break-inside:avoid;page-break-inside:avoid}
   .hash{word-break:break-all;font-size:9pt}
@@ -174,4 +174,4 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
 .donorSurface pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .donorSurface article+article{margin-top:24px}
 @media (max-width:800px){.dadHeader .brand{max-width:210px;font-size:16px;line-height:1.2}.dadHeader nav{margin-right:0}.donorSurface>.panel{padding:20px 16px}}
-@media print{.donorSurface button,.donorSurface form{display:none!important}}
+@media print{.donorSurface button,.donorSurface form{display:none}}

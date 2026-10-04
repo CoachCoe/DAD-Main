@@ -17,7 +17,7 @@ export default function PaymentMethodPage() {
   useEffect(() => {
     let active = true;
     setData(null); setError("");
-    api<Update>("/donor/me/payment-method").then((value) => {
+    api<Update>("/donor/me/payment-method", { cache: retry > 0 ? "reload" : "default" }).then((value) => {
       if (active) { setData(value); key.current = null; }
     }).catch((cause) => {
       if (!active) return;
@@ -67,10 +67,10 @@ export default function PaymentMethodPage() {
       {data?.status === "CANCELLED" && <p role="status">The monthly gift ended before this update could be applied.</p>}
       {data && <>
         <p>Updating a card does not confirm payment of an overdue gift or restore your streak. Those change only after a successful charge.</p>
-        <button disabled={busy} onClick={begin}>{busy ? "Opening Stripe…" : "Continue to Stripe"}</button>
+        <button type="button" disabled={busy} onClick={begin}>{busy ? "Opening Stripe…" : "Continue to Stripe"}</button>
       </>}
       {error && <p role="alert">{error}</p>}
-      <button disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh update status</button>
+      <button type="button" disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh update status</button>
     </>}
   </section>;
 }

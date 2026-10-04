@@ -18,7 +18,7 @@ export default function GivingPage() {
   useEffect(() => {
     let active = true;
     setData(null); setError("");
-    api<Gifts>(`/donor/me/gifts?offset=${offset}`).then((result) => {
+    api<Gifts>(`/donor/me/gifts?offset=${offset}`, { cache: retry > 0 ? "reload" : "default" }).then((result) => {
       if (active) setData(result);
     }).catch((cause) => {
       if (!active) return;
@@ -50,12 +50,12 @@ export default function GivingPage() {
             {" · "}{gift.frequency === "MONTHLY" ? "Monthly" : "One time"}{" · "}
             <time dateTime={gift.paid_at}>{new Date(gift.paid_at).toLocaleDateString()}</time>{" · "}<Link href={`/account/receipts?gift=${gift.id}`}>Gift record</Link>
           </li>)}</ul>}
-        {offset > 0 && <button onClick={() => setOffset(Math.max(0, offset - 50))}>Newer gifts</button>}
-        {data.next_offset !== null && <button onClick={() => setOffset(data.next_offset!)}>Older gifts</button>}
-        <p><button disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out"}</button></p>
+        {offset > 0 && <button type="button" onClick={() => setOffset(Math.max(0, offset - 50))}>Newer gifts</button>}
+        {data.next_offset !== null && <button type="button" onClick={() => setOffset(data.next_offset ?? 0)}>Older gifts</button>}
+        <p><button type="button" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out"}</button></p>
       </>}
       {error && <p role="alert">{error}</p>}
-      <button onClick={() => setRetry((value) => value + 1)}>Refresh history</button>
+      <button type="button" onClick={() => setRetry((value) => value + 1)}>Refresh history</button>
     </>}
   </section>;
 }

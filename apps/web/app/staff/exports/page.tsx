@@ -10,7 +10,7 @@ export default function ExportsPage() {
   useEffect(() => {
     let active = true;
     setError(""); setDatasets(null);
-    api<{ datasets: string[] }>("/donor/staff/exports").then((value) => { if (active) setDatasets(value.datasets); }).catch((cause) => {
+    api<{ datasets: string[] }>("/donor/staff/exports", { cache: retry > 0 ? "reload" : "default" }).then((value) => { if (active) setDatasets(value.datasets); }).catch((cause) => {
       if (active) setError(cause instanceof ApiError && cause.status === 403 ? "Your role does not permit exports." : "Exports could not be loaded. Sign in with an authorized staff account or retry when connected.");
     });
     return () => { active = false; };
@@ -20,6 +20,6 @@ export default function ExportsPage() {
     {!datasets && !error && <p role="status">Checking export permissions…</p>}
     {datasets && <ul>{datasets.map((name) => <li key={name}><a href={`/api/donor/staff/exports/${name}.csv`}>Download {name} CSV</a></li>)}</ul>}
     <h2>Recipient enrolment queue</h2><p>Activates at R2. R1 does not collect recipient enrolments. The enrolments export currently contains column headers only.</p>
-    {error && <p role="alert">{error}</p>}<button onClick={() => setRetry((value) => value + 1)}>Refresh exports</button>
+    {error && <p role="alert">{error}</p>}<button type="button" onClick={() => setRetry((value) => value + 1)}>Refresh exports</button>
   </section>;
 }

@@ -7,7 +7,7 @@ type Quote = { gift_id: string; donor_id: string; amount_minor: number; availabl
   subscription: { id: string; amount_minor: number; period_end: string; stops_at: string | null } | null;
 };
 type Action = { id: string; actor_id: string; kind: string; target_id: string; amount_minor: number | null; period_end: string | null; reason: string; status: string };
-type Confirmation = { amount_minor?: number; subscription_id?: string; period_end?: string; reason: string };
+type Confirmation = { amount_minor: number; reason: string } | { subscription_id: string; period_end: string; reason: string };
 type Result = { status?: string; subscription?: { stops_at: string | null } };
 const money = (minor: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(minor / 100);
 
@@ -32,20 +32,21 @@ export default function StaffFinancePage() {
     if (!donor) return;
     let active = true;
     setError(""); setQuote(null); setConfirmation(null); key.current = null;
-    Promise.all([api<Quote>(path), api<Action[]>(`/donor/staff/donors/${encodeURIComponent(donor)}/actions`), api<{ id: string }>("/donor/staff/me")]).then(([value, actions, actor]) => {
+    Promise.all([api<Quote>(path, { cache: retry > 0 ? "reload" : "default" }), api<Action[]>(`/donor/staff/donors/${encodeURIComponent(donor)}/actions`, { cache: retry > 0 ? "reload" : "default" }), api<{ id: string }>("/donor/staff/me", { cache: retry > 0 ? "reload" : "default" })]).then(([value, actions, actor]) => {
       if (!active) return;
       setQuote(value);
       if ("gift_id" in value) setAmount((value.available_minor / 100).toFixed(2));
       const target = "gift_id" in value ? value.gift_id : value.subscription?.id;
       const pending = actions.find((item) => item.target_id === target && item.status === "AUTHORIZED" && item.actor_id === actor.id);
       if (pending) {
+        if ((pending.kind === "REFUND" && pending.amount_minor === null) || (pending.kind === "CANCEL" && pending.period_end === null)) throw new Error("Incomplete saved action");
         key.current = pending.id; setReason(pending.reason);
-        setConfirmation(pending.kind === "REFUND" ? { amount_minor: pending.amount_minor!, reason: pending.reason } :
-          { subscription_id: pending.target_id, period_end: pending.period_end!, reason: pending.reason });
+        if (pending.kind === "REFUND" && pending.amount_minor !== null) setConfirmation({ amount_minor: pending.amount_minor, reason: pending.reason });
+        else if (pending.kind === "CANCEL" && pending.period_end !== null) setConfirmation({ subscription_id: pending.target_id, period_end: pending.period_end, reason: pending.reason });
       }
     }).catch(() => { if (active) setError("Financial details could not be loaded. Confirm Finance or Administrator access and retry when Stripe is available."); });
     return () => { active = false; };
-  }, [donor, gift, path, retry]);
+  }, [donor, path, retry]);
   function review(event: React.FormEvent) {
     event.preventDefault(); setError(""); setMessage("");
     if (!quote || reason.trim().length < 5) return;
@@ -62,10 +63,12 @@ export default function StaffFinancePage() {
     setBusy(true); setError(""); setMessage(""); key.current ??= crypto.randomUUID();
     try {
       const result = await api<Result>(path, { method: "POST", headers: { "Idempotency-Key": key.current }, body: JSON.stringify(confirmation) });
+      if (!result.status && !result.subscription?.stops_at) throw new Error("Cancellation was not confirmed");
       setMessage(result.status === "NOT_SUBMITTED" ? "No refund submitted. The available amount changed. Refresh and confirm a new request." :
         result.status ? `Stripe refund status: ${result.status}. Only successful refunds reduce collected totals.` :
-        `Cancellation confirmed at ${new Date(result.subscription!.stops_at!).toLocaleString()}. Past gifts are not refunded.`);
+        `Cancellation confirmed at ${new Date(result.subscription?.stops_at ?? "").toLocaleString()}. Past gifts are not refunded.`);
       setConfirmation(null); key.current = null;
+      setRetry((value) => value + 1);
     } catch { setError("This action is not confirmed. Retry the same request to reconcile it. Do not issue another refund while its outcome is unknown."); }
     finally { setBusy(false); }
   }
@@ -77,16 +80,16 @@ export default function StaffFinancePage() {
     {quote && <>{"gift_id" in quote ? <p>Original gift: {money(quote.amount_minor)}. Available to refund: {money(quote.available_minor)} USD.</p> :
       quote.subscription ? <p>{money(quote.subscription.amount_minor)}/month. Next renewal: {new Date(quote.subscription.period_end).toLocaleString()}.{quote.subscription.stops_at && " Cancellation is already scheduled."}</p> : <p>No monthly gift is available.</p>}
       {confirmation ? <div><h2>Confirm financial action</h2>
-        <p>{confirmation.amount_minor !== undefined ? `Refund ${money(confirmation.amount_minor)} USD to the original payment method.` : `Stop future renewals at ${new Date(confirmation.period_end!).toLocaleString()}. No refund is included.`}</p>
+        <p>{"amount_minor" in confirmation ? `Refund ${money(confirmation.amount_minor)} USD to the original payment method.` : `Stop future renewals at ${new Date(confirmation.period_end).toLocaleString()}. No refund is included.`}</p>
         <p>Reason: {confirmation.reason}</p>
-        <button disabled={busy} onClick={submit}>{busy ? "Checking action…" : key.current ? "Retry original financial action" : "Confirm financial action"}</button>
-        <button disabled={busy || key.current !== null} onClick={() => setConfirmation(null)}>Back</button>
+        <button type="button" disabled={busy} onClick={submit}>{busy ? "Checking action…" : key.current ? "Retry original financial action" : "Confirm financial action"}</button>
+        <button type="button" disabled={busy || key.current !== null} onClick={() => setConfirmation(null)}>Back</button>
       </div> : (("gift_id" in quote && quote.available_minor > 0) || ("subscription" in quote && quote.subscription && !quote.subscription.stops_at)) && <form onSubmit={review}>
         {"gift_id" in quote && <label>Refund in USD<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label>}
         <label>Audit reason<textarea minLength={5} maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} required /></label>
         <button disabled={busy} type="submit">Review financial action</button>
       </form>}
     </>}{message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
-    {donor && <button disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh financial details</button>}
+    {donor && <button type="button" disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh financial details</button>}
   </section>;
 }

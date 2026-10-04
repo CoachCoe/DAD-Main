@@ -9,7 +9,9 @@ afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState(null, "", "
 it("requires confirmation of exact refund cents and the audit reason", async () => {
   window.history.replaceState(null, "", "/staff/finance?donor=donor&gift=gift");
   const fetch = vi.fn().mockResolvedValueOnce(response(quote)).mockResolvedValueOnce(response([]))
-    .mockResolvedValueOnce(response({ id: "staff" })).mockResolvedValueOnce(response({ status: "PENDING" }));
+    .mockResolvedValueOnce(response({ id: "staff" })).mockResolvedValueOnce(response({ status: "PENDING" }))
+    .mockResolvedValueOnce(response({ ...quote, available_minor: 1766 })).mockResolvedValueOnce(response([]))
+    .mockResolvedValueOnce(response({ id: "staff" }));
   vi.stubGlobal("fetch", fetch);
   render(<StaffFinancePage />);
   fireEvent.change(await screen.findByLabelText("Refund in USD"), { target: { value: "12.34" } });
@@ -20,6 +22,7 @@ it("requires confirmation of exact refund cents and the audit reason", async () 
   fireEvent.click(screen.getByRole("button", { name: "Confirm financial action" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Stripe refund status: PENDING"));
   expect(JSON.parse(fetch.mock.calls[3][1].body)).toEqual({ amount_minor: 1234, reason: "Donor requested partial refund" });
+  expect(await screen.findByText(/Available to refund: \$17.66/)).toBeVisible();
 });
 
 it("reuses a persisted uncertain request rather than minting another refund", async () => {
