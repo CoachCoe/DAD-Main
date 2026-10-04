@@ -16,10 +16,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -28,7 +28,9 @@ class Base(DeclarativeBase):
 
 
 class EntityMixin:
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    # Native UUID on PostgreSQL, CHAR on SQLite. Declaring PostgreSQL's UUID type
+    # on SQLite gives numeric affinity and corrupts numeric-looking UUID hex values.
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -101,7 +103,7 @@ class DonorStaffActionRecord(EntityMixin, Base):
     actor_id: Mapped[UUID] = mapped_column(ForeignKey("donor_staff.id"), index=True)
     donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
     kind: Mapped[str] = mapped_column(String(16))
-    target_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), index=True)
+    target_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), index=True)
     amount_minor: Mapped[int | None] = mapped_column(BigInteger)
     period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reason: Mapped[str] = mapped_column(String(500))
@@ -792,7 +794,7 @@ class UserRecord(EntityMixin, Base):
     display_name: Mapped[str] = mapped_column(String(200))
     password_hash: Mapped[str] = mapped_column(Text)
     organization_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("organizations.id"), index=True
+        Uuid(as_uuid=True), ForeignKey("organizations.id"), index=True
     )
     role: Mapped[str] = mapped_column(String(40))  # DONOR | OPERATOR | VERIFIER | ADMIN
     wallet_address: Mapped[str | None] = mapped_column(String(42), nullable=True)
@@ -810,7 +812,7 @@ class SessionRecord(EntityMixin, Base):
     __tablename__ = "sessions"
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     user_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id"), index=True
+        Uuid(as_uuid=True), ForeignKey("users.id"), index=True
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     revoked_at: Mapped[datetime | None] = mapped_column(
@@ -823,7 +825,7 @@ class WalletChallengeRecord(EntityMixin, Base):
 
     __tablename__ = "wallet_challenges"
     user_id: Mapped[UUID] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("users.id"), index=True
+        Uuid(as_uuid=True), ForeignKey("users.id"), index=True
     )
     nonce: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
