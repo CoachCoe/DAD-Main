@@ -1,0 +1,2094 @@
+{
+  "case_version": "16.0.0",
+  "scalar_digest": "a30f35e0f9746376c44725f57cba50f617b5f6396a696e2c80969e67d0399a9c",
+  "cases": [
+    {
+      "input": " A.B+Tag@EXAMPLE.ORG ",
+      "expected": "a.b+tag@example.org"
+    },
+    {
+      "input": "a@fa\u00df.de",
+      "expected": "a@fass.de"
+    },
+    {
+      "input": "a@\u03c3\u03c2.gr",
+      "expected": "a@xn--4xaa.gr"
+    },
+    {
+      "input": "a@b\u00fccher.de",
+      "expected": "a@xn--bcher-kva.de"
+    },
+    {
+      "input": "a@\u4f8b\u3048.\u30c6\u30b9\u30c8",
+      "expected": "a@xn--r8jz45g.xn--zckzah"
+    },
+    {
+      "input": "a@a\u2024\u00e9b.com",
+      "expected": "a@xn--a.b-cma.com"
+    },
+    {
+      "input": "a@\u200dexample.com",
+      "expected": "a@example.com"
+    },
+    {
+      "input": "a@\ud55c\uae00.kr",
+      "expected": "a@xn--bj0bj06e.kr"
+    },
+    {
+      "input": "a@\u1100\u1161.kr",
+      "expected": "a@xn--o39a.kr"
+    },
+    {
+      "input": "a@\ud83d\ude00.com",
+      "expected": "a@xn--e28h.com"
+    },
+    {
+      "input": "a@\uff21\uff22\uff23.com",
+      "expected": "a@abc.com"
+    },
+    {
+      "input": "a@ab\u05d0.com",
+      "expected": null
+    },
+    {
+      "input": "a@\u05d0\u05d1.com",
+      "expected": "a@xn--4dbc.com"
+    },
+    {
+      "input": "a@xn--.com",
+      "expected": null
+    },
+    {
+      "input": "a@example.org.",
+      "expected": null
+    },
+    {
+      "input": "a@-bad.com",
+      "expected": null
+    },
+    {
+      "input": "a..b@example.org",
+      "expected": null
+    },
+    {
+      "input": "\u00e9@example.org",
+      "expected": null
+    },
+    {
+      "input": "\u001ca@example.org\u001f",
+      "expected": "a@example.org"
+    },
+    {
+      "input": "a@\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9.com",
+      "expected": null
+    },
+    {
+      "input": "a@a\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300\u0300.com",
+      "expected": "a@xn--0ca20iaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com"
+    },
+    {
+      "input": "a@\u2f868.com",
+      "expected": "a@xn--8-df8c.com"
+    },
+    {
+      "input": "x@\u0345\u0300\u11a8\u00c5\u0345\u1161.org",
+      "expected": "x@xn--5ca26lx1rbiai32d.org"
+    },
+    {
+      "input": "x@\u0300aa.org",
+      "expected": "x@xn--aa-4tb.org"
+    },
+    {
+      "input": "x@\u2024\ud55c\u2024\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\u0327\u03c2Aa\u00c5\u200c\u00e9\u1100\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u200c\u00df\u1100a\u00e9\ud55c\u11a8A.org",
+      "expected": "x@xn--ssaa-dpa023a4q9aqgb3458h.org"
+    },
+    {
+      "input": "x@A\u0345\ud55c.org",
+      "expected": "x@xn--a-gmb5112n.org"
+    },
+    {
+      "input": "x@\u00c5\u11a8\u200d\u200d\u11a8\u0301\ud83d\ude00.org",
+      "expected": "x@xn--5ca49hr9wa57013d.org"
+    },
+    {
+      "input": "x@\u0301\ud55c.org",
+      "expected": "x@xn--lsa6188h.org"
+    },
+    {
+      "input": "x@\u00c5a\u0301\u1100\u00dfa\u0345\u200c\ud55c.org",
+      "expected": "x@xn--ssa-dlat264by92a7727a.org"
+    },
+    {
+      "input": "x@\u1100\u0301a.org",
+      "expected": "x@xn--a-wbb268h.org"
+    },
+    {
+      "input": "x@\ud55c\u0315\u1100\u1100\u00e9\u05d1\u0300\ud83d\ude00\u200d\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345\ud55cA\u05d0\u00e9\u0300\ud55c\u11a8\u00df\ud83d\ude00.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2.org",
+      "expected": "x@xn--4xa.org"
+    },
+    {
+      "input": "x@\u00c5\u1161\u1161\u11a8\u00dfa.org",
+      "expected": "x@xn--ssa-tla412sa11c.org"
+    },
+    {
+      "input": "x@\u0300.org",
+      "expected": "x@xn--ksa.org"
+    },
+    {
+      "input": "x@\u1161\u1161\u05d1\u11a8\u11a8\ud83d\ude00\ud83d\ude00.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161A\u200c\u00df\ud83d\ude00.org",
+      "expected": "x@xn--ass-3dox7642b.org"
+    },
+    {
+      "input": "x@\u05d1\u03c2\ud83d\ude00\u11a8a.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u00c5\u0315\u200c\u2024\u0327\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327.org",
+      "expected": "x@xn--ota.org"
+    },
+    {
+      "input": "x@\u2024\u2024\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@A.org",
+      "expected": "x@a.org"
+    },
+    {
+      "input": "x@\u00e9\u00e9\u05d0\u05d0\u0301\u200d\u05d1a\u1100\ud83d\ude00\u200d.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0\u200c\ud55c\u00c5\u0315A\u05d0\u00df\u0301\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u0345A\u05d1\u0327\u200d\u00e9\u1161\u0327a\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\u05d0\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200d\u200d\u0300.org",
+      "expected": "x@xn--ksa.org"
+    },
+    {
+      "input": "x@\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00df\u1161\u05d1\u05d0\u05d0A\u03c2\u200c\u200d.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\u0315\u1100\u0327.org",
+      "expected": "x@xn--5sa0bw27e4o5q.org"
+    },
+    {
+      "input": "x@\u2024\u2024\u00e9\u00c5\u0327\u0315A.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\u05d1\u1100\u1161\u1161a\u11a8\u200d\u00df\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u00c5\u00e9\u0301\ud83d\ude00\u0315\u11a8\u1100.org",
+      "expected": "x@xn--5cai71nga4hq58gu7a8637u.org"
+    },
+    {
+      "input": "x@\u0315a\u200c\u1100A\u0327a\u200c\u0301\u00c5.org",
+      "expected": "x@xn--aa-niaq01zfdt14i.org"
+    },
+    {
+      "input": "x@\u0301.org",
+      "expected": "x@xn--lsa.org"
+    },
+    {
+      "input": "x@\u200c\u05d1A\u05d1\u00e9\u0301\u0300A\u05d1\u0345\u0327.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u05d1\u1100\u00df\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200d.org",
+      "expected": null
+    },
+    {
+      "input": "x@A\u2024\u11a8\ud55c\u03c2\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u200cA\u0327\ud55c\u00c5\u05d1\u05d0\u0300\u200d\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\u1100a.org",
+      "expected": "x@xn--a-n5g0y.org"
+    },
+    {
+      "input": "x@\u1100\u00c5a.org",
+      "expected": "x@xn--a-1fa284j.org"
+    },
+    {
+      "input": "x@\u0315\u03c2\u00e9\u05d0\u00e9\u00c5\u0345.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200cA\u03c2\u00c5\u05d1\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0.org",
+      "expected": "x@xn--4db.org"
+    },
+    {
+      "input": "x@a\u0301\u200d\u05d0\u00df\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2a.org",
+      "expected": "x@xn--a-zmb.org"
+    },
+    {
+      "input": "x@\u00c5\u05d0\u0327\ud55cA.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u0301\u03c2\u0315\u1100\u0315\u0301\u11a8\u11a8.org",
+      "expected": "x@xn--ksaca3fb55h323dqgba.org"
+    },
+    {
+      "input": "x@\u0300\u03c2\u05d1\u0300\u00df\u0301\u0327\u11a8\u1100.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200c\u0300\u0301A\u0345\u11a8\u1100\u05d1\u00e9\ud83d\ude00\u0345.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\ud83d\ude00\u00df.org",
+      "expected": "x@xn--ss-9ia03242c.org"
+    },
+    {
+      "input": "x@\u200c\u0301\u0327\u00e9\u0345\u1161\u0301\u05d0\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u0300\ud83d\ude00\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@A\u0345\u0301\u0345A\u05d1\u200c\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0\u1161A\u11a8\u200d\ud55c\u0301\u05d1\u00c5\u0345.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00df\u00c5\u03c2\ud83d\ude00\u1161\u0327\u0300\u0315\u11a8.org",
+      "expected": "x@xn--ss-zia07s9cse92c204emsal1689a.org"
+    },
+    {
+      "input": "x@\u0315\ud55c\u200d\u0327\u00e9\u1161.org",
+      "expected": "x@xn--9ca52itb896fhg5u.org"
+    },
+    {
+      "input": "x@\u1100a\u00e9A.org",
+      "expected": "x@xn--aa-bja885n.org"
+    },
+    {
+      "input": "x@\u0315\u0327.org",
+      "expected": "x@xn--5sa9a.org"
+    },
+    {
+      "input": "x@\u00e9.org",
+      "expected": "x@xn--9ca.org"
+    },
+    {
+      "input": "x@\u11a8\u1100\u2024\u0315\u1100.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u1161\u200c.org",
+      "expected": "x@xn--ota893e.org"
+    },
+    {
+      "input": "x@\u00e9\u1100\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5.org",
+      "expected": "x@xn--5ca.org"
+    },
+    {
+      "input": "x@\u03c2\u200c\u1100\u00c5\u05d1\u0300\u00df\u05d0\u1161\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\u00c5a\u00c5\u0315.org",
+      "expected": "x@xn--a-1fab45t0s2a.org"
+    },
+    {
+      "input": "x@\u05d1\u03c2\u00c5\u11a8\u00e9\u00c5\u00df\ud55c\u00e9\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345\u0327\u03c2\u00c5Aaa\u00c5\u2024\u03c2\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d1\u0345\u00c5\ud55c\u00e9\u1100\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315A\u0300\u0300\ud83d\ude00\ud55c\u0301\u0315\u11a8\u00e9\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\u2024\u1161\ud83d\ude00a\u05d0\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d1.org",
+      "expected": "x@xn--5db.org"
+    },
+    {
+      "input": "x@\ud55c\u00c5\u0315\ud55c\u0300\u00c5\u11a8\u00e9.org",
+      "expected": "x@xn--5caam25s8co13h4962aca.org"
+    },
+    {
+      "input": "x@\u05d0\u05d0\u03c2\u200d\u05d1\u200ca\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u00df.org",
+      "expected": "x@xn--ss-mo82a.org"
+    },
+    {
+      "input": "x@\u05d1a\u05d0\u00c5\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\u0327\u00e9.org",
+      "expected": "x@xn--9ca16isx76a.org"
+    },
+    {
+      "input": "x@\u1100\u0301\u11a8\u0301\u00df\u05d0\u00e9A\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\ud55c\u00df\ud55c\u0300\u2024\u05d1\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u200d\ud55c\ud55c\u00dfA\u200c\u0301.org",
+      "expected": "x@xn--ss-nian9603ya.org"
+    },
+    {
+      "input": "x@\ud55c\u200cA\u00e9\u0315\u2024\u11a8\u0315\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u00e9\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345\u0301\u200c\u11a8.org",
+      "expected": "x@xn--kxa862e.org"
+    },
+    {
+      "input": "x@\u00e9AA\ud83d\ude00A.org",
+      "expected": "x@xn--aaa-9la11525d.org"
+    },
+    {
+      "input": "x@\u0300\u0327\u00df\u1100\u0300\u03c2\u0315.org",
+      "expected": "x@xn--ss-4tbc9hpez5cu02e.org"
+    },
+    {
+      "input": "x@\u0315\u03c2\u03c2\u1161\u11a8\u2024\u1100\u05d1\u00e9a.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u0301.org",
+      "expected": "x@xn--3ka.org"
+    },
+    {
+      "input": "x@\u200d\u03c2a\u1100\u0301.org",
+      "expected": "x@xn--a-xbb49cv73b.org"
+    },
+    {
+      "input": "x@\u00e9\u03c2\u05d0\u2024\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u00df\u00e9\u05d1\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315\u2024\u03c2\u00e9\u03c2\u00c5\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u00e9a\u03c2.org",
+      "expected": "x@xn--a-9fa50t7622f.org"
+    },
+    {
+      "input": "x@a\u1161\u0300\u00e9\u0315\u03c2\u0301\ud83d\ude00\u1161\u0301\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@A\ud55c\u03c2\u00c5\u200c\u0327.org",
+      "expected": "x@xn--a-2fa84o1r2794f.org"
+    },
+    {
+      "input": "x@\u200d\u00c5\u0300\ud83d\ude00\u200d\u0315\u05d1\u1100\u200d\u0315\u1100.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\u05d1\u0301\u00e9\u0327\u11a8\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u2024\u1100\ud55c\u1100\u11a8\u11a8\u200d\u05d0\u1100.org",
+      "expected": null
+    },
+    {
+      "input": "x@A\u05d0\u0301\u05d1\u0327.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301\u200c.org",
+      "expected": "x@xn--lsa.org"
+    },
+    {
+      "input": "x@\u05d0\u05d1\u00c5\u11a8a\u1161.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00df\u0300\u1100\u0315\u0300\ud55c\u0345.org",
+      "expected": "x@xn--ss-6tba9hq8bz39d5727a.org"
+    },
+    {
+      "input": "x@\u00dfA\u0301\u1161.org",
+      "expected": "x@xn--ss-nia010o.org"
+    },
+    {
+      "input": "x@\u00e9\u0345\u1161.org",
+      "expected": "x@xn--9ca45lx3s.org"
+    },
+    {
+      "input": "x@\u200d\u0345a\u2024\u00c5\u0301\u11a8\u1100\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200cAA\u0327.org",
+      "expected": "x@xn--aa-jxb.org"
+    },
+    {
+      "input": "x@\u11a8\u11a8\u00e9a\u0327\u05d1\u0300\u0301\u00e9\u200d\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@AA\ud55c\u0345\u0327\u00e9.org",
+      "expected": "x@xn--aa-cja90u3uau178g.org"
+    },
+    {
+      "input": "x@\u11a8\u0345\u0327\u200ca\u0300\u1161.org",
+      "expected": "x@xn--0ca97irmf56bbka.org"
+    },
+    {
+      "input": "x@\u05d1\u00df\u11a8\u00df\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345\u0315\u0345\u1161\u00c5\u11a8.org",
+      "expected": "x@xn--5ca33ibob495ohma.org"
+    },
+    {
+      "input": "x@\ud55c\ud83d\ude00\u03c2\u00c5\u05d1\u0300\u05d1\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\u11a8\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301\u200da.org",
+      "expected": "x@xn--a-wbb.org"
+    },
+    {
+      "input": "x@\u1161.org",
+      "expected": "x@xn--qsd.org"
+    },
+    {
+      "input": "x@\u0300\u1100\u2024\ud55c\u00c5\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0\u00e9\u00c5\u1100\u00c5\ud55c\u0300\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\u2024\u0301\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345\u00c5\u0315\u00c5\u200d\u200d\u1161\ud55c.org",
+      "expected": "x@xn--5caa39nysl06c0n1z.org"
+    },
+    {
+      "input": "x@\u00e9\u1161\u1100\u2024\ud83d\ude00.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345\u11a8\u0301\u0301\u1161\u11a8\u05d1\u11a8a\ud55ca.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00df\u2024\u00e9\u1100\u00c5\ud83d\ude00\u1100A\u200c.org",
+      "expected": "x@xn--ss.a-soax749zba35582i.org"
+    },
+    {
+      "input": "x@\u200d\u0345\u03c2\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u0315\u0301\u0345\u1161\u0300\ud55c.org",
+      "expected": "x@xn--ksaac4fu4bl31dis72a.org"
+    },
+    {
+      "input": "x@\u0315\u11a8\u0315.org",
+      "expected": "x@xn--5saa603i.org"
+    },
+    {
+      "input": "x@\u00e9\u1100\u0345\u1161\u0345\u0327\ud83d\ude00\u00c5A.org",
+      "expected": "x@xn--a-1fal01u3uaa509uhwao9494a.org"
+    },
+    {
+      "input": "x@\u2024\u05d0\u0301\u00df\u0300\u0300\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\ud83d\ude00A\u0315\u1100\u05d0\u2024A\u05d1\u03c2\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u0315a\u11a8\u0345\ud55c\u1161\u00e9\u03c2aA.org",
+      "expected": "x@xn--aaa-bma78xvdw3clcw46niua3533o.org"
+    },
+    {
+      "input": "x@\ud55cA\u2024\u200d\u0327\u1161\u0345\u200dA.org",
+      "expected": "x@xn--a.a-xhc44eu94dds72a.org"
+    },
+    {
+      "input": "x@\u00c5A\u0300A\u0300\u2024A\u0300\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u05d1\u200d\u0301\u11a8\ud83d\ude00\u1161.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\ud55c\u200d\u00c5\u00df\u05d0\u200c\u00df\u00c5\u0315\u0345.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\u1100\u1100\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u1161\u0345\u00c5\u1161\u0301\u00e9\u00c5.org",
+      "expected": null
+    },
+    {
+      "input": "x@A\u2024\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\u0301\u11a8A\u05d1\u05d1\u11a8\u1161.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\ud83d\ude00\u0327\u0301\u0300.org",
+      "expected": "x@xn--ksaac5my456w.org"
+    },
+    {
+      "input": "x@\u00c5\u0301\u0315\u05d1\u00df\u0301a.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\ud83d\ude00\u2024\u00c5\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u200cA\u200c\u00c5\ud55c\u05d0\u11a8\u200c\u200d\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2\u03c2.org",
+      "expected": "x@xn--4xaa.org"
+    },
+    {
+      "input": "x@\ud83d\ude00\u05d1\u200d\u1161A.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0\u1161\u05d1\u0315\u1161.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u200c\u00df\u1100\ud83d\ude00\ud55c.org",
+      "expected": "x@xn--ss-hxb692lfu5ug6kn.org"
+    },
+    {
+      "input": "x@\u200d\u00c5A\u0345\u11a8\u200d\u03c2\u0315\u00e9\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u11a8\u0327\u05d1\u11a8\u0345.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u1100\u00dfA.org",
+      "expected": "x@xn--ssa-tla927r.org"
+    },
+    {
+      "input": "x@\u1100.org",
+      "expected": "x@xn--ypd.org"
+    },
+    {
+      "input": "x@\u0301\u1161\u0300A\u00e9\u00e9\u1161\u00e9.org",
+      "expected": "x@xn--a-bgaaa58xfa478wea.org"
+    },
+    {
+      "input": "x@\ud83d\ude00\u200c\u03c2\ud83d\ude00\u1100\u0345\ud55c.org",
+      "expected": "x@xn--uxat182h7o5q5uplba.org"
+    },
+    {
+      "input": "x@\u05d0\ud83d\ude00\u1161\u2024\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u05d1\u0327\u11a8\ud83d\ude00\u0301\ud83d\ude00\u0345\u0345\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u0315\u00df\u2024A\ud83d\ude00\u05d0\u0345\u05d0a.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2\u05d0\u00c5.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u0301\ud55c\u2024\ud83d\ude00\ud83d\ude00.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0\u0300a.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345.org",
+      "expected": "x@xn--uxa.org"
+    },
+    {
+      "input": "x@\u0301a\ud55c\u03c2\u00df\u0315\u200c.org",
+      "expected": "x@xn--ass-jdc7h30cn278g.org"
+    },
+    {
+      "input": "x@\u2024\u0301\u200d\u1100\u0301\u05d1\u0327.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345a\u0327\u200c\ud55c\u00df\u00dfa\u05d0\u0327\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\u0300\u0315A\u05d0A\u11a8\u1161\u0301\u11a8\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@A\ud55c\u05d0\ud55c\u03c2\u00e9\u00c5\u0300\u0301\u00c5.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345.org",
+      "expected": "x@xn--uxa.org"
+    },
+    {
+      "input": "x@\u00dfa\u05d0\ud83d\ude00\u11a8\u0315\u2024\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8A\u0327.org",
+      "expected": "x@xn--a-3db152i.org"
+    },
+    {
+      "input": "x@\u1161\u0315A\u0315\ud55c\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200d\u05d0\u1161\u00c5\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200d\ud83d\ude00\u00df\u05d0\u0300\u00df\u0300\u03c2\u05d1\u00e9\ud83d\ude00.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u0315\u11a8\u00e9\ud83d\ude00\u1161\u0301.org",
+      "expected": "x@xn--9ca68hxbz62fdkak219vda.org"
+    },
+    {
+      "input": "x@\u00df\u2024\u1100\u0301\ud83d\ude00\u11a8A\u00e9\u03c2.org",
+      "expected": "x@xn--ss.a-epa823a4sbs71dikbj173y.org"
+    },
+    {
+      "input": "x@\u11a8.org",
+      "expected": "x@xn--rud.org"
+    },
+    {
+      "input": "x@\u200d\ud83d\ude00.org",
+      "expected": "x@xn--e28h.org"
+    },
+    {
+      "input": "x@\u05d1.org",
+      "expected": "x@xn--5db.org"
+    },
+    {
+      "input": "x@A\u0345\u11a8a\u03c2\u00c5\u2024\u1161\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\u200c\ud55c\u0301\u200c.org",
+      "expected": "x@xn--lsa5188ha.org"
+    },
+    {
+      "input": "x@\u03c2\u0300\u2024A\u1161.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u1100\ud55ca\u0345\u1100\u200d\u2024\ud55c\u200d\u0301.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\ud83d\ude00\u2024\u2024\u0327A\u0300\u05d1\u00c5\u0327\u0301.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\u05d1\u05d1\u1100\u0301\u0345\u0301.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2\u0300\u00e9\u1100\u2024\u05d1\u0327\u0327\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\u0345\u0315\u0301\u0315\u11a8\u200ca.org",
+      "expected": "x@xn--a-9fa28na28ej72d.org"
+    },
+    {
+      "input": "x@\u05d1\u200d\u1100\ud55c\u0345\u0315\u1161\u0345a\u00e9\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u0345\u0301\u0345.org",
+      "expected": "x@xn--kxau903h.org"
+    },
+    {
+      "input": "x@\u0301\u05d0\u0301\ud55c\u0300\u0327\u00c5\u11a8\u11a8a.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\u0327\u2024\u1161\u0301\ud55c\ud83d\ude00\u05d0\u200d\u0345.org",
+      "expected": null
+    },
+    {
+      "input": "x@A\u1100\u0345\u1100\u0327\u05d1\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u03c2\u00c5\u200d\u00e9\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5A\u0300\u1161\u00df\u11a8.org",
+      "expected": "x@xn--ss-iiat512sima.org"
+    },
+    {
+      "input": "x@\u05d0.org",
+      "expected": "x@xn--4db.org"
+    },
+    {
+      "input": "x@\u00df\u11a8\u0327\u1161\u0327\u0301\u200d.org",
+      "expected": "x@xn--ss-9tb5ma569sfoa.org"
+    },
+    {
+      "input": "x@\u0345\u03c2\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301\u2024\u11a8\u0300\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\u05d0\u03c2\u0345\u0300\u03c2\ud83d\ude00.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2.org",
+      "expected": "x@xn--4xa.org"
+    },
+    {
+      "input": "x@a\u00e9\u03c2\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u0327\u0301\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0A\u200c\u200c\u1161\u00c5\u0315\u0345A\u00c5A.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0\u1161\u0315\u1161a\ud55ca.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\u00e9\ud83d\ude00a\u00df\u200c.org",
+      "expected": "x@xn--ass-9la845s2h87d.org"
+    },
+    {
+      "input": "x@\u0345\u00df.org",
+      "expected": "x@xn--ss-z9b.org"
+    },
+    {
+      "input": "x@\u200c\u0300.org",
+      "expected": "x@xn--ksa.org"
+    },
+    {
+      "input": "x@\u0315\u200ca\u00c5\u0315\ud55c.org",
+      "expected": "x@xn--a-2fa29nca9620y.org"
+    },
+    {
+      "input": "x@\u2024\u200d\u0327\u200c\u0327\u05d0\u200d\u0301\u2024\u03c2\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d1\u0315\u0315\u03c2\u05d1a\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315.org",
+      "expected": "x@xn--5sa.org"
+    },
+    {
+      "input": "x@\u2024\u05d0\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u200c\u0301\u200c\ud83d\ude00\u0301\u0301\u11a8.org",
+      "expected": "x@xn--ksacaa968pyh87d.org"
+    },
+    {
+      "input": "x@\u2024\u200d\ud83d\ude00\u00df\u0345\ud55c\u200c\ud83d\ude00\u00df\u00c5\u0327.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200d\u00e9.org",
+      "expected": "x@xn--9ca.org"
+    },
+    {
+      "input": "x@\u05d1\u0300\u200d\u00df\u0301\ud83d\ude00\u200c\u00c5\u03c2\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315\u1100\u0327\u0327.org",
+      "expected": "x@xn--5sa0ba292l.org"
+    },
+    {
+      "input": "x@\u2024\u0327\u00e9\u2024\u00df\u11a8\u00df\u0327\u0300\u00e9\u0345.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301.org",
+      "expected": "x@xn--lsa.org"
+    },
+    {
+      "input": "x@\u0327\u2024A\u00e9\u11a8\u200cA\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315\u0315\u0315\u00e9\ud55c.org",
+      "expected": "x@xn--9ca52iaa0720y.org"
+    },
+    {
+      "input": "x@\u2024\ud83d\ude00\ud83d\ude00\u200d\u0300\u05d1A.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345\u00df\u0301\u200c\u05d0\u0300\u2024\u05d0\u0300\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u0327\u0300.org",
+      "expected": "x@xn--ksaa9i.org"
+    },
+    {
+      "input": "x@\u0327\u00e9\u200c\ud55c\u0300.org",
+      "expected": "x@xn--9ca48hkdv280g.org"
+    },
+    {
+      "input": "x@\u03c2\u200c\u11a8\u2024a\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u1100\ud83d\ude00\ud83d\ude00\u200c\u05d1\u2024\u0301\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@A\u0327\u00c5\u200c\u0301\u200d\u03c2\u05d1\u0327\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200d\u0301\u0301\u200c.org",
+      "expected": "x@xn--lsaa.org"
+    },
+    {
+      "input": "x@\ud83d\ude00\u200d\u11a8\u2024\ud55c\u1100\u00c5\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9.org",
+      "expected": "x@xn--9ca.org"
+    },
+    {
+      "input": "x@\u03c2\u200dA\u00c5\u1161.org",
+      "expected": "x@xn--a-2fa41tquv.org"
+    },
+    {
+      "input": "x@\u03c2\ud83d\ude00\u00e9\u0301A\u1161\ud55cA\u0315\u03c2\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@a\u00c5.org",
+      "expected": "x@xn--a-2fa.org"
+    },
+    {
+      "input": "x@\u00e9a\u00c5.org",
+      "expected": "x@xn--a-2fak.org"
+    },
+    {
+      "input": "x@\u1161\u0300\u1161.org",
+      "expected": "x@xn--ksa574eba.org"
+    },
+    {
+      "input": "x@\ud83d\ude00.org",
+      "expected": "x@xn--e28h.org"
+    },
+    {
+      "input": "x@a\u200d\u0345\u1161\u1161\u1100\u05d1\u03c2\u0300\u0301\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@aa\u00e9.org",
+      "expected": "x@xn--aa-cja.org"
+    },
+    {
+      "input": "x@\u0301.org",
+      "expected": "x@xn--lsa.org"
+    },
+    {
+      "input": "x@\u0315\u200d\u11a8\ud55ca\u0300\u11a8.org",
+      "expected": "x@xn--0ca34i27wba2161w.org"
+    },
+    {
+      "input": "x@\u2024\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u00c5\ud55c\u200da\u05d0\u1161\u1161\u0301.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315\u05d0a\u200da\u200d\u05d1\u0300\ud83d\ude00\u1100\u0327.org",
+      "expected": null
+    },
+    {
+      "input": "x@A\u0345\u05d1A.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u00df.org",
+      "expected": "x@xn--ss-cmk.org"
+    },
+    {
+      "input": "x@\u0301\u05d0\u03c2\u0315\u00e9\u05d0\u2024\u0300\u00c5\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345\u200d\ud83d\ude00.org",
+      "expected": "x@xn--uxa2326w.org"
+    },
+    {
+      "input": "x@\u0345\u03c2\ud83d\ude00\u1161\u00e9\u0345\u0327\u200d\u00c5\u03c2\u0315.org",
+      "expected": "x@xn--5cah38n9bz1bb2ee3842at062h.org"
+    },
+    {
+      "input": "x@\u200d\ud83d\ude00\u1100\u2024\u0315\u11a8\ud83d\ude00\u1161\u2024\ud83d\ude00\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301a.org",
+      "expected": "x@xn--a-wbb.org"
+    },
+    {
+      "input": "x@a\u05d0\u0301\ud55c\u00e9\u0301\u00e9\u00e9\u0327\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327a\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200c\u0345.org",
+      "expected": "x@xn--uxa.org"
+    },
+    {
+      "input": "x@\ud83d\ude00\u0327\u0327\u1161\u11a8\u0315\u2024\u00c5\u200c\u200d.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345\u0327a\u2024\u11a8\u00c5\u200c\u0301\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00df\u00e9\u00e9\u00c5.org",
+      "expected": "x@xn--ss-ziapa.org"
+    },
+    {
+      "input": "x@\u0315a\u0345\u03c2\u00e9\u200c\u03c2\u03c2\u05d0\u200d\u0345.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u0301\ud55c\u0315\u00c5\u0315\u11a8\u2024\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00df\u0300\u00e9\u0345\u05d1\ud83d\ude00\u11a8\u0315\u00df\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u00e9\u0315\u03c2\u00df\u200c\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0A\u0301\u00e9\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\ud55c\u0300\u00c5\u00df\u0301\u03c2\ud55c\u1100.org",
+      "expected": "x@xn--s-1faa78bz1es7a238cx727afa.org"
+    },
+    {
+      "input": "x@\ud55c.org",
+      "expected": "x@xn--6q8b.org"
+    },
+    {
+      "input": "x@\u200c\u1161\u00df\u00df\u1100\u2024\u2024\u0327\u1161\u00e9\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00df\u2024\u200d\u200c\u1100\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200c\u0300.org",
+      "expected": "x@xn--ksa.org"
+    },
+    {
+      "input": "x@\u11a8\u0315aa\u0300\u1100\u0315\u0327\u0327.org",
+      "expected": "x@xn--a-sfa70oca3ga729vkgb.org"
+    },
+    {
+      "input": "x@\u200c\ud83d\ude00a\u00df\u05d1\u200d\u03c2\u0301\u1161\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301.org",
+      "expected": "x@xn--lsa.org"
+    },
+    {
+      "input": "x@a\u200c\u0300\u03c2\u05d1\u00c5\u200c\u03c2\u0327.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301.org",
+      "expected": "x@xn--lsa.org"
+    },
+    {
+      "input": "x@a\u200c\u05d0A\u03c2\u05d1\u0327\u0345\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00df\u200c\u05d0\u2024\u00df\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u0327\u0300\u11a8\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301.org",
+      "expected": "x@xn--lsa.org"
+    },
+    {
+      "input": "x@\u05d1\u200d\u05d0\u2024\u11a8\u00dfa\u11a8\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\u200cA\u0345\u1161.org",
+      "expected": "x@xn--a-gmb006hca.org"
+    },
+    {
+      "input": "x@\u1161\u00c5.org",
+      "expected": "x@xn--5ca355f.org"
+    },
+    {
+      "input": "x@\u1161A\u11a8\u11a8\u0315\u0327\u0345\u0327\u0300\u0327.org",
+      "expected": "x@xn--a-2cb7cba169sioaa2292a.org"
+    },
+    {
+      "input": "x@\u00c5\u00df\u03c2\u0300\u0300a\u00e9A\u05d1\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u0315\ud55c\u2024\u00df\u05d0\u2024\u05d0\u200d.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u05d0A\ud83d\ude00\u11a8\u1100\ud55ca\u0327.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00df\u200c\u0327\u00e9A.org",
+      "expected": "x@xn--sa-bja58b.org"
+    },
+    {
+      "input": "x@\u0301\u00df.org",
+      "expected": "x@xn--ss-7tb.org"
+    },
+    {
+      "input": "x@\u05d0\u03c2\u200d\u00e9\ud83d\ude00\ud83d\ude00\u0300\u05d1\u1161.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u00c5\u05d0\u05d0\u1161\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200ca\ud55c.org",
+      "expected": "x@xn--a-472g.org"
+    },
+    {
+      "input": "x@\u1161\u1100\u05d0\u0327\u05d0A\u0315\u11a8\u11a8\u00c5.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u0327\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d1.org",
+      "expected": "x@xn--5db.org"
+    },
+    {
+      "input": "x@\ud55cA\u00e9.org",
+      "expected": "x@xn--a-bga3724n.org"
+    },
+    {
+      "input": "x@\u0301\u0301\u0300\u00df\u200d\u1100.org",
+      "expected": "x@xn--ss-4tbda516s.org"
+    },
+    {
+      "input": "x@\u00df\u0345\u1161.org",
+      "expected": "x@xn--ss-19b890l.org"
+    },
+    {
+      "input": "x@\u200cA\u200d\u1100A\u00df\u200d\u0300.org",
+      "expected": "x@xn--aass-tvc416s.org"
+    },
+    {
+      "input": "x@\u0300\u0315\u00e9A.org",
+      "expected": "x@xn--a-9fa81noc.org"
+    },
+    {
+      "input": "x@\u00df\u0300\u00df.org",
+      "expected": "x@xn--ssss-rvc.org"
+    },
+    {
+      "input": "x@\u05d1\u00df\u00df\u200c\u0327\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55ca\u0327a\u1100.org",
+      "expected": "x@xn--aa-ixb592lbu5u.org"
+    },
+    {
+      "input": "x@\u05d1\u0300\u0345\u0315\u1161\u1100.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\ud83d\ude00\ud55c\ud83d\ude00\u0315\u11a8\u2024a\u2024\ud55c\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u0300\u00e9\u1161\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300.org",
+      "expected": "x@xn--ksa.org"
+    },
+    {
+      "input": "x@\u05d0\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200d\u0315\u2024\u0345\u00c5.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\ud83d\ude00\u0301a\ud55c.org",
+      "expected": "x@xn--a-wbb663i1z4q6upl.org"
+    },
+    {
+      "input": "x@\u1100a.org",
+      "expected": "x@xn--a-n5g.org"
+    },
+    {
+      "input": "x@\u200c\ud55c\u00df\u0300\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u00e9\u0300\u0315\u11a8\u05d1A\u0345A.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d1\ud83d\ude00\u0301.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315\u00c5\u200d\u00e9\ud83d\ude00a.org",
+      "expected": "x@xn--a-1fam63th462h.org"
+    },
+    {
+      "input": "x@\u200d\ud83d\ude00\ud83d\ude00\u00df\ud55c\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200dA\u2024\u0327a\u11a8.org",
+      "expected": "x@xn--a.a-xhc086p.org"
+    },
+    {
+      "input": "x@\u00df\u0327\u03c2\ud83d\ude00\u05d1\u0315\u200d.org",
+      "expected": null
+    },
+    {
+      "input": "x@A.org",
+      "expected": "x@a.org"
+    },
+    {
+      "input": "x@\u0315\u03c2\u0301\ud55c\ud55c\u200d.org",
+      "expected": "x@xn--lsa3b17af128da.org"
+    },
+    {
+      "input": "x@\u03c2\u1161\u1100\u0327\u00df\u200c\u0315\ud83d\ude00\u05d0\u11a8\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@AAa.org",
+      "expected": "x@aaa.org"
+    },
+    {
+      "input": "x@\u11a8.org",
+      "expected": "x@xn--rud.org"
+    },
+    {
+      "input": "x@\u11a8\u0345\u200c\u05d1\u0345\u0300\u03c2\u1161\u0327\u1161\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301\u1100\u00e9\u05d1\u200c\u03c2\u05d0\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\u0345\u03c2\u11a8A\u200d\u00e9\u1100\u200d\u0327\u0300.org",
+      "expected": "x@xn--a-9fab45stfj6a9by91mekb.org"
+    },
+    {
+      "input": "x@\u05d1\u11a8\u05d0\u0301A\u1100\u1100\u00c5.org",
+      "expected": null
+    },
+    {
+      "input": "x@a\u00df\u200d\u03c2\u1100\u00c5\u0300\ud83d\ude00.org",
+      "expected": "x@xn--ass-wla90yn7a238cr100g.org"
+    },
+    {
+      "input": "x@\ud55c\u11a8\u03c2\u1100\ud83d\ude00\u00e9\u05d1a\u00c5\u0345.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u0345\u11a8\u00e9\u00c5A\u200c\u05d1\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u200c\u00dfa\u0300\u200c.org",
+      "expected": "x@xn--ss-kia34u.org"
+    },
+    {
+      "input": "x@\u0300.org",
+      "expected": "x@xn--ksa.org"
+    },
+    {
+      "input": "x@\u1100\u0301\u00df\u2024\u00c5\u00e9\u200caA\u0301\u200c.org",
+      "expected": "x@xn--ss.a-8naw2a793bly3b.org"
+    },
+    {
+      "input": "x@\u0345\u1161\u00c5\u00df\u00c5\u00e9\u0300.org",
+      "expected": "x@xn--ss-xiacu423a3qbd58d.org"
+    },
+    {
+      "input": "x@A\ud55c\u0300\u00df\u00df.org",
+      "expected": "x@xn--assss-0ed77088a.org"
+    },
+    {
+      "input": "x@\u0345\u1100\ud83d\ude00\u11a8\u0315.org",
+      "expected": "x@xn--5sa14a324ahtav009p.org"
+    },
+    {
+      "input": "x@\u1161\u1100\u2024\u00e9\u05d0\u200c\u1100\u0300\u03c2a\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\u00e9\u05d0\u0327\u00df\u11a8\u0345\u05d0\u00e9.org",
+      "expected": null
+    },
+    {
+      "input": "x@a\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\u200cA\u03c2.org",
+      "expected": "x@xn--a-0mb3802n.org"
+    },
+    {
+      "input": "x@\ud83d\ude00\u200c\u200d\u0301\u200c\u1100a\u00c5.org",
+      "expected": "x@xn--a-2fa23nr8zdf68c.org"
+    },
+    {
+      "input": "x@\u00e9.org",
+      "expected": "x@xn--9ca.org"
+    },
+    {
+      "input": "x@\u00dfA\u05d0\ud83d\ude00\u0301\u0301\u05d0\u0301\u0327.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\u03c2\u0345\u200c\u200d\u00e9.org",
+      "expected": "x@xn--9caa37seb.org"
+    },
+    {
+      "input": "x@\u1161\u0301\u0315\ud55ca\u11a8\u05d1\u0327\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\ud83d\ude00\u2024\u00c5\u1161\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\ud55c\u00e9\u00e9\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@a\ud55c\u05d1\ud83d\ude00\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2\u00df\u00c5\u05d1\ud55c\u00c5\u200cA.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u0345\u05d0\u05d0\u1161A\u00e9\u00df\u00e9.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\u0315\u03c2\u11a8\u0301.org",
+      "expected": "x@xn--lsa3b17au85bc14u.org"
+    },
+    {
+      "input": "x@\u0300\u05d0\u1100\u00dfa\u00e9A\u200ca\u0315\u200d.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u1161\u0301\u2024\u200d\u0327\u11a8\u05d1\u0345\u0327A.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\u0345\u200ca\u0301\u200d\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u200d\u03c2\u200d\ud55c\u05d0\u200d.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315\u03c2A\ud55c\ud83d\ude00\u03c2.org",
+      "expected": "x@xn--a-1cb63cb8939xh6kn.org"
+    },
+    {
+      "input": "x@\u05d0\u0345\u11a8\u0301.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u1100\u03c2a\u05d1\u0345Aa\ud55c\u2024a.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u0315\u03c2.org",
+      "expected": "x@xn--5sa26am754j.org"
+    },
+    {
+      "input": "x@\u05d1\u05d0\u05d0\u05d0\u00e9\u00c5\u0315\u200c\u200c\u05d0\u1161.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9a\u00c5\u0300\u0345\u11a8.org",
+      "expected": "x@xn--a-2fak65sp0ar52d.org"
+    },
+    {
+      "input": "x@\u2024\u2024\u0300\u05d1\ud83d\ude00\u00c5a.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5.org",
+      "expected": "x@xn--5ca.org"
+    },
+    {
+      "input": "x@a\ud83d\ude00\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\u1100\u0327\u0301\u1161a\ud55c.org",
+      "expected": "x@xn--a-wbb7i892d6nam428gfa.org"
+    },
+    {
+      "input": "x@a\u200c\u1100\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\ud55c\u0300a\u0315\u0315.org",
+      "expected": "x@xn--a-ubb8da014p0y2y.org"
+    },
+    {
+      "input": "x@\u200c\u00e9\u00c5\u00df\u11a8\u00df.org",
+      "expected": "x@xn--ssss-poax6211a.org"
+    },
+    {
+      "input": "x@\u0300\u0301\u1100\u11a8\u0300.org",
+      "expected": "x@xn--ksaac644l9xa.org"
+    },
+    {
+      "input": "x@\u00df\u00c5\ud55c\ud83d\ude00\u05d0\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315a\u00e9\u00c5\u03c2\ud55c\u00dfA\u11a8\ud83d\ude00.org",
+      "expected": "x@xn--assa-qoax400b4rb042eg822bls7v.org"
+    },
+    {
+      "input": "x@\u00c5\u0327\u200ca\u2024\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u1100\u00c5\u2024\u0315\u1161\u0300\u2024\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u1161\u0327.org",
+      "expected": "x@xn--otaa930i.org"
+    },
+    {
+      "input": "x@\u00df.org",
+      "expected": "x@ss.org"
+    },
+    {
+      "input": "x@\u11a8\u0301Aa.org",
+      "expected": "x@xn--aa-7tb711m.org"
+    },
+    {
+      "input": "x@\u00c5\u1100\u11a8\u1100A\u00df\u1100.org",
+      "expected": "x@xn--ass-tla927rad35k.org"
+    },
+    {
+      "input": "x@\ud83d\ude00\u00c5\u00e9\u0315A\u11a8\u05d0\u200d\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\u03c2a\u200c\u2024a\u200ca\u200d\ud83d\ude00.org",
+      "expected": "x@xn--a.aa-9oa494b6z22i.org"
+    },
+    {
+      "input": "x@\u05d1\u0315A\u00e9\u0300\u0327\u05d0\u00c5\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200d\u1161\u1161\u0327\u1161\u03c2\u00e9\u00e9\u0315.org",
+      "expected": "x@xn--9caa28n8by6bt11dab.org"
+    },
+    {
+      "input": "x@\u05d0\u00e9\ud83d\ude00\u200d\u05d0\u200d.org",
+      "expected": null
+    },
+    {
+      "input": "x@a\u1161\u11a8\u0301\u0345\u00df\u0300\u05d1\u00df\u0345\u0327.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315\u0345\u0345\u11a8\u00e9\u0327.org",
+      "expected": "x@xn--fma64b0b09aa615s.org"
+    },
+    {
+      "input": "x@\u1100\u1100.org",
+      "expected": "x@xn--ypda.org"
+    },
+    {
+      "input": "x@\u03c2\u0300\ud55c\u0300\u05d0a\u200d\u2024\u00e9\u0300\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c.org",
+      "expected": "x@xn--6q8b.org"
+    },
+    {
+      "input": "x@\u05d1\u200c\u2024\u0300\u1100\u0300a.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\u05d1\u0327\ud55c\ud83d\ude00.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u00df\u200c\u00df\u00df.org",
+      "expected": "x@xn--ssssss-24d.org"
+    },
+    {
+      "input": "x@\u1161\u0345.org",
+      "expected": "x@xn--uxa501e.org"
+    },
+    {
+      "input": "x@\ud55c.org",
+      "expected": "x@xn--6q8b.org"
+    },
+    {
+      "input": "x@\u0315\u0301\u0345\u200d\u05d1\u0345\u00dfA.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327.org",
+      "expected": "x@xn--ota.org"
+    },
+    {
+      "input": "x@\u03c2\u00c5\u05d1\u11a8.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200c\u0301\u0345a\u200d\u1161\u0345\u0315\u200c\u05d0\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\ud55c\ud55c\u00df\u0345.org",
+      "expected": "x@xn--ss-19b9775saa.org"
+    },
+    {
+      "input": "x@\u11a8\u1100\u1161\u1100.org",
+      "expected": "x@xn--ypd94ax739a.org"
+    },
+    {
+      "input": "x@\u0327\u1161a\u03c2\u200d\ud83d\ude00\u0327A.org",
+      "expected": "x@xn--aa-hxbb39et11dxm98e.org"
+    },
+    {
+      "input": "x@\ud83d\ude00.org",
+      "expected": "x@xn--e28h.org"
+    },
+    {
+      "input": "x@\u00e9a\u0300\u05d1\u1100\u200d\u05d1\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u200d\u03c2.org",
+      "expected": "x@xn--ota62a.org"
+    },
+    {
+      "input": "x@aA\u0300\ud55c\u200c\u200d\u2024\u11a8\u1100\u00e9.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2a.org",
+      "expected": "x@xn--a-zmb.org"
+    },
+    {
+      "input": "x@\u2024\u00c5\u00e9\u0300\u11a8\u00c5\u200c\u0301\u00df\u0327.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u00e9\ud55c\u2024\u00e9\u0327\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\u0301\u00df\u0315\u2024\u0327\u03c2\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\u200d\u00df\u00c5\u11a8\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u00e9.org",
+      "expected": "x@xn--9ca38h.org"
+    },
+    {
+      "input": "x@\u0345AA\u05d0\u1161\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u00e9\u1161\u00df\ud55c.org",
+      "expected": "x@xn--ss-9ia985n5nas428g.org"
+    },
+    {
+      "input": "x@\ud55c\u200cA.org",
+      "expected": "x@xn--a-372g.org"
+    },
+    {
+      "input": "x@a\u11a8\u0301\u05d1\u0301\u1100\u200d\u200c\u05d1\u2024\ud83d\ude00.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345A\u200ca\u1161a.org",
+      "expected": "x@xn--aaa-kyc695o.org"
+    },
+    {
+      "input": "x@\u00c5\u0345\u200dAA\u00c5\u00c5\u05d1\u1161\u1100.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u200d\u05d1\u00e9\u200d\u0300\ud83d\ude00.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100.org",
+      "expected": "x@xn--ypd.org"
+    },
+    {
+      "input": "x@\ud83d\ude00A\u2024\u200d\u05d0\u0300\u200d\u1161.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0aa\u200d\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u00c5.org",
+      "expected": "x@xn--5caa.org"
+    },
+    {
+      "input": "x@\u200da.org",
+      "expected": "x@a.org"
+    },
+    {
+      "input": "x@\u0301\u1100\u00e9.org",
+      "expected": "x@xn--9ca58he8v.org"
+    },
+    {
+      "input": "x@\u1100\u200d.org",
+      "expected": "x@xn--ypd.org"
+    },
+    {
+      "input": "x@a\u05d1\u1161\u00c5\u0315\u200c\u0300\u05d0\u03c2\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u1161\ud55c\u00e9\u00e9\u11a8\u0301\u11a8.org",
+      "expected": "x@xn--9caa22nxx1aba1818uvr8b.org"
+    },
+    {
+      "input": "x@\u200c\u0301\u00c5\u00df\ud83d\ude00A\ud55cA\ud83d\ude00\u2024\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u11a8\u00c5\u0327.org",
+      "expected": "x@xn--5caa84okyz.org"
+    },
+    {
+      "input": "x@\u200c\u00e9\u1161\u11a8\u05d1\u05d1\u11a8\u0345\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315\u0315.org",
+      "expected": "x@xn--5saa.org"
+    },
+    {
+      "input": "x@\u1100\u200c.org",
+      "expected": "x@xn--ypd.org"
+    },
+    {
+      "input": "x@\u0327.org",
+      "expected": "x@xn--ota.org"
+    },
+    {
+      "input": "x@\u05d1\ud55c\u0315\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0\u11a8\u00c5\u2024a.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0\u05d1AA\u200d\u1100\u03c2a\u2024\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200ca\u1161\u00df\u1161\ud83d\ude00\u00e9\u03c2\ud55c\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00.org",
+      "expected": "x@xn--e28h.org"
+    },
+    {
+      "input": "x@\u0345\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8A\u200d\u1161.org",
+      "expected": "x@xn--a-7bh9q.org"
+    },
+    {
+      "input": "x@\u0301.org",
+      "expected": "x@xn--lsa.org"
+    },
+    {
+      "input": "x@\u05d1\u0315.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d1\u05d0\u0327\u200c\u1100.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u00c5\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u2024\u1100A\u200d\ud55c\u00c5\u1100\u00c5\ud55c\u1100\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u0315a\u0327A\u00c5.org",
+      "expected": "x@xn--aa-zia15tvcp62h.org"
+    },
+    {
+      "input": "x@\u0345\u00df.org",
+      "expected": "x@xn--ss-z9b.org"
+    },
+    {
+      "input": "x@\u1161\u05d1\u00e9\ud83d\ude00\u1100\u03c2\u00e9.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301\ud55c\u1100\u0300\u00dfa\u00e9\u0315.org",
+      "expected": "x@xn--ssa-dma58xfa9l800jbl38a.org"
+    },
+    {
+      "input": "x@\u05d0.org",
+      "expected": "x@xn--4db.org"
+    },
+    {
+      "input": "x@\u05d1\u00e9\u1100\ud83d\ude00\u00e9a\u0345\u03c2\u05d0\u05d1\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u05d0\u0345\u1161\u200d.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301.org",
+      "expected": "x@xn--lsa.org"
+    },
+    {
+      "input": "x@\u1161\u200ca\u1100Aa\u00df\u1161\u00c5\u00df\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u0300\u1161\u05d1\u11a8\u00dfA\u00e9\u00c5.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00dfa.org",
+      "expected": "x@ssa.org"
+    },
+    {
+      "input": "x@\u0315A\u03c2\u0301\u05d0\u1100.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0345.org",
+      "expected": "x@xn--uxa.org"
+    },
+    {
+      "input": "x@\u0327.org",
+      "expected": "x@xn--ota.org"
+    },
+    {
+      "input": "x@\u0301\u0300\u0345\u00e9\u11a8\u05d1\ud83d\ude00\u05d0\u200c\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u200ca\u03c2\u0315a.org",
+      "expected": "x@xn--aa-yvb4ev4b.org"
+    },
+    {
+      "input": "x@A\u0301A\ud55c\u1161.org",
+      "expected": "x@xn--a-tfa787j238p.org"
+    },
+    {
+      "input": "x@\u05d1\u200c\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c.org",
+      "expected": "x@xn--6q8b.org"
+    },
+    {
+      "input": "x@\u2024\u05d0\u1161\u200d\u05d0\u05d0\u00df\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@a\u1161\u03c2\u200da\u0315\ud83d\ude00.org",
+      "expected": "x@xn--aa-zvb80ef24cb799d.org"
+    },
+    {
+      "input": "x@\u0345\u05d0\u0300\u0327\u0300\u0300\u0301A.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud83d\ude00\u200c\u00e9\u11a8\u200c\u11a8\u0345\u00c5\u05d1\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u0345\u0315\u1161\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u00df\u0315.org",
+      "expected": "x@xn--ss-zvb3e.org"
+    },
+    {
+      "input": "x@A\u05d0\u0315\u11a8\u11a8\u03c2\u00df.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0327\u1161\u11a8\u00c5\u1100.org",
+      "expected": "x@xn--5ca96i54vblaol.org"
+    },
+    {
+      "input": "x@\u1100\u05d0\ud83d\ude00\u0327\u0327\u00e9\u00e9\ud83d\ude00.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\u0345\u0327\u0327\u0301\u00e9\u05d0\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u11a8\u0315\u00e9\ud83d\ude00\u00e9\u1100.org",
+      "expected": "x@xn--9caa08njxy5xa3963s.org"
+    },
+    {
+      "input": "x@\u05d0\u2024.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2\u200d\ud55c.org",
+      "expected": "x@xn--4xa8248h.org"
+    },
+    {
+      "input": "x@\u0301\ud83d\ude00\u0327\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u05d0\u00c5\u2024\u200d\u11a8\u05d0\u0345\u200c\u0300.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u200d\u0345\u200ca\u00e9\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1161\u200c\u1161\u0345\u11a8.org",
+      "expected": "x@xn--uxa501ea9z.org"
+    },
+    {
+      "input": "x@\u0315\u0300\u00c5\u03c2a\u05d0\u200c\u00df\u1161.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00c5\u2024a\u0327a\u00e9.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0315\u200c\u00c5\u03c2\u2024\u1161\u00df\u00df\u00e9\u1161A.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0301A\u11a8\u00c5Aa\u00df\u200d\u11a8.org",
+      "expected": "x@xn--aaass-mra298aov2bfa.org"
+    },
+    {
+      "input": "x@a\ud83d\ude00\u0315\u0315\ud83d\ude00\ud55c\u200d\u05d1\u00c5.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55ca\u2024\u00c5\u1161\ud55c\u00e9.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u1100\u1161.org",
+      "expected": "x@xn--o39a.org"
+    },
+    {
+      "input": "x@\u05d0\u05d0\u0301\u0301\u00c5\u0315\u200c\u00e9\ud55c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\u200d\u200c\u00df\u11a8\u0315\u03c2.org",
+      "expected": "x@xn--ss-zvb01e325crm2y.org"
+    },
+    {
+      "input": "x@\u1161\u05d0\u00e9\u00e9\u05d1\u03c2\u2024\u05d0\u00e9\u0345\u03c2.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u200d\ud83d\ude00\ud83d\ude00.org",
+      "expected": "x@xn--ksa2066wa.org"
+    },
+    {
+      "input": "x@\u00e9\u00c5.org",
+      "expected": "x@xn--5cah.org"
+    },
+    {
+      "input": "x@\u03c2\u200c\u00c5\u03c2\u05d1.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2\u11a8\ud55c\u11a8.org",
+      "expected": "x@xn--4xa822ea3151r.org"
+    },
+    {
+      "input": "x@\u05d1\ud83d\ude00\u0327\u1161\u00e9\u00df\u200d\u05d1\u05d1A.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u00e9\u05d0.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u03c2\ud83d\ude00.org",
+      "expected": "x@xn--4xa2126w.org"
+    },
+    {
+      "input": "x@\u0327\u200c\u00e9\u11a8A\u0301\u05d1\ud83d\ude00a\u00c5.org",
+      "expected": null
+    },
+    {
+      "input": "x@\u0300\u1100.org",
+      "expected": "x@xn--ksa282e.org"
+    },
+    {
+      "input": "x@\u2024\u0300\ud55c\u1100.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\u0300\u1161\u0300.org",
+      "expected": "x@xn--ksaa651i174q.org"
+    },
+    {
+      "input": "x@\u200c.org",
+      "expected": null
+    },
+    {
+      "input": "x@\ud55c\ud55c\u03c2.org",
+      "expected": "x@xn--4xa7248ha.org"
+    },
+    {
+      "input": "x@\u0315\u200d\u0327\u0300\u05d1\u0315A.org",
+      "expected": null
+    },
+    {
+      "input": "x@aA\u00df\u0345a\u0301\u0315\u0301.org",
+      "expected": "x@xn--aass-8na873a9dn8c.org"
+    },
+    {
+      "input": "x@\u200da\u11a8\u11a8\u2024\u0327\u0345\ud55c\u0301\u200ca.org",
+      "expected": "x@xn--a.a-ldc3qs7al72ea71026b.org"
+    }
+  ]
+}
