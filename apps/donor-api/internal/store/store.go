@@ -1,4 +1,4 @@
-// Package store accesses the donor tables owned by the existing Alembic migrations.
+// Package store accesses the R1 donor database.
 package store
 
 import (

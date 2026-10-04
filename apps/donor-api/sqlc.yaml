@@ -2,7 +2,7 @@ version: "2"
 sql:
   - engine: "postgresql"
     queries: ["db/queries.sql", "db/financial.sql", "db/checkout.sql", "db/outbox.sql", "db/worker.sql", "db/email.sql", "db/donor.sql", "db/recurring.sql", "db/staff.sql", "db/admin.sql", "db/admin_finance.sql", "db/content.sql"]
-    schema: "db/schema.sql"
+    schema: "db/migrations"
     gen:
       go:
         package: "queries"

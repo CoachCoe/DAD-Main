@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -33,12 +34,8 @@ func database(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	var version string
-	if err = pool.QueryRow(ctx, "SELECT version_num FROM alembic_version").Scan(&version); err != nil {
+	if err = migrations.Verify(ctx, pool); err != nil {
 		t.Fatal(err)
-	}
-	if version != "0030_donor_public_content" {
-		t.Fatalf("unexpected migration head %s", version)
 	}
 	return pool
 }
