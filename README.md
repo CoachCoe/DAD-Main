@@ -75,8 +75,9 @@ injected transports. Never point synthetic test data at a real mail provider.
 
 ## Checks
 
-Integration tests require a dedicated synthetic database named `donor_go`. They must
-never run against the application database.
+Integration tests require a dedicated synthetic database named `donor_go` and a test
+role with `CREATEDB` permission. Migration tests create and remove isolated databases.
+Tests must never run against the application database.
 
 ```sh
 docker run -d --name impactgraph-go-test-postgres -p 127.0.0.1:55440:5432 \
@@ -97,6 +98,20 @@ SMTP settings for those tests. CI runs the same checks with PostgreSQL and Chrom
 
 SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc; commit SQL and its
 generated Go query code together. Applied migrations are immutable and checksum-checked.
+
+Exercise a running synthetic deployment with read-only burst and soak tests:
+
+```sh
+cd apps/donor-api
+go run ./cmd/loadtest -url http://localhost:8002/donor/public/content -duration 30s -concurrency 128
+go run ./cmd/loadtest -url http://localhost:8002/donor/public/content -duration 5m -concurrency 16
+```
+
+The runner reports request counts, failures, throughput, and latency percentiles, and
+fails on non-200 responses, timeouts, or oversized bodies. For authenticated reads, set
+`DONOR_LOAD_COOKIE` to a synthetic donor's session cookie and select its read endpoint.
+Public empty-state results do not establish capacity for 50,000 donors: repeat against
+representative data, authenticated dashboards, and the intended deployment before launch.
 
 ## Containers and deployment
 
