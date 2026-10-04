@@ -12,6 +12,7 @@ from sqlalchemy import select
 from . import donor_staff as staff
 from .donor_email import queue_login_email
 from .donor_exports import DATASETS, csv_rows
+from .donor_staff_access import change_role, recovery_invitation
 from .donor_staff_finance import cancel_giving, cancellation_quote, refund_gift, refund_quote
 from .persistence import (
     DonorGiftRecord,
@@ -36,6 +37,11 @@ class Invitation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     email: str = Field(max_length=320)
     name: str = Field(min_length=1, max_length=100)
+    role: Literal["SUPPORT", "FINANCE", "ADMIN"]
+
+
+class RoleChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     role: Literal["SUPPORT", "FINANCE", "ADMIN"]
 
 
@@ -187,6 +193,19 @@ def install_staff_routes(app, factory, settings, browser_request, gateway=None):
             staff.disable_staff(session, actor, staff_id)
             return {"disabled": True}
         return run(request, "staff.manage", action)
+
+    @app.post("/donor/staff/accounts/{staff_id}/recovery")
+    def recover(staff_id: UUID, request: Request):
+        browser_request(request)
+        def action(session, actor):
+            token = recovery_invitation(session, actor.id, staff_id)
+            return {"invitation_url": f"{settings.origin}/staff/activate#token={token}"}
+        return run(request, "staff.manage", action)
+
+    @app.post("/donor/staff/accounts/{staff_id}/role")
+    def role(staff_id: UUID, body: RoleChange, request: Request):
+        browser_request(request)
+        return run(request, "staff.manage", lambda session, actor: change_role(session, actor.id, staff_id, body.role))
 
     @app.get("/donor/staff/exports")
     def exports(request: Request):

@@ -778,3 +778,19 @@ a lost browser response does not change its identity. Financial commands and ref
 observation sources are included in the permission-scoped CSV exports. Real Stripe
 sandbox acceptance, including refund state transitions and boundary cancellation,
 remains required before any live activation.
+
+## Staff access recovery
+
+An administrator can replace another staff member's credentials or expired invitation
+from Staff access. The explicit confirmation revokes existing sessions and unused
+invitations, removes the old password/MFA secret, and issues a new one-use, 24-hour
+invitation. Completing setup establishes a new password and authenticator. This also
+supports restoring a disabled account through verified setup. Roles and the stable staff
+identity are preserved, so historical financial actions retain their actor. Recovery is
+audited and cannot target the acting administrator; keep a second named administrator.
+
+Role changes require a separate administrator confirmation, preserve the account's
+enabled/disabled state, revoke existing sessions, and audit old/new roles. Concurrent
+access changes lock staff records in a consistent order and recheck that the actor is
+still an active administrator. Neither workflow permits a staff member to change their
+own access or bypass MFA. No plaintext password or authenticator secret is sent by mail.

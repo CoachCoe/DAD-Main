@@ -82,6 +82,18 @@ export default function StaffPage() {
       {actor.permissions.includes("staff.manage") && <section><h2>Staff access</h2>
         <button disabled={busy} onClick={() => action(async () => { setAccounts(await api<Staff[]>("/donor/staff/accounts")); })}>Refresh staff accounts</button>
         {accounts && <ul>{accounts.map((account) => <li key={account.id}>{account.name} · {account.email} · {account.role} · {account.disabled ? "Disabled" : account.active ? "Active" : "Invited"}
+          {account.id !== actor.id && <>
+            <details><summary>Replace credentials or invitation</summary>
+              <p>This revokes existing sessions and invitations. The staff member must choose a new password and authenticator. Disabled accounts are restored only after completing setup.</p>
+              <button disabled={busy} onClick={() => action(async () => { const result = await api<{ invitation_url: string }>(`/donor/staff/accounts/${account.id}/recovery`, { method: "POST" }); setInvitation(result.invitation_url); setAccounts(await api<Staff[]>("/donor/staff/accounts")); })}>Confirm replacement invitation</button>
+            </details>
+            <details><summary>Change role</summary>
+              <form onSubmit={(event) => { event.preventDefault(); const chosen = new FormData(event.currentTarget).get("role"); action(async () => { await api(`/donor/staff/accounts/${account.id}/role`, { method: "POST", body: JSON.stringify({ role: chosen }) }); setAccounts(await api<Staff[]>("/donor/staff/accounts")); }); }}>
+                <label>New role for {account.name}<select name="role" defaultValue={account.role}><option>SUPPORT</option><option>FINANCE</option><option>ADMIN</option></select></label>
+                <p>A role change ends existing sessions and requires a new sign-in.</p><button disabled={busy}>Confirm role change</button>
+              </form>
+            </details>
+          </>}
           {!account.disabled && account.id !== actor.id && <details><summary>Disable account</summary><p>This immediately revokes staff access.</p>
             <button disabled={busy} onClick={() => action(async () => { await api(`/donor/staff/accounts/${account.id}/disable`, { method: "POST" }); setAccounts(await api<Staff[]>("/donor/staff/accounts")); })}>Confirm disable {account.name}</button>
           </details>}
