@@ -70,6 +70,7 @@ export default function DashboardPage() {
         <Link href="/account/giving">My giving and sign-out</Link>
         <Link href="/account/share">Share and invite</Link>
         <Link href="/account/code">My referral code</Link>
+        <Link href="/account/profile">Profile and notifications</Link>
       </div>
     </>}
   </section>;

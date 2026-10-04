@@ -602,3 +602,19 @@ unresolved commands older than 23 hours require operator reconciliation. Changes
 final minute before renewal are refused; uncertain changes spanning renewal require
 invoice reconciliation. Real Stripe sandbox testing at the billing boundary is required
 before activation. Local adapter tests do not establish provider end-to-end acceptance.
+
+## Profile and notification consent
+
+`/account/profile` exposes the authenticated donor's account email, existing public
+nickname, optional notification choices, and a confirmed sign-out on every device.
+Email is read-only: changing a financial identity requires a separately verified workflow.
+Public nickname changes continue through explicit sharing consent.
+
+Referral-converted and marketing email choices default off and are independent of
+receipts, access messages, and essential payment notices. POST `/donor/me/preferences`
+requires strict booleans, a same-origin claimed session, and the current preference
+version. Stale tabs receive 409 and must refresh, preventing an older tab from silently
+reversing an opt-out. Migration 0026 stores current preferences and append-only versioned
+consent events; the migration refuses to discard consent history. Saving consent alone
+does not send any email. Optional delivery must recheck current consent at send time.
+POST `/donor/logout-all` revokes every current session for the authenticated donor only.

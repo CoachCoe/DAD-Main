@@ -43,6 +43,25 @@ class DonorRecord(EntityMixin, Base):
     referral_code: Mapped[str | None] = mapped_column(String(64), unique=True)
 
 
+class DonorPreferenceRecord(EntityMixin, Base):
+    __tablename__ = "donor_preferences"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), unique=True)
+    version: Mapped[int] = mapped_column(Integer)
+    referral_emails: Mapped[bool] = mapped_column(Boolean)
+    marketing_emails: Mapped[bool] = mapped_column(Boolean)
+
+
+class DonorPreferenceEventRecord(EntityMixin, Base):
+    __tablename__ = "donor_preference_events"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    referral_emails: Mapped[bool] = mapped_column(Boolean)
+    marketing_emails: Mapped[bool] = mapped_column(Boolean)
+    consent_version: Mapped[str] = mapped_column(String(80))
+    source: Mapped[str] = mapped_column(String(40))
+    __table_args__ = (UniqueConstraint("donor_id", "version", name="uq_donor_preference_version"),)
+
+
 class DonorLoginEmailRecord(EntityMixin, Base):
     """Delivery outbox; login secrets are encrypted separately from credential hashes."""
 

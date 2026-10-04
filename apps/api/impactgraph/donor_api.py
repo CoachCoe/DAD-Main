@@ -22,6 +22,7 @@ from .donor_amounts import amount_options, change_amount
 from .donor_email import EmailSettings, queue_login_email
 from .donor_pauses import pause_options, pause_recurring
 from .donor_payment_methods import begin_payment_update, payment_method_status
+from .donor_profile import PreferenceConflict, profile, save_preferences, sign_out_everywhere
 from .donor_projections import dashboard, refresh_projection
 from .donor_resumptions import resume_options, resume_recurring
 from .donor_sharing import captured_name, referral_svg, sharing_details
@@ -109,6 +110,13 @@ class AmountRequest(BaseModel):
     effective_at: datetime
 
 
+class PreferenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: StrictInt = Field(ge=0)
+    referral_emails: StrictBool
+    marketing_emails: StrictBool
+
+
 def create_app(*, factory=None, settings=None, gateway=None, email_settings=None):
     settings = settings or PaymentSettings.from_env()
     factory = factory or create_session_factory()
@@ -168,6 +176,36 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
         browser_request(request)
         with factory.begin() as session:
             sign_out(session, request.cookies.get(SESSION_COOKIE, ""))
+        response.delete_cookie(SESSION_COOKIE, path="/")
+        return {"signed_out": True}
+
+    @app.get("/donor/me/profile")
+    def get_profile(request: Request):
+        try:
+            with factory() as session:
+                return profile(session, request.cookies.get(SESSION_COOKIE, ""))
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
+
+    @app.post("/donor/me/preferences")
+    def preferences(body: PreferenceRequest, request: Request):
+        browser_request(request)
+        try:
+            with factory.begin() as session:
+                return save_preferences(session, request.cookies.get(SESSION_COOKIE, ""), **body.model_dump())
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
+        except PreferenceConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+
+    @app.post("/donor/logout-all")
+    def logout_all(request: Request, response: Response):
+        browser_request(request)
+        try:
+            with factory.begin() as session:
+                sign_out_everywhere(session, request.cookies.get(SESSION_COOKIE, ""))
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
         response.delete_cookie(SESSION_COOKIE, path="/")
         return {"signed_out": True}
 
