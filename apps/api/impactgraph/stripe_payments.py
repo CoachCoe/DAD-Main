@@ -95,6 +95,18 @@ class StripeGateway:
             http_client=stripe.RequestsClient(timeout=15),
         )
 
+    def retrieve_checkout(self, session_id: str) -> dict:
+        return self.client.v1.checkout.sessions.retrieve(session_id).to_dict()
+
+    def retrieve_setup_intent(self, setup_id: str) -> dict:
+        return self.client.v1.setup_intents.retrieve(setup_id).to_dict()
+
+    def update_subscription_payment_method(self, subscription_id: str, payment_method: str, key: str) -> dict:
+        return self.client.v1.subscriptions.update(
+            subscription_id, {"default_payment_method": payment_method, "proration_behavior": "none"},
+            options={"idempotency_key": key},
+        ).to_dict()
+
     def retrieve_refund(self, refund_id: str) -> dict:
         return self.client.v1.refunds.retrieve(refund_id).to_dict()
 
@@ -238,8 +250,11 @@ def accept_event(factory, event: dict) -> bool:
         details = (obj.get("parent") or {}).get("subscription_details") or {}
         metadata = details.get("metadata") or {}
         subscription = details.get("subscription")
+    payment_update_id = metadata.get("dad_payment_update_id") if kind.startswith("checkout.session.") else None
+    if payment_update_id:
+        UUID(payment_update_id)
     checkout_id = metadata.get("dad_checkout_id")
-    if not checkout_id and not kind.startswith("refund."):
+    if not payment_update_id and not checkout_id and not kind.startswith("refund."):
         return False  # A pre-existing Stripe account can contain unrelated payments.
     if checkout_id:
         UUID(checkout_id)
@@ -253,6 +268,8 @@ def accept_event(factory, event: dict) -> bool:
         data["paid_at"] = (obj.get("status_transitions") or {}).get("paid_at")
     if kind.startswith("refund."):
         data = {key: obj.get(key) for key in ("id", "payment_intent", "amount", "currency", "status")}
+    if payment_update_id:
+        data = {"id": obj["id"], "payment_update_id": payment_update_id}
     with factory.begin() as session:
         session.execute(_insert(session, StripeEventRecord).values(
             stripe_event_id=event["id"], event_type=kind,
@@ -263,6 +280,10 @@ def accept_event(factory, event: dict) -> bool:
 
 def _apply_event(session, event, gateway=None):
     data = event.data
+    if data.get("payment_update_id"):
+        from .donor_payment_methods import apply_payment_update_event
+        apply_payment_update_event(session, event, gateway or StripeGateway(PaymentSettings.from_env()))
+        return
     if event.event_type.startswith("refund."):
         reconcile_refund(session, event, gateway or StripeGateway(PaymentSettings.from_env()))
         return

@@ -32,7 +32,8 @@ export default function ClaimPage() {
 
   return <div className="authLayout"><section className="panel authPanel">
     <h1>{done ? "You’re signed in" : "Claim your donor account"}</h1>
-    {done ? <Link href="/account/dashboard">View my dashboard</Link> : <>
+    {done ? <><p><Link href="/account/dashboard">View my dashboard</Link></p>
+      <p><Link href="/account/payment-method">Update payment method</Link></p></> : <>
       <p>Confirm to sign in to the donor account associated with this email link.</p>
       {ready ? <button className="button" disabled={busy} onClick={claim}>
         {busy ? "Signing in…" : "Confirm and sign in"}</button>

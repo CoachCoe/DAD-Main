@@ -208,6 +208,20 @@ class DonorRefundObservationRecord(EntityMixin, Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DonorPaymentUpdateRecord(EntityMixin, Base):
+    """Authorized setup attempt; never contains card data or a SetupIntent secret."""
+
+    __tablename__ = "donor_payment_updates"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    attempt_id: Mapped[UUID] = mapped_column(ForeignKey("donor_stripe_checkouts.id"))
+    customer_id: Mapped[str] = mapped_column(String(255))
+    request_params: Mapped[dict] = mapped_column(JSON)
+    stripe_session_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    hosted_url: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="PENDING")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class DonorSubscriptionRecord(EntityMixin, Base):
     """Latest verified schedule, including the first renewal skipped on cancellation."""
 

@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .database import create_session_factory
 from .donor_email import EmailSettings, queue_login_email
+from .donor_payment_methods import begin_payment_update, payment_method_status
 from .donor_projections import dashboard, refresh_projection
 from .donor_sharing import captured_name, referral_svg, sharing_details
 from .donor_subscriptions import SubscriptionConflict, cancel_recurring, recurring_details
@@ -221,6 +222,19 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
             raise HTTPException(503, "Stripe is unavailable. Retry to check your monthly gift.") from exc
         except ValueError as exc:
             raise HTTPException(409, "Billing details need reconciliation. No change is confirmed.") from exc
+
+    @app.get("/donor/me/payment-method")
+    def payment_method(request: Request):
+        try:
+            return payment_method_status(factory, request.cookies.get(SESSION_COOKIE, ""))
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
+
+    @app.post("/donor/me/payment-method/setup")
+    def payment_setup(request: Request, idempotency_key: Annotated[UUID, Header()]):
+        browser_request(request)
+        return subscription_request(request, lambda provider, token: begin_payment_update(
+            factory, provider, settings, token, request_id=idempotency_key))
 
     @app.get("/donor/me/recurring")
     def recurring(request: Request):

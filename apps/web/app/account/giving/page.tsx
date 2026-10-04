@@ -41,6 +41,7 @@ export default function GivingPage() {
       {!data && !error && <p role="status">Loading your giving…</p>}
       {data && <>
         <p>{data.email}</p>
+        <p><Link href="/account/payment-method">Update payment method</Link></p>
         <p><Link href="/account/recurring">Manage monthly giving</Link></p>
         {data.gifts.length === 0 ? <p>No confirmed test gifts yet. Payment confirmation may take a moment.</p> :
           <ul>{data.gifts.map((gift) => <li key={gift.id}>

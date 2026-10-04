@@ -16,6 +16,7 @@ from .persistence import (
     DonorCheckoutRecord,
     DonorGiftRecord,
     DonorMetricProjectionRecord,
+    DonorPaymentUpdateRecord,
     DonorRecord,
     DonorRefundObservationRecord,
     DonorRefundRecord,
@@ -24,6 +25,9 @@ from .persistence import (
 
 
 def event_donor_id(session, event):
+    if event.data.get("payment_update_id"):
+        return session.scalar(select(DonorPaymentUpdateRecord.donor_id).where(
+            DonorPaymentUpdateRecord.id == UUID(event.data["payment_update_id"])))
     if event.data.get("checkout_id"):
         return session.scalar(select(DonorCheckoutRecord.donor_id).where(
             DonorCheckoutRecord.id == UUID(event.data["checkout_id"])))

@@ -455,7 +455,48 @@ Run both inbox and projection workers; schedule accuracy depends on consuming St
 updates, with account visits also reconciling current state. There is not yet a periodic
 Stripe-wide reconciliation job. Pending commands are retained for explicit retry and
 operational inspection; a staff reconciliation interface is still required. The migration
-refuses to discard nonempty schedule/audit tables. Payment-method updates, pause/resume,
-amount changes, staff cancellation permissions, and receipts are separate unfinished
-surfaces. This remains test-mode only and requires real Stripe sandbox acceptance before
+refuses to discard nonempty schedule/audit tables. Pause/resume, amount changes, staff cancellation permissions, and receipts remain
+unfinished surfaces. Payment-method updates are described below. This remains test-mode only and requires real Stripe sandbox acceptance before
 production activation.
+
+## Payment-method updates (sandbox)
+
+`/account/payment-method` is the destination for payment recovery links and is linked
+from My Giving, monthly-gift management, and the successful account-claim screen.
+A signed-out visitor requests the normal email sign-in link; no customer identity or
+saved card is exposed based on a supplied email. GET `/donor/me/payment-method` returns
+only the authenticated donor's latest update status. POST
+`/donor/me/payment-method/setup` requires the donor session, configured Origin, and a
+UUID v4 Idempotency-Key. It resolves the Stripe customer through the donor's owned
+subscription, not through browser input.
+
+Migration 0022 stores durable setup attempts and frozen request parameters. Stripe
+Checkout runs in `setup` mode, accepts cards only, and attaches the verified setup to
+the subscription's customer. The donor enters card details entirely on Stripe. The
+server stores customer/session IDs and attempt status, never card details, payment-method
+details, or SetupIntent secrets. Setup URLs are restricted to HTTPS checkout.stripe.com.
+They expire after one hour; uncertain creation cannot be reissued with a changed expiry.
+An unresolved creation older than 30 minutes requires operator reconciliation.
+
+The existing signed checkout.session.completed/expired inbox recognizes payment-update
+metadata separately from donation checkouts. Processing retrieves both the Checkout
+Session and SetupIntent, verifies ownership, test mode, successful off-session card setup,
+and the current subscription, then sets only that subscription's default payment method
+with a stable idempotency key and no proration. It re-reads the subscription before
+marking the update APPLIED. A redirect, an open setup, or an incomplete authentication
+challenge cannot confer success. This follows Stripe's
+[hosted payment-details update flow](https://docs.stripe.com/payments/checkout/subscriptions/update-payment-details).
+
+One unfinished setup per donor prevents competing devices from applying cards in event
+arrival order. Terminal attempts are never reapplied, so an old webhook cannot overwrite
+a newer card. Lost responses reconcile against Stripe; unresolved mutations older than
+23 hours are parked for explicit reconciliation. Expired sessions can be replaced and a
+subscription cancelled during setup is never restarted. The usual inbox retry command
+handles failed jobs. A retried start can also reconcile a completed session without
+requiring a new card entry. Returning to the page reads stored status; the refresh action
+is available while the inbox catches up.
+
+A card update creates no gift, forgives no outstanding invoice, and grants no streak
+month. Failed-payment retry/recovery messages and invoice recovery orchestration remain
+separate work, alongside pause/resume and amount changes. The existing production and
+real-Stripe sandbox acceptance gates still apply; no live keys are enabled by this slice.
