@@ -115,4 +115,4 @@ brightness control. An email change is not implemented; the profile shows a read
 address rather than an insecure identity replacement.
 
 The inactive enrolment queue and header-only export exist at R1. There is no enrolment
-trigger until R2; the prepared confirmation wording does not promise funds.
+trigger until R2; the [prepared confirmation wording](messaging.md) does not promise funds.
