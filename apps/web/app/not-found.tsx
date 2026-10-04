@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "No such record — ImpactGraph",
+  title: "Page not found — Dynamic Aid Delivery",
   robots: { index: false },
 };
 
@@ -11,15 +11,14 @@ export default function NotFound() {
     <div className="workspace">
       <section className="panel">
         <span className="eyebrow">NOT FOUND</span>
-        <h1>There is no record at this address</h1>
+        <h1>We couldn’t find this page</h1>
         <p className="subtle">
-          Either the identifier is wrong, or it names something this organisation has not
-          published. Nothing has been withdrawn — a claim that was published stays
-          published, so a missing page is a bad link rather than a removed record.
+          The link may be out of date or the page may not be published yet.
+          You can return home or learn how DAD works.
         </p>
         <div className="actionRow">
           <Link className="button" href="/">
-            Back to the record
+            Back to home
           </Link>
           <Link className="secondary" href="/about">
             How this works

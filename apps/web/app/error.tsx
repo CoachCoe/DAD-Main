@@ -15,9 +15,8 @@ export default function Error({
         <span className="eyebrow">SOMETHING BROKE</span>
         <h1>This page did not load</h1>
         <p className="subtle">
-          The record itself is unaffected: nothing here writes on read, so a failure to
-          display something has not changed it. Try again, and if it keeps happening the
-          reference below identifies what went wrong.
+          Please try again. If this keeps happening, the reference below can help DAD
+          investigate. After a checkout problem, check your giving history before starting another gift.
         </p>
         {error.digest ? (
           <p className="note">
@@ -29,7 +28,7 @@ export default function Error({
             Try again
           </button>
           <Link className="secondary" href="/">
-            Back to the record
+            Back to home
           </Link>
         </div>
       </section>

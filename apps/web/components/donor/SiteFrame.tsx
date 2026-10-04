@@ -2,13 +2,6 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Header } from "@/components/Header";
-import { SessionProvider } from "@/components/SessionProvider";
-
-export function isDonorRoute(path: string) {
-  return path === "/" || ["/account", "/donate", "/r", "/staff", "/initiatives", "/ledger", "/how-it-works", "/partners", "/legal"]
-    .some((prefix) => path === prefix || path.startsWith(prefix + "/"));
-}
 
 export function DonorHeader() {
   const path = usePathname();
@@ -32,12 +25,9 @@ export function DonorHeader() {
 }
 
 export function SiteFrame({ children }: { children: React.ReactNode }) {
-  const donor = isDonorRoute(usePathname());
-  const content = <><a className="skipLink" href="#main">Skip to content</a>{donor ? <DonorHeader /> : <Header />}
-    <main id="main" className={donor ? "donorSurface" : undefined}>{children}</main>
-    <footer>{donor ? <>Dynamic Aid Delivery · Donor release preview<span>DAD launches in April 2027. Giving in this environment uses Stripe test payments.</span>
-      <span><Link href="/partners">Partner interest</Link> · <Link href="/legal">Terms, privacy, and donor consent</Link></span></> :
-      <>ImpactGraph · Transparent provenance for real-world impact<span>This proof of concept uses demonstration data.</span></>}</footer>
+  return <><a className="skipLink" href="#main">Skip to content</a><DonorHeader />
+    <main id="main" className="donorSurface">{children}</main>
+    <footer>Dynamic Aid Delivery · Donor release preview<span>DAD launches in April 2027. Giving in this environment uses Stripe test payments.</span>
+      <span><Link href="/about">About DAD</Link> · <Link href="/partners">Partner interest</Link> · <Link href="/legal">Terms, privacy, and donor consent</Link></span></footer>
   </>;
-  return donor ? content : <SessionProvider>{content}</SessionProvider>;
 }

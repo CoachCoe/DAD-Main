@@ -1,7 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { PublicContent } from "./PublicContent";
-import { isDonorRoute } from "./SiteFrame";
 
 const published = { state: "published", ledger_as_of: "2026-09-01", cadence: "monthly", initiatives: [],
   ledger: [{ metric: "Collected", value: 3000, unit: "USD_CENTS", illustrative: false },
@@ -26,11 +25,4 @@ it("retries unavailable records and never substitutes demonstration numbers", as
   fireEvent.click(screen.getByRole("button", { name: "Retry records" }));
   expect(await screen.findByText(/No ledger figures have been published/)).toBeInTheDocument();
   expect(screen.queryByText("$30.00")).not.toBeInTheDocument();
-});
-
-it("keeps donor routes separate from the retained ImpactGraph session", () => {
-  for (const path of ["/", "/donate", "/r/invite", "/account/dashboard", "/staff/content", "/initiatives/first", "/ledger", "/partners", "/legal"]) {
-    expect(isDonorRoute(path)).toBe(true);
-  }
-  for (const path of ["/impactgraph", "/operator", "/risk", "/proof/first"]) expect(isDonorRoute(path)).toBe(false);
 });

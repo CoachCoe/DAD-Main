@@ -1,7 +1,7 @@
 import { type NextRequest } from "next/server";
 
 /**
- * Runtime proxy to the transparency API.
+ * Runtime proxy to the donor API.
  *
  * This was a `rewrites()` entry in next.config.ts, but with `output: standalone` the
  * destination is resolved when the config is evaluated and baked into server.js -- so the
@@ -14,9 +14,7 @@ import { type NextRequest } from "next/server";
  */
 export const dynamic = "force-dynamic";
 
-const apiBase = (path: string[]) => path[0] === "donor"
-  ? process.env.DONOR_API_BASE_URL ?? "http://localhost:8001"
-  : process.env.API_BASE_URL ?? "http://localhost:8000";
+const apiBase = () => process.env.DONOR_API_BASE_URL ?? "http://localhost:8002";
 
 // Headers that describe a single hop and must not be forwarded.
 const HOP_BY_HOP = new Set([
@@ -42,7 +40,10 @@ function forwardHeaders(source: Headers): Headers {
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
-  const target = new URL(`${apiBase(path)}/${path.join("/")}`);
+  if (path[0] !== "donor" || path.some((segment) => segment === "." || segment === ".." || /[\\/?#%]/.test(segment))) {
+    return Response.json({ detail: "Not found" }, { status: 404 });
+  }
+  const target = new URL(`${apiBase()}/${path.map(encodeURIComponent).join("/")}`);
   target.search = request.nextUrl.search;
 
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
@@ -51,9 +52,10 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     response = await fetch(target, {
       method: request.method,
       headers: forwardHeaders(request.headers),
-      // Streamed rather than buffered: evidence uploads come through here.
+      // Stream source documents without buffering them in the web server.
       body: hasBody ? request.body : undefined,
       redirect: "manual",
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(28_000)]),
       // Required by undici when the body is a stream.
       ...(hasBody ? { duplex: "half" } : {}),
     } as RequestInit);

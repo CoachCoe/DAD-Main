@@ -1,72 +1,19 @@
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("@/lib/network", () => ({
-  networkInfo: () => ({ name: "Anvil local EVM", isPublicEthereum: false, chainId: 31337 }),
-}));
-
-// The page links its explanation to a record that exists rather than to a named one, so
-// it reads the claim and its evidence rather than carrying their identifiers in source.
-vi.mock("@/lib/api", () => ({
-  readFromApi: (path: string) =>
-    Promise.resolve(
-      path === "/claims"
-        ? [{ id: "claim-water-12-200" }]
-        : { id: "claim-water-12-200", evidenceIds: ["ev-inv-8291"] },
-    ),
-}));
-
+import { render, screen } from "@testing-library/react";
+import { expect, it } from "vitest";
 import About from "./page";
 
-describe("How it works", () => {
-  it("names every stage of the chain the product exists to trace", async () => {
-    render(await About());
-    for (const stage of [
-      "Funding",
-      "Allocation",
-      "Transaction",
-      "Delivery",
-      "Evidence",
-      "Verification",
-      "Outcome",
-    ]) {
-      expect(screen.getByText(stage)).toBeInTheDocument();
-    }
-  });
+it("explains the donor release, monthly billing, direct referral credit, and launch timing", () => {
+  render(<About />);
+  expect(screen.getByText(/22 April 2027/)).toHaveTextContent("$30/month");
+  expect(screen.getByText(/only people you personally refer/)).toHaveTextContent("less successful refunds");
+  expect(screen.getByText(/does not enrol recipients/)).toHaveTextContent("Aid programs begin at launch");
+  expect(screen.getByText(/No real donation is collected/)).toBeInTheDocument();
+});
 
-  it("answers each donor question with a link to the record, not with prose", async () => {
-    render(await About());
-    const questions = [
-      "What happened?",
-      "Where did the funding originate?",
-      "Where did the money go?",
-      "What evidence supports it?",
-      "Who verified the result?",
-      "How reliable is the evidence?",
-    ];
-    for (const question of questions) {
-      expect(screen.getByRole("link", { name: question })).toHaveAttribute("href");
-    }
-  });
-
-  it("states what is fictional as plainly as what is real", async () => {
-    // A page whose argument is honesty cannot be coy about its own limits.
-    render(await About());
-    const fictional = screen.getByRole("heading", { name: "Fictional" }).closest("div");
-    expect(fictional).not.toBeNull();
-    expect(within(fictional!).getByText(/never moves it/)).toBeInTheDocument();
-    expect(screen.getByText(/Nothing here is audited/)).toBeInTheDocument();
-  });
-
-  it("does not claim the local chain is Ethereum verification", async () => {
-    render(await About());
-    expect(screen.getByText(/a local chain/)).toBeInTheDocument();
-    expect(screen.queryByText(/verified on Ethereum/i)).not.toBeInTheDocument();
-  });
-
-  it("lists the policy requirements a claim must pass", async () => {
-    render(await About());
-    expect(screen.getByText("The verifier is not the operator")).toBeInTheDocument();
-    expect(screen.getByText(/not from a request header/)).toBeInTheDocument();
-  });
+it("links the donor explanation to giving, source-backed figures, and partner interest", () => {
+  render(<About />);
+  expect(screen.getByRole("link", { name: "Try giving" })).toHaveAttribute("href", "/donate");
+  expect(screen.getByRole("link", { name: "Read the impact ledger" })).toHaveAttribute("href", "/ledger");
+  expect(screen.getByRole("link", { name: "Partner interest form" })).toHaveAttribute("href", "/partners");
+  expect(screen.getByText(/source documents support reported numbers/)).toHaveTextContent("illustrative figures are labeled");
 });

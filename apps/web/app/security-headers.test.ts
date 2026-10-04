@@ -22,13 +22,13 @@ describe("security headers", () => {
   it.each([
     ["X-Content-Type-Options", "nosniff"],
     ["X-Frame-Options", "DENY"],
-    ["Referrer-Policy", "strict-origin-when-cross-origin"],
+    ["Referrer-Policy", "no-referrer"],
   ])("sets %s", async (key, value) => {
     expect((await headerMap()).get(key)).toBe(value);
   });
 
   it("refuses framing in the CSP as well as the legacy header", async () => {
-    // The operator and verifier workspaces carry irreversible single-click actions.
+    // Staff financial actions must not be exposed through clickjacking.
     // X-Frame-Options alone leaves browsers that only honour frame-ancestors unprotected.
     expect((await headerMap()).get("Content-Security-Policy")).toContain(
       "frame-ancestors 'none'",
@@ -60,7 +60,7 @@ describe("security headers", () => {
     const policy = (await headerMap()).get("Permissions-Policy")!;
     expect(policy).toContain("geolocation=()");
     expect(policy).toContain("microphone=()");
-    // Field capture uses the native picker on this origin.
-    expect(policy).toContain("camera=(self)");
+    // R1 displays a referral code; scanning is done with the visitor's native camera.
+    expect(policy).toContain("camera=()");
   });
 });
