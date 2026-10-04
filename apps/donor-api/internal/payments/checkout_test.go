@@ -76,7 +76,7 @@ func TestFinancialGatewayUsesPinnedSDKAndIdempotentCardUpdate(t *testing.T) {
 			if err := r.ParseForm(); err != nil {
 				t.Error(err)
 			}
-			if r.Form.Get("default_payment_method") != "pm_fixture" || len(r.Form) != 1 {
+			if r.Form.Get("default_payment_method") != "pm_fixture" || r.Form.Get("proration_behavior") != "none" || len(r.Form) != 2 {
 				t.Errorf("unexpected card update parameters: %v", r.Form)
 			}
 		} else if r.Method != "GET" {

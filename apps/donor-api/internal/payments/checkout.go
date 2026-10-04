@@ -78,7 +78,7 @@ func (g *StripeGateway) RetrieveSetupIntent(ctx context.Context, id string) (Obj
 	return DecodeObject(result.LastResponse.RawJSON)
 }
 func (g *StripeGateway) UpdateSubscriptionPaymentMethod(ctx context.Context, id, method, key string) error {
-	params := &stripe.SubscriptionUpdateParams{DefaultPaymentMethod: stripe.String(method)}
+	params := &stripe.SubscriptionUpdateParams{DefaultPaymentMethod: stripe.String(method), ProrationBehavior: stripe.String("none")}
 	params.SetIdempotencyKey(key)
 	if _, err := g.client.V1Subscriptions.Update(ctx, id, params); err != nil {
 		return ErrCheckoutUnavailable
