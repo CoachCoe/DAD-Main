@@ -31,11 +31,13 @@ type CheckoutSource interface {
 	BeginCheckout(context.Context, payments.CheckoutRequest) (payments.CheckoutResult, error)
 }
 type Services struct {
-	Content   ContentSource
-	Dashboard DashboardSource
-	Webhook   WebhookReceiver
-	Checkout  CheckoutSource
-	Origin    string
+	Content         ContentSource
+	Dashboard       DashboardSource
+	Webhook         WebhookReceiver
+	Checkout        CheckoutSource
+	Origin          string
+	Account         AccountSource
+	EmailConfigured bool
 }
 
 // NewServer keeps the incomplete rewrite off the existing Python service port.
@@ -55,6 +57,7 @@ func NewServer(address string, services Services) *http.Server {
 		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(body)
 	}
+	installAccountRoutes(mux, services, guard, reply)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { reply(w, 200, map[string]string{"status": "alive"}) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 503, map[string]string{"detail": "Go donor rewrite is not ready for traffic"})

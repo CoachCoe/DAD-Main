@@ -120,10 +120,9 @@ func historicalBest(ctx context.Context, q *queries.Queries, id pgtype.UUID, h H
 	return best, nil
 }
 
-// RefreshProjectionFactsInTx writes only recognition facts. The orchestration layer
-// must queue financial messages in this transaction before it commits. No worker or
-// public mutation route calls this until the message outbox migration is complete.
-func RefreshProjectionFactsInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.Time) (queries.SaveProjectionParams, error) {
+// refreshProjectionFactsInTx writes only recognition facts. The orchestration layer
+// queues financial messages in this transaction before it commits.
+func refreshProjectionFactsInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.Time) (queries.SaveProjectionParams, error) {
 	q := queries.New(tx)
 	out := queries.SaveProjectionParams{DonorID: id, ComputedAt: timestamp(now), NextRefreshAt: timestamp(now.Add(24 * time.Hour))}
 	if _, err := q.LockDonor(ctx, id); err != nil {

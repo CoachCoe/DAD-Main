@@ -64,7 +64,7 @@ func Authenticated(ctx context.Context, q *queries.Queries, token string, now ti
 
 // ClaimInTx consumes email proof and inserts a hashed session. The caller must add
 // projection refresh and old-browser-session revocation in this SAME transaction,
-// commit it, and only then return the new cookie. No HTTP route exposes this yet.
+// commit it, and only then return the new cookie.
 func ClaimInTx(ctx context.Context, tx pgx.Tx, token string, now time.Time) (string, queries.Donor, error) {
 	q := queries.New(tx)
 	empty := queries.Donor{}

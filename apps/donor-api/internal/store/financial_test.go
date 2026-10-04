@@ -62,14 +62,14 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	if err != nil || preparing["state"] != "preparing" {
 		t.Fatalf("missing projection: %v %v", preparing, err)
 	}
-	if _, err = RefreshProjectionFactsInTx(ctx, tx, referrerID, now); err != nil {
+	if _, err = refreshProjectionFactsInTx(ctx, tx, referrerID, now); err != nil {
 		t.Fatal(err)
 	}
 	missing, err := Dashboard(ctx, q, referrerID, now)
 	if err != nil || missing["referrals"] != nil {
 		t.Fatal("missing referred history shown as zero")
 	}
-	initial, err := RefreshProjectionFactsInTx(ctx, tx, donorID, now)
+	initial, err := refreshProjectionFactsInTx(ctx, tx, donorID, now)
 	if err != nil || !initial.CurrentStreak.Valid || initial.CurrentStreak.Int32 != 2 || initial.BestStreak != 2 || initial.NetMinor.Int64 != 6000 || initial.ReferrerID != referrerID || initial.ReferralKind.String != "IRL" || !initial.FoundingAwardedAt.Valid {
 		t.Fatalf("wrong initial projection: %+v %v", initial, err)
 	}
@@ -89,7 +89,7 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	mustExec(t, tx, `INSERT INTO donor_refund_observations (id,refund_id,source_event_id,status,observed_at) VALUES ($1,$2,$3,'SUCCEEDED',$4)`, testID(t), refund, event, observed)
 	// Rebuild from facts, not the existing best, proving historical refund replay.
 	mustExec(t, tx, `UPDATE donor_metric_projections SET best_streak=0 WHERE donor_id=$1`, donorID)
-	refunded, err := RefreshProjectionFactsInTx(ctx, tx, donorID, now)
+	refunded, err := refreshProjectionFactsInTx(ctx, tx, donorID, now)
 	if err != nil || refunded.NetMinor.Int64 != 3000 || refunded.CurrentStreak.Int32 != 0 || refunded.BestStreak != 2 || !refunded.FoundingAwardedAt.Time.Equal(initial.FoundingAwardedAt.Time) {
 		t.Fatalf("wrong refunded projection: %+v %v", refunded, err)
 	}
@@ -98,7 +98,7 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 		t.Fatal("stale values exposed")
 	}
 	// Missing renewal history cannot manufacture a zero streak.
-	late, err := RefreshProjectionFactsInTx(ctx, tx, donorID, mar)
+	late, err := refreshProjectionFactsInTx(ctx, tx, donorID, mar)
 	if err != nil || late.CurrentStreak.Valid || !late.NextRefreshAt.Time.Equal(mar.Add(5*time.Minute)) {
 		t.Fatalf("missing history: %+v %v", late, err)
 	}
