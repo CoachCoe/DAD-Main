@@ -6,7 +6,9 @@ require (
 	github.com/alexedwards/argon2id v1.0.0
 	github.com/fernet/fernet-go v0.0.0-20240119011108-303da6aec611
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/pquerna/otp v1.5.0
+	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
 	github.com/stripe/stripe-go/v87 v87.0.0
 )
 
@@ -20,4 +22,5 @@ require (
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 )

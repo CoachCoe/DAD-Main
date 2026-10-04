@@ -58,7 +58,7 @@ func NormalizeEmail(value string) (string, error) {
 	if !utf8.ValidString(value) {
 		return "", ErrEmail
 	}
-	value = strings.TrimFunc(value, func(r rune) bool { return contains(tables.Whitespace, r) })
+	value = TrimSpace(value)
 	if strings.Count(value, "@") != 1 {
 		return "", ErrEmail
 	}
@@ -86,6 +86,11 @@ func NormalizeEmail(value string) (string, error) {
 		}
 	}
 	return strings.ToLower(local) + "@" + domain, nil
+}
+
+// TrimSpace retains Python's whitespace contract for donor-controlled names too.
+func TrimSpace(value string) string {
+	return strings.TrimFunc(value, func(r rune) bool { return contains(tables.Whitespace, r) })
 }
 
 func labelASCII(label string) (string, error) {

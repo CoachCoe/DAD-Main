@@ -156,6 +156,16 @@ type DonorPreference struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorReferralTouch struct {
+	TokenHash  string             `json:"token_hash"`
+	ReferrerID pgtype.UUID        `json:"referrer_id"`
+	Kind       string             `json:"kind"`
+	TouchedAt  pgtype.Timestamptz `json:"touched_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	ID         pgtype.UUID        `json:"id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorRefund struct {
 	GiftID         pgtype.UUID        `json:"gift_id"`
 	StripeRefundID string             `json:"stripe_refund_id"`

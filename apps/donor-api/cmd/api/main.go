@@ -50,6 +50,7 @@ func run() error {
 		services.Webhook = payments.Receiver{Secret: os.Getenv("STRIPE_WEBHOOK_SECRET"), Inbox: store.StripeInbox{DB: pool}}
 		services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
 		services.Account = store.AccountService{DB: pool}
+		services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
 	}
 	server := httpapi.NewServer(address, services)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
