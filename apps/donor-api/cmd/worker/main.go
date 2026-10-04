@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"impactgraph/donor-api/internal/mail"
+	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/store/queries"
@@ -30,10 +31,8 @@ func run(ctx context.Context, args []string) error {
 	if flags.NArg() != 0 || (*kind != "stripe" && *kind != "projections" && *kind != "login-email" && *kind != "messages") || (*retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_"))) {
 		return errors.New("invalid worker arguments")
 	}
-	// Cutover is explicit. Never start a second side-effecting runtime merely
-	// because a deployment inherited the Python service's environment.
 	if os.Getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
-		return errors.New("Go workers require explicit activation after Python worker handoff")
+		return errors.New("workers require DONOR_GO_WORKERS_ENABLED=true")
 	}
 	gateway, err := payments.NewStripeGateway(os.Getenv("STRIPE_SECRET_KEY"))
 	if err != nil {
@@ -50,6 +49,12 @@ func run(ctx context.Context, args []string) error {
 		return errors.New("donor worker database startup failed")
 	}
 	defer pool.Close()
+	check, finish := context.WithTimeout(ctx, 10*time.Second)
+	err = migrations.Verify(check, pool)
+	finish()
+	if err != nil {
+		return errors.New("donor schema is not current; run migrations before starting workers")
+	}
 	if *retry != "" {
 		retryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		count, err := queries.New(pool).RetryStripeEvent(retryCtx, *retry)

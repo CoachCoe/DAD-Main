@@ -1,99 +1,39 @@
-# POC security and privacy
+# R1 security controls
 
-## Authentication
+Donors authenticate through single-use, 15-minute email proof and hashed, revocable
+30-day sessions. Staff use individual Argon2id passwords plus six-digit TOTP, encrypted
+MFA secrets, consumed counters to prevent replay, persistent lockout, and eight-hour
+hashed sessions. Donor and staff cookies are separate, HttpOnly, and Secure on HTTPS.
+Staff cookies use SameSite=Strict; donor cookies use Lax. Anonymous login responses do
+not reveal whether an address exists.
 
-Operators, verifiers and administrators sign in with an email and password. Passwords are
-hashed with Argon2id. A session is an opaque random token; only its SHA-256 is stored, so a
-database disclosure does not hand over usable sessions, and sessions are revocable. The
-token travels in an httpOnly, SameSite=Lax cookie, marked Secure outside development. The
-web app proxies the API under its own origin so the cookie is first-party rather than
-requiring SameSite=None.
+Named permissions are checked server-side against current staff state. Ownership comes
+from the session and database, never an email or customer ID supplied by the browser.
+Financial mutations record their actor, target, reason, immutable command, and result.
+Staff recovery/role changes revoke sessions and preserve the last active administrator.
 
-Login answers identically for an unknown account and a wrong password, and hashes in both
-cases, so it cannot be used to enumerate accounts.
+Browser mutations require the configured exact Origin. Requests, pages, uploads,
+exports, password verification concurrency, and provider calls have bounded sizes or
+timeouts. Local abuse limits are not a substitute for controlled, distributed ingress
+limits. The Next proxy exposes only `/donor/*`; it is not an arbitrary HTTP proxy.
 
-Reads are deliberately public: programs, claims, provenance, verification status, public
-evidence and integrity verification all work without an account, because public
-verifiability is the point of the product. Mutations require a session, and the role comes
-from the account rather than from the request.
+Stripe handles all card entry. Signed webhooks are verified before persistence; only
+allowlisted event fields are stored. Retryable commands are recorded before provider
+calls. Current remote state is reconciled rather than trusting webhook arrival order.
+Logs must exclude donor payloads, credentials, tokens, and remote response bodies.
 
-A wallet address is bound to an account only after that account signs a single-use
-server-issued nonce (EIP-191); the address is recovered from the signature rather than
-supplied by the caller. A verifier cannot request verification until this binding exists.
-Separation of duties — the operating organisation may not verify its own claim — is decided
-against the program's operator recorded in the database.
+Public content never includes donor data or private source files. Source documents use a
+dedicated encryption key and SHA-256 verification. CSV exports use field allowlists,
+permission checks, private cache headers, formula neutralization, and audit trails.
+Do not publish exports or treat a source document's existence as proof of its accuracy.
 
-The seeded demo accounts share a published password and exist only for a local database, in
-the same spirit as Anvil's published keys. Never create them against a real deployment.
+The frontend restricts connections to its own origin, denies framing, uses no-referrer,
+and disables camera, microphone, and geolocation. Production CSP excludes unsafe-eval;
+inline scripts remain permitted for the current Next static rendering model. A nonce-based
+policy would require a reviewed rendering change. User content must never be inserted as
+raw HTML. Account tokens use fragments removed before network requests.
 
-Not included: SSO, MFA, password reset, account lockout, rate limiting, CSRF tokens
-(mitigated by SameSite), and any password policy beyond what the operator chooses.
-
-## Evidence and transport
-
-Evidence is offchain and carries PUBLIC, RESTRICTED or INTERNAL visibility, and visibility
-is enforced: PUBLIC evidence is readable without an account, RESTRICTED requires a session,
-and INTERNAL is limited to the operating organisation and administrators. Operator mutations
-are scoped to projects owned by their organisation; ADMIN is the documented POC override.
-Public Ethereum contains opaque identifiers and hashes only. Original bytes are hashed before
-processing. The registered commitment and historical provenance are immutable; the local
-filesystem object is deliberately mutable so the tamper demonstration can prove a mismatch.
-Integrity verification reads that object back and compares it with the independently indexed or
-queried registered commitment rather than trusting a mutable evidence-row hash or stored status.
-
-The API requires idempotency keys for important operations. Upload adapters enforce the configured MIME allowlist and size cap before storage; the cap is `MAX_UPLOAD_BYTES`, checked by reading one byte past the limit. The allowlist trusts the client-declared `Content-Type` and does no content sniffing.
-
-## Browser headers
-
-Every response carries a Content-Security-Policy, `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: strict-origin-when-cross-origin`, a Permissions-Policy, HSTS, and
-`X-Frame-Options: DENY` with `frame-ancestors 'none'`. None of these were set before.
-
-Framing is refused rather than restricted because the operator and verifier workspaces
-carry irreversible single-click actions — attest to this bundle, confirm this finding —
-and a framed page is how one of those gets clicked by somebody who thought they were
-clicking something else.
-
-The script policy allows `'unsafe-inline'` and `'unsafe-eval'`. That is the honest
-ceiling for an app rendered this way: Next inlines a hydration bootstrap and its runtime
-evaluates chunks, so a nonce-only policy would require every page to be dynamic. It is
-written down rather than left to look stricter than it is.
-
-## What answers an anonymous caller
-
-Reading the record without an account is the product, so most `GET` routes are public by
-design. Two kinds of public route are limited to the same per-client allowance as the
-public API, because public and expensive and unbounded is a different thing from public:
-
-- `POST /evidence/{id}/verify-integrity`, which reads an object out of storage and hashes
-  it on every call
-- the four `/export/**.csv` routes, each serialising a whole programme or claim
-
-`/metrics` is not public. It answers a scraper on the deployment's own network, or one
-presenting `METRICS_TOKEN`. Prometheus output is not a record, but it is an operational
-map: backlog depth and per-route latency say which part of this is struggling and when a
-queue is worth flooding.
-
-Notification confirm and unsubscribe take their token in the request body, not the query
-string, for the same reason the funder consent token does — a URL is written to access
-logs, kept in browser history and handed onward in a `Referer`.
-
-## Demo affordances that fabricate chain state
-
-The PostgreSQL seed also writes an OPERATOR attestation with a placeholder wallet and transaction hash, marked CONFIRMED. It is served by the claim API exactly as a real attestation would be and satisfies the `OPERATOR_ATTESTATION` requirement. Only the verifier attestation path is real end to end.
-
-`POST /blockchain/operations/{id}/confirm-evidence-demo` and `.../confirm-demo` mark an
-operation CONFIRMED, and the latter transitions a claim to VERIFIED, without any receipt,
-event or confirmation depth. They exist only for the in-memory demo store and now **refuse
-whenever a database is configured**, so they are unreachable in any real deployment. They
-are listed here rather than left for a reader to discover.
-
-Secrets belong in environment variables. Never commit mnemonics, funded keys, RPC tokens,
-AI keys, or production database credentials. Anvil keys are publicly known development
-keys and must never hold value. Sepolia deployment is explicit; browser code never receives
-a backend signing key.
-
-This POC does not include identity proofing, malware scanning, hardened object storage IAM, encryption key management, rate
-limiting, CSRF/session protection, KYC/AML, HSM signing, high-availability workers, or a
-security audit. Add these before processing
-real users or sensitive evidence.
+Release still needs verified legal/entity details, approved retention and incident
+procedures, managed secret storage, backup/restore evidence, trusted ingress protection,
+provider acceptance, and security/accessibility review. This document describes controls
+implemented in code, not a claim of independent certification or production readiness.

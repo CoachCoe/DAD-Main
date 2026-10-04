@@ -1,436 +1,116 @@
-# ImpactGraph
+# ImpactGraph — DAD donor release
 
-ImpactGraph is a Transparency Layer connecting funding, observed financial activity,
-real-world delivery, evidence, attestations, and outcomes into an inspectable provenance
-graph. It answers: **“You say my money produced this outcome. Show me why.”**
+The R1 donor application for Dynamic Aid Delivery: guest giving, direct Link and IRL
+referrals, a donor dashboard, recurring-gift controls, and an audited staff back office.
+The backend is Go, the web application is TypeScript/Next.js, and persistence is
+PostgreSQL. Licensed under MIT.
 
-Ethereum is used for immutable commitments, provenance, and identified attestations—not
-for moving the program's fiat money or storing documents. AI extracts and correlates; it
-cannot establish verification.
+**This build accepts Stripe test payments only.** Live donations, approved tax receipts,
+Wallet passes, and release acceptance are not established by running it locally. See
+[the product contract](docs/donor-domain.md) and [security](SECURITY.md).
 
-The DAD R1 donor product is being built alongside this transparency layer. Its
-[donor domain contract](docs/donor-domain.md) records the agreed giving, identity,
-referral, streak, and refund rules. Guest checkout and Stripe sandbox payment ingestion
-and donor account claim/sign-in/history are implemented, with queued SMTP login email.
-The sandbox donor dashboard shows persisted referral, streak, and recognition metrics;
-run its projection worker alongside the payment worker.
-Live giving and tax receipts remain disabled.
-See [donor sandbox setup](docs/donor-domain.md#running-the-stripe-sandbox).
+R1 is a donor product. It does not deliver aid, assess recipients, run AI services, or
+publish blockchain transactions. The enrolment export is an inactive R2 stub.
 
-```text
-Donor / Operator / Verifier UI
-              ↓
-      FastAPI Transparency API
-       ↓       ↓          ↓
- PostgreSQL  Evidence   AI/financial mocks
-       ↓
- Outbox / chain observer ↔ ImpactRegistry ↔ Anvil or Sepolia
-```
+## Local setup
 
-> **Proof of concept.** This is a demonstration of an architecture, not production
-> software. It is unaudited, the contract has had no third-party review, and the
-> financial, AI, and NGO data are deterministic fixtures. Do not deploy it to mainnet or
-> use it with real funds. See [Limitations](#limitations) and [SECURITY.md](SECURITY.md).
+Requires Go 1.27.1, Node 22.13+ (or Node 24), npm, Docker Compose, and PostgreSQL 16.
+Commands below run from the repository root. The local database uses port 55432.
 
-## Quick start
-
-Requires Python 3.12+, Node 22+, Docker, and Foundry.
-
-If `make` or `git` fails with "You have not agreed to the Xcode license agreements", run
-`sudo xcodebuild -license`. Until then `/usr/bin/make` and `/usr/bin/git` are unusable,
-though the binaries under `/Library/Developer/CommandLineTools/usr/bin/` still work.
-
-ImpactGraph maps PostgreSQL to host port `55432` to avoid common local PostgreSQL and
-other Docker development ports. The database itself still listens on 5432 in its container.
-
-```bash
+```sh
 cp .env.example .env
+# Edit .env, then load it in each terminal that runs an application command:
+set -a
+. ./.env
+set +a
 make install
 make db-up
 make migrate
-make seed
+make api                      # terminal 1
+make web                      # terminal 2, with the same environment loaded
 ```
 
-Then start the chain and the applications:
+Open http://localhost:3000. Without Stripe, SMTP, and encryption configuration, public
+pages and empty states work; giving, account email, and staff operations are unavailable.
+The frontend proxies `/api/donor/*` to `DONOR_API_BASE_URL`; the API listens on 8002.
+Do not put backend secrets in `NEXT_PUBLIC_*` variables.
 
-```bash
-make anvil                      # terminal 1
-make deploy-local               # terminal 2 -- needs DEPLOYER_PRIVATE_KEY in the environment
-# put the deployed address in IMPACT_REGISTRY_ADDRESS, set EVM_SENDER_ADDRESS to the deployer
-# and VERIFIER_WALLET_ADDRESS to a *different* local account, then:
-#
-# Seed AFTER the registry exists. Seeding is what registers the showcase commitment, and
-# integrity verification reads that commitment back from the registry -- seed first and the
-# check answers 409 for the rest of the run.
-make bootstrap-chain
-make api                        # terminal 2
-make web                        # terminal 3
+Use three independently generated encryption keys for email, staff MFA, and content:
+
+```sh
+openssl rand -base64 32 | tr '+/' '-_'
 ```
 
-Open <http://localhost:3000/impactgraph> for the transparency demonstration. The root
-URL hosts the donor release; its separate API setup is documented in
-[the donor domain guide](docs/donor-domain.md). Local Anvil deployment needs `DEPLOYER_PRIVATE_KEY` from a
-development account in the shell environment; never commit it.
+After setting `DONOR_STAFF_ENCRYPTION_KEY`, provision the first named administrator:
 
-`make bootstrap-chain` is required. Deployment alone leaves the registry empty, so the program
-and claim entities the golden path commits against do not exist and `registerEvidence` reverts
-with `UnknownProgram` while `createAttestation` reverts with `UnknownEntity`. The command
-creates both entities, grants `VERIFIER_ROLE` to the configured verifier wallet, refuses to
-grant it to the operator's own address, is idempotent, and refuses to run against Sepolia.
-
-Operators, verifiers and administrators sign in at `/login`; `make seed` creates the demo
-accounts and prints their email addresses and shared password. Reading a claim, its provenance,
-its evidence and its integrity needs no account — public verifiability is the point.
-The showcase starts at VERIFICATION_PENDING. `make demo-reset` is explicitly local-only. The verifier screen uses
-viem and an injected wallet to submit the attestation, while the backend independently
-validates the receipt, the expected registry event, the verification-bundle hash committed
-onchain and the confirmation depth before changing the claim to VERIFIED.
-
-The operator screen accepts an evidence file or can load the INV-8291 fixture. It exercises
-upload, original-byte hashing, mock structured extraction, reconciliation, operator review,
-durable outbox registration, and independently observed confirmation through the API. This
-is the one journey that is wired end to end through the real persistence and chain path.
-The mock extractor only recognises documents containing `INV-8291`; anything else is
-rejected with a 422. Backend signing is restricted to the configured unlocked local Anvil
-sender; the application does not silently use this path for Sepolia.
-
-A program records how many distinct independent verifiers its claims require, defaulting
-to one, which is what every program did before the column existed. An attestation counts
-only when it is confirmed onchain, covers the current evidence bundle, and comes from an
-organisation that is neither the operator nor one already counted. An attestation against
-a superseded bundle is history rather than an objection: it is reported and not counted.
-
-`/financial/funding/{id}/attribution` follows one contribution forward to the claims it
-reached. Each allocation names the single funding record it draws on, so the trail is that
-funder's own rather than a share of a pool; where a funding record stands for many
-contributors they cannot be separated, and the page says so. Money that was never
-committed or never spent is reported beside what was deployed.
-
-The donor dashboard, Claim Inspector and Evidence Inspector read the API. The claim page
-renders the policy requirements, the explainable score and the bundle hash the backend
-computed, and shows VERIFIED once the backend gets there. The evidence page runs the
-integrity check on demand, and `/admin` drives the tampering demonstration.
-
-## Run the demo
-
-One command, nothing else installed but Docker:
-
-```bash
-cd contracts && forge build && cd ..   # the API image deploys from this artifact
-export TINKER_API_KEY=...              # the demo reads uploaded documents with a model
-./scripts/demo.sh up
+```sh
+cd apps/donor-api
+go run ./cmd/staff --email named.person@example.org --name 'Named Person'
 ```
 
-The demo runs `AI_PROVIDER=tinker`, so an uploaded invoice is read by
-`thinkingmachines/Inkling-Small` rather than matched against a fixture. `demo.sh up`
-refuses to start without a key rather than failing on the operator's first upload. To run
-it offline instead, set `AI_PROVIDER=mock` in `docker-compose.demo.yml`; the fixture
-reader recognises only the seeded `INV-8291`.
+The command prints a private, one-use invitation. Protect that output. It refuses if
+any staff account already exists. Later invitations and recovery use `/staff` and require
+administrator permission. Provision two individual administrators; do not share MFA.
 
-That starts a disposable chain, deploys the registry, creates the onchain program and
-claim entities, migrates, seeds, and smoke-tests the result — then prints the URLs. The
-whole golden path completes on it, including the wallet-signed attestation. The showcase
-resets itself every 30 minutes, because anyone can drive it to VERIFIED.
+## Payments and workers
 
-`./scripts/demo.sh down` discards the chain and the data; `reset` puts the showcase back
-immediately; `logs` follows a service.
+Configure a Stripe **test** secret key and webhook signing secret. The receiver accepts
+snapshot events at `2026-09-30.endive`, matching stripe-go v87. Card entry and card updates
+are hosted by Stripe. Use `/api/donor/stripe/webhook` as the externally reachable route.
+See [operations](docs/operations.md) for supported events and recovery behavior.
 
-The chain publishes port 8545 so a browser wallet can reach it. If something else on the
-host already holds that port, the wallet will silently talk to the wrong chain — set
-`CHAIN_PORT` and `PUBLIC_RPC_URL` to move it.
+Workers start only with `DONOR_GO_WORKERS_ENABLED=true`. Run each kind in a separate
+terminal with the environment loaded:
 
-On a host, set `PUBLIC_API_URL` and `PUBLIC_RPC_URL` to the addresses a visitor's browser
-will use; they are inlined into the web bundle at build time.
-
-This stack is deliberately separate from `docker-compose.prod.yml`, which points at a real
-network and must never run a chain of its own.
-
-## Deployment
-
-Two separate things, deliberately kept apart: putting the contract on a public chain, and
-running the application.
-
-### Sepolia
-
-```bash
-export SEPOLIA_RPC_URL=...          # authenticated endpoint
-export DEPLOYER_PRIVATE_KEY=...     # Sepolia-only, funded
-export OPERATOR_WALLET_ADDRESS=...
-export VERIFIER_WALLET_ADDRESS=...  # must differ from the operator and the deployer
-./scripts/deploy-sepolia.sh
+```sh
+make worker KIND=stripe
+make worker KIND=projections
+make worker KIND=login-email
+make worker KIND=messages
 ```
 
-The script deploys the registry, assigns the operator and verifier roles, bootstraps the
-program and claim entities, verifies all five facts on chain with `cast`, and writes the
-addresses and transaction hashes into [`docs/sepolia-deployment.md`](docs/sepolia-deployment.md).
+SMTP delivery requires STARTTLS and the configured encryption key. Workers send real
+email to the configured addresses, even while gifts are test payments. Local tests use
+injected transports. Never point synthetic test data at a real mail provider.
 
-It is not a Make target because it is irreversible and public. It refuses to run in CI,
-checks the RPC really reports chain 11155111, checks the deployer is funded, refuses a
-verifier equal to the operator or the deployer, prints what it is about to do, and requires
-you to type `deploy to sepolia`. Nothing is recorded unless the on-chain verification
-passes. It never runs merely because an RPC URL is set.
+## Checks
 
-Entity identifiers and commitments are computed by `make chain-args` and passed to the
-Foundry script: they use the framed encoding in [`docs/hashing.md`](docs/hashing.md), which
-Solidity cannot reproduce. Signing stays in Foundry — the backend holds no key material,
-and verifier attestations are signed by an externally managed browser wallet.
+Integration tests require a dedicated synthetic database named `donor_go`. They must
+never run against the application database.
 
-Afterwards set `CHAIN_ID=11155111`, `DEMO_MODE=sepolia`, the RPC, the registry address and
-the explorer URL in your environment, leaving `EVM_SENDER_ADDRESS` empty. Use
-`make new-sepolia-demo-run` to mint a collision-free identifier for each public rehearsal
-rather than trying to reset a public chain. The individual steps remain available as
-`make deploy-sepolia` and `make configure-sepolia-roles` if you would rather drive them
-yourself.
-
-No Sepolia deployment is claimed in this repository until a real address and transaction
-are recorded in [`docs/sepolia-deployment.md`](docs/sepolia-deployment.md).
-
-### Registering the seeded evidence on a public network
-
-The backend holds no key on a public network, so it cannot register the seeded commitment
-itself. The operator signs it through Foundry, and the backend records the result only
-after verifying the receipt:
-
-```bash
-export IMPACT_REGISTRY_ADDRESS=0x...        # from the deployment
-export RPC_URL=https://...                  # your Sepolia RPC
-export DEPLOYER_PRIVATE_KEY=0x...           # the operator wallet
-./scripts/register-seed-evidence.sh
-```
-
-It checks the wallet actually holds `OPERATOR_ROLE` before spending anything, refuses if
-the evidence is already registered (registrations are immutable by design), and records
-the transaction only if the receipt carries an `EvidenceRegistered` event for that
-evidence, from that registry, committing the expected hash.
-
-Without this step, integrity verification returns 409: it reads the commitment back from
-the registry, and there is nothing to read.
-
-### The application
-
-Platform-neutral containers: an API image, a web image, an outbox worker sharing the API
-image, and PostgreSQL. They run on any host that speaks Docker Compose, and the same images
-push to any registry.
-
-```bash
-cp .env.production.example .env.production   # then fill it in
-./scripts/deploy.sh release                  # build, up, migrate, seed, smoke
-```
-
-Individual steps are `build`, `push`, `up`, `migrate`, `seed`, `smoke`, `logs`, `down`, also
-available as `make deploy-build`, `make deploy-up`, `make deploy-release` and so on.
-
-`release` ends with a smoke test that checks the API health endpoint, the program, claim and
-provenance read models, the web app, and that evidence integrity resolves the stored object
-and reports MATCH — not merely that a container started.
-
-Preflight refuses to start when the contract ABI has not been built, when `AI_PROVIDER`
-names a provider that does not exist, and, on Sepolia, when `CHAIN_ID` is wrong, the
-registry address is missing, or `EVM_SENDER_ADDRESS` is set — the backend must not sign on a
-public network.
-
-`NEXT_PUBLIC_*` values are inlined into the web bundle at build time, so changing them
-requires a rebuild rather than a restart.
-
-Not included, and required before this faces real users: TLS termination, a managed database
-with backups, production secret management, MFA/SSO, and identity proofing. The POC does
-have Argon2 password authentication, revocable server-side sessions, role checks, wallet
-proof-of-control, and project-scoped operator authorization. See
-[security](docs/security.md).
-
-## Financial data
-
-Money is always an integer number of minor units plus an ISO currency, never a float:
-$4,200.00 is `420000` and `"USD"`. `Money` refuses a float, a bool, a negative, and any
-attempt to add two currencies without a recorded rate.
-
-Funding, allocations, observed payments, deliveries and outcomes are real records. Payments
-are imported from a `FinancialDataProvider` rather than written by hand, and are unique per
-provider reference, so re-importing a statement records nothing new. Spend beyond the
-remaining allocation is rejected rather than recorded.
-
-Reconciliation resolves the payment and delivery an invoice refers to *from the ledger* and
-compares against those. A document with no counterpart payment is `UNMATCHED`; one that
-contradicts the payment it cites is `CONFLICT`. The verdict is written back onto the
-payment, so the money trail shows which spend is evidenced and which is not.
-
-```bash
-curl localhost:8000/financial/programs/program-clean-water-kenya-2026   # public
-curl localhost:8000/financial/transactions/ftx-9182                     # public
-# operator only, idempotent:
-curl -X POST -H 'Idempotency-Key: ...' \
-  localhost:8000/financial/programs/program-clean-water-kenya-2026/import
-```
-
-The seeded statement deliberately contains a payment with no invoice and one that
-contradicts the invoice it cites, so `UNMATCHED` and `CONFLICT` are states the demo can
-actually reach. `/financial` shows the whole trail without an account.
-
-## Operating it
-
-Application and uvicorn records render as one JSON stream, and a correlation identifier
-follows a unit of work from the request that started it to the outbox worker that finishes
-it. `/health/live` is dependency-free and is what the container probes; `/health/ready`
-checks PostgreSQL, the RPC and the evidence store, answers 503 with a per-component
-verdict, and is what the compose dependency gates and the smoke tests use.
-
-`/metrics` serves the API's counters to a scraper on the deployment's own network, or to
-one presenting `METRICS_TOKEN` as a bearer token; setting that token replaces the network
-check rather than adding to it. The worker runs its own exporter on port 9100 because it
-is a separate process. The two numbers worth watching are the outbox depth and
-the age of its oldest unsubmitted row: a stalled outbox is the one failure this system
-would otherwise hide, since every read model keeps answering exactly as before.
-
-```bash
-make worker                     # drains the chain outbox
-cd apps/api && .venv/bin/python -m impactgraph.cli notifications
-```
-
-Anyone can follow a claim with an email address and no account. Nothing is sent until that
-address confirms, and when a claim's status changes -- verified, challenged, rejected --
-the people following it are told. Delivery is recorded and deduplicated. The transport is
-a console implementation: the pipeline is real, the last hop prints instead of sending,
-and it says so rather than pretending.
-
-## Tests
-
-```bash
-make test-contracts
-make test-api
-make test-web
+```sh
+docker run -d --name impactgraph-go-test-postgres -p 127.0.0.1:55440:5432 \
+  -e POSTGRES_USER=go_test -e POSTGRES_PASSWORD=go_test -e POSTGRES_DB=donor_go \
+  postgres:16-alpine
+# Wait for: docker exec impactgraph-go-test-postgres pg_isready -U go_test -d donor_go
+export TEST_DATABASE_URL=postgresql://go_test:go_test@localhost:55440/donor_go
+(cd apps/donor-api && DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/migrate)
+make test
+(cd apps/web && npx playwright install chromium)
 make test-browser-e2e
-cd apps/web && npm run build
 ```
 
-With PostgreSQL, Anvil, and a deployed local registry configured, run
-`make test-local-e2e` to exercise database intent → outbox → EVM transaction → validated
-event → confirmed database state. `make test-browser-e2e` starts the API and web application
-and drives Chromium through donor provenance inspection and durable operator evidence
-registration. Install its browser once with `cd apps/web && npx playwright install chromium`.
+`make test` checks Go formatting, vet, race-enabled tests, compilation, frontend lint,
+unit tests, generated route types, TypeScript, and the production build. Browser tests
+start a local Go API and Next server. Use a synthetic application database and no live
+SMTP settings for those tests. CI runs the same checks with PostgreSQL and Chromium.
 
-See [architecture](docs/architecture.md), [trust model](docs/trust-model.md),
-[provenance](docs/provenance-model.md), [state machines](docs/state-machines.md),
-[hashing](docs/hashing.md), the [demo script](docs/demo-script.md), the
-[security notes](docs/security.md), and the [decision record](docs/decisions.md).
+SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc; commit SQL and its
+generated Go query code together. Applied migrations are immutable and checksum-checked.
 
-## Money before it has a programme
+## Containers and deployment
 
-Contributions arrive against an organisation and are assigned to a programme afterwards,
-or not yet. `GET /financial/organizations/{ref}/position` publishes what has been given
-and how much of it is still unassigned, per currency — one of the four things the
-operating organisation commits to publishing, and not answerable per programme, because
-unrestricted money has no programme.
+See [operations](docs/operations.md). Docker images run as non-root users; Compose binds
+web and API ports to loopback for a separately managed HTTPS ingress. No command deploys
+contracts, seeds demonstration accounts, enables workers, or deletes database volumes
+implicitly. Test-only readiness is not approval to solicit live donations.
 
-A funding row may stand for many small contributions at once, carrying a contributor count
-instead of a name, so a daily total does not need a row per payment. An individual row is
-kept wherever somebody has asked to be named against what they funded. See ADR-018.
+## Layout
 
-Assignment is one directional: money that has been allocated cannot be moved, because a
-published attribution has already told somebody what their contribution paid for.
+- `apps/donor-api/cmd`: API, workers, migrations, administrator bootstrap.
+- `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, credentials.
+- `apps/donor-api/db`: versioned SQL migrations and sqlc queries.
+- `apps/web`: public website, donor account, staff interface, browser and unit tests.
+- `docs`: product rules, architecture, operations, and security guidance.
 
-```bash
-curl -s localhost:8000/financial/organizations/org-global-water/position
-```
-
-## Reviewing what looks wrong
-
-Verification examines one document at a time, so the patterns that indicate fraud —
-one invoice billed to two funders, one photograph standing in for three deliveries — are
-invisible to it. `POST /risk/scan` runs three deterministic detectors across one
-organisation's own records and posts what it finds to a queue a person decides in.
-
-Nothing it finds changes a claim, notifies anyone outside the organisation, or becomes
-public. Closing a finding requires a reason, and those reasons are the only measure of
-how often the checks were right; `GET /risk/precision` reports it. See ADR-015 to ADR-017.
-
-Near-duplicate image comparison grows faster than a portfolio does, so the HTTP scan
-refuses above a ceiling and large tenants run it out of band:
-
-```bash
-cd apps/api && .venv/bin/python -m impactgraph.cli risk-scan --organization org-global-water
-```
-
-## Asking the people a claim describes
-
-A claim that nobody named in it has been asked about rests on the operating
-organisation's own account. `BENEFICIARY_CONFIRMATION` is a policy requirement that warns
-when nobody has been asked and fails when somebody disputes the delivery.
-
-The channel is **disabled** until the safeguarding review in
-[docs/beneficiary-safeguarding.md](docs/beneficiary-safeguarding.md) is signed off, and
-there is no SMS or USSD transport. Enrolment is deliberately separate in time from
-delivery, because an operator controlling both at once controls who gets asked.
-
-## Limitations
-
-The banking provider, AI provider, NGO records, outcomes and all demo evidence are
-fictional and deterministic. Never present mock or Anvil results as Ethereum verification.
-
-What is real: the Solidity registry and its role checks; evidence upload, original-byte
-hashing and the immutability of the registered commitment; integrity verification against the stored bytes; the
-transactional outbox, idempotency records, audit log and correlation IDs; the chain
-observer's receipt, event, bundle-hash and confirmation-depth checks; and the verifier
-wallet signing path.
-
-What is not:
-
-- **Authentication is basic by design.** Email and password with server-side sessions; no
-  SSO, MFA or password reset. See [security](docs/security.md) and ADR-005.
-- **No payment *initiation*, by design.** ImpactGraph observes financial activity through
-  a `FinancialDataProvider` and never moves money. The provider is a deterministic mock;
-  a real adapter implements the same interface without anything downstream changing.
-- **Extraction confidence is self-reported.** A model asked how sure it is produces a
-  plausible number, not a calibrated one, so nothing downstream is gated on it. The fields
-  reconciliation resolves a payment against — invoice number, amount and currency — are
-  confirmed by an operator whatever the model claims, because a single misread digit turns
-  a matched payment into an unmatched one. `AI_PROVIDER` names `mock` or `tinker`, and
-  anything else fails at startup rather than silently using the mock.
-- **PDFs are refused, not read.** Only PNG, JPEG and plain text reach the model. A PDF
-  decoded as text is mojibake, and a model handed mojibake returns confident nonsense;
-  rendering pages to images is the fix and is not built.
-- **Incomplete verifier decisions.** Reject is implemented as an idempotent audited domain
-  operation. Request-more-evidence remains disabled because the specification does not define
-  whether it returns a claim to EVIDENCE_PENDING or leaves it VERIFICATION_PENDING.
-- **Attestation state dimensions are not separated.** A single attestation status still carries
-  wallet/chain progress; blockchain confirmation and semantic review need separate fields.
-- **Partial evidence set.** The current seeded verification bundle contains the real invoice
-  commitment only. Receipt, completion report, and photograph records/artifacts remain to be
-  seeded and linked before the five-object showcase is complete.
-- **The seeded operator attestation is a fixture.** `seed_read_model` writes an OPERATOR
-  attestation with a placeholder wallet and transaction hash, marked CONFIRMED, and the
-  claim API serves it exactly as it would a real one. It satisfies the
-  `OPERATOR_ATTESTATION` requirement without any chain activity. Only the *verifier*
-  attestation path is real end to end.
-- **Sepolia only, and unaudited.** The registry is deployed to Sepolia and the golden
-  path has completed there; see [docs/sepolia-deployment.md](docs/sepolia-deployment.md).
-  Nothing here has been audited and none of it belongs on mainnet.
-- **Two parallel models.** Four endpoints run only on the in-process demo store:
-  `POST /verification-requests/{id}/submit-attestation`,
-  `POST /blockchain/operations/{id}/confirm-evidence-demo`,
-  `POST /blockchain/operations/{id}/confirm-demo` and
-  `GET /blockchain/transactions/{hash}`. The middle two fabricate onchain confirmation and
-  the first fabricates a transaction hash. All are listed in
-  [security](docs/security.md) rather than left to be discovered.
-- **CI coverage is narrower than the trust boundary.** CI runs Foundry, backend unit/API
-  against a PostgreSQL service — so the migrations are applied where they are deployed
-  rather than only against SQLite — frontend unit/type, production build gates, and the
-  Playwright journeys against the full demo stack with `AI_PROVIDER=mock`. It does not
-  run the Anvil-backed evidence integration script; run `make test-local-e2e` locally
-  before changing anything on the chain path. Receipt observation is the exception: the
-  check that an event came from the configured registry, and not from any contract that
-  emits the same signature, is covered against stub RPC objects and needs no chain.
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the gates a change must pass, and the
-conventions this codebase follows.
-
-## Security
-
-This is an unaudited proof of concept. Do not deploy it to mainnet or use it with real
-funds. To report a vulnerability, see [SECURITY.md](SECURITY.md) — please do not open a
-public issue.
-
-## License
-
-[MIT](LICENSE) © 2026 Shawn Coe.
+[Contributing](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [MIT license](LICENSE)

@@ -31,6 +31,7 @@ type CheckoutSource interface {
 	BeginCheckout(context.Context, payments.CheckoutRequest) (payments.CheckoutResult, error)
 }
 type Services struct {
+	Ready           func(context.Context) error
 	Content         ContentSource
 	Dashboard       DashboardSource
 	Webhook         WebhookReceiver
@@ -48,8 +49,6 @@ type Services struct {
 	EmailConfigured bool
 }
 
-// NewServer keeps the incomplete rewrite off the existing Python service port.
-// Readiness must remain unavailable until the complete donor path is implemented.
 func NewServer(address string, services Services) *http.Server {
 	content, dashboard := services.Content, services.Dashboard
 	origin := services.Origin
@@ -75,7 +74,13 @@ func NewServer(address string, services Services) *http.Server {
 	installContentRoutes(mux, services, guard, reply)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { reply(w, 200, map[string]string{"status": "alive"}) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, 503, map[string]string{"detail": "Go donor rewrite is not ready for traffic"})
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if services.Ready == nil || services.Ready(ctx) != nil {
+			reply(w, 503, map[string]string{"detail": "Donor database unavailable or migrations pending"})
+			return
+		}
+		reply(w, 200, map[string]string{"status": "ready", "payments": "test_mode_only"})
 	})
 	mux.HandleFunc("GET /donor/public/content", func(w http.ResponseWriter, r *http.Request) {
 		if content == nil {

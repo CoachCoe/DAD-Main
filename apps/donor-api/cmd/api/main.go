@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"impactgraph/donor-api/internal/httpapi"
+	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
 )
@@ -45,6 +46,13 @@ func run() error {
 			return errors.New("donor database startup failed")
 		}
 		defer pool.Close()
+		services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
+		check, finish := context.WithTimeout(context.Background(), 10*time.Second)
+		err = services.Ready(check)
+		finish()
+		if err != nil {
+			return errors.New("donor schema is not current; run migrations before starting the API")
+		}
 		services.Content = store.ContentReader{DB: pool}
 		services.Partner = store.PartnerService{DB: pool}
 		services.Dashboard = store.DashboardReader{DB: pool}

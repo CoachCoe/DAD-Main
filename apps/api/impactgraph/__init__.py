@@ -1,1 +1,0 @@
-"""ImpactGraph transparency API."""

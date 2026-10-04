@@ -1,92 +1,65 @@
 # Architecture
 
-ImpactGraph separates claims about the real world from evidence that a named actor made
-those claims. PostgreSQL is the workflow/indexing store; Ethereum is the immutable
-commitment and attestation authority; neither replaces the other.
+The R1 application is a Next.js TypeScript web client backed by a Go HTTP service and
+PostgreSQL 16. Hosted Stripe Checkout handles USD test payments and card setup. Separate
+Go workers reconcile signed Stripe events, refresh donor projections, and deliver email.
 
-```mermaid
-flowchart TB
-  subgraph Clients
-    D[Donor UI]
-    O[Operator UI]
-    V[Verifier UI + wallet]
-  end
-  D & O & V --> API[Transparency API / FastAPI]
-  API --> Domain[Domain and application services]
-  Domain --> DB[(PostgreSQL)]
-  Domain --> Store[(Offchain evidence storage)]
-  Domain --> AI[Mock/real AI provider]
-  Domain --> Financial[FinancialDataProvider: mock bank feed]
-  DB --> Worker[Outbox and chain observer]
-  Worker --> Registry[ImpactRegistry]
-  V -->|wallet-signed transaction| Registry
-  Registry --> Ethereum[EVM: Anvil or Sepolia]
-  Worker -->|receipt + expected event + confirmations| DB
+```text
+Browser → Next.js /api/donor/* → Go HTTP API → PostgreSQL
+             ↓                     ↓               ↑
+       Stripe-hosted UI        Stripe API      Go workers
+                                                ↓
+                                          SMTP with STARTTLS
 ```
 
-## Authority boundaries
+The browser uses the same origin for API requests. The Go service owns authorization,
+validation, CSRF checks, and business rules. The Next proxy cannot grant permissions.
+Donor and staff cookies identify distinct server-side sessions. Staff require individual
+passwords and MFA; roles map to named permissions checked against current database state.
 
-- `ImpactRegistry` authorizes blockchain actors and rejects duplicate/unknown entities.
-- Domain services authorize application personas and validate lifecycle transitions.
-- Claim verification is decided by `VerificationPolicyService`, reached through
-  `verification.evaluate_persisted_claim` from both the durable path
-  (`worker._confirm_verifier_attestation`) and the read model (`read_model.verification`),
-  so one requirement list governs both. No AI, reconciliation result, operator action or
-  frontend assertion can produce VERIFIED on any path, and a claim that was verified and
-  then fails a requirement is lowered to CHALLENGED rather than left reading as verified.
-- The AI provider proposes typed facts; it never changes a claim to VERIFIED.
-- The verifier signs a deterministic bundle containing the exact reviewed claim/evidence.
+## Financial consistency
 
-## Core flows
+Guest checkouts capture first-touch attribution before accounts exist. Durable commands
+are committed before external mutations and carry frozen parameters and stable processor
+idempotency keys. An ambiguous provider response is reconciled before another mutation;
+old unknown commands require operator review rather than a new blind request.
 
-Backend-originated chain writes use a transactional outbox: persist intent, audit entry,
-blockchain operation, and job atomically; submit later; verify the receipt/event; then
-advance domain state. Wallet-originated writes begin with a backend intent, are submitted
-by the wallet, and are independently observed by the backend. Frontend assertions are not
-trusted.
+The webhook verifies the raw request signature and persists allowlisted fields before
+acknowledging. Workers use transaction locks and current provider state to reconcile
+out-of-order events. Checkout completion is not collection. Gifts, billing periods,
+refund state, append-only observations, projections, and notification intents commit
+together. Money is integer USD cents. Referral credit is one level only.
 
-Evidence storage hashes exact uploaded bytes before processing. Registered objects are
-immutable, and integrity verification re-reads the stored object and rehashes it. Derived
-artifacts would carry separate hashes; no derivation step exists yet. Corrections are
-modelled as a new evidence record plus a SUPERSEDES edge, but no code path writes one.
+Domain calculations in `internal/recognition` are independent of HTTP and Stripe. Queries in
+`db` generate the typed store layer with sqlc. Donor reads use indexed projections;
+financial replay runs in event/projection workers. Projection expiry makes incomplete
+streaks explicitly unavailable instead of showing invented zeroes.
 
-## Telling people things
+SMTP is at least once. Encrypted delivery payloads and stable Message-IDs survive retries;
+provider acknowledgement loss can still cause duplicate mail. Optional messages check
+current consent before delivery. Logs avoid payloads and donor identifiers.
 
-A status change writes its intent into the same outbox, in the transaction that decided it,
-and a separate dispatcher sends it. Each worker claims only its own topics. Following a
-claim needs no account: the subscription holds an address and the hash of a token, and
-nothing is sent until that address confirms. Delivery is recorded, deduplicated per
-subscriber per event, and retried until it succeeds or is given up on and said to be.
+## Public content
 
-## Security assumptions
+Staff publish a pair of spreadsheet CSV snapshots. Source documents are private,
+encrypted, and integrity-checked; public data contains no source bytes or private donor
+information. Ledger values carry an as-of date and visibly mark illustrative figures.
+Publishing is manual; there is no CMS or live outcome pipeline.
 
-The POC has upload limits and type validation, ORM queries, opaque onchain IDs, and
-environment-held secrets. Operators, verifiers and administrators authenticate with an
-email and password hashed with Argon2id, against revocable server-side sessions, and the
-role comes from the account rather than from a request header. Wallet control is proven by
-signature over a single-use server-issued nonce, not asserted. Operator mutations and
-INTERNAL evidence are scoped to the caller's organisation. See [security](security.md) and
-ADR-005. Local Anvil accounts are unsafe outside local development. Production identity proofing, fine-grained document IAM, KYC/AML, HSM-backed
-keys, and hardened job infrastructure are not implemented.
+## Database lifecycle
 
-## Financial records
+Embedded SQL migrations are applied under a transaction advisory lock and recorded with
+SHA-256 checksums. The API and workers require the complete known migration history.
+`migrate --adopt-existing` supports a database at the former `0030_donor_public_content`
+revision only after comparing the donor schema to the embedded baseline. It preserves all
+existing records and leaves unrelated legacy tables untouched. Back up and restore-test
+before adoption; removal of obsolete deployed data is a separate operational decision.
 
-Money is an integer count of minor units plus an ISO currency, in two columns, never a
-float and never a single string. Funding, allocations, observed payments, deliveries and
-outcomes are typed records.
+## Boundaries
 
-ImpactGraph observes financial activity; it does not initiate it. `FinancialDataProvider`
-is a read-only feed, imported idempotently by provider reference. The allocation is a
-spending ceiling: an import that would exceed the remaining balance is rejected, so the
-ledger cannot report spend the program never committed to.
+Only the donor product, staff operations, marketing content, and partner contact form run
+at R1. The recipient queue/export is inactive. There are no AI, evidence-processing,
+blockchain, recipient eligibility, aid-payment, or partner-portal services.
 
-Evidence reconciliation resolves its counterparts from these records rather than from
-values supplied by the caller, which is what makes a mismatch meaningful.
-
-## Future evolution
-
-Likely extensions include verified organization credentials, payment-provider adapters,
-multiple/threshold verifiers, public verification APIs, privacy-preserving disclosure,
-external auditors, alternative evidence stores, and carefully versioned additional EVM
-networks. None are required for the POC.
-
+This build is test-mode only. Readiness confirms a usable, migrated database; it does not
+certify legal approval, Wallet integration, delivery operations, or production capacity.
