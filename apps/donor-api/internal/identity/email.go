@@ -13,9 +13,8 @@ import (
 	"unicode/utf8"
 )
 
-// Generated from Python's stringprep and Unicode 3.2 normalization data by
-// apps/api/tests/export_donor_identity.py. Changes require identity compatibility
-// review, not automatic regeneration during ordinary Go dependency upgrades.
+// Frozen from the former backend's stringprep and Unicode 3.2 normalization data.
+// Changes require identity compatibility review, not dependency regeneration.
 //
 //go:embed tables.json
 var encodedTables []byte

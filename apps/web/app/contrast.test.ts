@@ -1,15 +1,3 @@
-/**
- * The stylesheet states its own contrast ratios. This checks they are true.
- *
- * Those comments are the only record of why each colour is the shade it is, and a palette
- * is exactly the kind of thing that gets adjusted by eye later. Without this, the first
- * person to warm up a grey takes a label below AA and the comment above it keeps claiming
- * otherwise.
- *
- * Thresholds are WCAG 2.1: 4.5:1 for body text, 3:1 for text at 18.66px bold or 24px, and
- * 3:1 for the boundary of a control you have to be able to find.
- */
-
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -42,7 +30,7 @@ function contrast(foreground: string, background: string): number {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
-describe("the palette meets the ratios the stylesheet claims for it", () => {
+describe("the palette meets accessible text contrast thresholds", () => {
   const paper = token("paper");
 
   it.each([
