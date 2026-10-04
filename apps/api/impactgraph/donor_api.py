@@ -137,6 +137,9 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
         if not limiter.check(address)[0]:
             raise HTTPException(429, "Too many requests", headers={"Retry-After": "60"})
 
+    from .donor_staff_api import install_staff_routes
+    install_staff_routes(app, factory, settings, browser_request)
+
     @app.middleware("http")
     async def private_responses(request, call_next):
         response = await call_next(request)

@@ -32,6 +32,46 @@ class EntityMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DonorStaffRecord(EntityMixin, Base):
+    __tablename__ = "donor_staff"
+    email: Mapped[str] = mapped_column(String(320), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    role: Mapped[str] = mapped_column(String(16))
+    disabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    password_hash: Mapped[str | None] = mapped_column(String(255))
+    totp_secret: Mapped[bytes | None] = mapped_column(LargeBinary)
+    totp_counter: Mapped[int] = mapped_column(BigInteger, default=-1, server_default="-1")
+    failures: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (CheckConstraint("role IN ('SUPPORT', 'FINANCE', 'ADMIN')", name="ck_donor_staff_role"),)
+
+
+class DonorStaffInviteRecord(EntityMixin, Base):
+    __tablename__ = "donor_staff_invites"
+    staff_id: Mapped[UUID] = mapped_column(ForeignKey("donor_staff.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pending_secret: Mapped[bytes | None] = mapped_column(LargeBinary)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class DonorStaffSessionRecord(EntityMixin, Base):
+    __tablename__ = "donor_staff_sessions"
+    staff_id: Mapped[UUID] = mapped_column(ForeignKey("donor_staff.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class DonorStaffAuditRecord(EntityMixin, Base):
+    __tablename__ = "donor_staff_audit"
+    actor_id: Mapped[UUID | None] = mapped_column(ForeignKey("donor_staff.id"), index=True)
+    action: Mapped[str] = mapped_column(String(80), index=True)
+    target: Mapped[str] = mapped_column(String(160))
+    details: Mapped[dict] = mapped_column(JSON)
+
+
 class DonorRecord(EntityMixin, Base):
     """A guest donor can own checkout records before proving control of their email."""
 

@@ -666,3 +666,53 @@ a duplicate. Failures use bounded exponential retry, park after five attempts, a
 retain only an exception class rather than provider details. Delivery and suppression
 records are retained; migration downgrade refuses to discard them. A queued or sent
 email is never treated as proof that a payment recovered.
+
+## Staff identity and permissions
+
+The R1 back office is `/staff`, with `/staff/sign-in` and private invitation activation
+at `/staff/activate`. It is independent of donor sessions and the ImpactGraph demo users.
+No demonstration account or request header confers staff permission. Every staff member
+has an individual email, name, role, Argon2id password, and mandatory authenticator code.
+
+Set a distinct `DONOR_STAFF_ENCRYPTION_KEY` (Fernet key) in the secret manager before
+provisioning. After migration 0028, bootstrap the first administrator once:
+
+```sh
+python -m impactgraph.donor_staff --email named.person@example.org --name 'Named Person'
+```
+
+This command refuses when any staff account exists. It prints one private invitation;
+use an approved private channel to deliver it and do not log or commit it. Administrators
+create later invitations in the back office without a developer. Invitations expire in
+24 hours, are single use, and allow five activation attempts. The invitee establishes
+their own password and authenticator before access is granted. The activation fragment
+is removed from browser history before API use; secrets are not returned by staff lists.
+
+Authenticator codes use the cryptography library's RFC 6238 TOTP implementation, six
+digits and a 30-second interval with one interval of clock tolerance. Accepted counters
+are consumed under the staff-row lock to prevent replay. Passwords are Argon2id hashes;
+TOTP secrets are encrypted separately from the database. Five failed logins lock the
+account for 15 minutes, persisted across API processes. Edge rate limiting is also
+required to bound attempts against unknown accounts. Sessions are hashed, HttpOnly,
+SameSite=Strict, secure on HTTPS, and expire after eight hours. Every request rechecks
+the current account and permissions. Disabling an account revokes its sessions. An
+administrator cannot disable themselves or remove the last active administrator.
+
+| Role | Named permissions |
+| --- | --- |
+| Support | `donor.read`, `message.resend` |
+| Finance | Support plus `gift.refund`, `gift.cancel`, `data.export` |
+| Administrator | Finance plus `staff.manage`, `content.publish`, `audit.read` |
+
+Permissions are enforced on the server. Defining a permission does not activate its
+endpoint: financial actions, exports, resends, and content publishing are implemented
+in their corresponding modules. Staff can search donors and inspect paginated gifts,
+streak snapshots, direct referrers and referred donors with the Link/IRL type. Reads,
+logins, invitations, activation, and disable actions record actor, timestamp, target,
+and result in the staff audit table. No password, authenticator secret, invitation token,
+or donor search term is copied to audit details. Migration downgrade preserves records
+unless the staff tables are empty.
+
+Recovery of a lost authenticator or password requires an approved staff recovery
+workflow; do not disable MFA or edit credential hashes to bypass it. Keep at least two
+individually provisioned administrators before operation.
