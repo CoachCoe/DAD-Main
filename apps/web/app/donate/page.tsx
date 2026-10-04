@@ -37,7 +37,7 @@ export default function DonatePage() {
           "Idempotency-Key": attempt.current.key }, body: payload,
       });
       const destination = new URL(result.url);
-      if (destination.protocol !== "https:" || destination.hostname !== "checkout.stripe.com") {
+      if (destination.protocol !== "https:" || destination.host !== "checkout.stripe.com" || destination.username || destination.password) {
         throw new Error("Checkout returned an unexpected destination.");
       }
       window.location.assign(destination.href);
@@ -56,10 +56,10 @@ export default function DonatePage() {
         <p className="note">This is a sandbox preview. No real donation is collected or badge awarded.</p>
         <fieldset disabled={busy}>
           <legend>Gift frequency</legend>
-          <label className="field"><span><input type="radio" name="frequency" checked={monthly}
-            onChange={() => setMonthly(true)} /> Monthly</span></label>
-          <label className="field"><span><input type="radio" name="frequency" checked={!monthly}
-            onChange={() => setMonthly(false)} /> One time</span></label>
+          <label className="choice"><input type="radio" name="frequency" checked={monthly}
+            onChange={() => setMonthly(true)} /> Monthly</label>
+          <label className="choice"><input type="radio" name="frequency" checked={!monthly}
+            onChange={() => setMonthly(false)} /> One time</label>
         </fieldset>
         <fieldset disabled={busy}>
           <legend>Choose an amount</legend>

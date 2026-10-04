@@ -85,6 +85,8 @@ h1,h2,h3,p{margin-top:0}
 .button:disabled{opacity:.65;cursor:default}
 .secondary{font-family:var(--font-display);font-weight:700;font-size:15px;border:1.5px solid var(--ghost-line);background:transparent;color:var(--ink);border-radius:var(--radius-pill);padding:12px 24px;cursor:pointer}
 .secondary:hover{border-color:var(--ink)}
+.hero .secondary{color:var(--paper);border-color:var(--ghost-line-dark)}
+.hero .secondary:hover{border-color:var(--paper)}
 a.secondary{display:inline-block;text-align:center;text-decoration:none}
 a.secondary+a.secondary{margin-top:10px}
 .full{width:100%;margin-top:16px}
@@ -141,7 +143,7 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
 }
 .actionRow{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
 .actionRow>*{flex:1 1 auto;min-width:150px;text-align:center}
-.skipLink{position:absolute;left:16px;top:-56px;z-index:20;padding:11px 18px;border-radius:var(--radius-pill);background:var(--brand);color:var(--paper);font-family:var(--font-mono);font-size:11px;letter-spacing:var(--track-label-sm);text-transform:uppercase;text-decoration:none}
+.skipLink{position:absolute;left:16px;top:-56px;z-index:20;padding:11px 18px;border-radius:var(--radius-pill);background:var(--brand);color:var(--ink);font-family:var(--font-mono);font-size:11px;letter-spacing:var(--track-label-sm);text-transform:uppercase;text-decoration:none}
 .skipLink:focus{top:12px}
 .donorMetrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:24px 0}
 .donorMetrics article{padding:20px;border:1px solid var(--line);border-radius:var(--radius-card)}
@@ -162,10 +164,13 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
 .donorSurface form{max-width:44rem}
 .donorSurface label{display:block;margin:16px 0 10px}
 .donorSurface fieldset{min-width:0;border:1px solid var(--line);padding:16px;margin:16px 0}
-.donorSurface input:not([type="checkbox"]),.donorSurface textarea,.donorSurface select{display:block;width:100%;min-height:44px;margin-top:6px;padding:10px;border:1px solid var(--muted);border-radius:8px;background:var(--field);color:var(--ink);font:inherit;font-size:16px}
+.donorSurface input:not([type="checkbox"]):not([type="radio"]),.donorSurface textarea,.donorSurface select{display:block;width:100%;min-height:44px;margin-top:6px;padding:10px;border:1px solid var(--muted);border-radius:8px;background:var(--field);color:var(--ink);font:inherit;font-size:16px}
 .donorSurface textarea{min-height:7rem}
-.donorSurface input[type="checkbox"]{width:24px;height:24px;vertical-align:middle;accent-color:var(--brand-ink);margin-right:8px}
+.donorSurface .choice{display:flex;align-items:center;gap:10px;min-height:44px;margin:4px 0}
+.donorSurface input[type="radio"]{padding:0;margin:0;flex:none}
+.donorSurface input[type="checkbox"],.donorSurface input[type="radio"]{width:24px;height:24px;vertical-align:middle;accent-color:var(--brand-ink);margin-right:8px}
 .donorSurface button{min-height:44px;margin:4px 8px 4px 0;padding:10px 16px;border:1px solid var(--ink);border-radius:8px;background:var(--ink);color:var(--card);font:inherit;cursor:pointer}
+.donorSurface button[aria-pressed="true"]{background:var(--brand-wash);color:var(--ink);border:2px solid var(--brand-ink)}
 .donorSurface button:disabled{opacity:.55;cursor:default}
 .donorSurface a:not(.button):not(.secondary){text-decoration:underline;text-underline-offset:3px}
 .donorSurface :is(button,input,select,textarea,a,summary):focus-visible{outline:3px solid var(--brand-ink);outline-offset:3px}

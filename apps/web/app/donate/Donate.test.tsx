@@ -5,6 +5,20 @@ import DonatePage from "./page";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("sandbox giving", () => {
+  it.each([
+    "http://checkout.stripe.com/session",
+    "https://checkout.stripe.com.attacker.example/session",
+    "https://attacker@checkout.stripe.com/session",
+    "https://checkout.stripe.com:444/session",
+  ])("rejects an unsafe checkout destination: %s", async (url) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ url }), { status: 200 })));
+    render(<DonatePage />);
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("unexpected destination");
+    expect(screen.getByRole("button", { name: "Continue to test checkout" })).toBeEnabled();
+  });
+
   it("defaults to monthly, discloses the actual charge, and removes daily framing for one-time", () => {
     render(<DonatePage />);
     expect(screen.getByRole("radio", { name: "Monthly" })).toBeChecked();

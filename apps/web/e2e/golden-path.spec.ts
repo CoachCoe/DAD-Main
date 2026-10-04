@@ -48,7 +48,10 @@ test("the mobile menu announces its state and restores keyboard focus", async ({
 
 test("a cold payment-recovery visit offers sign-in without exposing account data", async ({ page }) => {
   await page.goto("/account/payment-method");
-  await expect(page.getByRole("link", { name: /sign in/i })).toBeVisible();
+  const signIn = page.getByRole("link", { name: "Email me a sign-in link", exact: true });
+  await expect(signIn).toBeVisible();
+  await expect(signIn).toHaveAttribute("href", "/account/sign-in");
+  await expect(page.getByRole("button", { name: "Continue to Stripe" })).toHaveCount(0);
   await expectNoHorizontalScroll(page);
 });
 
