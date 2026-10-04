@@ -29,7 +29,7 @@ func run() error {
 	if err := payments.ValidateOrigin(services.Origin); err != nil {
 		return err
 	}
-	var gateway payments.SubscriptionGateway
+	var gateway payments.StaffFinanceGateway
 	if key := os.Getenv("STRIPE_SECRET_KEY"); key != "" {
 		configured, err := payments.NewStripeGateway(key)
 		if err != nil {
@@ -53,10 +53,12 @@ func run() error {
 		services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
 		services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
 		if key := os.Getenv("DONOR_STAFF_ENCRYPTION_KEY"); key != "" {
-			services.Staff, err = store.NewStaffService(pool, key)
-			if err != nil {
+			staff, staffErr := store.NewStaffService(pool, key)
+			if staffErr != nil {
 				return errors.New("staff configuration is invalid")
 			}
+			services.Staff, services.Admin = staff, staff
+			services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
 		}
 	}
 	server := httpapi.NewServer(address, services)

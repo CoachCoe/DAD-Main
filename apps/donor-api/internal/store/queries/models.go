@@ -209,6 +209,21 @@ type DonorStaff struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorStaffAction struct {
+	ActorID        pgtype.UUID        `json:"actor_id"`
+	DonorID        pgtype.UUID        `json:"donor_id"`
+	Kind           string             `json:"kind"`
+	TargetID       pgtype.UUID        `json:"target_id"`
+	AmountMinor    pgtype.Int8        `json:"amount_minor"`
+	PeriodEnd      pgtype.Timestamptz `json:"period_end"`
+	Reason         string             `json:"reason"`
+	StripeRefundID pgtype.Text        `json:"stripe_refund_id"`
+	Status         string             `json:"status"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	ID             pgtype.UUID        `json:"id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorStaffInvite struct {
 	StaffID       pgtype.UUID        `json:"staff_id"`
 	TokenHash     string             `json:"token_hash"`
