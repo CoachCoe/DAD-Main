@@ -18,6 +18,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .database import create_session_factory
 from .donor_email import EmailSettings, queue_login_email
+from .donor_projections import dashboard, refresh_projection
 from .donors import (
     DonorAccessDenied,
     GiftFrequency,
@@ -110,6 +111,8 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
         try:
             with factory.begin() as session:
                 token = claim_account(session, body.token)
+                donor = authenticated_donor(session, token)
+                refresh_projection(session, donor.id)
                 # Replace this browser's old session, leaving other devices alone.
                 sign_out(session, request.cookies.get(SESSION_COOKIE, ""))
         except DonorAccessDenied as exc:
@@ -125,6 +128,15 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
             sign_out(session, request.cookies.get(SESSION_COOKIE, ""))
         response.delete_cookie(SESSION_COOKIE, path="/")
         return {"signed_out": True}
+
+    @app.get("/donor/me/dashboard")
+    def donor_dashboard(request: Request):
+        try:
+            with factory() as session:
+                donor = authenticated_donor(session, request.cookies.get(SESSION_COOKIE, ""))
+                return dashboard(session, donor.id)
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
 
     @app.get("/donor/me/gifts")
     def gifts(request: Request, offset: int = 0):

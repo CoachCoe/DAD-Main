@@ -115,17 +115,16 @@ controlled-mailbox delivery verification remain release gates.
 
 The Stripe integration persists verified events and individual gifts. Checkout and event
 deduplication, one monthly checkout/subscription reservation per donor, and invoice
-renewals are covered. The next domain projection must enforce the attribution deadline
-at successful payment time, establish the permanent first-gift relationship, and apply
-it to subsequent gifts. Until then, gifts link to the original candidate attribution
-on the checkout; those fields are not awarded referral credit. Do not use checkout
-drafts or aggregated transparency funding as proof of collection. Refund-state reconciliation is implemented; issuing refunds, subscription editing,
-dashboard projections, permanent badge/best-streak persistence, staff MFA, and messaging
-beyond account access remain unshipped.
+renewals are covered. Stored donor projections select the successful first gift using
+processor timestamps, enforce the attribution deadline, and apply the direct relationship
+to subsequent net gifts. They also preserve sandbox recognition and historical bests.
+The authenticated sandbox dashboard reads those projections. Do not use checkout drafts
+or transparency funding as proof of collection. Issuing refunds, subscription edits and
+schedule changes, staff MFA, and messaging beyond account access remain unshipped.
 
 ## Running the Stripe sandbox
 
-Install the API dependencies and run migrations through `0019_donor_financial_facts`. Set
+Install the API dependencies and run migrations through `0020_donor_metrics`. Set
 `STRIPE_SECRET_KEY` to a Stripe test key and `STRIPE_WEBHOOK_SECRET` to the signing
 secret of the sandbox endpoint. No secrets belong in git. Live keys/events and Connect
 events are refused. The receiving organization and account still require verification.
@@ -244,7 +243,7 @@ referral notifications require their own implementations and approved copy.
 are successful `Gift` facts, the current verified state of each `Refund`, and explicit
 monthly `BillingPeriod` facts, plus an aware `as_of` timestamp. The Stripe worker now persists billing periods and reconciled refunds;
 `donor_financial_facts.load_history` translates owner-scoped records to these inputs.
-Dashboard endpoints and durable projections remain pending. Legacy gifts may still lack
+The sandbox dashboard now reads durable projections of those facts. Legacy gifts may still lack
 billing-period and payment-link information until reconciled.
 
 - `relationships` selects the earliest successful payment per donor by processor
@@ -280,9 +279,9 @@ historical reporting must supply the state actually known at that time. Facts mu
 USD integer cents and aware timestamps. Do not infer monthly billing dates from charge
 dates, assume every missing invoice was a cancellation, or feed checkout drafts here.
 
-Remaining integration requires intentional-skip/schedule facts, permanent awards and
-historical bests, and a replayable projection. This module operates on supplied history; the eventual dashboard should
-read indexed projections rather than repeatedly load every donor's financial history.
+Remaining integration requires intentional-skip/schedule facts. The calculation module
+operates on supplied history; the dashboard reads indexed projections rather than loading
+all donor financial history in each request.
 Sandbox calculations must stay visibly labeled and cannot confer live donor recognition.
 
 
@@ -327,8 +326,56 @@ destructive downgrade. Do not delete old gifts or fabricate period dates to migr
 `load_history` returns calculation inputs for one donor, including refund observation
 times. This is a current-state view, not a tax-reporting history: observations record
 when reconciliation happened, not a guessed processor status-transition timestamp.
-Cancellation/pause schedule facts, historical best replay, permanent badge awards, and
-materialized referral/dashboard projections are still required. Until those exist, a
-missing current billing period remains explicitly unavailable rather than an invented
-zero streak. No live giving, live donor badges, or new donor-dashboard UI is enabled by
-this migration.
+Cancellation/pause schedule facts are still required. A missing current billing period
+remains explicitly unavailable rather than an invented zero streak. No live giving or
+live donor badges are enabled by these sandbox facts.
+
+
+## Sandbox donor dashboard
+
+Migration `0020_donor_metrics` adds `donor_metric_projections`. `/account/dashboard`
+shows the five R1 elements: Link Referrals, IRL Referrals, net attributed dollars with a
+channel breakdown, recurring streak, and simulated Founding Donor recognition. All are
+visibly sandbox-only. Account claim leads here; My Giving remains a separate screen.
+The authenticated `/donor/me/dashboard` endpoint derives its owner from the donor session,
+accepts no donor selection, exposes no referred-donor identities, and is non-cacheable.
+The same endpoint can serve the future mobile app.
+
+A projection stores one donor's direct relationship and net collected dollars. The
+read endpoint aggregates these indexed rows for the referrer, counting each referred
+donor only while net collection is positive. It never recursively follows referrals.
+An earlier successful payment delivered late corrects the derived relationship using
+payment time; later gifts and refunds do not reassign it. Missing contributions during
+backfill are unavailable, not zero. The financial event and affected donor's projection
+commit in the same transaction. Workers lock the donor before payment/attempt rows to
+serialize refreshes and preserve recognition.
+
+Founding recognition is awarded once and retained through refreshes, refunds, and later
+cutoff changes. Historical best streaks only increase. Backfill replays known payment
+and refund-observation times to recover prior bests, preserving any existing best. Refund
+observation times do not prove an earlier processor transition; reconciliation of missing
+historical facts still requires operator review. These are sandbox recognition records;
+a production launch must use production data, never treat test awards as real awards.
+
+Start the projection worker alongside the Stripe and email workers:
+
+```bash
+cd apps/api
+.venv/bin/python -m impactgraph.donor_projections
+```
+
+It backfills donors missing projections and refreshes due records. `--once` processes at
+most one due donor; repeated invocation drains the backlog. Refreshes are scheduled at
+known future payment/period boundaries, the grace deadline, or a daily safety interval.
+Incomplete streaks are retried every five minutes. Financial events update immediately;
+the separate worker handles time passing without an event. Run it continuously and
+monitor worker health/backlog before inviting sandbox donors.
+
+The dashboard suppresses expired streak values until refreshed. Missing billing periods
+show “Updating,” while a verified zero remains zero. Pending projection creation, partial
+data, failed connection, and logged-out states are distinct. Cancellation and pauses
+still require verified schedule facts; they are not guessed from a missing invoice.
+A downgrade with recognition rows is refused because those rows contain permanent awards
+and historical bests. Preserve and migrate recognition explicitly rather than dropping
+or truncating the projection table. Load/spike validation and production operations
+remain release gates; the dashboard itself does no financial-history replay.

@@ -12,6 +12,8 @@ The DAD R1 donor product is being built alongside this transparency layer. Its
 [donor domain contract](docs/donor-domain.md) records the agreed giving, identity,
 referral, streak, and refund rules. Guest checkout and Stripe sandbox payment ingestion
 and donor account claim/sign-in/history are implemented, with queued SMTP login email.
+The sandbox donor dashboard shows persisted referral, streak, and recognition metrics;
+run its projection worker alongside the payment worker.
 Live giving and tax receipts remain disabled.
 See [donor sandbox setup](docs/donor-domain.md#running-the-stripe-sandbox).
 

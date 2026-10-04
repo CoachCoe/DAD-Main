@@ -35,6 +35,7 @@ export default function GivingPage() {
   }
   return <section className="panel">
     <h1>My giving</h1>
+    <p><Link href="/account/dashboard">My dashboard</Link></p>
     <p>Sandbox history only. These are simulated payments, not tax receipts. Refunds and subscription controls are not available in this preview.</p>
     {signedOut ? <Link href="/account/sign-in">Sign in to view your giving</Link> : <>
       {!data && !error && <p role="status">Loading your giving…</p>}

@@ -30,6 +30,7 @@ from .donor_financial_facts import (
     reconcile_refund,
     record_period,
 )
+from .donor_projections import event_donor_id, refresh_projection
 from .donors import GiftFrequency, normalize_email, prepare_checkout
 from .persistence import (
     DonorCheckoutRecord,
@@ -359,8 +360,14 @@ def process_next_event(factory, *, gateway=None) -> bool:
         event.attempts += 1
         try:
             with session.begin_nested():
+                donor_id = event_donor_id(session, event)
+                if donor_id is not None:
+                    session.execute(select(DonorRecord).where(
+                        DonorRecord.id == donor_id).with_for_update())
                 _apply_event(session, event, gateway)
                 session.flush()
+                if donor_id is not None:
+                    refresh_projection(session, donor_id)
         except Exception as exc:  # noqa: BLE001 -- preserve failed inbox work for explicit replay
             event.last_error = type(exc).__name__
         else:

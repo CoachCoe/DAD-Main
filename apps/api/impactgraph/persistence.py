@@ -208,6 +208,30 @@ class DonorRefundObservationRecord(EntityMixin, Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DonorMetricProjectionRecord(EntityMixin, Base):
+    __tablename__ = "donor_metric_projections"
+    __table_args__ = (
+        CheckConstraint("net_minor IS NULL OR net_minor >= 0", name="ck_donor_metrics_net"),
+        CheckConstraint("best_streak >= 0 AND (current_streak IS NULL OR current_streak >= 0)",
+                        name="ck_donor_metrics_streak"),
+        CheckConstraint("(referrer_id IS NULL AND referral_kind IS NULL) OR "
+                        "(referrer_id IS NOT NULL AND referral_kind IN ('LINK', 'IRL'))",
+                        name="ck_donor_metrics_referral"),
+    )
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), unique=True)
+    referrer_id: Mapped[UUID | None] = mapped_column(ForeignKey("donors.id"), index=True)
+    referral_kind: Mapped[str | None] = mapped_column(String(4))
+    first_gift_id: Mapped[str | None] = mapped_column(String(255))
+    net_minor: Mapped[int | None] = mapped_column(BigInteger)
+    founding_awarded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    best_streak: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    current_streak: Mapped[int | None] = mapped_column(Integer)
+    at_risk: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    grace_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    next_refresh_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+
+
 class ProgramRecord(EntityMixin, Base):
     __tablename__ = "programs"
     slug: Mapped[str] = mapped_column(String(120), unique=True)

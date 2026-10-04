@@ -530,3 +530,11 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
 .riskMethod{margin-top:10px;font-size:13px;color:var(--muted)}
 .riskMethod summary{cursor:pointer;font-family:var(--font-mono);font-size:10px;letter-spacing:var(--track-label-sm);text-transform:uppercase}
 .riskMethod p{margin:8px 0 0;max-width:62ch;line-height:1.55}
+
+/* Equal-weight referral channels; the donor dashboard has five metric surfaces. */
+.donorMetrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:24px 0}
+.donorMetrics article{padding:20px;border:1px solid var(--line);border-radius:var(--radius-card)}
+.donorMetrics h2{font-size:18px;margin:0 0 12px}
+.donorMetricValue{font-family:var(--font-display);font-size:28px;font-weight:700;font-variant-numeric:tabular-nums}
+.donorMetrics summary{cursor:pointer;padding:12px 0}
+@media(max-width:600px){.donorMetrics{grid-template-columns:1fr}}
