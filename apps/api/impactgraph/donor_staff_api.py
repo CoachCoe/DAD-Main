@@ -3,22 +3,26 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Literal
 from uuid import UUID
 
+import stripe
 from fastapi import Header, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 from sqlalchemy import select
 
 from . import donor_staff as staff
 from .donor_email import queue_login_email
 from .donor_exports import DATASETS, csv_rows
+from .donor_staff_finance import cancel_giving, cancellation_quote, refund_gift, refund_quote
 from .persistence import (
     DonorGiftRecord,
     DonorMessageRecord,
     DonorMetricProjectionRecord,
     DonorRecord,
+    DonorStaffActionRecord,
     DonorStaffAuditRecord,
     DonorStaffRecord,
 )
+from .stripe_payments import PaymentUnavailable, StripeGateway
 
 
 class Credentials(BaseModel):
@@ -45,7 +49,20 @@ class Activation(Token):
     code: str = Field(pattern=r"^[0-9]{6}$")
 
 
-def install_staff_routes(app, factory, settings, browser_request):
+class RefundRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    amount_minor: StrictInt = Field(ge=1, le=99_999_999)
+    reason: str = Field(min_length=5, max_length=500)
+
+
+class StaffCancellationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subscription_id: UUID
+    period_end: datetime
+    reason: str = Field(min_length=5, max_length=500)
+
+
+def install_staff_routes(app, factory, settings, browser_request, gateway=None):
     def run(request, permission, operation):
         try:
             with factory.begin() as session:
@@ -59,6 +76,50 @@ def install_staff_routes(app, factory, settings, browser_request):
             raise HTTPException(404, "Record not found") from exc
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from exc
+
+    def finance(request, permission, operation):
+        token = request.cookies.get(staff.COOKIE)
+        run(request, permission, lambda _session, _actor: None)
+        try:
+            return operation(gateway or StripeGateway(settings), token)
+        except staff.StaffDenied as exc:
+            raise HTTPException(401, "Staff sign-in required") from exc
+        except staff.StaffForbidden as exc:
+            raise HTTPException(403, "Permission denied") from exc
+        except LookupError as exc:
+            raise HTTPException(404, "Record not found") from exc
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except (stripe.StripeError, PaymentUnavailable) as exc:
+            raise HTTPException(503, "Stripe is unavailable. Retry the same request to check its status") from exc
+
+    @app.get("/donor/staff/donors/{donor_id}/gifts/{gift_id}/refund")
+    def preview_refund(donor_id: UUID, gift_id: UUID, request: Request):
+        return finance(request, "gift.refund", lambda provider, token: refund_quote(factory, provider, token, donor_id, gift_id))
+
+    @app.post("/donor/staff/donors/{donor_id}/gifts/{gift_id}/refund")
+    def refund(donor_id: UUID, gift_id: UUID, body: RefundRequest, request: Request, idempotency_key: Annotated[UUID, Header()]):
+        browser_request(request)
+        return finance(request, "gift.refund", lambda provider, token: refund_gift(factory, provider, token,
+            donor_id=donor_id, gift_id=gift_id, request_id=idempotency_key, amount_minor=body.amount_minor, reason=body.reason))
+
+    @app.get("/donor/staff/donors/{donor_id}/cancellation")
+    def preview_cancellation(donor_id: UUID, request: Request):
+        return finance(request, "gift.cancel", lambda provider, token: cancellation_quote(factory, provider, token, donor_id))
+
+    @app.post("/donor/staff/donors/{donor_id}/cancellation")
+    def cancel(donor_id: UUID, body: StaffCancellationRequest, request: Request, idempotency_key: Annotated[UUID, Header()]):
+        browser_request(request)
+        return finance(request, "gift.cancel", lambda provider, token: cancel_giving(factory, provider, token,
+            donor_id=donor_id, attempt_id=body.subscription_id, request_id=idempotency_key, period_end=body.period_end, reason=body.reason))
+
+    @app.get("/donor/staff/donors/{donor_id}/actions")
+    def actions(donor_id: UUID, request: Request):
+        return run(request, "donor.read", lambda session, _actor: [{"id": str(row.id), "actor_id": str(row.actor_id),
+            "kind": row.kind, "target_id": str(row.target_id), "amount_minor": row.amount_minor, "period_end": row.period_end,
+            "reason": row.reason, "status": row.status, "completed_at": row.completed_at} for row in session.scalars(
+                select(DonorStaffActionRecord).where(DonorStaffActionRecord.donor_id == donor_id)
+                .order_by(DonorStaffActionRecord.created_at.desc(), DonorStaffActionRecord.id).limit(100))])
 
     @app.post("/donor/staff/sign-in")
     def sign_in(body: Credentials, request: Request, response: Response):

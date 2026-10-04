@@ -70,8 +70,8 @@ export default function StaffPage() {
         <p>Streak: {detail.streak?.current ?? "Updating"} · Best: {detail.streak?.best ?? "Updating"}{detail.streak?.at_risk ? " · At risk" : ""}</p>
         {detail.streak && <p>Computed {new Date(detail.streak.computed_at).toLocaleString()}</p>}
         <p>Referrer: {detail.referrer ? `${detail.referrer.email} · ${detail.referrer.type}` : "No attributed referrer"}</p>
-        <h3>Gifts</h3>{detail.gifts.length ? <ul>{detail.gifts.map((gift) => <li key={gift.id}>
-          {money(gift.amount_minor)} · {gift.frequency} · {new Date(gift.paid_at).toLocaleString()} · <code>{gift.id}</code>
+        <h3>Gifts</h3>{actor.permissions.includes("gift.cancel") && <p><Link href={`/staff/finance?donor=${detail.id}`}>Cancel monthly giving</Link></p>}{detail.gifts.length ? <ul>{detail.gifts.map((gift) => <li key={gift.id}>
+          {money(gift.amount_minor)} · {gift.frequency} · {new Date(gift.paid_at).toLocaleString()} · <code>{gift.id}</code>{actor.permissions.includes("gift.refund") && <> · <Link href={`/staff/finance?donor=${detail.id}&gift=${gift.id}`}>Refund gift</Link></>}
         </li>)}</ul> : <p>No gifts recorded.</p>}
         {detail.next_gifts_offset !== null && <button disabled={busy} onClick={() => open(detail.id, detail.next_gifts_offset!)}>Older gifts</button>}
         <h3>People referred</h3>{detail.referred.length ? <ul>{detail.referred.map((person) => <li key={person.id}>

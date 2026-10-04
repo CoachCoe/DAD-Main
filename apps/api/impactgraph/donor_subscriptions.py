@@ -113,6 +113,12 @@ def recurring_details(factory, gateway, token):
 
 
 def cancel_recurring(factory, gateway, token, *, request_id, attempt_id, period_end):
+    return cancel_authorized(factory, gateway, lambda session: _owner(session, token),
+                             request_id=request_id, attempt_id=attempt_id, period_end=period_end)
+
+
+def cancel_authorized(factory, gateway, resolve_owner, *, request_id, attempt_id, period_end):
+    """resolve_owner must enforce actor permission and lock the target donor on each call."""
     from .donor_projections import refresh_projection
 
     if request_id.version != 4:
@@ -122,7 +128,7 @@ def cancel_recurring(factory, gateway, token, *, request_id, attempt_id, period_
     # Commit authorization before any external mutation. A crash leaves a retryable,
     # auditable command rather than an unexplained change at the processor.
     with factory.begin() as session:
-        donor = _owner(session, token)
+        donor = resolve_owner(session)
         attempt = _attempt(session, donor.id, attempt_id)
         if attempt is None or not attempt.stripe_subscription_id:
             raise SubscriptionConflict("No confirmed monthly gift was found")
@@ -135,7 +141,7 @@ def cancel_recurring(factory, gateway, token, *, request_id, attempt_id, period_
             session.add(DonorCancellationRecord(id=request_id, donor_id=donor.id,
                                                 attempt_id=attempt.id, confirmed_period_end=period_end))
     with factory.begin() as session:
-        donor = _owner(session, token)
+        donor = resolve_owner(session)
         attempt = _attempt(session, donor.id, attempt_id)
         action = session.get(DonorCancellationRecord, request_id)
         row = reconcile_subscription(session, attempt, gateway)

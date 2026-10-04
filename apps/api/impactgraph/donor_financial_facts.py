@@ -97,7 +97,13 @@ def reconcile_refund(session, event, gateway):
     # Serialize retrieval under the gift lock. Webhook timestamps have second-level
     # precision and cannot order competing refund states reliably.
     current = gateway.retrieve_refund(data["id"])
-    if (current.get("id") != data["id"]
+    if current.get("id") != data["id"]:
+        raise ValueError("Retrieved refund identity changed")
+    return record_refund(session, gift, current, event_id=event.id)
+
+
+def record_refund(session, gift, current, *, event_id=None, action_id=None):
+    if (not isinstance(current.get("id"), str) or not current["id"].startswith("re_")
             or current.get("payment_intent") != gift.stripe_payment_intent_id
             or current.get("currency") != "usd" or type(current.get("amount")) is not int
             or not 0 < current["amount"] <= gift.amount_minor):
@@ -105,9 +111,9 @@ def reconcile_refund(session, event, gateway):
     status = RefundStatus(current.get("status", "").upper()).value
     observed = datetime.now(UTC)
     refund = session.scalar(select(DonorRefundRecord).where(
-        DonorRefundRecord.stripe_refund_id == data["id"]))
+        DonorRefundRecord.stripe_refund_id == current["id"]))
     if refund is None:
-        refund = DonorRefundRecord(gift_id=gift.id, stripe_refund_id=data["id"],
+        refund = DonorRefundRecord(gift_id=gift.id, stripe_refund_id=current["id"],
                                    amount_minor=current["amount"], currency="USD",
                                    status=status, observed_at=observed)
         session.add(refund)
@@ -119,8 +125,9 @@ def reconcile_refund(session, event, gateway):
         DonorRefundRecord.gift_id == gift.id, DonorRefundRecord.status == "SUCCEEDED"))
     if total > gift.amount_minor:
         raise ValueError("Successful refunds exceed the gift")
-    session.add(DonorRefundObservationRecord(refund_id=refund.id, source_event_id=event.id,
+    session.add(DonorRefundObservationRecord(refund_id=refund.id, source_event_id=event_id, source_action_id=action_id,
                                            status=status, observed_at=observed))
+    return refund
 
 
 def load_history(session, donor_id):

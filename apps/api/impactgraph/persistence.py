@@ -64,6 +64,22 @@ class DonorStaffSessionRecord(EntityMixin, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class DonorStaffActionRecord(EntityMixin, Base):
+    __tablename__ = "donor_staff_actions"
+    actor_id: Mapped[UUID] = mapped_column(ForeignKey("donor_staff.id"), index=True)
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    target_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), index=True)
+    amount_minor: Mapped[int | None] = mapped_column(BigInteger)
+    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reason: Mapped[str] = mapped_column(String(500))
+    stripe_refund_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    status: Mapped[str] = mapped_column(String(16), default="AUTHORIZED", server_default="AUTHORIZED")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (CheckConstraint("(kind = 'REFUND' AND amount_minor IS NOT NULL AND amount_minor > 0 AND period_end IS NULL) OR "
+                         "(kind = 'CANCEL' AND amount_minor IS NULL AND period_end IS NOT NULL)", name="ck_donor_staff_action_shape"),)
+
+
 class DonorStaffAuditRecord(EntityMixin, Base):
     __tablename__ = "donor_staff_audit"
     actor_id: Mapped[UUID | None] = mapped_column(ForeignKey("donor_staff.id"), index=True)
@@ -277,7 +293,9 @@ class DonorRefundObservationRecord(EntityMixin, Base):
 
     __tablename__ = "donor_refund_observations"
     refund_id: Mapped[UUID] = mapped_column(ForeignKey("donor_refunds.id"), index=True)
-    source_event_id: Mapped[UUID] = mapped_column(ForeignKey("donor_stripe_events.id"), unique=True)
+    source_event_id: Mapped[UUID | None] = mapped_column(ForeignKey("donor_stripe_events.id"), unique=True)
+    source_action_id: Mapped[UUID | None] = mapped_column(ForeignKey("donor_staff_actions.id"), index=True)
+    __table_args__ = (CheckConstraint("(source_event_id IS NULL) <> (source_action_id IS NULL)", name="ck_donor_refund_observation_source"),)
     status: Mapped[str] = mapped_column(String(16))
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

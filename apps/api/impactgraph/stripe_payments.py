@@ -110,6 +110,27 @@ class StripeGateway:
     def retrieve_refund(self, refund_id: str) -> dict:
         return self.client.v1.refunds.retrieve(refund_id).to_dict()
 
+    def create_refund(self, payment_intent, amount_minor, command_id):
+        return self.client.v1.refunds.create({"payment_intent": payment_intent, "amount": amount_minor,
+            "reason": "requested_by_customer", "metadata": {"dad_staff_action": command_id}},
+            options={"idempotency_key": "dad-staff-refund-" + command_id}).to_dict()
+
+    def list_payment_refunds(self, payment_intent):
+        rows, after = [], None
+        for _ in range(10):
+            params = {"payment_intent": payment_intent, "limit": 100}
+            if after:
+                params["starting_after"] = after
+            page = self.client.v1.refunds.list(params).to_dict()
+            data = page.get("data", [])
+            rows.extend(data)
+            if page.get("has_more") is False:
+                return rows
+            if not data or data[-1].get("id") == after:
+                break
+            after = data[-1]["id"]
+        raise PaymentUnavailable("Refund history requires reconciliation")
+
     def change_monthly_amount(self, subscription_id, item_id, product_id, amount_minor, key):
         return self.client.v1.subscriptions.update(subscription_id, {
             "items": [{"id": item_id, "quantity": 1, "price_data": {"currency": "usd", "product": product_id,

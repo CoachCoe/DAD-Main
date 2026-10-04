@@ -741,3 +741,40 @@ consent and recovery rules remain authoritative. A resend renders a new as-of co
 preserving the prior message. Account-claim requests use the existing cooldown and
 single-use credential outbox. None of these responses asserts successful mail delivery.
 The staff audit viewer is `/staff/audit` and is restricted to administrators.
+
+## Staff financial actions (sandbox)
+
+`/staff/finance` previews a gift's current Stripe refund balance or a donor's exact next
+renewal. Finance and Administrator roles can confirm a refund or cancellation with a
+reason. Support cannot. The server requires the named permission on every attempt,
+configured Origin, a UUID v4 request key, and owned donor/gift/subscription relationships.
+A replay must use the same actor, amount/date, target, and reason. A donor session is
+never created to impersonate the donor.
+
+Migration 0029 stores the financial command before any processor mutation. Refunds use
+the original PaymentIntent, integer USD cents, a stable idempotency key, and command-ID
+metadata. Stripe refund history is read completely (bounded at 1,000 rows per payment;
+larger histories require reconciliation) before mutation. Pending refunds reserve their
+amount. A lost response is recovered by matching the authorized command in Stripe
+metadata, not by assuming failure and sending a second refund. Unknown requests older
+than 23 hours require reconciliation and cannot be blindly reissued. If a confirmed
+amount is no longer available, the command is marked ABANDONED without submission; a
+new amount requires new confirmation.
+
+Authoritative staff refund observations use the same financial fact writer as webhook
+observations. Each observation identifies exactly one verified Stripe event or staff
+command. Current refund status and append-only observations are preserved. Successful
+refunds reduce collected and attributed dollars; pending/failed refunds do not. Full
+refunds affect the qualifying referral count and streak through the existing rules;
+the Founding Donor badge stays permanent. Preview can reconcile an already-applied
+staff refund without another mutation. Original actors and subsequent observers remain
+separately auditable.
+
+Staff cancellation calls the same authorized billing operation as donor cancellation:
+the exact confirmed renewal boundary, no immediate charge, no refund, and no retroactive
+streak erasure. The staff command, reason, and resulting confirmation are linked in the
+audit record. The finance screen retrieves an original uncertain request so refresh or
+a lost browser response does not change its identity. Financial commands and refund
+observation sources are included in the permission-scoped CSV exports. Real Stripe
+sandbox acceptance, including refund state transitions and boundary cancellation,
+remains required before any live activation.
