@@ -7,7 +7,12 @@ from sqlalchemy import select
 
 from .donor_subscriptions import SubscriptionConflict, _attempt, _owner
 from .donors import _utc
-from .persistence import DonorPauseRecord
+from .persistence import DonorPauseRecord, DonorResumeRecord
+
+
+def effective_resume(session, pause):
+    resume = session.scalar(select(DonorResumeRecord).where(DonorResumeRecord.pause_id == pause.id))
+    return _utc(resume.next_renewal) if resume and resume.confirmed_at else _utc(pause.resumes_at)
 
 
 def renewal_after(boundary, months, anchor):
@@ -31,12 +36,18 @@ def reconcile_pause(session, attempt, remote, *, now=None):
     pause = remote.get("pause_collection")
     row = session.scalar(select(DonorPauseRecord).where(
         DonorPauseRecord.attempt_id == attempt.id).order_by(DonorPauseRecord.created_at.desc()).limit(1))
+    resume = session.scalar(select(DonorResumeRecord).where(DonorResumeRecord.pause_id == row.id)) if row else None
     if pause:
+        if (resume and pause.get("behavior") == "void"
+                and pause.get("resumes_at") == int(_utc(resume.next_renewal).timestamp())):
+            resume.confirmed_at = resume.confirmed_at or now
+            return row
         if (row is None or pause.get("behavior") != "void"
-                or pause.get("resumes_at") != int(_utc(row.resumes_at).timestamp())):
+                or pause.get("resumes_at") != int(_utc(row.resumes_at).timestamp())
+                or (resume and resume.confirmed_at)):
             raise ValueError("Unrecognized payment pause")
         row.confirmed_at = row.confirmed_at or now
-    elif (row and row.confirmed_at and now < _utc(row.resumes_at)
+    elif (row and row.confirmed_at and now < effective_resume(session, row)
           and remote.get("status") not in {"canceled", "incomplete_expired"}):
         raise ValueError("Pause ended earlier than the authorized schedule")
     return row
@@ -54,19 +65,22 @@ def _read(session, attempt, gateway):
 
 
 def pause_options(factory, gateway, token):
+    from .donor_projections import refresh_projection
+
     with factory.begin() as session:
         donor = _owner(session, token)
         attempt = _attempt(session, donor.id)
         if attempt is None or not attempt.stripe_subscription_id:
             return {"state": "unavailable", "pause": None, "options": []}
         schedule, _remote, anchor = _read(session, attempt, gateway)
+        refresh_projection(session, donor.id)
         if schedule.stops_at is not None or schedule.status in {"canceled", "incomplete_expired"}:
             return {"state": "unavailable", "pause": None, "options": []}
         row = session.scalar(select(DonorPauseRecord).where(
             DonorPauseRecord.attempt_id == attempt.id).order_by(DonorPauseRecord.created_at.desc()).limit(1))
-        active = row and (row.confirmed_at is None or datetime.now(UTC) < _utc(row.resumes_at))
+        active = row and (row.confirmed_at is None or datetime.now(UTC) < effective_resume(session, row))
         return {"state": "ready", "subscription_id": str(attempt.id),
-                "pause": {"request_id": str(row.id), "months": row.months, "starts_at": _utc(row.starts_at), "resumes_at": _utc(row.resumes_at),
+                "pause": {"request_id": str(row.id), "months": row.months, "starts_at": _utc(row.starts_at), "resumes_at": effective_resume(session, row),
                           "confirmed": row.confirmed_at is not None} if active else None,
                 "options": [{"months": months, "starts_at": _utc(schedule.period_end),
                              "resumes_at": renewal_after(schedule.period_end, months, anchor)}
@@ -94,7 +108,7 @@ def pause_recurring(factory, gateway, token, *, request_id, attempt_id, months, 
         else:
             other = session.scalar(select(DonorPauseRecord).where(
                 DonorPauseRecord.attempt_id == attempt.id).order_by(DonorPauseRecord.created_at.desc()).limit(1))
-            if other and (other.confirmed_at is None or datetime.now(UTC) < _utc(other.resumes_at)):
+            if other and (other.confirmed_at is None or datetime.now(UTC) < effective_resume(session, other)):
                 raise SubscriptionConflict("A pause already exists. Refresh to view its dates")
             schedule, remote, anchor = _read(session, attempt, gateway)
             if (schedule.status != "active" or schedule.stops_at is not None or remote.get("pause_collection")
@@ -121,5 +135,5 @@ def pause_recurring(factory, gateway, token, *, request_id, attempt_id, months, 
             if row.confirmed_at is None:
                 raise SubscriptionConflict("Pause is not confirmed. Retry to check its status")
         refresh_projection(session, donor.id)
-        result = {"request_id": str(row.id), "months": row.months, "starts_at": _utc(row.starts_at), "resumes_at": _utc(row.resumes_at), "confirmed": True}
+        result = {"request_id": str(row.id), "months": row.months, "starts_at": _utc(row.starts_at), "resumes_at": effective_resume(session, row), "confirmed": True}
     return {"pause": result}

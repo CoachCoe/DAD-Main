@@ -53,7 +53,7 @@ export default function PausePage() {
       {!data && !error && <p role="status">Checking pause dates…</p>}
       {data?.pause ? <>
         <p role="status">{data.pause.confirmed ? "Pause confirmed." : "Pause not yet confirmed."}</p>
-        <p>Skip {data.pause.months} renewal{data.pause.months === 1 ? "" : "s"}, starting {date(data.pause.starts_at)}.
+        <p>Original pause starts {date(data.pause.starts_at)}.
           Giving automatically resumes {date(data.pause.resumes_at)}.</p>
         {!data.pause.confirmed && <button disabled={busy} onClick={() => confirm(data.pause!)}>Retry saved pause</button>}
       </> : data && data.options.length === 0 ? <p>No monthly gift is currently available to pause.</p> : data && <>
@@ -69,7 +69,7 @@ export default function PausePage() {
       </>}
       <p>Your streak ends at the first skipped renewal. Your Founding Donor badge stays yours.
         Pausing does not refund gifts or forgive an outstanding invoice.</p>
-      <p>Pauses resume automatically. Ending one early is not available in this preview.</p>
+      <p><Link href="/account/resume">Resume at next renewal</Link></p>
       {error && <p role="alert">{error}</p>}
       <button disabled={busy} onClick={() => setRetry((value) => value + 1)}>Refresh pause dates</button>
     </>}

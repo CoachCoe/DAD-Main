@@ -38,6 +38,10 @@ def factory(engine):
 
 @pytest.fixture
 def setup(factory):
+    return make_pause_setup(factory)
+
+
+def make_pause_setup(factory):
     gateway = PauseGateway()
     result = checkout(factory, gateway, frequency=GiftFrequency.MONTHLY)
     anchor = datetime.fromtimestamp(INVOICE_PERIOD_START, UTC)

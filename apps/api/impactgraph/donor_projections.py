@@ -21,6 +21,7 @@ from .persistence import (
     DonorRecord,
     DonorRefundObservationRecord,
     DonorRefundRecord,
+    DonorResumeRecord,
     DonorSubscriptionRecord,
 )
 
@@ -87,8 +88,10 @@ def refresh_projection(session, donor_id, *, now=None):
     pauses = session.execute(select(DonorPauseRecord, DonorSubscriptionRecord).join(
         DonorSubscriptionRecord, DonorSubscriptionRecord.attempt_id == DonorPauseRecord.attempt_id,
     ).where(DonorPauseRecord.donor_id == donor_id, DonorPauseRecord.confirmed_at.is_not(None))).all()
+    resumptions = {r.pause_id: _utc(r.next_renewal) for r in session.scalars(select(DonorResumeRecord).where(
+        DonorResumeRecord.donor_id == donor_id, DonorResumeRecord.confirmed_at.is_not(None)))}
     pause_windows = [(_utc(p.starts_at), datetime.max.replace(tzinfo=UTC)
-                     if s.stops_at and _utc(s.stops_at) <= now else _utc(p.resumes_at)) for p, s in pauses]
+                     if s.stops_at and _utc(s.stops_at) <= now else resumptions.get(p.id, _utc(p.resumes_at))) for p, s in pauses]
     stopped = [_utc(end) for end in session.scalars(select(DonorSubscriptionRecord.stops_at).where(
         DonorSubscriptionRecord.donor_id == donor_id, DonorSubscriptionRecord.stops_at.is_not(None)))]
     relation = relationships(gifts, as_of=now).get(str(donor_id))

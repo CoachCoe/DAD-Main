@@ -208,6 +208,14 @@ class DonorRefundObservationRecord(EntityMixin, Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DonorResumeRecord(EntityMixin, Base):
+    __tablename__ = "donor_resumptions"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    pause_id: Mapped[UUID] = mapped_column(ForeignKey("donor_pauses.id"), unique=True)
+    next_renewal: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class DonorPauseRecord(EntityMixin, Base):
     __tablename__ = "donor_pauses"
     donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
