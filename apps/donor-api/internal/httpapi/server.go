@@ -42,6 +42,9 @@ type Services struct {
 	Staff           StaffSource
 	Admin           AdminSource
 	StaffFinance    StaffFinanceSource
+	Exports         ExportSource
+	ContentAdmin    ContentAdminSource
+	Partner         PartnerSource
 	EmailConfigured bool
 }
 
@@ -68,6 +71,8 @@ func NewServer(address string, services Services) *http.Server {
 	installStaffRoutes(mux, services, guard, reply)
 	installAdminRoutes(mux, services, guard, reply)
 	installStaffFinanceRoutes(mux, services, guard, reply)
+	installExportRoutes(mux, services, reply)
+	installContentRoutes(mux, services, guard, reply)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { reply(w, 200, map[string]string{"status": "alive"}) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 503, map[string]string{"detail": "Go donor rewrite is not ready for traffic"})

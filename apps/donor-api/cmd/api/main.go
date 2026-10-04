@@ -46,6 +46,7 @@ func run() error {
 		}
 		defer pool.Close()
 		services.Content = store.ContentReader{DB: pool}
+		services.Partner = store.PartnerService{DB: pool}
 		services.Dashboard = store.DashboardReader{DB: pool}
 		services.Webhook = payments.Receiver{Secret: os.Getenv("STRIPE_WEBHOOK_SECRET"), Inbox: store.StripeInbox{DB: pool}}
 		services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
@@ -58,6 +59,8 @@ func run() error {
 				return errors.New("staff configuration is invalid")
 			}
 			services.Staff, services.Admin = staff, staff
+			services.Exports = staff
+			services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKey: os.Getenv("DONOR_CONTENT_ENCRYPTION_KEY")}
 			services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
 		}
 	}

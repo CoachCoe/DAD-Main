@@ -26,13 +26,16 @@ func (g *browserGuard) check(w http.ResponseWriter, r *http.Request, reply reply
 	return true
 }
 func decodeBody(w http.ResponseWriter, r *http.Request, target interface{}) bool {
+	return decodeBodyLimit(w, r, target, 256*1024)
+}
+func decodeBodyLimit(w http.ResponseWriter, r *http.Request, target interface{}, limit int64) bool {
 	if value := r.Header.Get("Content-Type"); value != "" {
 		media, _, err := mime.ParseMediaType(value)
 		if err != nil || (media != "application/json" && !(strings.HasPrefix(media, "application/") && strings.HasSuffix(media, "+json"))) {
 			return false
 		}
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256*1024))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(target) != nil {
 		return false

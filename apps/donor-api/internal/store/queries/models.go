@@ -64,6 +64,15 @@ type DonorCheckout struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorContentSource struct {
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	Name          string             `json:"name"`
+	Sha256        string             `json:"sha256"`
+	EncryptedData []byte             `json:"encrypted_data"`
+	ID            pgtype.UUID        `json:"id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorGift struct {
 	DonorID               pgtype.UUID        `json:"donor_id"`
 	CheckoutID            pgtype.UUID        `json:"checkout_id"`
@@ -130,6 +139,18 @@ type DonorMetricProjection struct {
 	NextRefreshAt     pgtype.Timestamptz `json:"next_refresh_at"`
 	ID                pgtype.UUID        `json:"id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorPartnerSignup struct {
+	Organization   string             `json:"organization"`
+	Name           string             `json:"name"`
+	Email          string             `json:"email"`
+	Website        string             `json:"website"`
+	Message        string             `json:"message"`
+	RequestHash    string             `json:"request_hash"`
+	ConsentVersion string             `json:"consent_version"`
+	ID             pgtype.UUID        `json:"id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type DonorPause struct {
