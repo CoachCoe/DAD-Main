@@ -36,18 +36,19 @@ export default function GivingPage() {
   return <section className="panel">
     <h1>My giving</h1>
     <p><Link href="/account/dashboard">My dashboard</Link></p>
-    <p>Sandbox history only. These are simulated payments, not tax receipts. Refunds and tax receipts are not available in this preview.</p>
+    <p>Sandbox history only. These are simulated payments, not tax receipts. Records show verified refund adjustments. Legal tax receipts await activation.</p>
     {signedOut ? <Link href="/account/sign-in">Sign in to view your giving</Link> : <>
       {!data && !error && <p role="status">Loading your giving…</p>}
       {data && <>
         <p>{data.email}</p>
         <p><Link href="/account/payment-method">Update payment method</Link></p>
         <p><Link href="/account/recurring">Manage monthly giving</Link></p>
+        <p><Link href="/account/receipts">Annual summaries</Link></p>
         {data.gifts.length === 0 ? <p>No confirmed test gifts yet. Payment confirmation may take a moment.</p> :
           <ul>{data.gifts.map((gift) => <li key={gift.id}>
             {new Intl.NumberFormat("en-US", { style: "currency", currency: gift.currency }).format(gift.amount_minor / 100)}
             {" · "}{gift.frequency === "MONTHLY" ? "Monthly" : "One time"}{" · "}
-            <time dateTime={gift.paid_at}>{new Date(gift.paid_at).toLocaleDateString()}</time>
+            <time dateTime={gift.paid_at}>{new Date(gift.paid_at).toLocaleDateString()}</time>{" · "}<Link href={`/account/receipts?gift=${gift.id}`}>Gift record</Link>
           </li>)}</ul>}
         {offset > 0 && <button onClick={() => setOffset(Math.max(0, offset - 50))}>Newer gifts</button>}
         {data.next_offset !== null && <button onClick={() => setOffset(data.next_offset!)}>Older gifts</button>}

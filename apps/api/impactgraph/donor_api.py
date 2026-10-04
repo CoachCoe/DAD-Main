@@ -24,6 +24,7 @@ from .donor_pauses import pause_options, pause_recurring
 from .donor_payment_methods import begin_payment_update, payment_method_status
 from .donor_profile import PreferenceConflict, profile, save_preferences, sign_out_everywhere
 from .donor_projections import dashboard, refresh_projection
+from .donor_receipts import annual_summary, receipt
 from .donor_resumptions import resume_options, resume_recurring
 from .donor_sharing import captured_name, referral_svg, sharing_details
 from .donor_subscriptions import SubscriptionConflict, cancel_recurring, recurring_details
@@ -270,6 +271,26 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
                 ], "next_offset": offset + 50 if len(rows) > 50 else None}
         except DonorAccessDenied as exc:
             raise HTTPException(401, "Sign in required") from exc
+
+    def document_request(request, operation):
+        try:
+            with factory() as session:
+                donor = authenticated_donor(session, request.cookies.get(SESSION_COOKIE, ""))
+                return operation(session, donor.id)
+        except DonorAccessDenied as exc:
+            raise HTTPException(401, "Sign in required") from exc
+        except LookupError as exc:
+            raise HTTPException(404, "Gift not found") from exc
+        except ValueError as exc:
+            raise HTTPException(409, "Gift records are unavailable for this request") from exc
+
+    @app.get("/donor/me/receipts/{gift_id}")
+    def gift_receipt(gift_id: UUID, request: Request):
+        return document_request(request, lambda session, donor_id: receipt(session, donor_id, gift_id))
+
+    @app.get("/donor/me/annual-summary/{year}")
+    def summary(year: int, request: Request):
+        return document_request(request, lambda session, donor_id: annual_summary(session, donor_id, year))
 
     def subscription_request(request, operation):
         try:

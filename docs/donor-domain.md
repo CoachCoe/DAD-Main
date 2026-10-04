@@ -618,3 +618,51 @@ reversing an opt-out. Migration 0026 stores current preferences and append-only 
 consent events; the migration refuses to discard consent history. Saving consent alone
 does not send any email. Optional delivery must recheck current consent at send time.
 POST `/donor/logout-all` revokes every current session for the authenticated donor only.
+
+## Gift records and transactional outbox (sandbox)
+
+`/account/receipts` provides owner-scoped gift records and calendar-year summaries, linked
+from My Giving. GET `/donor/me/receipts/{gift_uuid}` and
+`/donor/me/annual-summary/{year}` require a claimed donor session. An unowned gift and
+an absent gift both return 404. Records show original collected cents, every current
+refund status, successful refunded cents, net cents, and an as-of timestamp. Pending or
+failed refunds do not reduce collected money. Annual grouping uses America/New_York;
+refund adjustments concern those gifts and can include later-year observations. This
+is explicitly not a tax deduction calculation. Finance must approve the eventual tax
+summary treatment before activation.
+
+Every surface and template states that these are sandbox payments, not tax receipts.
+No EIN, entity status, legal acknowledgment, or real tax deductibility is fabricated.
+Approved receipt text and verified receiving-entity details remain activation gates.
+
+Migration 0027 adds a durable message outbox. Projection refresh runs under the donor
+lock and queues each verified gift record once, each prior-year summary once, a direct
+referral conversion once per referred donor, and recovery notices at failure, day 7,
+and day 13. Refresh workers also enqueue annual summaries after the New York year
+boundary. The same transaction records financial facts and delivery intents. There is
+no enrolment trigger at R1; `enrolment_template` prepares the R2 wording and explicitly
+disclaims any promise of funds or aid.
+
+Run the existing projection worker alongside the separate notification worker:
+
+```sh
+python -m impactgraph.donor_projections
+python -m impactgraph.donor_messages
+```
+
+Both support `--once` for supervision/testing. The notification worker uses the existing
+TLS SMTP settings. Tests inject a fake transport and never send messages. The account
+claim worker remains separate. Optional referral notifications recheck current opt-in
+before every attempt and include only Link/IRL type, never the referred person's name,
+email, or gift amount. Their preference link allows opting out. Marketing consent does
+not trigger any campaign mail. Receipts, access messages, and essential recovery notices
+are separate from optional notifications, as specified in the message classification.
+
+Recovery stops on payment, cancellation, or grace expiry. If the worker was down, older
+reminders are suppressed when a later reminder is due. Disabled donor accounts suppress
+all delivery. Rendering is committed before sending, and retry keeps the same body and
+Message-ID. SMTP cannot guarantee exactly-once delivery: acknowledgement loss may cause
+a duplicate. Failures use bounded exponential retry, park after five attempts, and
+retain only an exception class rather than provider details. Delivery and suppression
+records are retained; migration downgrade refuses to discard them. A queued or sent
+email is never treated as proof that a payment recovered.

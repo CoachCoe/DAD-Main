@@ -62,6 +62,21 @@ class DonorPreferenceEventRecord(EntityMixin, Base):
     __table_args__ = (UniqueConstraint("donor_id", "version", name="uq_donor_preference_version"),)
 
 
+class DonorMessageRecord(EntityMixin, Base):
+    __tablename__ = "donor_messages"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    dedup_key: Mapped[str] = mapped_column(String(160), unique=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    context: Mapped[dict] = mapped_column(JSON)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(String(80))
+    suppressed_reason: Mapped[str | None] = mapped_column(String(80))
+    subject: Mapped[str | None] = mapped_column(String(200))
+    body: Mapped[str | None] = mapped_column(Text)
+
+
 class DonorLoginEmailRecord(EntityMixin, Base):
     """Delivery outbox; login secrets are encrypted separately from credential hashes."""
 

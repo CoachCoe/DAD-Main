@@ -122,6 +122,8 @@ def refresh_projection(session, donor_id, *, now=None):
         boundaries.append(row.grace_ends_at)
     row.next_refresh_at = min([row.next_refresh_at, *(t for t in boundaries if t > now)])
     session.flush()
+    from .donor_messages import queue_financial_messages
+    queue_financial_messages(session, donor_id, now=now)
     return row
 
 
