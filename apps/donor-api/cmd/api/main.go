@@ -21,6 +21,21 @@ func run() error {
 		address = "127.0.0.1:8002"
 	}
 	var services httpapi.Services
+	services.Origin = os.Getenv("DONOR_PUBLIC_ORIGIN")
+	if services.Origin == "" {
+		services.Origin = "http://localhost:3000"
+	}
+	if err := payments.ValidateOrigin(services.Origin); err != nil {
+		return err
+	}
+	var gateway payments.CheckoutGateway
+	if key := os.Getenv("STRIPE_SECRET_KEY"); key != "" {
+		configured, err := payments.NewStripeGateway(key)
+		if err != nil {
+			return err
+		}
+		gateway = configured
+	}
 	if dsn := os.Getenv("DONOR_GO_DATABASE_URL"); dsn != "" {
 		startup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		pool, err := store.Open(startup, dsn)
@@ -32,6 +47,7 @@ func run() error {
 		services.Content = store.ContentReader{DB: pool}
 		services.Dashboard = store.DashboardReader{DB: pool}
 		services.Webhook = payments.Receiver{Secret: os.Getenv("STRIPE_WEBHOOK_SECRET"), Inbox: store.StripeInbox{DB: pool}}
+		services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	}
 	server := httpapi.NewServer(address, services)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

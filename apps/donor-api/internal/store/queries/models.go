@@ -55,3 +55,15 @@ type DonorMetricProjection struct {
 	ID                pgtype.UUID        `json:"id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
+
+type DonorStripeCheckout struct {
+	CheckoutID           pgtype.UUID        `json:"checkout_id"`
+	RequestHash          string             `json:"request_hash"`
+	RequestParams        []byte             `json:"request_params"`
+	StripeSessionID      pgtype.Text        `json:"stripe_session_id"`
+	StripeSubscriptionID pgtype.Text        `json:"stripe_subscription_id"`
+	HostedUrl            pgtype.Text        `json:"hosted_url"`
+	Status               string             `json:"status"`
+	ID                   pgtype.UUID        `json:"id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}

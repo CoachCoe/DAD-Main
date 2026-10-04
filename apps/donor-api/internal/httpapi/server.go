@@ -6,8 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
+	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
@@ -22,16 +27,26 @@ type DashboardSource interface {
 type WebhookReceiver interface {
 	Receive(context.Context, []byte, string) error
 }
+type CheckoutSource interface {
+	BeginCheckout(context.Context, payments.CheckoutRequest) (payments.CheckoutResult, error)
+}
 type Services struct {
 	Content   ContentSource
 	Dashboard DashboardSource
 	Webhook   WebhookReceiver
+	Checkout  CheckoutSource
+	Origin    string
 }
 
 // NewServer keeps the incomplete rewrite off the existing Python service port.
 // Readiness must remain unavailable until the complete donor path is implemented.
 func NewServer(address string, services Services) *http.Server {
 	content, dashboard := services.Content, services.Dashboard
+	origin := services.Origin
+	if origin == "" {
+		origin = "http://localhost:3000"
+	}
+	guard := &browserGuard{origin: origin}
 	mux := http.NewServeMux()
 	reply := func(w http.ResponseWriter, status int, body interface{}) {
 		w.Header().Set("Content-Type", "application/json")
@@ -113,6 +128,78 @@ func NewServer(address string, services Services) *http.Server {
 			reply(w, 200, map[string]bool{"received": true})
 		}
 	})
+	mux.HandleFunc("POST /donor/checkouts", func(w http.ResponseWriter, r *http.Request) {
+		if status := guard.allow(r, time.Now()); status != 0 {
+			detail := "Request origin is not allowed"
+			if status == 429 {
+				detail = "Too many requests"
+				w.Header().Set("Retry-After", "60")
+			}
+			reply(w, status, map[string]string{"detail": detail})
+			return
+		}
+		var body struct {
+			Email     *string         `json:"email"`
+			Amount    *int64          `json:"amount_minor"`
+			Frequency json.RawMessage `json:"frequency"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, payments.MaxWebhookBytes))
+		decoder.DisallowUnknownFields()
+		var extra interface{}
+		invalid := decoder.Decode(&body) != nil
+		if contentType := r.Header.Get("Content-Type"); contentType != "" {
+			media, _, err := mime.ParseMediaType(contentType)
+			if err != nil || (media != "application/json" && !(strings.HasPrefix(media, "application/") && strings.HasSuffix(media, "+json"))) {
+				invalid = true
+			}
+		}
+		if !invalid {
+			invalid = decoder.Decode(&extra) != io.EOF
+		}
+		frequency := "MONTHLY"
+		if len(body.Frequency) > 0 {
+			frequency = ""
+			if err := json.Unmarshal(body.Frequency, &frequency); err != nil {
+				invalid = true
+			}
+		}
+		var requestID pgtype.UUID
+		if err := requestID.Scan(r.Header.Get("Idempotency-Key")); err != nil {
+			invalid = true
+		}
+		if invalid || body.Email == nil || body.Amount == nil || utf8.RuneCountInString(*body.Email) > 320 || *body.Amount < 100 || *body.Amount > 99999999 || (frequency != "MONTHLY" && frequency != "ONE_TIME") || !requestID.Valid || requestID.Bytes[6]>>4 != 4 || requestID.Bytes[8]&0xc0 != 0x80 {
+			reply(w, 422, map[string]string{"detail": "Invalid request fields"})
+			return
+		}
+		if services.Checkout == nil {
+			reply(w, 503, map[string]string{"detail": "Checkout is temporarily unavailable; retry the same request"})
+			return
+		}
+		var visitor *string
+		if cookie, err := r.Cookie("dad_referral"); err == nil {
+			visitor = &cookie.Value
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+		defer cancel()
+		result, err := services.Checkout.BeginCheckout(ctx, payments.CheckoutRequest{RequestID: requestID, Email: *body.Email, Amount: *body.Amount, Frequency: frequency, Visitor: visitor})
+		switch {
+		case errors.Is(err, payments.ErrCheckoutConflict):
+			reply(w, 409, map[string]string{"detail": "Checkout conflicts with an existing request"})
+		case errors.Is(err, store.ErrDenied):
+			reply(w, 403, map[string]string{"detail": "Giving is unavailable for this account"})
+		case errors.Is(err, payments.ErrCheckoutInput):
+			reply(w, 422, map[string]string{"detail": "Invalid request fields"})
+		case err != nil:
+			reply(w, 503, map[string]string{"detail": "Checkout is temporarily unavailable; retry the same request"})
+		default:
+			reply(w, 201, result)
+		}
+	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { reply(w, 404, map[string]string{"detail": "Not Found"}) })
-	return &http.Server{Addr: address, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 * 1024}
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Cache-Control", "no-store")
+		mux.ServeHTTP(w, r)
+	})
+	return &http.Server{Addr: address, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 * 1024}
 }
