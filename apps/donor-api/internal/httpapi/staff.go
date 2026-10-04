@@ -196,7 +196,12 @@ func installStaffRoutes(mux *http.ServeMux, services Services, guard *browserGua
 			result, err := source.ChangeAccess(ctx, staffToken(r), id, action, body.Role)
 			var response interface{} = result
 			if err == nil && action == "recovery" {
-				response = map[string]string{"invitation_url": guard.origin + "/staff/activate#token=" + result["token"].(string)}
+				token, ok := result["token"].(string)
+				if !ok || !validToken(token) {
+					err = errors.New("invalid recovery result")
+				} else {
+					response = map[string]string{"invitation_url": guard.origin + "/staff/activate#token=" + token}
+				}
 			}
 			if err == nil && action == "role" {
 				response = result["staff"]

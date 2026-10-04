@@ -77,6 +77,7 @@ services:
       dockerfile: apps/web/Dockerfile
     environment:
       DONOR_API_BASE_URL: http://api:8002
+      DONOR_CLIENT_IP_HEADER: ${DONOR_CLIENT_IP_HEADER:-}
     depends_on:
       api:
         condition: service_healthy

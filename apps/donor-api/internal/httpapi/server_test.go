@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -44,7 +45,7 @@ func TestReadinessChecksDatabaseWithinDeadline(t *testing.T) {
 		if !called || response.Code != want {
 			t.Fatalf("called=%v status=%d", called, response.Code)
 		}
-		if failure != nil && response.Body.String() == failure.Error() {
+		if failure != nil && strings.Contains(response.Body.String(), failure.Error()) {
 			t.Fatal("database details exposed")
 		}
 	}

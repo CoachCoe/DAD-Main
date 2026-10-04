@@ -123,14 +123,14 @@ func (g *StripeGateway) UpdateSubscriptionPaymentMethod(ctx context.Context, id,
 
 func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, error) {
 	result, err := g.client.V1Refunds.Retrieve(ctx, id, nil)
-	if err != nil || result.LastResponse == nil {
+	if err != nil || result == nil || result.LastResponse == nil {
 		return nil, ErrCheckoutUnavailable
 	}
 	return DecodeObject(result.LastResponse.RawJSON)
 }
 func (g *StripeGateway) RetrieveSubscription(ctx context.Context, id string) (Object, error) {
 	result, err := g.client.V1Subscriptions.Retrieve(ctx, id, nil)
-	if err != nil || result.LastResponse == nil {
+	if err != nil || result == nil || result.LastResponse == nil {
 		return nil, ErrCheckoutUnavailable
 	}
 	return DecodeObject(result.LastResponse.RawJSON)
@@ -166,7 +166,7 @@ func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key stri
 		return RemoteCheckout{}, ErrCheckoutUnavailable
 	}
 	var result RemoteCheckout
-	if session.LastResponse == nil || json.Unmarshal(session.LastResponse.RawJSON, &result) != nil {
+	if session == nil || session.LastResponse == nil || json.Unmarshal(session.LastResponse.RawJSON, &result) != nil {
 		return result, ErrCheckoutUnavailable
 	}
 	return result, nil

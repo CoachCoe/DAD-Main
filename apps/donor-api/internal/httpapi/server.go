@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -37,6 +38,7 @@ type Services struct {
 	Webhook         WebhookReceiver
 	Checkout        CheckoutSource
 	Origin          string
+	TrustedProxies  []netip.Prefix
 	Account         AccountSource
 	Donor           DonorSource
 	Recurring       RecurringSource
@@ -55,14 +57,13 @@ func NewServer(address string, services Services) *http.Server {
 	if origin == "" {
 		origin = "http://localhost:3000"
 	}
-	guard := &browserGuard{origin: origin}
+	guard := &browserGuard{origin: origin, trustedProxies: services.TrustedProxies}
 	mux := http.NewServeMux()
 	reply := func(w http.ResponseWriter, status int, body interface{}) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(body)
+		writeJSON(w, status, body)
 	}
 	installAccountRoutes(mux, services, guard, reply)
 	installDonorRoutes(mux, services, guard, reply)
@@ -97,7 +98,7 @@ func NewServer(address string, services Services) *http.Server {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "public, max-age=60")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		_ = json.NewEncoder(w).Encode(body)
+		writeJSON(w, http.StatusOK, body)
 	})
 	mux.HandleFunc("GET /donor/me/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("dad_donor_session")

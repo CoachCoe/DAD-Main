@@ -1,4 +1,5 @@
-import { type NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
+import { isIP } from "node:net";
 
 /**
  * Runtime proxy to the donor API.
@@ -47,11 +48,18 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   target.search = request.nextUrl.search;
 
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
+  const requestHeaders = forwardHeaders(request.headers);
+  requestHeaders.delete("x-real-ip");
+  requestHeaders.delete("x-forwarded-for");
+  // Enable only behind ingress that overwrites this header and blocks direct access.
+  const clientHeader = process.env.DONOR_CLIENT_IP_HEADER;
+  const clientIP = clientHeader ? request.headers.get(clientHeader) : null;
+  if (clientIP && isIP(clientIP)) requestHeaders.set("x-real-ip", clientIP);
   let response: Response;
   try {
     response = await fetch(target, {
       method: request.method,
-      headers: forwardHeaders(request.headers),
+      headers: requestHeaders,
       // Stream source documents without buffering them in the web server.
       body: hasBody ? request.body : undefined,
       redirect: "manual",

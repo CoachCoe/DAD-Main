@@ -129,6 +129,9 @@ func (s *StaffService) SignOut(ctx context.Context, token string) error {
 	if err != nil {
 		return err
 	}
+	if _, err = q.StaffByID(ctx, staff.ID); err != nil {
+		return err
+	}
 	if err = q.RevokeStaffSession(ctx, queries.RevokeStaffSessionParams{TokenHash: HashToken(token), RevokedAt: timestamp(now)}); err != nil {
 		return err
 	}

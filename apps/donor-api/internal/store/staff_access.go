@@ -26,6 +26,19 @@ func staffTransaction[T any](ctx context.Context, s *StaffService, token, permis
 	if err != nil {
 		return empty, err
 	}
+	// Access management locks all staff in ID order; other mutations lock only
+	// their actor so revocation cannot race an already-authorized write.
+	if permission == "message.resend" || permission == "content.publish" {
+		q := queries.New(tx)
+		if _, err = q.StaffByID(ctx, actor.ID); err != nil {
+			return empty, err
+		}
+		now = time.Now().UTC()
+		actor, err = requireStaff(ctx, q, token, permission, now)
+		if err != nil {
+			return empty, err
+		}
+	}
 	result, err := run(tx, actor, now)
 	if err != nil {
 		return empty, err

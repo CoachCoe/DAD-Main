@@ -5,8 +5,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +24,13 @@ func run() error {
 		address = "127.0.0.1:8002"
 	}
 	var services httpapi.Services
+	for _, value := range strings.FieldsFunc(os.Getenv("DONOR_TRUSTED_PROXY_CIDRS"), func(r rune) bool { return r == ',' }) {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(value))
+		if err != nil {
+			return errors.New("DONOR_TRUSTED_PROXY_CIDRS must contain valid CIDR ranges")
+		}
+		services.TrustedProxies = append(services.TrustedProxies, prefix)
+	}
 	services.EmailConfigured = os.Getenv("DONOR_SMTP_HOST") != "" && os.Getenv("DONOR_EMAIL_FROM") != "" && os.Getenv("DONOR_EMAIL_ENCRYPTION_KEY") != ""
 	services.Origin = os.Getenv("DONOR_PUBLIC_ORIGIN")
 	if services.Origin == "" {

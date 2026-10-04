@@ -37,6 +37,16 @@ only on loopback. Configure trusted client abuse limits at ingress; the API's lo
 rate limiter alone is not a distributed public-release defense. Never trust an arbitrary
 client-supplied forwarding header. Configure database TLS for remote database connections.
 
+For per-visitor API limits behind Next, configure ingress to overwrite a single-IP
+header (for example `X-Real-IP`), then set `DONOR_CLIENT_IP_HEADER` on the web service
+to that header and `DONOR_TRUSTED_PROXY_CIDRS` on the API to the web proxy's exact
+address or isolated network. Block direct browser access around that ingress. The web
+service strips incoming forwarding headers unless configured, and the API trusts
+`X-Real-IP` only from those peers. Without this configuration, all proxied requests
+share the proxy's quota. The in-process limiter permits 20 mutations per rolling minute
+per address, retains at most 65,536 addresses, and fails closed when full; capacity
+and distributed limits must be validated against the agreed launch spike.
+
 `/health/live` checks process availability. `/health/ready` checks the migration history
 through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is intentionally
 unconfigured. Readiness is not payment-provider acceptance or live-release authorization.
