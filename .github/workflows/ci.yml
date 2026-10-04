@@ -4,6 +4,16 @@ on:
   pull_request:
 
 jobs:
+  donor-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.1"
+          cache: false
+      - run: test -z "$(gofmt -l .)" && go vet ./... && go test -race ./... && go build ./...
+        working-directory: apps/donor-api
   contracts:
     runs-on: ubuntu-latest
     steps:
@@ -84,4 +94,3 @@ jobs:
         run: docker compose -f docker-compose.demo.yml logs --tail 200
       - if: always()
         run: docker compose -f docker-compose.demo.yml down -v
-

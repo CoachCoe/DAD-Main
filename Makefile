@@ -1,4 +1,5 @@
 .PHONY: install dev api web db-up migrate seed bootstrap-chain chain-args worker worker-once deploy-build deploy-up deploy-release deploy-smoke deploy-down deploy-logs test test-contracts test-api test-web test-browser-e2e test-local-e2e anvil deploy-local deploy-sepolia configure-sepolia-roles demo-reset new-sepolia-demo-run reconcile-chain
+.PHONY: donor-go test-donor-go
 
 install:
 	cd apps/api && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
@@ -53,7 +54,13 @@ configure-sepolia-roles:
 	@echo "Configuring ImpactRegistry roles on explicit Sepolia target (chain 11155111)."
 	cd contracts && forge script script/ConfigureImpactRegistryRoles.s.sol:ConfigureImpactRegistryRoles --rpc-url "$(SEPOLIA_RPC_URL)" --broadcast
 
-test: test-contracts test-api test-web
+test: test-contracts test-api test-web test-donor-go
+
+test-donor-go:
+	cd apps/donor-api && go vet ./... && go test -race ./... && go build ./...
+
+donor-go:
+	cd apps/donor-api && go run ./cmd/api
 
 test-contracts:
 	cd contracts && forge test

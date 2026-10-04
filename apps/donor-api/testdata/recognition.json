@@ -1,0 +1,1252 @@
+[
+  {
+    "name": "direct-only channels",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      },
+      {
+        "id": "g2",
+        "donor_id": "cara",
+        "amount_minor": 100,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "IRL",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      },
+      {
+        "id": "g3",
+        "donor_id": "dee",
+        "amount_minor": 500,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "ben",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "alice": {
+        "link_count": 1,
+        "irl_count": 1,
+        "link_minor": 3000,
+        "irl_minor": 100,
+        "currency": "USD"
+      },
+      "ben": {
+        "link_count": 1,
+        "irl_count": 0,
+        "link_minor": 500,
+        "irl_minor": 0,
+        "currency": "USD"
+      }
+    }
+  },
+  {
+    "name": "full refund removes count",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 3000,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "alice": {
+        "link_count": 0,
+        "irl_count": 0,
+        "link_minor": 0,
+        "irl_minor": 0,
+        "currency": "USD"
+      }
+    }
+  },
+  {
+    "name": "partial refund retains count",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 1000,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "alice": {
+        "link_count": 1,
+        "irl_count": 0,
+        "link_minor": 2000,
+        "irl_minor": 0,
+        "currency": "USD"
+      }
+    }
+  },
+  {
+    "name": "nonfinal refund PENDING",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 3000,
+        "status": "PENDING",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "alice": {
+        "link_count": 1,
+        "irl_count": 0,
+        "link_minor": 3000,
+        "irl_minor": 0,
+        "currency": "USD"
+      }
+    }
+  },
+  {
+    "name": "nonfinal refund REQUIRES_ACTION",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 3000,
+        "status": "REQUIRES_ACTION",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "alice": {
+        "link_count": 1,
+        "irl_count": 0,
+        "link_minor": 3000,
+        "irl_minor": 0,
+        "currency": "USD"
+      }
+    }
+  },
+  {
+    "name": "nonfinal refund FAILED",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 3000,
+        "status": "FAILED",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "alice": {
+        "link_count": 1,
+        "irl_count": 0,
+        "link_minor": 3000,
+        "irl_minor": 0,
+        "currency": "USD"
+      }
+    }
+  },
+  {
+    "name": "nonfinal refund CANCELED",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 3000,
+        "status": "CANCELED",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "alice": {
+        "link_count": 1,
+        "irl_count": 0,
+        "link_minor": 3000,
+        "irl_minor": 0,
+        "currency": "USD"
+      }
+    }
+  },
+  {
+    "name": "refund then later gift retains original referrer",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      },
+      {
+        "id": "g2",
+        "donor_id": "ben",
+        "amount_minor": 9000,
+        "paid_at": "2027-02-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "other",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 3000,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "alice": {
+        "link_count": 1,
+        "irl_count": 0,
+        "link_minor": 9000,
+        "irl_minor": 0,
+        "currency": "USD"
+      }
+    }
+  },
+  {
+    "name": "direct first gift cannot become referred",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g2",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-02-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      },
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": null,
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {}
+  },
+  {
+    "name": "self referral excluded",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "ben",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {}
+  },
+  {
+    "name": "expiry is exclusive",
+    "operation": "referrals",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-02-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-02-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {}
+  },
+  {
+    "name": "duplicate gifts deduplicated",
+    "operation": "net",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      },
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "g1": 3000
+    }
+  },
+  {
+    "name": "conflicting duplicate rejected",
+    "operation": "net",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      },
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 9000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "error": "invalid"
+  },
+  {
+    "name": "refund above gift rejected",
+    "operation": "net",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 3001,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "error": "invalid"
+  },
+  {
+    "name": "future refund snapshot rejected",
+    "operation": "net",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 3000,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-03-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "error": "invalid"
+  },
+  {
+    "name": "duplicate refunds deduplicated",
+    "operation": "net",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 1000,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      },
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 1000,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-02-01T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "g1": 2000
+    }
+  },
+  {
+    "name": "founding before New York cutoff",
+    "operation": "founding",
+    "as_of": "2027-04-22T04:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-04-22T03:59:59.999999Z",
+        "frequency": "ONE_TIME",
+        "candidate": null,
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": true
+  },
+  {
+    "name": "founding cutoff exclusive",
+    "operation": "founding",
+    "as_of": "2027-04-22T04:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-04-22T04:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": null,
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": false
+  },
+  {
+    "name": "founding remains awarded",
+    "operation": "founding",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": true,
+    "stops": [],
+    "pauses": [],
+    "expected": true
+  },
+  {
+    "name": "two recurring periods",
+    "operation": "streak",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      },
+      {
+        "id": "g2",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-02-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "feb",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      },
+      {
+        "id": "feb",
+        "donor_id": "ben",
+        "due_at": "2027-02-01T00:00:00Z",
+        "ends_at": "2027-03-01T00:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "current": 2,
+      "best": 2,
+      "at_risk": false,
+      "grace_ends_at": null
+    }
+  },
+  {
+    "name": "failed renewal grace",
+    "operation": "streak",
+    "as_of": "2027-02-14T23:59:59Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      },
+      {
+        "id": "feb",
+        "donor_id": "ben",
+        "due_at": "2027-02-01T00:00:00Z",
+        "ends_at": "2027-03-01T00:00:00Z",
+        "status": "FAILED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "current": 1,
+      "best": 1,
+      "at_risk": true,
+      "grace_ends_at": "2027-02-15T00:00:00Z"
+    }
+  },
+  {
+    "name": "grace expiration",
+    "operation": "streak",
+    "as_of": "2027-02-15T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      },
+      {
+        "id": "feb",
+        "donor_id": "ben",
+        "due_at": "2027-02-01T00:00:00Z",
+        "ends_at": "2027-03-01T00:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "current": 0,
+      "best": 1,
+      "at_risk": false,
+      "grace_ends_at": null
+    }
+  },
+  {
+    "name": "one time never builds streak",
+    "operation": "streak",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "ONE_TIME",
+        "candidate": {
+          "referrer_id": "alice",
+          "kind": "LINK",
+          "expires_at": "2027-03-01T00:00:00Z"
+        },
+        "period_id": "",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "current": 0,
+      "best": 0,
+      "at_risk": false,
+      "grace_ends_at": null
+    }
+  },
+  {
+    "name": "missing billing fact rejected",
+    "operation": "streak",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "error": "incomplete"
+  },
+  {
+    "name": "missing renewal rejected",
+    "operation": "streak",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "error": "incomplete"
+  },
+  {
+    "name": "cancel boundary resets current retains best",
+    "operation": "streak",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [
+      "2027-02-01T00:00:00Z"
+    ],
+    "pauses": [],
+    "expected": {
+      "current": 0,
+      "best": 1,
+      "at_risk": false,
+      "grace_ends_at": null
+    }
+  },
+  {
+    "name": "active pause boundary",
+    "operation": "streak",
+    "as_of": "2027-02-01T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [
+      {
+        "start": "2027-02-01T00:00:00Z",
+        "end": "2027-03-01T00:00:00Z"
+      }
+    ],
+    "expected": {
+      "current": 0,
+      "best": 1,
+      "at_risk": false,
+      "grace_ends_at": null
+    }
+  },
+  {
+    "name": "partial refund still qualifies recurring",
+    "operation": "streak",
+    "as_of": "2027-01-20T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 1000,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-01-10T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "current": 1,
+      "best": 1,
+      "at_risk": false,
+      "grace_ends_at": null
+    }
+  },
+  {
+    "name": "full refund breaks current preserves recorded best",
+    "operation": "streak",
+    "as_of": "2027-01-20T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [
+      {
+        "id": "r1",
+        "gift_id": "g1",
+        "amount_minor": 3000,
+        "status": "SUCCEEDED",
+        "updated_at": "2027-01-10T00:00:00Z",
+        "currency": "USD"
+      }
+    ],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 4,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "current": 0,
+      "best": 4,
+      "at_risk": false,
+      "grace_ends_at": null
+    }
+  },
+  {
+    "name": "late payment starts new streak",
+    "operation": "streak",
+    "as_of": "2027-02-16T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      },
+      {
+        "id": "g2",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-02-15T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "feb",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      },
+      {
+        "id": "feb",
+        "donor_id": "ben",
+        "due_at": "2027-02-01T00:00:00Z",
+        "ends_at": "2027-03-01T00:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "current": 1,
+      "best": 1,
+      "at_risk": false,
+      "grace_ends_at": null
+    }
+  }
+]
