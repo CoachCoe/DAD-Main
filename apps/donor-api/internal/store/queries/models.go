@@ -69,6 +69,18 @@ type DonorGift struct {
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorLoginEmail struct {
+	DonorID        pgtype.UUID        `json:"donor_id"`
+	EncryptedToken []byte             `json:"encrypted_token"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	AvailableAt    pgtype.Timestamptz `json:"available_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	Attempts       int32              `json:"attempts"`
+	LastError      pgtype.Text        `json:"last_error"`
+	ID             pgtype.UUID        `json:"id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorLoginLink struct {
 	DonorID    pgtype.UUID        `json:"donor_id"`
 	TokenHash  string             `json:"token_hash"`
@@ -76,6 +88,22 @@ type DonorLoginLink struct {
 	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
 	ID         pgtype.UUID        `json:"id"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorMessage struct {
+	DonorID          pgtype.UUID        `json:"donor_id"`
+	DedupKey         string             `json:"dedup_key"`
+	Kind             string             `json:"kind"`
+	Context          []byte             `json:"context"`
+	AvailableAt      pgtype.Timestamptz `json:"available_at"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	Attempts         int32              `json:"attempts"`
+	LastError        pgtype.Text        `json:"last_error"`
+	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
+	Subject          pgtype.Text        `json:"subject"`
+	Body             pgtype.Text        `json:"body"`
+	ID               pgtype.UUID        `json:"id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type DonorMetricProjection struct {
@@ -115,6 +143,15 @@ type DonorPaymentUpdate struct {
 	HostedUrl       pgtype.Text        `json:"hosted_url"`
 	Status          string             `json:"status"`
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+	ID              pgtype.UUID        `json:"id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorPreference struct {
+	DonorID         pgtype.UUID        `json:"donor_id"`
+	Version         int32              `json:"version"`
+	ReferralEmails  bool               `json:"referral_emails"`
+	MarketingEmails bool               `json:"marketing_emails"`
 	ID              pgtype.UUID        `json:"id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }

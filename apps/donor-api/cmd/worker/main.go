@@ -7,10 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/store/queries"
@@ -19,13 +21,13 @@ import (
 
 func run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("donor-worker", flag.ContinueOnError)
-	kind := flags.String("kind", "", "stripe or projections")
+	kind := flags.String("kind", "", "stripe, projections, login-email, or messages")
 	once := flags.Bool("once", false, "process at most one item")
 	retry := flags.String("retry-event", "", "reset an unprocessed Stripe event's attempt budget")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	if flags.NArg() != 0 || (*kind != "stripe" && *kind != "projections") || (*retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_"))) {
+	if flags.NArg() != 0 || (*kind != "stripe" && *kind != "projections" && *kind != "login-email" && *kind != "messages") || (*retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_"))) {
 		return errors.New("invalid worker arguments")
 	}
 	// Cutover is explicit. Never start a second side-effecting runtime merely
@@ -59,9 +61,34 @@ func run(ctx context.Context, args []string) error {
 	var step func(context.Context) (bool, error)
 	if *kind == "stripe" {
 		step = store.EventWorker{DB: pool, Gateway: gateway}.ProcessNext
-	} else {
+	} else if *kind == "projections" {
 		step = func(ctx context.Context) (bool, error) {
 			return store.RefreshNextProjection(ctx, pool, time.Now().UTC())
+		}
+	} else {
+		port := 587
+		if value := os.Getenv("DONOR_SMTP_PORT"); value != "" {
+			var err error
+			port, err = strconv.Atoi(value)
+			if err != nil {
+				return mail.ErrConfiguration
+			}
+		}
+		settings := mail.Settings{Host: os.Getenv("DONOR_SMTP_HOST"), Port: port, Username: os.Getenv("DONOR_SMTP_USERNAME"), Password: os.Getenv("DONOR_SMTP_PASSWORD"), Sender: os.Getenv("DONOR_EMAIL_FROM"), EncryptionKey: os.Getenv("DONOR_EMAIL_ENCRYPTION_KEY")}
+		if err := settings.Validate(); err != nil {
+			return err
+		}
+		origin := os.Getenv("DONOR_PUBLIC_ORIGIN")
+		if origin == "" {
+			origin = "http://localhost:3000"
+		}
+		transport := mail.SMTPTransport{Settings: settings}
+		if *kind == "login-email" {
+			worker := store.LoginEmailWorker{DB: pool, Settings: settings, Origin: origin, Transport: transport}
+			step = func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }
+		} else {
+			worker := store.MessageWorker{DB: pool, Settings: settings, Origin: origin, Transport: transport}
+			step = func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }
 		}
 	}
 	return workers.Run(ctx, *once, 2*time.Second, step)
