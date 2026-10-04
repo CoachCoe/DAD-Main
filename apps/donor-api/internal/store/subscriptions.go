@@ -31,6 +31,10 @@ func reconcileSubscription(ctx context.Context, tx pgx.Tx, gateway payments.Fina
 	if err != nil {
 		return empty, err
 	}
+	return reconcileRemoteSubscription(ctx, tx, draft, attempt, remote, now)
+}
+func reconcileRemoteSubscription(ctx context.Context, tx pgx.Tx, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, remote payments.Object, now time.Time) (queries.DonorSubscription, error) {
+	empty := queries.DonorSubscription{}
 	metadata, e1 := remote.Object("metadata")
 	items, e2 := remote.Object("items")
 	lines, e3 := items.Array("data")
@@ -68,10 +72,10 @@ func reconcileSubscription(ctx context.Context, tx pgx.Tx, gateway payments.Fina
 		cancelAt = true
 	}
 	q := queries.New(tx)
-	if err = reconcileAmount(ctx, q, draft, item, price, end, now); err != nil {
+	if err := reconcileAmount(ctx, q, draft, item, price, end, now); err != nil {
 		return empty, err
 	}
-	if err = reconcilePause(ctx, q, attempt, remote, now); err != nil {
+	if err := reconcilePause(ctx, q, attempt, remote, now); err != nil {
 		return empty, err
 	}
 	var stops pgtype.Timestamptz

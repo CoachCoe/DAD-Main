@@ -63,6 +63,41 @@ type PaymentMethodGateway interface {
 	UpdateSubscriptionPaymentMethod(context.Context, string, string, string) error
 }
 
+type SubscriptionGateway interface {
+	PaymentMethodGateway
+	CheckoutGateway
+	ScheduleCancellation(context.Context, string, int64, string) error
+	PauseCollection(context.Context, string, int64, string) error
+	ChangeMonthlyAmount(context.Context, string, string, string, int64, string) error
+}
+
+func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, values map[string]interface{}, key string) error {
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return ErrCheckoutUnavailable
+	}
+	var params stripe.SubscriptionUpdateParams
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err = decoder.Decode(&params); err != nil {
+		return ErrCheckoutUnavailable
+	}
+	params.SetIdempotencyKey(key)
+	if _, err = g.client.V1Subscriptions.Update(ctx, id, &params); err != nil {
+		return ErrCheckoutUnavailable
+	}
+	return nil
+}
+func (g *StripeGateway) ScheduleCancellation(ctx context.Context, id string, end int64, key string) error {
+	return g.mutateSubscription(ctx, id, map[string]interface{}{"cancel_at": end, "proration_behavior": "none"}, key)
+}
+func (g *StripeGateway) PauseCollection(ctx context.Context, id string, resumes int64, key string) error {
+	return g.mutateSubscription(ctx, id, map[string]interface{}{"pause_collection": map[string]interface{}{"behavior": "void", "resumes_at": resumes}, "proration_behavior": "none"}, key)
+}
+func (g *StripeGateway) ChangeMonthlyAmount(ctx context.Context, id, item, product string, amount int64, key string) error {
+	return g.mutateSubscription(ctx, id, map[string]interface{}{"items": []interface{}{map[string]interface{}{"id": item, "quantity": 1, "price_data": map[string]interface{}{"currency": "usd", "product": product, "recurring": map[string]interface{}{"interval": "month"}, "unit_amount": amount}}}, "proration_behavior": "none"}, key)
+}
+
 func (g *StripeGateway) RetrieveCheckout(ctx context.Context, id string) (Object, error) {
 	result, err := g.client.V1CheckoutSessions.Retrieve(ctx, id, nil)
 	if err != nil || result == nil || result.LastResponse == nil {

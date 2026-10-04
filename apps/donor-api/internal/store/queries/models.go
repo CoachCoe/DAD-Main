@@ -43,6 +43,15 @@ type DonorBillingPeriod struct {
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorCancellation struct {
+	DonorID            pgtype.UUID        `json:"donor_id"`
+	AttemptID          pgtype.UUID        `json:"attempt_id"`
+	ConfirmedPeriodEnd pgtype.Timestamptz `json:"confirmed_period_end"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorCheckout struct {
 	DonorID           pgtype.UUID        `json:"donor_id"`
 	AmountMinor       int64              `json:"amount_minor"`

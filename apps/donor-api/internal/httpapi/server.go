@@ -38,6 +38,7 @@ type Services struct {
 	Origin          string
 	Account         AccountSource
 	Donor           DonorSource
+	Recurring       RecurringSource
 	EmailConfigured bool
 }
 
@@ -60,6 +61,7 @@ func NewServer(address string, services Services) *http.Server {
 	}
 	installAccountRoutes(mux, services, guard, reply)
 	installDonorRoutes(mux, services, guard, reply)
+	installRecurringRoutes(mux, services, guard, reply)
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) { reply(w, 200, map[string]string{"status": "alive"}) })
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, 503, map[string]string{"detail": "Go donor rewrite is not ready for traffic"})

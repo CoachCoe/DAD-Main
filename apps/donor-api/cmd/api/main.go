@@ -29,7 +29,7 @@ func run() error {
 	if err := payments.ValidateOrigin(services.Origin); err != nil {
 		return err
 	}
-	var gateway payments.CheckoutGateway
+	var gateway payments.SubscriptionGateway
 	if key := os.Getenv("STRIPE_SECRET_KEY"); key != "" {
 		configured, err := payments.NewStripeGateway(key)
 		if err != nil {
@@ -51,6 +51,7 @@ func run() error {
 		services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
 		services.Account = store.AccountService{DB: pool}
 		services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
+		services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	}
 	server := httpapi.NewServer(address, services)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
