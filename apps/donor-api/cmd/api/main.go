@@ -52,6 +52,12 @@ func run() error {
 		services.Account = store.AccountService{DB: pool}
 		services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
 		services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
+		if key := os.Getenv("DONOR_STAFF_ENCRYPTION_KEY"); key != "" {
+			services.Staff, err = store.NewStaffService(pool, key)
+			if err != nil {
+				return errors.New("staff configuration is invalid")
+			}
+		}
 	}
 	server := httpapi.NewServer(address, services)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

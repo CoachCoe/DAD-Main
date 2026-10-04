@@ -195,6 +195,31 @@ type DonorResumption struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorStaff struct {
+	Email        string             `json:"email"`
+	Name         string             `json:"name"`
+	Role         string             `json:"role"`
+	Disabled     bool               `json:"disabled"`
+	PasswordHash pgtype.Text        `json:"password_hash"`
+	TotpSecret   []byte             `json:"totp_secret"`
+	TotpCounter  int64              `json:"totp_counter"`
+	Failures     int32              `json:"failures"`
+	LockedUntil  pgtype.Timestamptz `json:"locked_until"`
+	ID           pgtype.UUID        `json:"id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorStaffInvite struct {
+	StaffID       pgtype.UUID        `json:"staff_id"`
+	TokenHash     string             `json:"token_hash"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt    pgtype.Timestamptz `json:"consumed_at"`
+	PendingSecret []byte             `json:"pending_secret"`
+	Attempts      int32              `json:"attempts"`
+	ID            pgtype.UUID        `json:"id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorStripeCheckout struct {
 	CheckoutID           pgtype.UUID        `json:"checkout_id"`
 	RequestHash          string             `json:"request_hash"`
