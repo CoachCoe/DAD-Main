@@ -36,6 +36,8 @@ jobs:
         working-directory: apps/donor-api
       - run: test -z "$(gofmt -l .)" && go vet ./... && go test -race ./... && go build ./...
         working-directory: apps/donor-api
+      - run: go run ./cmd/compatfixture > "$RUNNER_TEMP/go-credentials.json" && python ../api/tests/verify_go_credentials.py "$RUNNER_TEMP/go-credentials.json"
+        working-directory: apps/donor-api
   contracts:
     runs-on: ubuntu-latest
     steps:
