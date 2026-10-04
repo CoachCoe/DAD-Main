@@ -54,6 +54,8 @@ export default function StaffPage() {
   return <section className="panel"><h1>DAD staff back office</h1><p>Sandbox donor records. Staff access and actions are audited.</p>
     {signedOut ? <Link href="/staff/sign-in">Staff sign-in</Link> : actor ? <>
       <p>{actor.name} · {actor.role}</p>
+      {actor.permissions.includes("data.export") && <p><Link href="/staff/exports">Exports and enrolment queue</Link></p>}
+      {actor.permissions.includes("audit.read") && <p><Link href="/staff/audit">Audit history</Link></p>}
       <button disabled={busy} onClick={() => action(async () => { await api("/donor/staff/sign-out", { method: "POST" }); setSignedOut(true); })}>Sign out</button>
       <form onSubmit={(event) => { event.preventDefault(); search(); }}>
         <label>Find donor by email<input type="search" maxLength={320} value={q} onChange={(event) => setQ(event.target.value)} /></label>
@@ -64,7 +66,7 @@ export default function StaffPage() {
       </li>)}</ul> : <p>No matching donors.</p>}
         {results.next_offset !== null && <button disabled={busy} onClick={() => search(results.next_offset!)}>Next donor page</button>}
       </>}
-      {detail && <article><h2>{detail.email}</h2><p>Public nickname: {detail.public_name || "Not shared"}</p>
+      {detail && <article><h2>{detail.email}</h2><p><Link href={`/staff/messages?donor=${detail.id}`}>Delivery history and resends</Link></p><p>Public nickname: {detail.public_name || "Not shared"}</p>
         <p>Streak: {detail.streak?.current ?? "Updating"} · Best: {detail.streak?.best ?? "Updating"}{detail.streak?.at_risk ? " · At risk" : ""}</p>
         {detail.streak && <p>Computed {new Date(detail.streak.computed_at).toLocaleString()}</p>}
         <p>Referrer: {detail.referrer ? `${detail.referrer.email} · ${detail.referrer.type}` : "No attributed referrer"}</p>

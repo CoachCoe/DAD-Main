@@ -47,7 +47,10 @@ def cipher():
 
 
 def audit(session, actor_id, action, target, **details):
-    session.add(DonorStaffAuditRecord(actor_id=actor_id, action=action, target=str(target), details=details))
+    row = DonorStaffAuditRecord(actor_id=actor_id, action=action, target=str(target), details=details)
+    session.add(row)
+    session.flush()
+    return row
 
 
 def view(staff):

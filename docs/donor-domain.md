@@ -716,3 +716,28 @@ unless the staff tables are empty.
 Recovery of a lost authenticator or password requires an approved staff recovery
 workflow; do not disable MFA or edit credential hashes to bypass it. Keep at least two
 individually provisioned administrators before operation.
+
+## Staff exports and resends
+
+`/staff/exports` lists only datasets allowed by the current role. The CSV endpoint at
+`/donor/staff/exports/{dataset}.csv` rechecks permissions before streaming. Finance can
+export donor and financial datasets; staff identities require `staff.manage`, and audit
+history requires `audit.read`. Fixed field allowlists omit password hashes, authenticator
+secrets, invitation/session/login tokens, hosted checkout URLs, and message bodies.
+Referral rows always include `referral_kind`. CSV text cells neutralize spreadsheet
+formula prefixes; numeric minor units remain numeric. Rows stream in batches of 500,
+with no-store headers and an audit record for start, completion/interruption, and row
+count. Completion means the response was generated, not proof that a person saved it.
+
+The enrolment queue explicitly reports `not_active_until_r2`. Its R1 CSV path exists and
+returns column headers only; this does not imply a live recipient intake surface.
+
+`/staff/messages?donor={uuid}` shows delivery states and allows Support or higher to
+request account-claim links or resend gift records and annual summaries. A resend has
+an actor-bound UUID v4 idempotency key and a one-minute donor/type cooldown. Pending
+original messages are not duplicated. Parked messages can receive a new audited request;
+optional referral and recovery notices cannot be resent through this route. Their normal
+consent and recovery rules remain authoritative. A resend renders a new as-of copy,
+preserving the prior message. Account-claim requests use the existing cooldown and
+single-use credential outbox. None of these responses asserts successful mail delivery.
+The staff audit viewer is `/staff/audit` and is restricted to administrators.

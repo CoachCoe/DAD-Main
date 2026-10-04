@@ -1,15 +1,19 @@
 """Staff-only R1 routes; never accepts role, actor, or donor ownership from headers."""
-from datetime import UTC, datetime
-from typing import Literal
+from datetime import UTC, datetime, timedelta
+from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import HTTPException, Request, Response
+from fastapi import Header, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from . import donor_staff as staff
+from .donor_email import queue_login_email
+from .donor_exports import DATASETS, csv_rows
 from .persistence import (
     DonorGiftRecord,
+    DonorMessageRecord,
     DonorMetricProjectionRecord,
     DonorRecord,
     DonorStaffAuditRecord,
@@ -122,6 +126,86 @@ def install_staff_routes(app, factory, settings, browser_request):
             staff.disable_staff(session, actor, staff_id)
             return {"disabled": True}
         return run(request, "staff.manage", action)
+
+    @app.get("/donor/staff/exports")
+    def exports(request: Request):
+        return run(request, "data.export", lambda _session, actor: {
+            "datasets": [name for name, (_, _, permission) in DATASETS.items() if permission in staff.PERMISSIONS[actor.role]]})
+
+    @app.get("/donor/staff/exports/{dataset}.csv")
+    def export(dataset: str, request: Request):
+        if dataset not in DATASETS:
+            raise HTTPException(404, "Dataset not found")
+        permission = DATASETS[dataset][2]
+        record_id = run(request, permission, lambda session, actor: staff.audit(session, actor.id, "data.export_started", dataset).id)
+        return StreamingResponse(csv_rows(factory, request.cookies.get(staff.COOKIE), dataset, record_id),
+            media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="dad-{dataset}.csv"',
+                                           "X-Content-Type-Options": "nosniff"})
+
+    @app.get("/donor/staff/enrolments")
+    def enrolments(request: Request):
+        return run(request, "data.export", lambda _session, _actor: {"state": "not_active_until_r2", "enrolments": []})
+
+    @app.post("/donor/staff/donors/{donor_id}/claim-email")
+    def resend_claim(donor_id: UUID, request: Request):
+        browser_request(request)
+        def action(session, actor):
+            donor = session.get(DonorRecord, donor_id)
+            if donor is None:
+                raise LookupError("Donor not found")
+            queue_login_email(session, donor.email)
+            staff.audit(session, actor.id, "message.claim_requested", donor_id)
+            return {"queued": True}
+        return run(request, "message.resend", action)
+
+    @app.get("/donor/staff/donors/{donor_id}/messages")
+    def messages(donor_id: UUID, request: Request, offset: int = 0):
+        if offset < 0:
+            raise HTTPException(422, "Invalid offset")
+        def action(session, actor):
+            if session.get(DonorRecord, donor_id) is None:
+                raise LookupError("Donor not found")
+            rows = session.scalars(select(DonorMessageRecord).where(DonorMessageRecord.donor_id == donor_id)
+                .order_by(DonorMessageRecord.created_at.desc(), DonorMessageRecord.id).offset(offset).limit(51)).all()
+            staff.audit(session, actor.id, "message.list", donor_id)
+            return {"messages": [{"id": str(row.id), "kind": row.kind, "attempts": row.attempts,
+                    "completed_at": row.completed_at, "last_error": row.last_error, "suppressed_reason": row.suppressed_reason,
+                    "available_at": row.available_at} for row in rows[:50]],
+                    "next_offset": offset + 50 if len(rows) > 50 else None}
+        return run(request, "donor.read", action)
+
+    @app.post("/donor/staff/messages/{message_id}/resend")
+    def resend(message_id: UUID, request: Request, idempotency_key: Annotated[UUID, Header()]):
+        browser_request(request)
+        if idempotency_key.version != 4:
+            raise HTTPException(422, "Use a UUID v4 request key")
+        def action(session, actor):
+            # Serialize per donor to keep two simultaneous retries from creating two jobs.
+            source = session.get(DonorMessageRecord, message_id)
+            if source is None:
+                raise LookupError("Message not found")
+            session.execute(select(DonorRecord.id).where(DonorRecord.id == source.donor_id).with_for_update())
+            key = "resend:" + str(idempotency_key)
+            existing = session.scalar(select(DonorMessageRecord).where(DonorMessageRecord.dedup_key == key))
+            if existing:
+                if existing.context.get("resend_source") != str(message_id) or existing.context.get("resend_actor") != str(actor.id):
+                    raise ValueError("Resend key already used")
+                return {"queued": True, "id": str(existing.id)}
+            if source.kind not in ("RECEIPT", "ANNUAL") or source.suppressed_reason:
+                raise ValueError("Only unsuppressed gift records and annual summaries may be resent")
+            if source.completed_at is None and source.attempts < 5:
+                raise ValueError("The original message is still queued")
+            recent = session.scalar(select(DonorMessageRecord.id).where(DonorMessageRecord.donor_id == source.donor_id,
+                DonorMessageRecord.kind == source.kind, DonorMessageRecord.created_at > datetime.now(UTC) - timedelta(minutes=1)))
+            if recent:
+                raise ValueError("Wait one minute before requesting another copy")
+            job = DonorMessageRecord(donor_id=source.donor_id, kind=source.kind, dedup_key=key,
+                context={**source.context, "resend_source": str(message_id), "resend_actor": str(actor.id)}, available_at=datetime.now(UTC))
+            session.add(job)
+            session.flush()
+            staff.audit(session, actor.id, "message.resend_requested", job.id, source_id=str(message_id))
+            return {"queued": True, "id": str(job.id)}
+        return run(request, "message.resend", action)
 
     @app.get("/donor/staff/donors")
     def donors(request: Request, q: str = "", offset: int = 0):
