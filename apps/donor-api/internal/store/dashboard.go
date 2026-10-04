@@ -22,7 +22,7 @@ func Dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time
 	if err != nil {
 		return nil, err
 	}
-	referred, err := q.ReferredProjections(ctx, id)
+	referred, err := q.ReferralTotals(ctx, queries.ReferralTotalsParams{ReferrerID: id, NextRefreshAt: timestamp(now)})
 	if err != nil {
 		return nil, err
 	}
@@ -30,43 +30,13 @@ func Dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time
 	if err != nil {
 		return nil, err
 	}
-	ready := !missing
-	var link, irl, linkMinor, irlMinor int64
-	for _, r := range referred {
-		if !r.NetMinor.Valid || !r.NextRefreshAt.Time.After(now) {
-			ready = false
-			continue
-		}
-		if r.NetMinor.Int64 < 0 {
-			ready = false
-			continue
-		}
-		switch r.ReferralKind.String {
-		case "LINK":
-			if r.NetMinor.Int64 > math.MaxInt64-linkMinor {
-				ready = false
-				continue
-			}
-			linkMinor += r.NetMinor.Int64
-			if r.NetMinor.Int64 > 0 {
-				link++
-			}
-		case "IRL":
-			if r.NetMinor.Int64 > math.MaxInt64-irlMinor {
-				ready = false
-				continue
-			}
-			irlMinor += r.NetMinor.Int64
-			if r.NetMinor.Int64 > 0 {
-				irl++
-			}
-		default:
-			ready = false
-		}
-	}
+	linkAmount, linkErr := referred.LinkMinor.Int64Value()
+	irlAmount, irlErr := referred.IrlMinor.Int64Value()
+	ready := !missing && referred.Ready && linkErr == nil && irlErr == nil && linkAmount.Valid && irlAmount.Valid
+	linkMinor, irlMinor := linkAmount.Int64, irlAmount.Int64
 	result := map[string]interface{}{"mode": "test", "state": "ready", "computed_at": row.ComputedAt.Time, "referrals": nil, "streak": nil, "founding_donor": row.FoundingAwardedAt.Valid}
 	if ready && irlMinor <= math.MaxInt64-linkMinor {
-		result["referrals"] = map[string]interface{}{"link": link, "irl": irl, "link_minor": linkMinor, "irl_minor": irlMinor, "total_minor": linkMinor + irlMinor, "currency": "USD"}
+		result["referrals"] = map[string]interface{}{"link": referred.LinkCount, "irl": referred.IrlCount, "link_minor": linkMinor, "irl_minor": irlMinor, "total_minor": linkMinor + irlMinor, "currency": "USD"}
 	}
 	if row.NextRefreshAt.Time.After(now) && row.CurrentStreak.Valid {
 		var grace interface{}

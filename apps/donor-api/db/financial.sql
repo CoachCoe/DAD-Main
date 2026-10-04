@@ -38,8 +38,13 @@ net_minor=EXCLUDED.net_minor,founding_awarded_at=EXCLUDED.founding_awarded_at,
 best_streak=EXCLUDED.best_streak,current_streak=EXCLUDED.current_streak,at_risk=EXCLUDED.at_risk,
 grace_ends_at=EXCLUDED.grace_ends_at,computed_at=EXCLUDED.computed_at,next_refresh_at=EXCLUDED.next_refresh_at;
 
--- name: ReferredProjections :many
-SELECT * FROM donor_metric_projections WHERE referrer_id=$1;
+-- name: ReferralTotals :one
+SELECT count(*) FILTER (WHERE referral_kind='LINK' AND net_minor>0)::bigint AS link_count,
+count(*) FILTER (WHERE referral_kind='IRL' AND net_minor>0)::bigint AS irl_count,
+coalesce(sum(net_minor) FILTER (WHERE referral_kind='LINK'),0)::numeric AS link_minor,
+coalesce(sum(net_minor) FILTER (WHERE referral_kind='IRL'),0)::numeric AS irl_minor,
+coalesce(bool_and(coalesce(net_minor>=0 AND next_refresh_at>$2 AND referral_kind IN ('LINK','IRL'),false)),true)::boolean AS ready
+FROM donor_metric_projections WHERE referrer_id=$1;
 
 -- name: MissingReferredProjection :one
 SELECT EXISTS(SELECT 1 FROM donor_gifts g JOIN donor_checkouts c ON c.id=g.checkout_id

@@ -180,43 +180,39 @@ func (q *Queries) Projection(ctx context.Context, donorID pgtype.UUID) (DonorMet
 	return i, err
 }
 
-const referredProjections = `-- name: ReferredProjections :many
-SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at FROM donor_metric_projections WHERE referrer_id=$1
+const referralTotals = `-- name: ReferralTotals :one
+SELECT count(*) FILTER (WHERE referral_kind='LINK' AND net_minor>0)::bigint AS link_count,
+count(*) FILTER (WHERE referral_kind='IRL' AND net_minor>0)::bigint AS irl_count,
+coalesce(sum(net_minor) FILTER (WHERE referral_kind='LINK'),0)::numeric AS link_minor,
+coalesce(sum(net_minor) FILTER (WHERE referral_kind='IRL'),0)::numeric AS irl_minor,
+coalesce(bool_and(coalesce(net_minor>=0 AND next_refresh_at>$2 AND referral_kind IN ('LINK','IRL'),false)),true)::boolean AS ready
+FROM donor_metric_projections WHERE referrer_id=$1
 `
 
-func (q *Queries) ReferredProjections(ctx context.Context, referrerID pgtype.UUID) ([]DonorMetricProjection, error) {
-	rows, err := q.db.Query(ctx, referredProjections, referrerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []DonorMetricProjection{}
-	for rows.Next() {
-		var i DonorMetricProjection
-		if err := rows.Scan(
-			&i.DonorID,
-			&i.ReferrerID,
-			&i.ReferralKind,
-			&i.FirstGiftID,
-			&i.NetMinor,
-			&i.FoundingAwardedAt,
-			&i.BestStreak,
-			&i.CurrentStreak,
-			&i.AtRisk,
-			&i.GraceEndsAt,
-			&i.ComputedAt,
-			&i.NextRefreshAt,
-			&i.ID,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+type ReferralTotalsParams struct {
+	ReferrerID    pgtype.UUID        `json:"referrer_id"`
+	NextRefreshAt pgtype.Timestamptz `json:"next_refresh_at"`
+}
+
+type ReferralTotalsRow struct {
+	LinkCount int64          `json:"link_count"`
+	IrlCount  int64          `json:"irl_count"`
+	LinkMinor pgtype.Numeric `json:"link_minor"`
+	IrlMinor  pgtype.Numeric `json:"irl_minor"`
+	Ready     bool           `json:"ready"`
+}
+
+func (q *Queries) ReferralTotals(ctx context.Context, arg ReferralTotalsParams) (ReferralTotalsRow, error) {
+	row := q.db.QueryRow(ctx, referralTotals, arg.ReferrerID, arg.NextRefreshAt)
+	var i ReferralTotalsRow
+	err := row.Scan(
+		&i.LinkCount,
+		&i.IrlCount,
+		&i.LinkMinor,
+		&i.IrlMinor,
+		&i.Ready,
+	)
+	return i, err
 }
 
 const refundHistory = `-- name: RefundHistory :many

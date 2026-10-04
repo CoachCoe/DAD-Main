@@ -58,6 +58,30 @@ func (q *Queries) ContentSourceByID(ctx context.Context, id pgtype.UUID) (DonorC
 	return i, err
 }
 
+const contentSourceIDs = `-- name: ContentSourceIDs :many
+SELECT id FROM donor_content_sources WHERE id=ANY($1::uuid[])
+`
+
+func (q *Queries) ContentSourceIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, contentSourceIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const contentSources = `-- name: ContentSources :many
 SELECT id,name,sha256 FROM donor_content_sources ORDER BY created_at DESC,id LIMIT 500
 `

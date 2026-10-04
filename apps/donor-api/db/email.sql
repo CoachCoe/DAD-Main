@@ -27,8 +27,14 @@ SELECT * FROM donor_gifts WHERE id=$1 AND donor_id=$2 AND paid_at<=$3;
 SELECT * FROM donor_refunds WHERE gift_id=$1 ORDER BY observed_at,id;
 
 -- name: AnnualGifts :many
-SELECT id FROM donor_gifts WHERE donor_id=$1 AND paid_at>=sqlc.arg(starts_at)
+SELECT * FROM donor_gifts WHERE donor_id=$1 AND paid_at>=sqlc.arg(starts_at)
 AND paid_at<sqlc.arg(ends_at) AND paid_at<=sqlc.arg(as_of) ORDER BY paid_at,id;
+
+-- name: AnnualRefunds :many
+SELECT r.* FROM donor_refunds r JOIN donor_gifts g ON g.id=r.gift_id
+WHERE g.donor_id=$1 AND g.paid_at>=sqlc.arg(starts_at)
+AND g.paid_at<sqlc.arg(ends_at) AND g.paid_at<=sqlc.arg(as_of)
+ORDER BY r.gift_id,r.observed_at,r.id;
 
 -- name: NextMessage :one
 SELECT * FROM donor_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1

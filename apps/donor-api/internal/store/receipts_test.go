@@ -11,6 +11,53 @@ import (
 	"impactgraph/donor-api/internal/store/queries"
 )
 
+type countedQueries struct {
+	queries.DBTX
+	reads int
+}
+
+func (db *countedQueries) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	db.reads++
+	return db.DBTX.Query(ctx, sql, args...)
+}
+
+func (db *countedQueries) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	db.reads++
+	return db.DBTX.QueryRow(ctx, sql, args...)
+}
+
+func TestAnnualSummaryReadsGiftsAndRefundsInTwoQueries(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	owner, checkout := testID(t), testID(t)
+	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", owner, owner.String()+"@example.org")
+	mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')", checkout, owner)
+	paid := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	for i := range 100 {
+		gift, refund := testID(t), testID(t)
+		mustExec(t, tx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)", gift, owner, checkout, "pi_"+gift.String(), paid.Add(time.Duration(i)*time.Minute))
+		mustExec(t, tx, "INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,500,'USD','SUCCEEDED',$4)", refund, gift, "re_"+refund.String(), paid.Add(time.Hour))
+	}
+	db := &countedQueries{DBTX: tx}
+	summary, err := ReadAnnualSummary(ctx, queries.New(db), owner, 2026, paid.AddDate(1, 0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if db.reads != 2 || len(summary.Gifts) != 100 || summary.Amount != 300000 || summary.Refunded != 50000 || summary.Net != 250000 {
+		t.Fatal("incorrect or unbatched annual summary", db.reads, summary)
+	}
+	for i, gift := range summary.Gifts {
+		if len(gift.Refunds) != 1 || gift.Net != 2500 || gift.Refunds[0].ID == "" || gift.PaidAt != iso(paid.Add(time.Duration(i)*time.Minute)) {
+			t.Fatal("gift/refund ordering or identity lost", gift)
+		}
+	}
+}
+
 func TestReceiptsScopeNewYorkYearAndLaterRefunds(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()

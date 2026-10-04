@@ -64,12 +64,17 @@ func ReadGiftRecord(ctx context.Context, q *queries.Queries, donor, gift pgtype.
 	if err != nil {
 		return out, err
 	}
-	if row.AmountMinor <= 0 || row.Currency != "USD" {
-		return out, ErrReceipt
-	}
 	refunds, err := q.ReceiptRefunds(ctx, gift)
 	if err != nil {
 		return out, err
+	}
+	return giftRecord(row, refunds)
+}
+
+func giftRecord(row queries.DonorGift, refunds []queries.DonorRefund) (GiftRecord, error) {
+	out := GiftRecord{Refunds: []RefundRecord{}}
+	if row.AmountMinor <= 0 || row.Currency != "USD" {
+		return out, ErrReceipt
 	}
 	out.ID = row.ID.String()
 	out.Amount = row.AmountMinor
@@ -104,12 +109,21 @@ func ReadAnnualSummary(ctx context.Context, q *queries.Queries, donor pgtype.UUI
 	if year < 2026 || year > now.In(zone).Year() {
 		return out, ErrReceipt
 	}
-	ids, err := q.AnnualGifts(ctx, queries.AnnualGiftsParams{DonorID: donor, StartsAt: timestamp(time.Date(year, 1, 1, 0, 0, 0, 0, zone)), EndsAt: timestamp(time.Date(year+1, 1, 1, 0, 0, 0, 0, zone)), AsOf: timestamp(now)})
+	rangeParams := queries.AnnualGiftsParams{DonorID: donor, StartsAt: timestamp(time.Date(year, 1, 1, 0, 0, 0, 0, zone)), EndsAt: timestamp(time.Date(year+1, 1, 1, 0, 0, 0, 0, zone)), AsOf: timestamp(now)}
+	gifts, err := q.AnnualGifts(ctx, rangeParams)
 	if err != nil {
 		return out, err
 	}
-	for _, id := range ids {
-		gift, err := ReadGiftRecord(ctx, q, donor, id, now)
+	refunds, err := q.AnnualRefunds(ctx, queries.AnnualRefundsParams(rangeParams))
+	if err != nil {
+		return out, err
+	}
+	byGift := make(map[pgtype.UUID][]queries.DonorRefund)
+	for _, refund := range refunds {
+		byGift[refund.GiftID] = append(byGift[refund.GiftID], refund)
+	}
+	for _, row := range gifts {
+		gift, err := giftRecord(row, byGift[row.ID])
 		if err != nil {
 			return out, err
 		}

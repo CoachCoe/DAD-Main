@@ -54,14 +54,12 @@ func spreadsheetRows(text string, columns []string) ([]map[string]string, error)
 	}
 }
 
-func contentSourceID(ctx context.Context, q *queries.Queries, value string) (string, error) {
+func contentSourceID(required map[pgtype.UUID]bool, value string) (string, error) {
 	var id pgtype.UUID
 	if id.Scan(value) != nil || !id.Valid {
 		return "", ErrStaffInput
 	}
-	if _, err := q.ContentSourceByID(ctx, id); err != nil {
-		return "", err
-	}
+	required[id] = true
 	return id.String(), nil
 }
 
@@ -82,6 +80,7 @@ func (s ContentService) Publish(ctx context.Context, token string, r Publication
 			return nil, err
 		}
 		q := queries.New(tx)
+		requiredSources := make(map[pgtype.UUID]bool)
 		slugs := map[string]bool{}
 		for _, row := range initiatives {
 			slug := row["slug"]
@@ -101,7 +100,7 @@ func (s ContentService) Publish(ctx context.Context, token string, r Publication
 			if _, err = time.Parse(time.DateOnly, row["planned_start"]); err != nil {
 				return nil, ErrStaffInput
 			}
-			row["board_approval_source_id"], err = contentSourceID(ctx, q, row["board_approval_source_id"])
+			row["board_approval_source_id"], err = contentSourceID(requiredSources, row["board_approval_source_id"])
 			if err != nil {
 				return nil, err
 			}
@@ -122,12 +121,25 @@ func (s ContentService) Publish(ctx context.Context, token string, r Publication
 			illustrative := row["illustrative"] == "true"
 			var source interface{}
 			if row["source_id"] != "" || !illustrative {
-				source, err = contentSourceID(ctx, q, row["source_id"])
+				source, err = contentSourceID(requiredSources, row["source_id"])
 				if err != nil {
 					return nil, err
 				}
 			}
 			ledger = append(ledger, map[string]interface{}{"metric": row["metric"], "value": value, "unit": row["unit"], "source_id": source, "illustrative": illustrative})
+		}
+		if len(requiredSources) > 0 {
+			ids := make([]pgtype.UUID, 0, len(requiredSources))
+			for id := range requiredSources {
+				ids = append(ids, id)
+			}
+			found, err := q.ContentSourceIDs(ctx, ids)
+			if err != nil {
+				return nil, err
+			}
+			if len(found) != len(ids) {
+				return nil, ErrStaffInput
+			}
 		}
 		payload, err := json.Marshal(map[string]interface{}{"initiatives": initiatives, "ledger": ledger, "ledger_as_of": r.AsOf, "cadence": cadence})
 		if err != nil {

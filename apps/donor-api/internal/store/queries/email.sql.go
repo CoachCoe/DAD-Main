@@ -12,7 +12,7 @@ import (
 )
 
 const annualGifts = `-- name: AnnualGifts :many
-SELECT id FROM donor_gifts WHERE donor_id=$1 AND paid_at>=$2
+SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at FROM donor_gifts WHERE donor_id=$1 AND paid_at>=$2
 AND paid_at<$3 AND paid_at<=$4 ORDER BY paid_at,id
 `
 
@@ -23,7 +23,7 @@ type AnnualGiftsParams struct {
 	AsOf     pgtype.Timestamptz `json:"as_of"`
 }
 
-func (q *Queries) AnnualGifts(ctx context.Context, arg AnnualGiftsParams) ([]pgtype.UUID, error) {
+func (q *Queries) AnnualGifts(ctx context.Context, arg AnnualGiftsParams) ([]DonorGift, error) {
 	rows, err := q.db.Query(ctx, annualGifts,
 		arg.DonorID,
 		arg.StartsAt,
@@ -34,13 +34,73 @@ func (q *Queries) AnnualGifts(ctx context.Context, arg AnnualGiftsParams) ([]pgt
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []DonorGift{}
 	for rows.Next() {
-		var id pgtype.UUID
-		if err := rows.Scan(&id); err != nil {
+		var i DonorGift
+		if err := rows.Scan(
+			&i.DonorID,
+			&i.CheckoutID,
+			&i.StripeObjectID,
+			&i.AmountMinor,
+			&i.Currency,
+			&i.Frequency,
+			&i.PaidAt,
+			&i.StripePaymentIntentID,
+			&i.PeriodID,
+			&i.ID,
+			&i.CreatedAt,
+		); err != nil {
 			return nil, err
 		}
-		items = append(items, id)
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const annualRefunds = `-- name: AnnualRefunds :many
+SELECT r.gift_id, r.stripe_refund_id, r.amount_minor, r.currency, r.status, r.observed_at, r.id, r.created_at FROM donor_refunds r JOIN donor_gifts g ON g.id=r.gift_id
+WHERE g.donor_id=$1 AND g.paid_at>=$2
+AND g.paid_at<$3 AND g.paid_at<=$4
+ORDER BY r.gift_id,r.observed_at,r.id
+`
+
+type AnnualRefundsParams struct {
+	DonorID  pgtype.UUID        `json:"donor_id"`
+	StartsAt pgtype.Timestamptz `json:"starts_at"`
+	EndsAt   pgtype.Timestamptz `json:"ends_at"`
+	AsOf     pgtype.Timestamptz `json:"as_of"`
+}
+
+func (q *Queries) AnnualRefunds(ctx context.Context, arg AnnualRefundsParams) ([]DonorRefund, error) {
+	rows, err := q.db.Query(ctx, annualRefunds,
+		arg.DonorID,
+		arg.StartsAt,
+		arg.EndsAt,
+		arg.AsOf,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DonorRefund{}
+	for rows.Next() {
+		var i DonorRefund
+		if err := rows.Scan(
+			&i.GiftID,
+			&i.StripeRefundID,
+			&i.AmountMinor,
+			&i.Currency,
+			&i.Status,
+			&i.ObservedAt,
+			&i.ID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
