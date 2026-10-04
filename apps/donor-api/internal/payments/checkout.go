@@ -51,6 +51,56 @@ func ValidateOrigin(origin string) error {
 
 type StripeGateway struct{ client *stripe.Client }
 
+type FinancialGateway interface {
+	RetrieveRefund(context.Context, string) (Object, error)
+	RetrieveSubscription(context.Context, string) (Object, error)
+}
+
+type PaymentMethodGateway interface {
+	FinancialGateway
+	RetrieveCheckout(context.Context, string) (Object, error)
+	RetrieveSetupIntent(context.Context, string) (Object, error)
+	UpdateSubscriptionPaymentMethod(context.Context, string, string, string) error
+}
+
+func (g *StripeGateway) RetrieveCheckout(ctx context.Context, id string) (Object, error) {
+	result, err := g.client.V1CheckoutSessions.Retrieve(ctx, id, nil)
+	if err != nil || result == nil || result.LastResponse == nil {
+		return nil, ErrCheckoutUnavailable
+	}
+	return DecodeObject(result.LastResponse.RawJSON)
+}
+func (g *StripeGateway) RetrieveSetupIntent(ctx context.Context, id string) (Object, error) {
+	result, err := g.client.V1SetupIntents.Retrieve(ctx, id, nil)
+	if err != nil || result == nil || result.LastResponse == nil {
+		return nil, ErrCheckoutUnavailable
+	}
+	return DecodeObject(result.LastResponse.RawJSON)
+}
+func (g *StripeGateway) UpdateSubscriptionPaymentMethod(ctx context.Context, id, method, key string) error {
+	params := &stripe.SubscriptionUpdateParams{DefaultPaymentMethod: stripe.String(method)}
+	params.SetIdempotencyKey(key)
+	if _, err := g.client.V1Subscriptions.Update(ctx, id, params); err != nil {
+		return ErrCheckoutUnavailable
+	}
+	return nil
+}
+
+func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, error) {
+	result, err := g.client.V1Refunds.Retrieve(ctx, id, nil)
+	if err != nil || result.LastResponse == nil {
+		return nil, ErrCheckoutUnavailable
+	}
+	return DecodeObject(result.LastResponse.RawJSON)
+}
+func (g *StripeGateway) RetrieveSubscription(ctx context.Context, id string) (Object, error) {
+	result, err := g.client.V1Subscriptions.Retrieve(ctx, id, nil)
+	if err != nil || result.LastResponse == nil {
+		return nil, ErrCheckoutUnavailable
+	}
+	return DecodeObject(result.LastResponse.RawJSON)
+}
+
 func NewStripeGateway(key string) (*StripeGateway, error) {
 	if key == "" {
 		return nil, ErrCheckoutUnavailable

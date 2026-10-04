@@ -18,6 +18,19 @@ type Donor struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorAmountChange struct {
+	DonorID       pgtype.UUID        `json:"donor_id"`
+	CheckoutID    pgtype.UUID        `json:"checkout_id"`
+	PreviousMinor int64              `json:"previous_minor"`
+	AmountMinor   int64              `json:"amount_minor"`
+	EffectiveAt   pgtype.Timestamptz `json:"effective_at"`
+	ItemID        string             `json:"item_id"`
+	ProductID     string             `json:"product_id"`
+	ConfirmedAt   pgtype.Timestamptz `json:"confirmed_at"`
+	ID            pgtype.UUID        `json:"id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorBillingPeriod struct {
 	DonorID              pgtype.UUID        `json:"donor_id"`
 	CheckoutID           pgtype.UUID        `json:"checkout_id"`
@@ -28,6 +41,32 @@ type DonorBillingPeriod struct {
 	Status               string             `json:"status"`
 	ID                   pgtype.UUID        `json:"id"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorCheckout struct {
+	DonorID           pgtype.UUID        `json:"donor_id"`
+	AmountMinor       int64              `json:"amount_minor"`
+	Currency          string             `json:"currency"`
+	Frequency         string             `json:"frequency"`
+	ReferrerID        pgtype.UUID        `json:"referrer_id"`
+	ReferralKind      pgtype.Text        `json:"referral_kind"`
+	ReferralExpiresAt pgtype.Timestamptz `json:"referral_expires_at"`
+	ID                pgtype.UUID        `json:"id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorGift struct {
+	DonorID               pgtype.UUID        `json:"donor_id"`
+	CheckoutID            pgtype.UUID        `json:"checkout_id"`
+	StripeObjectID        string             `json:"stripe_object_id"`
+	AmountMinor           int64              `json:"amount_minor"`
+	Currency              string             `json:"currency"`
+	Frequency             string             `json:"frequency"`
+	PaidAt                pgtype.Timestamptz `json:"paid_at"`
+	StripePaymentIntentID pgtype.Text        `json:"stripe_payment_intent_id"`
+	PeriodID              pgtype.UUID        `json:"period_id"`
+	ID                    pgtype.UUID        `json:"id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 }
 
 type DonorLoginLink struct {
@@ -56,6 +95,50 @@ type DonorMetricProjection struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorPause struct {
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	AttemptID   pgtype.UUID        `json:"attempt_id"`
+	Months      int32              `json:"months"`
+	StartsAt    pgtype.Timestamptz `json:"starts_at"`
+	ResumesAt   pgtype.Timestamptz `json:"resumes_at"`
+	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
+	ID          pgtype.UUID        `json:"id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorPaymentUpdate struct {
+	DonorID         pgtype.UUID        `json:"donor_id"`
+	AttemptID       pgtype.UUID        `json:"attempt_id"`
+	CustomerID      string             `json:"customer_id"`
+	RequestParams   []byte             `json:"request_params"`
+	StripeSessionID pgtype.Text        `json:"stripe_session_id"`
+	HostedUrl       pgtype.Text        `json:"hosted_url"`
+	Status          string             `json:"status"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+	ID              pgtype.UUID        `json:"id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorRefund struct {
+	GiftID         pgtype.UUID        `json:"gift_id"`
+	StripeRefundID string             `json:"stripe_refund_id"`
+	AmountMinor    int64              `json:"amount_minor"`
+	Currency       string             `json:"currency"`
+	Status         string             `json:"status"`
+	ObservedAt     pgtype.Timestamptz `json:"observed_at"`
+	ID             pgtype.UUID        `json:"id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorResumption struct {
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	PauseID     pgtype.UUID        `json:"pause_id"`
+	NextRenewal pgtype.Timestamptz `json:"next_renewal"`
+	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
+	ID          pgtype.UUID        `json:"id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorStripeCheckout struct {
 	CheckoutID           pgtype.UUID        `json:"checkout_id"`
 	RequestHash          string             `json:"request_hash"`
@@ -66,4 +149,27 @@ type DonorStripeCheckout struct {
 	Status               string             `json:"status"`
 	ID                   pgtype.UUID        `json:"id"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorStripeEvent struct {
+	StripeEventID string             `json:"stripe_event_id"`
+	EventType     string             `json:"event_type"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	Data          []byte             `json:"data"`
+	ProcessedAt   pgtype.Timestamptz `json:"processed_at"`
+	Attempts      int32              `json:"attempts"`
+	LastError     pgtype.Text        `json:"last_error"`
+	ID            pgtype.UUID        `json:"id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorSubscription struct {
+	AttemptID  pgtype.UUID        `json:"attempt_id"`
+	DonorID    pgtype.UUID        `json:"donor_id"`
+	Status     string             `json:"status"`
+	PeriodEnd  pgtype.Timestamptz `json:"period_end"`
+	StopsAt    pgtype.Timestamptz `json:"stops_at"`
+	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+	ID         pgtype.UUID        `json:"id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }

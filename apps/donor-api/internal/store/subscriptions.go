@@ -1,0 +1,170 @@
+package store
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/payments"
+	"impactgraph/donor-api/internal/store/queries"
+)
+
+func absent(o payments.Object, key string) bool {
+	raw := bytes.TrimSpace(o[key])
+	return len(raw) == 0 || bytes.Equal(raw, []byte("null"))
+}
+func terminalSubscription(status string) bool {
+	return status == "canceled" || status == "incomplete_expired"
+}
+
+// The caller holds the donor lock. Read current processor state rather than an
+// event snapshot so delayed delivery cannot undo a newer cancellation or pause.
+func reconcileSubscription(ctx context.Context, tx pgx.Tx, gateway payments.FinancialGateway, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, now time.Time) (queries.DonorSubscription, error) {
+	empty := queries.DonorSubscription{}
+	if gateway == nil {
+		return empty, payments.ErrCheckoutUnavailable
+	}
+	remote, err := gateway.RetrieveSubscription(ctx, attempt.StripeSubscriptionID.String)
+	if err != nil {
+		return empty, err
+	}
+	metadata, e1 := remote.Object("metadata")
+	items, e2 := remote.Object("items")
+	lines, e3 := items.Array("data")
+	if draft.Frequency != "MONTHLY" || !attempt.StripeSubscriptionID.Valid || remote.Text("id") != attempt.StripeSubscriptionID.String || !remote.BoolIs("livemode", false) || e1 != nil || metadata.Text("dad_checkout_id") != draft.ID.String() || e2 != nil || !items.BoolIs("has_more", false) || e3 != nil || len(lines) != 1 {
+		return empty, payments.ErrFacts
+	}
+	item := lines[0]
+	price, e1 := item.Object("price")
+	recurring, e2 := price.Object("recurring")
+	count, e3 := recurring.Int("interval_count")
+	quantity, e4 := item.Int("quantity")
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || price.Text("currency") != "usd" || recurring.Text("interval") != "month" || count != 1 || quantity != 1 {
+		return empty, payments.ErrFacts
+	}
+	start, e1 := item.Int("current_period_start")
+	end, e2 := item.Int("current_period_end")
+	if e1 != nil || e2 != nil || start < 0 || end > 253402300799 || end < start || end-start < 27*86400 || end-start > 32*86400 {
+		return empty, payments.ErrFacts
+	}
+	status := remote.Text("status")
+	switch status {
+	case "active", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired":
+	default:
+		return empty, payments.ErrFacts
+	}
+	if !remote.BoolIs("cancel_at_period_end", true) && !remote.BoolIs("cancel_at_period_end", false) {
+		return empty, payments.ErrFacts
+	}
+	cancelAt := false
+	if !absent(remote, "cancel_at") {
+		epoch, err := remote.Int("cancel_at")
+		if err != nil || epoch != end {
+			return empty, payments.ErrFacts
+		}
+		cancelAt = true
+	}
+	q := queries.New(tx)
+	if err = reconcileAmount(ctx, q, draft, item, price, end, now); err != nil {
+		return empty, err
+	}
+	if err = reconcilePause(ctx, q, attempt, remote, now); err != nil {
+		return empty, err
+	}
+	var stops pgtype.Timestamptz
+	if cancelAt || remote.BoolIs("cancel_at_period_end", true) || terminalSubscription(status) {
+		stops = timestamp(time.Unix(end, 0))
+	}
+	id, err := NewID()
+	if err != nil {
+		return empty, err
+	}
+	row, err := q.SaveSubscription(ctx, queries.SaveSubscriptionParams{ID: id, AttemptID: attempt.ID, DonorID: draft.DonorID, Status: status, PeriodEnd: timestamp(time.Unix(end, 0)), StopsAt: stops, ObservedAt: timestamp(now)})
+	if err != nil {
+		return empty, err
+	}
+	if terminalSubscription(status) {
+		if err = q.CancelAttempt(ctx, attempt.ID); err != nil {
+			return empty, err
+		}
+		if err = q.ReleaseReservation(ctx, attempt.ID); err != nil {
+			return empty, err
+		}
+	}
+	return row, nil
+}
+
+func reconcileAmount(ctx context.Context, q *queries.Queries, draft queries.DonorCheckout, item, price payments.Object, end int64, now time.Time) error {
+	actual, err := price.Int("unit_amount")
+	if err != nil {
+		return err
+	}
+	change, err := q.LatestAmountChange(ctx, draft.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if actual != draft.AmountMinor {
+			return payments.ErrFacts
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if item.Text("id") != change.ItemID || price.Text("product") != change.ProductID {
+		return payments.ErrFacts
+	}
+	if actual == change.AmountMinor {
+		if !change.ConfirmedAt.Valid && end != change.EffectiveAt.Time.Unix() {
+			return payments.ErrFacts
+		}
+		return q.ConfirmAmountChange(ctx, queries.ConfirmAmountChangeParams{ID: change.ID, ConfirmedAt: timestamp(now)})
+	}
+	if !change.ConfirmedAt.Valid && actual == change.PreviousMinor {
+		return nil
+	}
+	return payments.ErrFacts
+}
+
+func reconcilePause(ctx context.Context, q *queries.Queries, attempt queries.DonorStripeCheckout, remote payments.Object, now time.Time) error {
+	pause, err := q.LatestPause(ctx, attempt.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	hasPause := err == nil
+	var resume queries.DonorResumption
+	hasResume := false
+	if hasPause {
+		resume, err = q.ResumptionForPause(ctx, pause.ID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		hasResume = err == nil
+	}
+	if !absent(remote, "pause_collection") {
+		collection, err := remote.Object("pause_collection")
+		if err != nil {
+			return err
+		}
+		resumes, err := collection.Int("resumes_at")
+		if err != nil || collection.Text("behavior") != "void" {
+			return payments.ErrFacts
+		}
+		if hasResume && resumes == resume.NextRenewal.Time.Unix() {
+			return q.ConfirmResumption(ctx, queries.ConfirmResumptionParams{ID: resume.ID, ConfirmedAt: timestamp(now)})
+		}
+		if !hasPause || resumes != pause.ResumesAt.Time.Unix() || (hasResume && resume.ConfirmedAt.Valid) {
+			return payments.ErrFacts
+		}
+		return q.ConfirmPause(ctx, queries.ConfirmPauseParams{ID: pause.ID, ConfirmedAt: timestamp(now)})
+	}
+	until := pause.ResumesAt.Time
+	if hasResume && resume.ConfirmedAt.Valid {
+		until = resume.NextRenewal.Time
+	}
+	if hasPause && pause.ConfirmedAt.Valid && now.Before(until) && !terminalSubscription(remote.Text("status")) {
+		return payments.ErrFacts
+	}
+	return nil
+}

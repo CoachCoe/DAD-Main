@@ -60,3 +60,43 @@ func TestPaymentBoundariesRejectLiveAndUnsafeOrigins(t *testing.T) {
 		}
 	}
 }
+
+func TestFinancialGatewayUsesPinnedSDKAndIdempotentCardUpdate(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Header.Get("Stripe-Version") != APIVersion {
+			t.Error("API version drift")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "POST" {
+			if r.URL.Path != "/v1/subscriptions/sub_fixture" || r.Header.Get("Idempotency-Key") != "dad-payment-apply-fixture" {
+				t.Error("mutation identity changed")
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Error(err)
+			}
+			if r.Form.Get("default_payment_method") != "pm_fixture" || len(r.Form) != 1 {
+				t.Errorf("unexpected card update parameters: %v", r.Form)
+			}
+		} else if r.Method != "GET" {
+			t.Error("unexpected method")
+		}
+		_, _ = w.Write([]byte(`{"id":"fixture","livemode":false}`))
+	}))
+	defer server.Close()
+	backends := stripe.NewBackendsWithConfig(&stripe.BackendConfig{URL: stripe.String(server.URL), HTTPClient: server.Client(), MaxNetworkRetries: stripe.Int64(0), LeveledLogger: &stripe.LeveledLogger{Level: stripe.LevelNull}})
+	g := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	for _, read := range []func(context.Context, string) (Object, error){g.RetrieveRefund, g.RetrieveSubscription, g.RetrieveCheckout, g.RetrieveSetupIntent} {
+		value, err := read(context.Background(), "fixture")
+		if err != nil || !value.BoolIs("livemode", false) {
+			t.Fatal("failed object read", err)
+		}
+	}
+	if err := g.UpdateSubscriptionPaymentMethod(context.Background(), "sub_fixture", "pm_fixture", "dad-payment-apply-fixture"); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 5 {
+		t.Fatalf("requests=%d", calls)
+	}
+}
