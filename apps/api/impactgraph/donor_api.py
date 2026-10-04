@@ -19,6 +19,7 @@ from starlette.concurrency import run_in_threadpool
 
 from .database import create_session_factory
 from .donor_email import EmailSettings, queue_login_email
+from .donor_pauses import pause_options, pause_recurring
 from .donor_payment_methods import begin_payment_update, payment_method_status
 from .donor_projections import dashboard, refresh_projection
 from .donor_sharing import captured_name, referral_svg, sharing_details
@@ -82,6 +83,14 @@ class CancellationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     subscription_id: UUID
     period_end: datetime
+
+
+class PauseRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subscription_id: UUID
+    months: StrictInt = Field(ge=1, le=3)
+    starts_at: datetime
+    resumes_at: datetime
 
 
 def create_app(*, factory=None, settings=None, gateway=None, email_settings=None):
@@ -239,6 +248,17 @@ def create_app(*, factory=None, settings=None, gateway=None, email_settings=None
     @app.get("/donor/me/recurring")
     def recurring(request: Request):
         return subscription_request(request, lambda provider, token: recurring_details(factory, provider, token))
+
+    @app.get("/donor/me/recurring/pause")
+    def pause_dates(request: Request):
+        return subscription_request(request, lambda provider, token: pause_options(factory, provider, token))
+
+    @app.post("/donor/me/recurring/pause")
+    def pause(body: PauseRequest, request: Request, idempotency_key: Annotated[UUID, Header()]):
+        browser_request(request)
+        return subscription_request(request, lambda provider, token: pause_recurring(
+            factory, provider, token, request_id=idempotency_key, attempt_id=body.subscription_id,
+            months=body.months, starts_at=body.starts_at, resumes_at=body.resumes_at))
 
     @app.post("/donor/me/recurring/cancel")
     def cancel(body: CancellationRequest, request: Request,

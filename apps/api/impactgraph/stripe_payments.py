@@ -110,6 +110,12 @@ class StripeGateway:
     def retrieve_refund(self, refund_id: str) -> dict:
         return self.client.v1.refunds.retrieve(refund_id).to_dict()
 
+    def pause_collection(self, subscription_id: str, resumes_at: int, key: str) -> dict:
+        return self.client.v1.subscriptions.update(
+            subscription_id, {"pause_collection": {"behavior": "void", "resumes_at": resumes_at},
+                              "proration_behavior": "none"}, options={"idempotency_key": key},
+        ).to_dict()
+
     def retrieve_subscription(self, subscription_id: str) -> dict:
         return self.client.v1.subscriptions.retrieve(subscription_id).to_dict()
 

@@ -16,6 +16,7 @@ from .persistence import (
     DonorCheckoutRecord,
     DonorGiftRecord,
     DonorMetricProjectionRecord,
+    DonorPauseRecord,
     DonorPaymentUpdateRecord,
     DonorRecord,
     DonorRefundObservationRecord,
@@ -83,6 +84,11 @@ def refresh_projection(session, donor_id, *, now=None):
                                           computed_at=now, next_refresh_at=now)
         session.add(row)
     gifts, refunds, periods = load_history(session, donor_id)
+    pauses = session.execute(select(DonorPauseRecord, DonorSubscriptionRecord).join(
+        DonorSubscriptionRecord, DonorSubscriptionRecord.attempt_id == DonorPauseRecord.attempt_id,
+    ).where(DonorPauseRecord.donor_id == donor_id, DonorPauseRecord.confirmed_at.is_not(None))).all()
+    pause_windows = [(_utc(p.starts_at), datetime.max.replace(tzinfo=UTC)
+                     if s.stops_at and _utc(s.stops_at) <= now else _utc(p.resumes_at)) for p, s in pauses]
     stopped = [_utc(end) for end in session.scalars(select(DonorSubscriptionRecord.stops_at).where(
         DonorSubscriptionRecord.donor_id == donor_id, DonorSubscriptionRecord.stops_at.is_not(None)))]
     relation = relationships(gifts, as_of=now).get(str(donor_id))
@@ -101,13 +107,14 @@ def refresh_projection(session, donor_id, *, now=None):
     row.best_streak = _historical_best(session, donor_id, gifts, refunds, periods, now, row.best_streak)
     try:
         result = streak(gifts, refunds, periods, str(donor_id), as_of=now, previous_best=row.best_streak,
-                        stopped_period_ends=stopped)
+                        stopped_period_ends=stopped, pause_windows=pause_windows)
         row.current_streak, row.best_streak = result.current, result.best
         row.at_risk, row.grace_ends_at = result.at_risk, result.grace_ends_at
     except ValueError:
         row.next_refresh_at = now + timedelta(minutes=5)
     boundaries = [*(_utc(p.due_at) for p in periods), *(_utc(p.ends_at) for p in periods),
-                  *(_utc(g.paid_at) for g in gifts), *stopped]
+                  *(_utc(g.paid_at) for g in gifts), *stopped,
+                  *(t for window in pause_windows for t in window)]
     if row.grace_ends_at:
         boundaries.append(row.grace_ends_at)
     row.next_refresh_at = min([row.next_refresh_at, *(t for t in boundaries if t > now)])

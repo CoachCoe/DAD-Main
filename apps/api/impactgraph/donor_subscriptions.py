@@ -19,10 +19,10 @@ class SubscriptionConflict(ValueError):
     pass
 
 
-def reconcile_subscription(session, attempt, gateway):
+def reconcile_subscription(session, attempt, gateway, *, remote=None):
     """Read current Stripe state under the donor lock; event arrival order is irrelevant."""
     draft = session.get(DonorCheckoutRecord, attempt.checkout_id)
-    remote = gateway.retrieve_subscription(attempt.stripe_subscription_id)
+    remote = remote if remote is not None else gateway.retrieve_subscription(attempt.stripe_subscription_id)
     items = remote.get("items") or {}
     lines = items.get("data") or []
     if (draft.frequency != "MONTHLY" or remote.get("id") != attempt.stripe_subscription_id
@@ -44,10 +44,12 @@ def reconcile_subscription(session, attempt, gateway):
     if status not in {"active", "past_due", "unpaid", "canceled", "incomplete", "incomplete_expired"}:
         raise ValueError("Unsupported subscription state")
     cancel = remote.get("cancel_at_period_end")
-    if type(cancel) is not bool or remote.get("pause_collection"):
+    if type(cancel) is not bool:
         raise ValueError("Unsupported subscription schedule")
     if remote.get("cancel_at") not in {None, end}:
         raise ValueError("Cancellation must occur at the monthly boundary")
+    from .donor_pauses import reconcile_pause
+    reconcile_pause(session, attempt, remote)
     row = session.scalar(select(DonorSubscriptionRecord).where(
         DonorSubscriptionRecord.attempt_id == attempt.id))
     if row is None:

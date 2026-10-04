@@ -326,7 +326,7 @@ destructive downgrade. Do not delete old gifts or fabricate period dates to migr
 `load_history` returns calculation inputs for one donor, including refund observation
 times. This is a current-state view, not a tax-reporting history: observations record
 when reconciliation happened, not a guessed processor status-transition timestamp.
-Cancellation/pause schedule facts are still required. A missing current billing period
+Cancellation and fixed-length pause schedules are supplied by the adapters below. A missing current billing period
 remains explicitly unavailable rather than an invented zero streak. No live giving or
 live donor badges are enabled by these sandbox facts.
 
@@ -455,8 +455,8 @@ Run both inbox and projection workers; schedule accuracy depends on consuming St
 updates, with account visits also reconciling current state. There is not yet a periodic
 Stripe-wide reconciliation job. Pending commands are retained for explicit retry and
 operational inspection; a staff reconciliation interface is still required. The migration
-refuses to discard nonempty schedule/audit tables. Pause/resume, amount changes, staff cancellation permissions, and receipts remain
-unfinished surfaces. Payment-method updates are described below. This remains test-mode only and requires real Stripe sandbox acceptance before
+refuses to discard nonempty schedule/audit tables. Early resumption, amount changes, staff cancellation permissions, and receipts remain
+unfinished surfaces. Payment-method updates and fixed-length pauses are described below. This remains test-mode only and requires real Stripe sandbox acceptance before
 production activation.
 
 ## Payment-method updates (sandbox)
@@ -498,5 +498,47 @@ is available while the inbox catches up.
 
 A card update creates no gift, forgives no outstanding invoice, and grants no streak
 month. Failed-payment retry/recovery messages and invoice recovery orchestration remain
-separate work, alongside pause/resume and amount changes. The existing production and
+separate work, alongside early resumption and amount changes. The existing production and
 real-Stripe sandbox acceptance gates still apply; no live keys are enabled by this slice.
+
+## Fixed-length pauses (sandbox)
+
+`/account/pause`, linked from monthly-gift management, previews skipping 1, 2, or 3
+renewals. GET `/donor/me/recurring/pause` retrieves the owned Stripe subscription and
+returns the first skipped renewal and automatic-resume date. Dates preserve Stripe's
+original UTC billing-cycle anchor, including January 31 → February 28/29 → March 31.
+Only a single monthly subscription with no conflicting scheduled change is supported.
+The API returns timestamps with explicit UTC offsets on both SQLite and PostgreSQL.
+
+POST to the same path requires a claimed session, configured Origin, UUID v4 idempotency
+key, owned subscription attempt, duration, and both displayed dates. Migration 0023
+stores this immutable confirmation and its acknowledgement. A changed billing period,
+conflicting cancellation, or overlapping pause cannot silently change the confirmation.
+Requests commit before contacting Stripe, and retries reconcile an already-applied pause
+rather than extending it. Unresolved commands older than 23 hours require reconciliation.
+The screen can retry a saved pending command after a browser refresh.
+
+Stripe receives `pause_collection` with `behavior=void` and the fixed `resumes_at`
+timestamp, plus no proration. This skips future invoices rather than accumulating drafts
+to charge on return. It does not forgive previously issued invoices or refund gifts.
+Stripe automatically resumes collection at the confirmed date; no DAD timer is needed
+for that mutation. See Stripe's [pause collection documentation](https://docs.stripe.com/billing/subscriptions/pause-payment).
+Manual early resumption and changing an existing pause's duration are not implemented
+in this slice. Pausing a gift with a failed current payment is also unavailable until
+that payment is recovered; the existing payment-method flow remains available.
+
+Subscription reads and updated/deleted webhooks recognize only a matching locally
+authorized pause. An unexpected external pause or an early external unpause is held for
+reconciliation. A confirmed pause supplies a bounded gap after the last verified billing
+period; the dashboard worker changes the streak to zero at the first skipped renewal,
+not at confirmation. This does not fabricate paid or skipped invoice records. At the
+resume boundary, a missing renewal fact produces Updating rather than an invented
+payment. A successfully collected resumed period restarts the streak at one; best streak,
+referral money, and the Founding Donor badge remain intact. Cancellation during a pause
+is supported and cannot make the dashboard promise automatic resumption afterwards.
+
+Real Stripe sandbox acceptance must exercise invoice voiding and automatic resumption at
+the exact billing boundary, especially with month-end anchors, before production use.
+The automated adapter tests use a fake provider and do not replace this acceptance gate.
+The migration refuses to discard nonempty pause/audit records. Staff reconciliation UI,
+early resume, amount changes, receipts, and recovery messaging remain separate work.

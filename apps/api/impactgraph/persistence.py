@@ -208,6 +208,20 @@ class DonorRefundObservationRecord(EntityMixin, Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DonorPauseRecord(EntityMixin, Base):
+    __tablename__ = "donor_pauses"
+    donor_id: Mapped[UUID] = mapped_column(ForeignKey("donors.id"), index=True)
+    attempt_id: Mapped[UUID] = mapped_column(ForeignKey("donor_stripe_checkouts.id"), index=True)
+    months: Mapped[int] = mapped_column(Integer)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resumes_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint("months IN (1, 2, 3)", name="ck_donor_pause_months"),
+        CheckConstraint("resumes_at > starts_at", name="ck_donor_pause_dates"),
+    )
+
+
 class DonorPaymentUpdateRecord(EntityMixin, Base):
     """Authorized setup attempt; never contains card data or a SetupIntent secret."""
 
