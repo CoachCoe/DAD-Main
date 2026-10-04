@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"impactgraph/donor-api/internal/httpapi"
+	"impactgraph/donor-api/internal/store"
 )
 
 func run() error {
@@ -18,7 +19,18 @@ func run() error {
 	if address == "" {
 		address = "127.0.0.1:8002"
 	}
-	server := httpapi.NewServer(address)
+	var content httpapi.ContentSource
+	if dsn := os.Getenv("DONOR_GO_DATABASE_URL"); dsn != "" {
+		startup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		pool, err := store.Open(startup, dsn)
+		cancel()
+		if err != nil {
+			return errors.New("donor database startup failed")
+		}
+		defer pool.Close()
+		content = store.ContentReader{DB: pool}
+	}
+	server := httpapi.NewServer(address, content)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	failures := make(chan error, 1)

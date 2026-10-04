@@ -1,0 +1,13 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "db/queries.sql"
+    schema: "db/schema.sql"
+    gen:
+      go:
+        package: "queries"
+        out: "internal/store/queries"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_empty_slices: true
+        omit_unused_structs: true
