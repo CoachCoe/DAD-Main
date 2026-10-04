@@ -229,7 +229,7 @@ def begin_checkout(factory, gateway: CheckoutGateway, settings: PaymentSettings,
             "customer_email": donor.email,
             "client_reference_id": str(draft.id), "metadata": metadata,
             "line_items": [{"price_data": price, "quantity": 1}],
-            "payment_method_types": ["card"],
+            "allowed_payment_method_types": ["card"],
             "success_url": settings.origin + "/donate/thanks?session_id={CHECKOUT_SESSION_ID}",
             "cancel_url": settings.origin + "/donate",
         }

@@ -63,7 +63,7 @@ def begin_payment_update(factory, gateway, settings, token, *, request_id):
             if remote.get("status") not in {"active", "past_due", "unpaid"}:
                 raise SubscriptionConflict("This monthly gift cannot accept a payment update")
             metadata = {"dad_payment_update_id": str(request_id)}
-            params = {"mode": "setup", "customer": remote["customer"], "payment_method_types": ["card"],
+            params = {"mode": "setup", "customer": remote["customer"], "allowed_payment_method_types": ["card"],
                       "metadata": metadata, "setup_intent_data": {"metadata": metadata},
                       "success_url": settings.origin + "/account/payment-method",
                       "cancel_url": settings.origin + "/account/payment-method",

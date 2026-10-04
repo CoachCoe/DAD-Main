@@ -90,7 +90,10 @@ def test_hosted_setup_uses_verified_customer_and_confirms_only_after_apply(facto
     params, key = gateway.calls[-1]
     assert params["mode"] == "setup" and params["customer"] == "cus_owner"
     assert "customer_email" not in params and "line_items" not in params
-    assert params["payment_method_types"] == ["card"]
+    assert params["allowed_payment_method_types"] == ["card"]
+    assert "payment_method_types" not in params
+    from stripe.params.checkout._session_create_params import SessionCreateParams
+    assert set(params) <= SessionCreateParams.__annotations__.keys()
     assert params["success_url"] == SETTINGS.origin + "/account/payment-method"
     assert params["setup_intent_data"]["metadata"] == params["metadata"]
     assert key.startswith("dad-payment-setup-")

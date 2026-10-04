@@ -127,6 +127,10 @@ def test_checkout_uses_hosted_stripe_and_monthly_metadata(factory, gateway):
     assert params["subscription_data"]["metadata"]["dad_checkout_id"] == result["checkoutId"]
     assert "customer" not in params  # An unverified email must not expose saved payment methods.
     assert params["customer_email"] == "ben@example.org"
+    assert params["allowed_payment_method_types"] == ["card"]
+    assert "payment_method_types" not in params
+    from stripe.params.checkout._session_create_params import SessionCreateParams
+    assert set(params) <= SessionCreateParams.__annotations__.keys()
     assert key.startswith("dad-checkout-")
     with factory() as session:
         assert session.scalar(select(func.count()).select_from(DonorGiftRecord)) == 0
