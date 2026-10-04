@@ -125,6 +125,7 @@ func (s *StaffService) Invite(ctx context.Context, token, email, name, role stri
 		if _, err := q.StaffByID(ctx, actor.ID); err != nil {
 			return "", err
 		}
+		now = time.Now().UTC()
 		if _, err := requireStaff(ctx, q, token, "staff.manage", now); err != nil {
 			return "", err
 		}
@@ -162,6 +163,7 @@ func (s *StaffService) ChangeAccess(ctx context.Context, token string, targetID 
 		if err != nil {
 			return nil, err
 		}
+		now = time.Now().UTC()
 		if _, err = requireStaff(ctx, q, token, "staff.manage", now); err != nil {
 			return nil, err
 		}

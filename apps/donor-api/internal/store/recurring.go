@@ -49,7 +49,7 @@ func donorOwner(token string) ownerResolver {
 		if _, err = q.LockDonor(ctx, d.ID); err != nil {
 			return d, err
 		}
-		return Authenticated(ctx, q, token, now)
+		return Authenticated(ctx, q, token, time.Now().UTC())
 	}
 }
 func (s RecurringService) transaction(ctx context.Context, owner ownerResolver, operation func(pgx.Tx, queries.Donor, time.Time) (map[string]interface{}, error)) (map[string]interface{}, error) {
@@ -63,7 +63,7 @@ func (s RecurringService) transaction(ctx context.Context, owner ownerResolver, 
 	if err != nil {
 		return nil, err
 	}
-	result, err := operation(tx, d, now)
+	result, err := operation(tx, d, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}

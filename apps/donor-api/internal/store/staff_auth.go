@@ -42,6 +42,7 @@ func (s *StaffService) SignIn(ctx context.Context, email, password, code string)
 		return "", err
 	}
 	found := err == nil
+	now = time.Now().UTC()
 	hash := s.dummyHash
 	if found && staff.PasswordHash.Valid {
 		hash = staff.PasswordHash.String

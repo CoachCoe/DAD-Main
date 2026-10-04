@@ -36,11 +36,14 @@ func staffFinancialOwner(ctx context.Context, q *queries.Queries, token string, 
 	if _, err = q.StaffByID(ctx, actor.ID); err != nil {
 		return actor, donor, err
 	}
-	actor, err = requireStaff(ctx, q, token, permission, now)
+	actor, err = requireStaff(ctx, q, token, permission, time.Now().UTC())
 	if err != nil {
 		return actor, donor, err
 	}
 	donor, err = q.LockDonor(ctx, id)
+	if err == nil {
+		actor, err = requireStaff(ctx, q, token, permission, time.Now().UTC())
+	}
 	return actor, donor, err
 }
 
