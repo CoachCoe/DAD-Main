@@ -34,7 +34,7 @@ func TestDashboardAuthenticationAndPrivateErrors(t *testing.T) {
 		{"", nil, 401}, {"existing-session", nil, 200}, {"invalid", store.ErrDenied, 401}, {"existing-session", errors.New("private database details"), 503},
 	} {
 		stub := &dashboardStub{err: tc.err}
-		server := NewServer("", nil, stub)
+		server := NewServer("", Services{Dashboard: stub})
 		req := httptest.NewRequest("GET", "/donor/me/dashboard", nil)
 		if tc.token != "" {
 			req.AddCookie(&http.Cookie{Name: "dad_donor_session", Value: tc.token})

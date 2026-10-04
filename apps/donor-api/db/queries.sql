@@ -36,3 +36,7 @@ INSERT INTO donor_sessions (id, donor_id, token_hash, expires_at) VALUES ($1, $2
 
 -- name: RevokeSession :exec
 UPDATE donor_sessions SET revoked_at = $2 WHERE token_hash = $1 AND revoked_at IS NULL;
+
+-- name: InsertStripeEvent :exec
+INSERT INTO donor_stripe_events (id,stripe_event_id,event_type,occurred_at,data)
+VALUES ($1,$2,$3,$4,$5) ON CONFLICT (stripe_event_id) DO NOTHING;

@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
+	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
 )
 
@@ -17,10 +19,19 @@ type ContentSource interface {
 type DashboardSource interface {
 	DonorDashboard(context.Context, string) (map[string]interface{}, error)
 }
+type WebhookReceiver interface {
+	Receive(context.Context, []byte, string) error
+}
+type Services struct {
+	Content   ContentSource
+	Dashboard DashboardSource
+	Webhook   WebhookReceiver
+}
 
 // NewServer keeps the incomplete rewrite off the existing Python service port.
 // Readiness must remain unavailable until the complete donor path is implemented.
-func NewServer(address string, content ContentSource, dashboard DashboardSource) *http.Server {
+func NewServer(address string, services Services) *http.Server {
+	content, dashboard := services.Content, services.Dashboard
 	mux := http.NewServeMux()
 	reply := func(w http.ResponseWriter, status int, body interface{}) {
 		w.Header().Set("Content-Type", "application/json")
@@ -72,6 +83,35 @@ func NewServer(address string, content ContentSource, dashboard DashboardSource)
 			return
 		}
 		reply(w, 200, body)
+	})
+	mux.HandleFunc("POST /donor/stripe/webhook", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, payments.MaxWebhookBytes))
+		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				reply(w, 413, map[string]string{"detail": "Webhook payload is too large"})
+			} else {
+				reply(w, 400, map[string]string{"detail": "Invalid Stripe event"})
+			}
+			return
+		}
+		if services.Webhook == nil {
+			reply(w, 503, map[string]string{"detail": "Webhook verification unavailable"})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		err = services.Webhook.Receive(ctx, body, r.Header.Get("Stripe-Signature"))
+		switch {
+		case errors.Is(err, payments.ErrInvalidEvent):
+			reply(w, 400, map[string]string{"detail": "Invalid Stripe event"})
+		case errors.Is(err, payments.ErrEventShape):
+			reply(w, 400, map[string]string{"detail": "Invalid Stripe event shape"})
+		case err != nil:
+			reply(w, 503, map[string]string{"detail": "Webhook verification unavailable"})
+		default:
+			reply(w, 200, map[string]bool{"received": true})
+		}
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { reply(w, 404, map[string]string{"detail": "Not Found"}) })
 	return &http.Server{Addr: address, Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32 * 1024}

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"impactgraph/donor-api/internal/httpapi"
+	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
 )
 
@@ -19,8 +20,7 @@ func run() error {
 	if address == "" {
 		address = "127.0.0.1:8002"
 	}
-	var content httpapi.ContentSource
-	var dashboard httpapi.DashboardSource
+	var services httpapi.Services
 	if dsn := os.Getenv("DONOR_GO_DATABASE_URL"); dsn != "" {
 		startup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		pool, err := store.Open(startup, dsn)
@@ -29,10 +29,11 @@ func run() error {
 			return errors.New("donor database startup failed")
 		}
 		defer pool.Close()
-		content = store.ContentReader{DB: pool}
-		dashboard = store.DashboardReader{DB: pool}
+		services.Content = store.ContentReader{DB: pool}
+		services.Dashboard = store.DashboardReader{DB: pool}
+		services.Webhook = payments.Receiver{Secret: os.Getenv("STRIPE_WEBHOOK_SECRET"), Inbox: store.StripeInbox{DB: pool}}
 	}
-	server := httpapi.NewServer(address, content, dashboard)
+	server := httpapi.NewServer(address, services)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	failures := make(chan error, 1)

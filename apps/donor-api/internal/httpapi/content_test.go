@@ -23,7 +23,7 @@ func TestPublishedContentCacheAndBoundedDatabaseContext(t *testing.T) {
 		return map[string]interface{}{"state": "unpublished", "initiatives": []string{}, "ledger": []string{}, "ledger_as_of": nil, "cadence": nil}, nil
 	})
 	response := httptest.NewRecorder()
-	server := NewServer("", reader, nil)
+	server := NewServer("", Services{Content: reader})
 	server.Handler.ServeHTTP(response, httptest.NewRequest("GET", "/donor/public/content", nil))
 	if response.Code != 200 || response.Header().Get("Cache-Control") != "public, max-age=60" {
 		t.Fatalf("bad published response %d %v", response.Code, response.Header())
@@ -34,7 +34,7 @@ func TestDatabaseFailureIsPrivateAndNotCached(t *testing.T) {
 		return nil, errors.New("private database detail")
 	})
 	response := httptest.NewRecorder()
-	server := NewServer("", reader, nil)
+	server := NewServer("", Services{Content: reader})
 	server.Handler.ServeHTTP(response, httptest.NewRequest("GET", "/donor/public/content", nil))
 	if response.Code != 503 || response.Header().Get("Cache-Control") != "no-store" || strings.Contains(response.Body.String(), "private") {
 		t.Fatalf("unsafe error %s", response.Body.String())

@@ -6,7 +6,7 @@ import (
 )
 
 func TestFoundationCannotAdvertiseReadiness(t *testing.T) {
-	server := NewServer("127.0.0.1:8002", nil, nil)
+	server := NewServer("127.0.0.1:8002", Services{})
 	for _, test := range []struct {
 		path   string
 		status int

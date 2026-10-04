@@ -105,6 +105,30 @@ func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) er
 	return err
 }
 
+const insertStripeEvent = `-- name: InsertStripeEvent :exec
+INSERT INTO donor_stripe_events (id,stripe_event_id,event_type,occurred_at,data)
+VALUES ($1,$2,$3,$4,$5) ON CONFLICT (stripe_event_id) DO NOTHING
+`
+
+type InsertStripeEventParams struct {
+	ID            pgtype.UUID        `json:"id"`
+	StripeEventID string             `json:"stripe_event_id"`
+	EventType     string             `json:"event_type"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	Data          []byte             `json:"data"`
+}
+
+func (q *Queries) InsertStripeEvent(ctx context.Context, arg InsertStripeEventParams) error {
+	_, err := q.db.Exec(ctx, insertStripeEvent,
+		arg.ID,
+		arg.StripeEventID,
+		arg.EventType,
+		arg.OccurredAt,
+		arg.Data,
+	)
+	return err
+}
+
 const lockDonor = `-- name: LockDonor :one
 SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at FROM donors WHERE id = $1 FOR UPDATE
 `
