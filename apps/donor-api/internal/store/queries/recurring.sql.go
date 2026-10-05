@@ -11,6 +11,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acquireSubscriptionLease = `-- name: AcquireSubscriptionLease :execrows
+INSERT INTO donor_subscription_leases(attempt_id,donor_id,command_id,expires_at)
+VALUES($1,$2,$3,$4)
+ON CONFLICT (attempt_id) DO UPDATE SET command_id=EXCLUDED.command_id,expires_at=EXCLUDED.expires_at
+WHERE donor_subscription_leases.expires_at<=$5
+`
+
+type AcquireSubscriptionLeaseParams struct {
+	AttemptID pgtype.UUID        `json:"attempt_id"`
+	DonorID   pgtype.UUID        `json:"donor_id"`
+	CommandID pgtype.UUID        `json:"command_id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	Now       pgtype.Timestamptz `json:"now"`
+}
+
+func (q *Queries) AcquireSubscriptionLease(ctx context.Context, arg AcquireSubscriptionLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, acquireSubscriptionLease,
+		arg.AttemptID,
+		arg.DonorID,
+		arg.CommandID,
+		arg.ExpiresAt,
+		arg.Now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const amountChangeByID = `-- name: AmountChangeByID :one
 SELECT donor_id, checkout_id, previous_minor, amount_minor, effective_at, item_id, product_id, confirmed_at, id, created_at FROM donor_amount_changes WHERE id=$1
 `
@@ -230,6 +259,29 @@ func (q *Queries) LatestMonthlyAttempt(ctx context.Context, donorID pgtype.UUID)
 	return i, err
 }
 
+const latestMonthlyAttemptSnapshot = `-- name: LatestMonthlyAttemptSnapshot :one
+SELECT a.checkout_id, a.request_hash, a.request_params, a.stripe_session_id, a.stripe_subscription_id, a.hosted_url, a.status, a.id, a.created_at FROM donor_stripe_checkouts a JOIN donor_checkouts d ON d.id=a.checkout_id
+WHERE d.donor_id=$1 AND d.frequency='MONTHLY' AND a.status<>'EXPIRED'
+ORDER BY a.created_at DESC,a.id DESC LIMIT 1
+`
+
+func (q *Queries) LatestMonthlyAttemptSnapshot(ctx context.Context, donorID pgtype.UUID) (DonorStripeCheckout, error) {
+	row := q.db.QueryRow(ctx, latestMonthlyAttemptSnapshot, donorID)
+	var i DonorStripeCheckout
+	err := row.Scan(
+		&i.CheckoutID,
+		&i.RequestHash,
+		&i.RequestParams,
+		&i.StripeSessionID,
+		&i.StripeSubscriptionID,
+		&i.HostedUrl,
+		&i.Status,
+		&i.ID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const latestPaymentUpdate = `-- name: LatestPaymentUpdate :one
 SELECT donor_id, attempt_id, customer_id, request_params, stripe_session_id, hosted_url, status, completed_at, id, created_at FROM donor_payment_updates WHERE donor_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1
 `
@@ -299,6 +351,20 @@ func (q *Queries) PauseByID(ctx context.Context, id pgtype.UUID) (DonorPause, er
 	return i, err
 }
 
+const releaseSubscriptionLease = `-- name: ReleaseSubscriptionLease :exec
+DELETE FROM donor_subscription_leases WHERE attempt_id=$1 AND command_id=$2
+`
+
+type ReleaseSubscriptionLeaseParams struct {
+	AttemptID pgtype.UUID `json:"attempt_id"`
+	CommandID pgtype.UUID `json:"command_id"`
+}
+
+func (q *Queries) ReleaseSubscriptionLease(ctx context.Context, arg ReleaseSubscriptionLeaseParams) error {
+	_, err := q.db.Exec(ctx, releaseSubscriptionLease, arg.AttemptID, arg.CommandID)
+	return err
+}
+
 const resumptionByID = `-- name: ResumptionByID :one
 SELECT donor_id, pause_id, next_renewal, confirmed_at, id, created_at FROM donor_resumptions WHERE id=$1
 `
@@ -315,6 +381,17 @@ func (q *Queries) ResumptionByID(ctx context.Context, id pgtype.UUID) (DonorResu
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const subscriptionObservedAt = `-- name: SubscriptionObservedAt :one
+SELECT observed_at FROM donor_subscriptions WHERE attempt_id=$1
+`
+
+func (q *Queries) SubscriptionObservedAt(ctx context.Context, attemptID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, subscriptionObservedAt, attemptID)
+	var observed_at pgtype.Timestamptz
+	err := row.Scan(&observed_at)
+	return observed_at, err
 }
 
 const unfinishedPaymentUpdate = `-- name: UnfinishedPaymentUpdate :one

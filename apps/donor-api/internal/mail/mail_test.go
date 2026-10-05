@@ -3,11 +3,20 @@ package mail
 import (
 	"bufio"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
 	"errors"
 	"io"
+	"math/big"
 	"mime/quotedprintable"
 	"net"
 	netmail "net/mail"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -30,6 +39,10 @@ func TestMessageMIMEAndInjectionBoundaries(t *testing.T) {
 	}
 	if parsed.Header.Get("Message-ID") != message.ID {
 		t.Fatal("message identity changed")
+	}
+	date, err := time.Parse(time.RFC1123Z, parsed.Header.Get("Date"))
+	if err != nil || time.Since(date) > time.Minute {
+		t.Fatal("missing or stale Date header", parsed.Header.Get("Date"), err)
 	}
 	for _, edit := range []func(*Message){func(m *Message) { m.To += "\r\nBcc: bad@example.org" }, func(m *Message) { m.From += "\nX: bad" }, func(m *Message) { m.Subject += "\r\nBcc: bad@example.org" }, func(m *Message) { m.ID += "\nX: bad" }} {
 		bad := message
@@ -66,7 +79,7 @@ func TestSMTPRefusesCleartextAndHonorsCancellation(t *testing.T) {
 				_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
 				close(connected)
 				if mode == "cancel" {
-					_, err = io.Copy(io.Discard, conn)
+					_, _ = io.Copy(io.Discard, conn)
 					commands <- ""
 					return
 				}
@@ -108,5 +121,153 @@ func TestSMTPRefusesCleartextAndHonorsCancellation(t *testing.T) {
 				t.Fatal("cleartext command escaped TLS boundary", command)
 			}
 		})
+	}
+}
+
+func fixtureTLS(t *testing.T) (*tls.Config, *x509.CertPool) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "fixture SMTP"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1)},
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(certificate)
+	return &tls.Config{Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}}}, pool
+}
+
+type fixtureSession struct {
+	commands []string
+	data     []string
+	err      error
+}
+
+func serveSTARTTLS(listener net.Listener, config *tls.Config) fixtureSession {
+	var session fixtureSession
+	conn, err := listener.Accept()
+	if err != nil {
+		session.err = err
+		return session
+	}
+	defer func() { conn.Close() }()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	r := bufio.NewReader(conn)
+	reply := func(lines string) { _, _ = io.WriteString(conn, lines) }
+	reply("220 fixture SMTP\r\n")
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			session.err = err
+			return session
+		}
+		command := strings.TrimSuffix(line, "\r\n")
+		session.commands = append(session.commands, command)
+		verb, _, _ := strings.Cut(command, " ")
+		switch {
+		case verb == "EHLO" && len(session.commands) == 1:
+			reply("250-fixture\r\n250 STARTTLS\r\n")
+		case verb == "EHLO":
+			reply("250-fixture\r\n250 AUTH PLAIN\r\n")
+		case verb == "STARTTLS":
+			reply("220 ready\r\n")
+			secure := tls.Server(conn, config)
+			if err := secure.Handshake(); err != nil {
+				session.err = err
+				return session
+			}
+			conn, r = secure, bufio.NewReader(secure)
+		case verb == "AUTH":
+			reply("235 accepted\r\n")
+		case verb == "MAIL", verb == "RCPT":
+			reply("250 ok\r\n")
+		case verb == "DATA":
+			reply("354 send\r\n")
+			for {
+				line, err := r.ReadString('\n')
+				if err != nil {
+					session.err = err
+					return session
+				}
+				if line == ".\r\n" {
+					break
+				}
+				session.data = append(session.data, strings.TrimSuffix(line, "\r\n"))
+			}
+			reply("250 queued\r\n")
+		case verb == "QUIT":
+			reply("221 bye\r\n")
+			return session
+		default:
+			reply("502 unexpected\r\n")
+		}
+	}
+}
+
+func TestSMTPDeliversOverVerifiedSTARTTLS(t *testing.T) {
+	config, roots := fixtureTLS(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	host, portText, _ := net.SplitHostPort(listener.Addr().String())
+	port, _ := strconv.Atoi(portText)
+	sessions := make(chan fixtureSession, 1)
+	go func() { sessions <- serveSTARTTLS(listener, config) }()
+	transport := SMTPTransport{Settings: Settings{Host: host, Port: port, Username: "private-user", Password: "private-password", Sender: "DAD <sender@example.org>", EncryptionKey: "configured"}, RootCAs: roots}
+	message := Message{From: "DAD <sender@example.org>", To: "donor@example.org", Subject: "Receipt", Body: "Thank you\n.hidden line\n.", ID: "<dad-message-fixture@example.org>"}
+	if err = transport.Send(context.Background(), message); err != nil {
+		t.Fatal(err)
+	}
+	session := <-sessions
+	if session.err != nil {
+		t.Fatal(session.err)
+	}
+	plain := base64.StdEncoding.EncodeToString([]byte("\x00private-user\x00private-password"))
+	want := []string{"EHLO localhost", "STARTTLS", "EHLO localhost", "AUTH PLAIN " + plain, "MAIL FROM:<sender@example.org>", "RCPT TO:<donor@example.org>", "DATA", "QUIT"}
+	if !slices.Equal(session.commands, want) {
+		t.Fatalf("commands = %q", session.commands)
+	}
+	if !slices.Contains(session.data, "..hidden line") || !slices.Contains(session.data, "..") {
+		t.Fatalf("leading dots not stuffed: %q", session.data)
+	}
+	unstuffed := make([]string, len(session.data))
+	for i, line := range session.data {
+		unstuffed[i] = strings.TrimPrefix(line, ".")
+	}
+	parsed, err := netmail.ReadMessage(strings.NewReader(strings.Join(unstuffed, "\r\n") + "\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for header, value := range map[string]string{"From": `"DAD" <sender@example.org>`, "To": "<donor@example.org>", "Subject": "Receipt", "Message-ID": message.ID, "Content-Transfer-Encoding": "quoted-printable"} {
+		if got := parsed.Header.Get(header); got != value {
+			t.Fatalf("%s = %q", header, got)
+		}
+	}
+	if _, err = time.Parse(time.RFC1123Z, parsed.Header.Get("Date")); err != nil {
+		t.Fatal("Date header", err)
+	}
+	body, err := io.ReadAll(quotedprintable.NewReader(parsed.Body))
+	// The DATA terminator requires the final line to end in CRLF.
+	if err != nil || strings.ReplaceAll(string(body), "\r\n", "\n") != message.Body+"\n" {
+		t.Fatalf("body = %q, %v", body, err)
 	}
 }

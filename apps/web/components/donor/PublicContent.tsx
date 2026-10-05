@@ -1,37 +1,38 @@
-"use client";
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { api } from "@/lib/api";
+import type { Initiative, PublicContent } from "@/lib/publicContent";
+import { formatMoney } from "@/lib/money";
+import { RefreshButton } from "./RefreshButton";
 
-type Initiative = { slug: string; title: string; summary: string; partner: string; planned_start: string };
-type Content = { state: "unpublished" | "published"; initiatives: Initiative[];
-  ledger: { id: string; metric: string; value: number; unit: string; illustrative: boolean }[]; ledger_as_of: string | null; cadence: string | null };
-export function PublicContent({ view, slug }: { view: "initiatives" | "ledger"; slug?: string }) {
-  const [data, setData] = useState<Content | null>(null);
-  const [error, setError] = useState("");
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    let active = true;
-    setData(null); setError("");
-    api<Content>("/donor/public/content", { cache: retry > 0 ? "reload" : "default" }).then((value) => { if (active) setData(value); }).catch(() => {
-      if (active) setError("This page could not load its published records. Check your connection and retry.");
-    });
-    return () => { active = false; };
-  }, [retry]);
-  if (error) return <section className="panel"><p role="alert">{error}</p><button type="button" onClick={() => setRetry((value) => value + 1)}>Retry records</button></section>;
-  if (!data) return <p role="status">Loading published records…</p>;
-  if (view === "ledger") return <section className="panel">
-    {data.ledger_as_of && <p>As of <time dateTime={data.ledger_as_of}>{data.ledger_as_of}</time> · Updated {data.cadence}.</p>}
-    {data.ledger.length ? <div className="donorMetrics">{data.ledger.map((item) => <article key={item.id}>
-      <h2>{item.metric}</h2><p className="donorMetricValue">{item.unit === "USD_CENTS" ? new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(item.value / 100) : `${item.value.toLocaleString()} ${item.unit.toLowerCase()}`}</p>
+export function ContentUnavailable() {
+  return <div className="errorMessage" role="alert">
+    <b>Published records are unavailable right now.</b>
+    <span>This page shows only figures DAD has published, so nothing is shown in their place. Please retry in a moment.</span>
+    <RefreshButton>Retry records</RefreshButton>
+  </div>;
+}
+
+export function Ledger({ content }: { content: PublicContent }) {
+  return <>
+    {content.ledger_as_of && <p>As of <time dateTime={content.ledger_as_of}>{content.ledger_as_of}</time> · Updated {content.cadence}.</p>}
+    {content.ledger.length ? <div className="donorMetrics">{content.ledger.map((item) => <article key={item.id}>
+      <h2>{item.metric}</h2><p className="donorMetricValue">{item.unit === "USD_CENTS" ? formatMoney(item.value) : `${item.value.toLocaleString("en-US")} ${item.unit.toLowerCase()}`}</p>
       <p>{item.illustrative ? <strong>Illustrative figure — not a reported outcome</strong> : "Source document retained by DAD and available on request."}</p>
     </article>)}</div> : <p>No ledger figures have been published yet. Figures will appear with their source records and an as-of date.</p>}
-  </section>;
-  const selected = slug ? data.initiatives.filter((item) => item.slug === slug) : data.initiatives;
-  return <section className="panel">{selected.length ? selected.map((item) => <article key={item.slug}>
-    <h2>{slug ? item.title : <Link href={`/initiatives/${item.slug}`}>{item.title}</Link>}</h2>
-    <p>{item.summary}</p><p>Partner: {item.partner}. Planned start: <time dateTime={item.planned_start}>{item.planned_start}</time>.</p>
+  </>;
+}
+
+export function InitiativeList({ initiatives }: { initiatives: Initiative[] }) {
+  if (!initiatives.length) return <p>Board-approved plans will appear here as they are published. No initiatives have been published yet.</p>;
+  return initiatives.map((item) => <article key={item.slug}>
+    <h2><Link href={`/initiatives/${item.slug}`}>{item.title}</Link></h2>
+    <InitiativeFacts initiative={item} />
+  </article>);
+}
+
+export function InitiativeFacts({ initiative }: { initiative: Initiative }) {
+  return <>
+    <p>{initiative.summary}</p>
+    <p>Partner: {initiative.partner}. Planned start: <time dateTime={initiative.planned_start}>{initiative.planned_start}</time>.</p>
     <p>Planned initiative. Programs open at launch; this is not a recipient enrolment form.</p>
-    {slug && <p><Link href="/donate">Support DAD’s work</Link> — gifts support DAD as a whole and are not designated to this initiative.</p>}
-  </article>) : <p>{slug ? "This initiative has not been published. Browse the initiatives index for current plans." : "Board-approved plans will appear here as they are published. No initiatives have been published yet."}</p>}</section>;
+  </>;
 }

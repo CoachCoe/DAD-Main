@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { isIP } from "node:net";
+import { trustedClientIp } from "@/lib/clientIp";
+import { donorApiBase } from "@/lib/donorApi";
 
 /**
  * Runtime proxy to the donor API.
@@ -15,9 +16,12 @@ import { isIP } from "node:net";
  */
 export const dynamic = "force-dynamic";
 
-const apiBase = () => process.env.DONOR_API_BASE_URL ?? "http://localhost:8002";
+// Only what the API reads crosses the boundary; anything else a browser or an
+// intermediary adds (including spoofable forwarding headers) is dropped.
+const REQUEST_HEADERS = ["accept", "accept-language", "content-type", "cookie", "idempotency-key", "origin", "stripe-signature", "user-agent"];
 
-// Headers that describe a single hop and must not be forwarded.
+// Response headers not relayed as they are: hop-by-hop ones, a length and encoding that
+// fetch has already undone, and Set-Cookie, which is appended separately below.
 const HOP_BY_HOP = new Set([
   "connection",
   "keep-alive",
@@ -27,34 +31,27 @@ const HOP_BY_HOP = new Set([
   "proxy-authorization",
   "te",
   "trailer",
-  "host",
   "content-length",
+  "content-encoding",
+  "set-cookie",
 ]);
-
-function forwardHeaders(source: Headers): Headers {
-  const headers = new Headers();
-  source.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) headers.set(key, value);
-  });
-  return headers;
-}
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
   if (path[0] !== "donor" || path.some((segment) => segment === "." || segment === ".." || /[\\/?#%]/.test(segment))) {
     return Response.json({ detail: "Not found" }, { status: 404 });
   }
-  const target = new URL(`${apiBase()}/${path.map(encodeURIComponent).join("/")}`);
+  const target = new URL(`${donorApiBase()}/${path.map(encodeURIComponent).join("/")}`);
   target.search = request.nextUrl.search;
 
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
-  const requestHeaders = forwardHeaders(request.headers);
-  requestHeaders.delete("x-real-ip");
-  requestHeaders.delete("x-forwarded-for");
-  // Enable only behind ingress that overwrites this header and blocks direct access.
-  const clientHeader = process.env.DONOR_CLIENT_IP_HEADER;
-  const clientIP = clientHeader ? request.headers.get(clientHeader) : null;
-  if (clientIP && isIP(clientIP)) requestHeaders.set("x-real-ip", clientIP);
+  const requestHeaders = new Headers();
+  for (const name of REQUEST_HEADERS) {
+    const value = request.headers.get(name);
+    if (value !== null) requestHeaders.set(name, value);
+  }
+  const client = trustedClientIp(request.headers);
+  if (client) requestHeaders.set("x-real-ip", client);
   let response: Response;
   try {
     response = await fetch(target, {
@@ -79,12 +76,12 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     );
   }
 
-  const headers = forwardHeaders(response.headers);
-  // Preserve every Set-Cookie, which a plain Headers copy would collapse into one.
-  headers.delete("set-cookie");
-  const cookies = response.headers.getSetCookie?.() ?? [];
-  for (const cookie of cookies) headers.append("set-cookie", cookie);
-  headers.delete("content-encoding");
+  const headers = new Headers();
+  response.headers.forEach((value, key) => {
+    if (!HOP_BY_HOP.has(key)) headers.set(key, value);
+  });
+  // Appended one by one: a plain Headers copy would fold several Set-Cookie values into one.
+  for (const cookie of response.headers.getSetCookie()) headers.append("set-cookie", cookie);
 
   return new Response(response.body, { status: response.status, headers });
 }

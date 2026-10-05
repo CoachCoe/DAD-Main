@@ -4,15 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/payments"
+	"impactgraph/donor-api/internal/recognition"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-func queueMessage(ctx context.Context, q *queries.Queries, donor pgtype.UUID, kind, key string, details interface{}, at time.Time) error {
+func queueMessage(ctx context.Context, q *queries.Queries, donor pgtype.UUID, kind, key string, details any, at time.Time) error {
 	id, err := NewID()
 	if err != nil {
 		return err
@@ -38,6 +42,9 @@ func RefreshProjectionInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now t
 	return result, QueueFinancialMessages(ctx, queries.New(tx), id, now)
 }
 
+// RefreshNextProjection refreshes the donor whose projection is due soonest.
+// A donor whose facts cannot be projected is deferred with backoff and its
+// failure recorded for the monitor, so it cannot hold up every other donor.
 func RefreshNextProjection(ctx context.Context, pool *pgxpool.Pool, now time.Time) (bool, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -52,10 +59,42 @@ func RefreshNextProjection(ctx context.Context, pool *pgxpool.Pool, now time.Tim
 	if err != nil {
 		return false, err
 	}
-	if _, err = RefreshProjectionInTx(ctx, tx, id, now); err != nil {
+	work, err := tx.Begin(ctx)
+	if err != nil {
 		return false, err
 	}
+	_, refreshErr := RefreshProjectionInTx(ctx, work, id, now)
+	if refreshErr == nil {
+		refreshErr = work.Commit(ctx)
+	}
+	if refreshErr != nil {
+		category, ok := projectionFailure(refreshErr)
+		if !ok {
+			return false, refreshErr
+		}
+		if err = work.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			return false, err
+		}
+		if err = q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: pgtype.Text{String: category, Valid: true}, AsOf: timestamp(now)}); err != nil {
+			return false, err
+		}
+	}
 	return true, tx.Commit(ctx)
+}
+
+// projectionFailure classifies errors that retrying cannot fix until the
+// donor's facts change.
+func projectionFailure(err error) (string, bool) {
+	var pgErr *pgconn.PgError
+	switch {
+	case errors.Is(err, recognition.ErrInvalid), errors.Is(err, payments.ErrFacts):
+		return "InvalidFacts", true
+	case errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "22"):
+		return "DataException", true
+	case errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "23"):
+		return "ConstraintViolation", true
+	}
+	return "", false
 }
 
 func QueueLoginEmailInTx(ctx context.Context, tx pgx.Tx, email string, now time.Time) error {

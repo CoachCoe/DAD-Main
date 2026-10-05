@@ -35,7 +35,8 @@ automatic-resume date shown before confirmation.
 The first valid referral touch wins for 30 days, for both referrer and channel (LINK or
 IRL). Later scans, links, and direct visits do not overwrite it or extend its deadline.
 An expired window can be replaced by a new referral touch. Checkout stores attribution
-before account creation. Conversion requires a successful first gift within the window;
+before account creation, and each collected gift records the referrer and channel that
+were valid at the moment of charge. Conversion requires a successful first gift within the window;
 starting checkout is not conversion. Once converted, the donor's direct referral
 relationship is permanent. Later gifts add dollars, never additional conversions.
 
@@ -63,7 +64,9 @@ current count. Refund and subscription cancellation are separate staff actions.
 A streak month is a successful monthly recurring billing period, starting at one.
 One-time gifts do not count. A failed renewal gets 14 days from its scheduled date:
 retain the current count as at risk, increment once when recovered within grace, and
-reset the active streak to zero after grace. Later recovery starts at one. Retain the
+reset the active streak to zero after grace. A renewal not yet reported by the processor
+likewise keeps the current count, not at risk, for those 14 days; after that the streak
+is unknown until the facts arrive. Later recovery starts at one. Retain the
 historical best. An intentional pause/cancellation ends continuity at the first skipped
 renewal, not immediately. Amount changes do not break continuity. Partial refunds retain
 the period if recurring funds remain; full refunds disqualify it unless another qualifying
@@ -112,8 +115,8 @@ implemented behind optional issuer configuration; real-provider/device acceptanc
 open. [Analytics](analytics.md) defines available financial facts and the pending browser
 collection contract. App design deliverables and operational release acceptance remain
 separate from the backend rewrite. The web referral-code page
-offers full screen and manual brightness instructions; it cannot promise hardware
-brightness control. Email changes require single-use confirmations at both the current
+offers full screen, keeps the display awake while shown, and gives manual brightness
+instructions; it cannot promise hardware brightness control. Email changes require single-use confirmations at both the current
 and proposed address, each expiring after 15 minutes. Completing a change preserves the
 donor ID, revokes existing sessions and sign-in links, and records identity audit events.
 An address already attached to another donor is rejected after verification; accounts

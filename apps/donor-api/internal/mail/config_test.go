@@ -16,6 +16,7 @@ func TestEnvironmentConfiguration(t *testing.T) {
 		{"custom port", "DONOR_SMTP_PORT", "2525", false},
 		{"bad port", "DONOR_SMTP_PORT", "abc", true},
 		{"port range", "DONOR_SMTP_PORT", "65536", true},
+		{"implicit TLS port", "DONOR_SMTP_PORT", "465", true},
 		{"missing host", "DONOR_SMTP_HOST", "", true},
 		{"bad sender", "DONOR_EMAIL_FROM", "invalid", true},
 		{"header injection", "DONOR_EMAIL_FROM", "sender@example.org\r\nBcc: victim@example.org", true},

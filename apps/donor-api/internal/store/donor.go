@@ -193,6 +193,16 @@ func (s DonorService) SaveSharing(ctx context.Context, token, name string, repla
 		return sharing(d, s.Origin), nil
 	})
 }
+
+// ReferrerName resolves a shareable code to its owner's chosen public name.
+func (s DonorService) ReferrerName(ctx context.Context, code string) (string, error) {
+	referrer, err := queries.New(s.DB).ReferrerByCode(ctx, pgtype.Text{String: code, Valid: true})
+	if err != nil {
+		return "", err
+	}
+	return referrer.PublicName.String, nil
+}
+
 func (s DonorService) CaptureReferral(ctx context.Context, code, kind, visitor string, now time.Time) (ReferralCapture, error) {
 	if kind != "LINK" && kind != "IRL" {
 		return ReferralCapture{}, payments.ErrFacts

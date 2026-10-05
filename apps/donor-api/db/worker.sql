@@ -1,6 +1,6 @@
 -- name: NextStripeEvent :one
-SELECT * FROM donor_stripe_events WHERE processed_at IS NULL AND attempts<10
-ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
+SELECT * FROM donor_stripe_events WHERE processed_at IS NULL AND attempts<10 AND available_at<=now()
+ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
 -- name: IncrementEventAttempt :exec
 UPDATE donor_stripe_events SET attempts=attempts+1 WHERE id=$1;
@@ -9,7 +9,8 @@ UPDATE donor_stripe_events SET attempts=attempts+1 WHERE id=$1;
 UPDATE donor_stripe_events SET processed_at=$2,last_error=NULL WHERE id=$1;
 
 -- name: FailStripeEvent :exec
-UPDATE donor_stripe_events SET last_error=$2 WHERE id=$1;
+UPDATE donor_stripe_events SET last_error=$2,
+available_at=now()+least(power(2,attempts)*interval '30 seconds',interval '1 hour') WHERE id=$1;
 
 -- name: CheckoutDraft :one
 SELECT * FROM donor_checkouts WHERE id=$1;
@@ -17,11 +18,17 @@ SELECT * FROM donor_checkouts WHERE id=$1;
 -- name: AttemptForCheckout :one
 SELECT * FROM donor_stripe_checkouts WHERE checkout_id=$1 FOR UPDATE;
 
--- name: GiftOwnerByPayment :one
-SELECT donor_id FROM donor_gifts WHERE stripe_payment_intent_id=$1;
+-- name: AttemptSnapshotForCheckout :one
+SELECT * FROM donor_stripe_checkouts WHERE checkout_id=$1;
 
--- name: PaymentUpdateOwner :one
-SELECT donor_id FROM donor_payment_updates WHERE id=$1;
+-- name: AttemptSnapshotByID :one
+SELECT * FROM donor_stripe_checkouts WHERE id=$1;
+
+-- name: GiftSnapshotByPayment :one
+SELECT * FROM donor_gifts WHERE stripe_payment_intent_id=$1;
+
+-- name: PaymentUpdateSnapshot :one
+SELECT * FROM donor_payment_updates WHERE id=$1;
 
 -- name: BindSubscription :exec
 UPDATE donor_stripe_checkouts SET stripe_subscription_id=$2 WHERE id=$1;
@@ -46,8 +53,8 @@ UPDATE donor_billing_periods SET status='PAID' WHERE id=$1;
 SELECT EXISTS(SELECT 1 FROM donor_gifts WHERE donor_id=$1)::boolean;
 
 -- name: InsertGift :exec
-INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,stripe_payment_intent_id,period_id)
-VALUES ($1,$2,$3,$4,$5,'USD',$6,$7,$8,$9) ON CONFLICT (stripe_object_id) DO NOTHING;
+INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,stripe_payment_intent_id,period_id,referrer_id,referral_kind)
+VALUES ($1,$2,$3,$4,$5,'USD',$6,$7,$8,$9,$10,$11) ON CONFLICT (stripe_object_id) DO NOTHING;
 
 -- name: GiftByStripeObject :one
 SELECT * FROM donor_gifts WHERE stripe_object_id=$1 FOR UPDATE;
@@ -120,4 +127,4 @@ SELECT * FROM donor_stripe_checkouts WHERE id=$1 FOR UPDATE;
 UPDATE donor_payment_updates SET stripe_session_id=$2,status=$3,hosted_url=$4,completed_at=$5 WHERE id=$1;
 
 -- name: RetryStripeEvent :execrows
-UPDATE donor_stripe_events SET attempts=0,last_error=NULL WHERE stripe_event_id=$1 AND processed_at IS NULL;
+UPDATE donor_stripe_events SET attempts=0,last_error=NULL,available_at=now() WHERE stripe_event_id=$1 AND processed_at IS NULL;

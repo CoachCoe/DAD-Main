@@ -59,11 +59,9 @@ func LoadHistory(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (
 	return result, nil
 }
 
-func historicalBest(ctx context.Context, q *queries.Queries, id pgtype.UUID, h History, now time.Time, previous int64) (int64, error) {
-	observations, err := q.RefundObservations(ctx, queries.RefundObservationsParams{DonorID: id, ObservedAt: timestamp(now)})
-	if err != nil {
-		return 0, err
-	}
+// historicalBest replays refund observations made by asOf so a full refund
+// cannot erase a best streak the donor had already attained.
+func historicalBest(ctx context.Context, id pgtype.UUID, h History, observations []queries.RefundObservationsRow, now time.Time, previous int64) (int64, error) {
 	byID := map[string]recognition.Refund{}
 	for _, r := range h.Refunds {
 		byID[r.ID] = r
@@ -86,6 +84,30 @@ func historicalBest(ctx context.Context, q *queries.Queries, id pgtype.UUID, h H
 		}
 	}
 	return replayBest(ctx, id.String(), h, history, now, previous)
+}
+
+// refundsAsOf returns each refund's state as of asOf. A refund last updated
+// after asOf, as another process with a later clock may record, takes its
+// latest earlier observation; the later update is returned as a refresh boundary.
+func refundsAsOf(current []recognition.Refund, observations []queries.RefundObservationsRow, asOf time.Time) ([]recognition.Refund, []time.Time) {
+	latest := map[string]queries.RefundObservationsRow{}
+	for _, o := range observations {
+		latest[o.StripeRefundID] = o
+	}
+	result := make([]recognition.Refund, 0, len(current))
+	var later []time.Time
+	for _, r := range current {
+		if r.UpdatedAt.After(asOf) {
+			later = append(later, r.UpdatedAt)
+			o, ok := latest[r.ID]
+			if !ok {
+				continue
+			}
+			r.Status, r.UpdatedAt = o.Status, o.ObservedAt.Time
+		}
+		result = append(result, r)
+	}
+	return result, later
 }
 
 func replayBest(ctx context.Context, donorID string, h History, history []recognition.Refund, now time.Time, previous int64) (int64, error) {
@@ -151,58 +173,35 @@ func refreshProjectionFactsInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, 
 		return out, err
 	}
 	old, err := q.Projection(ctx, id)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return out, err
-	}
-	if errors.Is(err, pgx.ErrNoRows) {
-		out.ID, err = NewID()
-		if err != nil {
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		if out.ID, err = NewID(); err != nil {
 			return out, err
 		}
-	} else {
+	case err != nil:
+		return out, err
+	default:
 		out.ID = old.ID
 		out.FoundingAwardedAt = old.FoundingAwardedAt
 		out.BestStreak = old.BestStreak
+		out.FirstGiftID, out.ReferrerID, out.ReferralKind = old.FirstGiftID, old.ReferrerID, old.ReferralKind
 	}
 	h, err := LoadHistory(ctx, q, id)
 	if err != nil {
 		return out, err
 	}
-	relations, err := recognition.Relationships(h.Gifts, now)
+	observations, err := q.RefundObservations(ctx, queries.RefundObservationsParams{DonorID: id, ObservedAt: timestamp(now)})
 	if err != nil {
 		return out, err
 	}
-	if relation, ok := relations[id.String()]; ok {
-		out.FirstGiftID = pgtype.Text{String: relation.FirstGiftID, Valid: true}
-		if relation.ReferrerID != nil {
-			if err = out.ReferrerID.Scan(*relation.ReferrerID); err != nil {
-				return out, err
-			}
-			out.ReferralKind = pgtype.Text{String: *relation.Kind, Valid: true}
-		}
-	}
-	founded, err := recognition.Founding(h.Gifts, id.String(), now, out.FoundingAwardedAt.Valid)
-	if err != nil {
+	refunds, refundBoundaries := refundsAsOf(h.Refunds, observations, now)
+	if err = projectConversion(&out, h, id, now); err != nil {
 		return out, err
 	}
-	if founded && !out.FoundingAwardedAt.Valid {
-		out.FoundingAwardedAt = timestamp(now)
+	if out.NetMinor, err = netMinor(h.Gifts, refunds, now); err != nil {
+		return out, err
 	}
-	net, netErr := recognition.NetGifts(h.Gifts, h.Refunds, now)
-	if netErr == nil {
-		total := int64(0)
-		for _, amount := range net {
-			if amount > math.MaxInt64-total {
-				netErr = recognition.ErrInvalid
-				break
-			}
-			total += amount
-		}
-		if netErr == nil {
-			out.NetMinor = pgtype.Int8{Int64: total, Valid: true}
-		}
-	}
-	best, err := historicalBest(ctx, q, id, h, now, int64(out.BestStreak))
+	best, err := historicalBest(ctx, id, h, observations, now, int64(out.BestStreak))
 	if err != nil {
 		return out, err
 	}
@@ -210,33 +209,17 @@ func refreshProjectionFactsInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, 
 		return out, recognition.ErrInvalid
 	}
 	out.BestStreak = int32(best)
-	windows, err := q.PauseWindows(ctx, id)
+	stops, pauses, err := renewalStops(ctx, q, id, now)
 	if err != nil {
 		return out, err
 	}
-	pauses := make([]recognition.Pause, 0, len(windows))
-	for _, w := range windows {
-		end := w.ResumesAt.Time
-		if w.NextRenewal.Valid {
-			end = w.NextRenewal.Time
-		}
-		if w.StopsAt.Valid && !w.StopsAt.Time.After(now) {
-			end = time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)
-		}
-		pauses = append(pauses, recognition.Pause{Start: w.StartsAt.Time, End: end})
-	}
-	ended, err := q.StoppedPeriods(ctx, id)
-	if err != nil {
-		return out, err
-	}
-	stops := make([]time.Time, 0, len(ended))
-	for _, v := range ended {
-		stops = append(stops, v.Time)
-	}
-	streak, err := recognition.GivingStreak(h.Gifts, h.Refunds, h.Periods, id.String(), now, best, stops, pauses)
-	if err != nil {
+	streak, err := recognition.GivingStreak(h.Gifts, refunds, h.Periods, id.String(), now, best, stops, pauses)
+	switch {
+	case errors.Is(err, recognition.ErrIncomplete):
 		out.NextRefreshAt = timestamp(now.Add(5 * time.Minute))
-	} else {
+	case err != nil:
+		return out, err
+	default:
 		if streak.Current > math.MaxInt32 || streak.Best > math.MaxInt32 {
 			return out, recognition.ErrInvalid
 		}
@@ -247,9 +230,9 @@ func refreshProjectionFactsInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, 
 			out.GraceEndsAt = timestamp(*streak.GraceEndsAt)
 		}
 	}
-	boundaries := append([]time.Time{}, stops...)
+	boundaries := append(refundBoundaries, stops...)
 	for _, p := range h.Periods {
-		boundaries = append(boundaries, p.DueAt, p.EndsAt)
+		boundaries = append(boundaries, p.DueAt, p.EndsAt, p.EndsAt.Add(recognition.Grace))
 	}
 	for _, g := range h.Gifts {
 		boundaries = append(boundaries, g.PaidAt)
@@ -266,4 +249,77 @@ func refreshProjectionFactsInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, 
 		}
 	}
 	return out, q.SaveProjection(ctx, out)
+}
+
+// projectConversion records the donor's first gift, its referral and the
+// Founding Donor award. Both are permanent once set, so a gift processed late
+// cannot move a relationship whose referral notice may already have been sent.
+func projectConversion(out *queries.SaveProjectionParams, h History, id pgtype.UUID, now time.Time) error {
+	if !out.FirstGiftID.Valid {
+		relations, err := recognition.Relationships(h.Gifts, now)
+		if err != nil {
+			return err
+		}
+		if relation, ok := relations[id.String()]; ok {
+			out.FirstGiftID = pgtype.Text{String: relation.FirstGiftID, Valid: true}
+			if relation.ReferrerID != nil {
+				if err = out.ReferrerID.Scan(*relation.ReferrerID); err != nil {
+					return err
+				}
+				out.ReferralKind = pgtype.Text{String: *relation.Kind, Valid: true}
+			}
+		}
+	}
+	if out.FoundingAwardedAt.Valid {
+		return nil
+	}
+	at, qualified, err := recognition.FoundingQualifiedAt(h.Gifts, id.String(), now)
+	if qualified {
+		out.FoundingAwardedAt = timestamp(at)
+	}
+	return err
+}
+
+func netMinor(gifts []recognition.Gift, refunds []recognition.Refund, now time.Time) (pgtype.Int8, error) {
+	net, err := recognition.NetGifts(gifts, refunds, now)
+	if err != nil {
+		return pgtype.Int8{}, err
+	}
+	total := int64(0)
+	for _, amount := range net {
+		if amount > math.MaxInt64-total {
+			return pgtype.Int8{}, recognition.ErrInvalid
+		}
+		total += amount
+	}
+	return pgtype.Int8{Int64: total, Valid: true}, nil
+}
+
+// renewalStops returns the renewal boundaries ended by cancellation and the
+// pause windows that skip renewals.
+func renewalStops(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) ([]time.Time, []recognition.Pause, error) {
+	windows, err := q.PauseWindows(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	pauses := make([]recognition.Pause, 0, len(windows))
+	for _, w := range windows {
+		end := w.ResumesAt.Time
+		if w.NextRenewal.Valid {
+			end = w.NextRenewal.Time
+		}
+		if w.StopsAt.Valid && !w.StopsAt.Time.After(now) {
+			end = time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)
+		}
+		pauses = append(pauses, recognition.Pause{Start: w.StartsAt.Time, End: end})
+	}
+	ended, err := q.StoppedPeriods(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
+	stops := make([]time.Time, 0, len(ended))
+	for _, v := range ended {
+		stops = append(stops, v.Time)
+	}
+	return stops, pauses, nil
 }

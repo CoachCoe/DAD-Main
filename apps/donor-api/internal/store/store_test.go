@@ -51,7 +51,7 @@ func donor(t *testing.T, pool *pgxpool.Pool) (pgtype.UUID, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		for _, query := range []string{"DELETE FROM donor_sessions WHERE donor_id=$1", "DELETE FROM donor_login_links WHERE donor_id=$1", "DELETE FROM donors WHERE id=$1"} {
+		for _, query := range []string{"DELETE FROM donor_sessions WHERE donor_id=$1", "DELETE FROM donor_login_links WHERE donor_id=$1", "DELETE FROM donor_metric_projections WHERE donor_id=$1", "DELETE FROM donors WHERE id=$1"} {
 			if _, err := pool.Exec(ctx, query, id); err != nil {
 				t.Error(err)
 			}
@@ -94,7 +94,7 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 				return
 			}
 			defer tx.Rollback(ctx)
-			session, _, err := ClaimInTx(ctx, tx, token, now)
+			session, _, err := ClaimInTx(ctx, tx, token)
 			if err == nil {
 				err = tx.Commit(ctx)
 				if err == nil {
@@ -129,7 +129,7 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 		if len(session) != 43 {
 			t.Fatalf("token encoding changed")
 		}
-		if _, err = Authenticated(context.Background(), queries.New(pool), session, now.Add(30*24*time.Hour)); !errors.Is(err, ErrDenied) {
+		if _, err = Authenticated(context.Background(), queries.New(pool), session, time.Now().Add(30*24*time.Hour)); !errors.Is(err, ErrDenied) {
 			t.Fatal("session expiry boundary")
 		}
 	}
@@ -138,7 +138,7 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	if _, _, err = ClaimInTx(context.Background(), tx, sibling, now); !errors.Is(err, ErrDenied) {
+	if _, _, err = ClaimInTx(context.Background(), tx, sibling); !errors.Is(err, ErrDenied) {
 		t.Fatalf("sibling remains usable: %v", err)
 	}
 }
@@ -152,7 +152,7 @@ func TestClaimRollbackLeavesProofUsable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, _, err := ClaimInTx(ctx, tx, token, now)
+	session, _, err := ClaimInTx(ctx, tx, token)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestClaimRollbackLeavesProofUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, _, err = ClaimInTx(ctx, tx, token, now); err != nil {
+	if _, _, err = ClaimInTx(ctx, tx, token); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -190,7 +190,7 @@ func TestDisabledDonorCannotClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, _, err = ClaimInTx(ctx, tx, token, now); !errors.Is(err, ErrDenied) {
+	if _, _, err = ClaimInTx(ctx, tx, token); !errors.Is(err, ErrDenied) {
 		t.Fatalf("disabled donor claimed: %v", err)
 	}
 }
@@ -205,7 +205,7 @@ func TestExpiredProofCannotCreateSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, _, err = ClaimInTx(ctx, tx, token, now); !errors.Is(err, ErrDenied) {
+	if _, _, err = ClaimInTx(ctx, tx, token); !errors.Is(err, ErrDenied) {
 		t.Fatalf("expiry boundary: %v", err)
 	}
 	var count int

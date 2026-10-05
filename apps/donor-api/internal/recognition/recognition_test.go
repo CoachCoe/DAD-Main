@@ -3,7 +3,6 @@ package recognition
 import (
 	"encoding/json"
 	"errors"
-	"math"
 	"os"
 	"reflect"
 	"testing"
@@ -39,14 +38,16 @@ func TestSharedFinancialScenarios(t *testing.T) {
 		t.Fatal("missing financial scenarios")
 	}
 	for _, c := range cases {
+		// Referral totals are aggregated in SQL; the store package runs those scenarios.
+		if c.Operation == "referrals" {
+			continue
+		}
 		t.Run(c.Name, func(t *testing.T) {
-			var result interface{}
+			var result any
 			var err error
 			switch c.Operation {
 			case "net":
 				result, err = NetGifts(c.Gifts, c.Refunds, c.AsOf)
-			case "referrals":
-				result, err = ReferralTotals(c.Gifts, c.Refunds, c.AsOf)
 			case "founding":
 				result, err = Founding(c.Gifts, c.DonorID, c.AsOf, c.PreviouslyAwarded)
 			case "streak":
@@ -71,7 +72,7 @@ func TestSharedFinancialScenarios(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var got, want interface{}
+			var got, want any
 			if err = json.Unmarshal(encoded, &got); err != nil {
 				t.Fatal(err)
 			}
@@ -82,17 +83,6 @@ func TestSharedFinancialScenarios(t *testing.T) {
 				t.Fatalf("got %s, want %s", encoded, c.Expected)
 			}
 		})
-	}
-}
-func TestRejectOverflowRatherThanWrapAttributedMoney(t *testing.T) {
-	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-	c := &Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: now.Add(time.Hour)}
-	first := Gift{ID: "a", DonorID: "ben", Amount: math.MaxInt64, PaidAt: now, Frequency: "ONE_TIME", Currency: "USD", Candidate: c}
-	second := first
-	second.ID = "b"
-	second.Amount = 1
-	if _, err := ReferralTotals([]Gift{first, second}, nil, now); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("overflow: %v", err)
 	}
 }
 func TestEquivalentTimezoneFactsDeduplicateWithoutChangingInput(t *testing.T) {
@@ -111,5 +101,21 @@ func TestEquivalentTimezoneFactsDeduplicateWithoutChangingInput(t *testing.T) {
 	}
 	if !reflect.DeepEqual(input, original) {
 		t.Fatal("calculation modified caller facts")
+	}
+}
+func TestFoundingQualifiedAtUsesEarliestQualifyingGift(t *testing.T) {
+	early := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	gifts := []Gift{
+		{ID: "late", DonorID: "ben", Amount: 100, PaidAt: FoundingCutoff, Frequency: "ONE_TIME", Currency: "USD"},
+		{ID: "second", DonorID: "ben", Amount: 100, PaidAt: early.Add(time.Hour), Frequency: "ONE_TIME", Currency: "USD"},
+		{ID: "first", DonorID: "ben", Amount: 100, PaidAt: early, Frequency: "ONE_TIME", Currency: "USD"},
+		{ID: "other", DonorID: "cara", Amount: 100, PaidAt: early.Add(-time.Hour), Frequency: "ONE_TIME", Currency: "USD"},
+	}
+	at, ok, err := FoundingQualifiedAt(gifts, "ben", FoundingCutoff.Add(time.Hour))
+	if err != nil || !ok || !at.Equal(early) {
+		t.Fatalf("qualified=%v at=%s err=%v", ok, at, err)
+	}
+	if _, ok, err = FoundingQualifiedAt(gifts, "ben", early.Add(-time.Second)); err != nil || ok {
+		t.Fatal("future gift qualified", err)
 	}
 }

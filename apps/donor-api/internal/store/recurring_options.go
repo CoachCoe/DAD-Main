@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -9,146 +10,202 @@ import (
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-func (s RecurringService) AmountOptions(ctx context.Context, token string) (map[string]interface{}, error) {
-	return s.transaction(ctx, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (map[string]interface{}, error) {
-		unavailable := map[string]interface{}{"state": "unavailable"}
+// AmountOptions offers a new amount from the next renewal. An unavailable
+// offer carries only its state.
+type AmountOptions struct {
+	AmountMinor    int64         `json:"amount_minor"`
+	Change         *AmountChange `json:"change"`
+	EffectiveAt    time.Time     `json:"effective_at"`
+	State          string        `json:"state"`
+	SubscriptionID string        `json:"subscription_id"`
+}
+
+func (o AmountOptions) MarshalJSON() ([]byte, error) {
+	if o.State != "ready" {
+		return json.Marshal(struct {
+			State string `json:"state"`
+		}{o.State})
+	}
+	type options AmountOptions
+	return json.Marshal(options(o))
+}
+
+type PauseOption struct {
+	Months    int32     `json:"months"`
+	ResumesAt time.Time `json:"resumes_at"`
+	StartsAt  time.Time `json:"starts_at"`
+}
+type PauseOptions struct {
+	Options        []PauseOption `json:"options"`
+	Pause          *PauseView    `json:"pause"`
+	State          string        `json:"state"`
+	SubscriptionID string        `json:"subscription_id,omitempty"`
+}
+
+// ResumeOptions is unavailable, a saved resumption, or an offer to resume at
+// the next renewal; each state carries only its own fields.
+type ResumeOptions struct {
+	Confirmed      *bool      `json:"confirmed,omitempty"`
+	NextRenewal    *time.Time `json:"next_renewal,omitempty"`
+	OriginalResume *time.Time `json:"original_resume,omitempty"`
+	PauseID        string     `json:"pause_id,omitempty"`
+	RequestID      string     `json:"request_id,omitempty"`
+	State          string     `json:"state"`
+}
+
+func (s RecurringService) AmountOptions(ctx context.Context, token string) (AmountOptions, error) {
+	unavailable := AmountOptions{State: "unavailable"}
+	snapshot, err := s.donorSnapshot(ctx, token)
+	if err != nil {
+		return AmountOptions{}, err
+	}
+	return ownerTransaction(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (AmountOptions, error) {
 		q := queries.New(tx)
 		attempt, err := q.LatestMonthlyAttempt(ctx, d.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return unavailable, nil
 		}
 		if err != nil {
-			return nil, err
+			return AmountOptions{}, err
 		}
 		if !attempt.StripeSubscriptionID.Valid {
 			return unavailable, nil
 		}
-		schedule, _, err := s.read(ctx, tx, attempt, now, "amount")
+		schedule, _, err := s.read(ctx, tx, attempt, now, "amount", snapshot)
 		if err != nil {
-			return nil, err
+			return AmountOptions{}, err
 		}
 		if schedule.Status != "active" || schedule.StopsAt.Valid {
 			return unavailable, nil
 		}
 		draft, err := q.CheckoutDraft(ctx, attempt.CheckoutID)
 		if err != nil {
-			return nil, err
+			return AmountOptions{}, err
 		}
 		amount, err := nextAmount(ctx, q, draft)
 		if err != nil {
-			return nil, err
+			return AmountOptions{}, err
 		}
+		out := AmountOptions{State: "ready", SubscriptionID: attempt.ID.String(), AmountMinor: amount, EffectiveAt: schedule.PeriodEnd.Time}
 		change, err := q.LatestAmountChange(ctx, draft.ID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return nil, err
+		switch {
+		case err == nil:
+			out.Change = amountView(change)
+		case !errors.Is(err, pgx.ErrNoRows):
+			return AmountOptions{}, err
 		}
-		var view interface{}
-		if err == nil {
-			view = amountView(change)
-		}
-		return map[string]interface{}{"state": "ready", "subscription_id": attempt.ID.String(), "amount_minor": amount, "effective_at": schedule.PeriodEnd.Time, "change": view}, nil
+		return out, nil
 	})
 }
-func (s RecurringService) PauseOptions(ctx context.Context, token string) (map[string]interface{}, error) {
-	return s.transaction(ctx, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (map[string]interface{}, error) {
-		options := []map[string]interface{}{}
-		unavailable := map[string]interface{}{"state": "unavailable", "pause": nil, "options": options}
+func (s RecurringService) PauseOptions(ctx context.Context, token string) (PauseOptions, error) {
+	unavailable := PauseOptions{State: "unavailable", Options: []PauseOption{}}
+	snapshot, err := s.donorSnapshot(ctx, token)
+	if err != nil {
+		return PauseOptions{}, err
+	}
+	return ownerTransaction(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (PauseOptions, error) {
 		q := queries.New(tx)
 		attempt, err := q.LatestMonthlyAttempt(ctx, d.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return unavailable, nil
 		}
 		if err != nil {
-			return nil, err
+			return PauseOptions{}, err
 		}
 		if !attempt.StripeSubscriptionID.Valid {
 			return unavailable, nil
 		}
-		schedule, remote, err := s.read(ctx, tx, attempt, now, "pause")
+		schedule, remote, err := s.read(ctx, tx, attempt, now, "pause", snapshot)
 		if err != nil {
-			return nil, err
+			return PauseOptions{}, err
 		}
 		if _, err = RefreshProjectionInTx(ctx, tx, d.ID, now); err != nil {
-			return nil, err
+			return PauseOptions{}, err
 		}
 		if schedule.StopsAt.Valid || terminalSubscription(schedule.Status) {
 			return unavailable, nil
 		}
+		out := PauseOptions{State: "ready", SubscriptionID: attempt.ID.String(), Options: []PauseOption{}}
 		pause, err := q.LatestPause(ctx, attempt.ID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return nil, err
+			return PauseOptions{}, err
 		}
 		active := false
 		if err == nil {
 			until, err := effectiveResume(ctx, q, pause)
 			if err != nil {
-				return nil, err
+				return PauseOptions{}, err
 			}
 			active = !pause.ConfirmedAt.Valid || now.Before(until)
 		}
-		var view interface{}
 		if active {
-			view, err = pauseView(ctx, q, pause)
+			view, err := pauseView(ctx, q, pause)
 			if err != nil {
-				return nil, err
+				return PauseOptions{}, err
 			}
+			out.Pause = &view
 		} else if schedule.Status == "active" {
-			epoch, _ := remote.Int("billing_cycle_anchor")
-			anchor := time.Unix(epoch, 0).UTC()
+			anchor, err := billingAnchor(remote)
+			if err != nil {
+				return PauseOptions{}, err
+			}
 			for months := int32(1); months <= 3; months++ {
 				until, err := renewalAfter(schedule.PeriodEnd.Time, months, anchor)
 				if err != nil {
-					return nil, err
+					return PauseOptions{}, err
 				}
-				options = append(options, map[string]interface{}{"months": months, "starts_at": schedule.PeriodEnd.Time, "resumes_at": until})
+				out.Options = append(out.Options, PauseOption{Months: months, StartsAt: schedule.PeriodEnd.Time, ResumesAt: until})
 			}
 		}
-		return map[string]interface{}{"state": "ready", "subscription_id": attempt.ID.String(), "pause": view, "options": options}, nil
+		return out, nil
 	})
 }
-func (s RecurringService) ResumeOptions(ctx context.Context, token string) (map[string]interface{}, error) {
-	return s.transaction(ctx, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (map[string]interface{}, error) {
-		unavailable := map[string]interface{}{"state": "unavailable"}
+func (s RecurringService) ResumeOptions(ctx context.Context, token string) (ResumeOptions, error) {
+	unavailable := ResumeOptions{State: "unavailable"}
+	snapshot, err := s.donorSnapshot(ctx, token)
+	if err != nil {
+		return ResumeOptions{}, err
+	}
+	return ownerTransaction(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (ResumeOptions, error) {
 		q := queries.New(tx)
 		attempt, err := q.LatestMonthlyAttempt(ctx, d.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return unavailable, nil
 		}
 		if err != nil {
-			return nil, err
+			return ResumeOptions{}, err
 		}
 		if !attempt.StripeSubscriptionID.Valid {
 			return unavailable, nil
 		}
-		schedule, remote, err := s.read(ctx, tx, attempt, now, "pause")
+		schedule, remote, err := s.read(ctx, tx, attempt, now, "pause", snapshot)
 		if err != nil {
-			return nil, err
+			return ResumeOptions{}, err
 		}
 		if _, err = RefreshProjectionInTx(ctx, tx, d.ID, now); err != nil {
-			return nil, err
+			return ResumeOptions{}, err
 		}
 		pause, err := q.LatestPause(ctx, attempt.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return unavailable, nil
 		}
 		if err != nil {
-			return nil, err
+			return ResumeOptions{}, err
 		}
 		if !pause.ConfirmedAt.Valid || schedule.StopsAt.Valid || schedule.Status != "active" {
 			return unavailable, nil
 		}
 		command, err := q.ResumptionForPause(ctx, pause.ID)
 		if err == nil {
-			view := resumptionView(command)
-			view["state"] = "saved"
-			return view, nil
+			saved := resumptionView(command)
+			return ResumeOptions{State: "saved", Confirmed: &saved.Confirmed, NextRenewal: &saved.NextRenewal, PauseID: saved.PauseID, RequestID: saved.RequestID}, nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
-			return nil, err
+			return ResumeOptions{}, err
 		}
 		if absent(remote, "pause_collection") || !schedule.PeriodEnd.Time.Before(pause.ResumesAt.Time) || !now.Before(schedule.PeriodEnd.Time) {
 			return unavailable, nil
 		}
-		return map[string]interface{}{"state": "ready", "pause_id": pause.ID.String(), "next_renewal": schedule.PeriodEnd.Time, "original_resume": pause.ResumesAt.Time}, nil
+		return ResumeOptions{State: "ready", PauseID: pause.ID.String(), NextRenewal: &schedule.PeriodEnd.Time, OriginalResume: &pause.ResumesAt.Time}, nil
 	})
 }

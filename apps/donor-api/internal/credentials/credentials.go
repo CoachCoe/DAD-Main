@@ -1,5 +1,5 @@
-// Package credentials preserves the existing Python credential formats. Secrets
-// and hashes must never be included in HTTP errors or application logs.
+// Package credentials preserves the legacy credential contract: the formats
+// already stored in the deployed pre-rewrite database. Secrets and hashes must never be included in HTTP errors or application logs.
 package credentials
 
 import (
@@ -18,7 +18,7 @@ import (
 
 var ErrInvalid = errors.New("invalid credential")
 
-// Python argon2-cffi's current writer parameters, deliberately independent of CPU count.
+// The legacy contract's Argon2id writer parameters, deliberately independent of CPU count.
 func HashPassword(password string) (string, error) {
 	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 12 || utf8.RuneCountInString(password) > 128 {
 		return "", ErrInvalid
@@ -53,6 +53,14 @@ func key(value string) (*fernet.Key, error) {
 	copy(k[:], decoded)
 	return k, nil
 }
+
+// ValidateKey reports whether value is a usable encryption key, so services
+// can refuse to start instead of failing on first use.
+func ValidateKey(value string) error {
+	_, err := key(value)
+	return err
+}
+
 func Encrypt(value []byte, encodedKey string) ([]byte, error) {
 	k, err := key(encodedKey)
 	if err != nil {
@@ -100,8 +108,8 @@ func VerifyOTP(secret []byte, code string, now time.Time, previous int64) (int64
 	return 0, ErrInvalid
 }
 
-// QuoteASCII reproduces Python JSON's ensure_ascii=True string escaping. Checkout
-// request hashes must not change when a retry crosses the language boundary.
+// QuoteASCII reproduces the legacy contract's ASCII-only JSON string escaping.
+// Checkout request hashes must match those recorded by the pre-rewrite service.
 func QuoteASCII(value string) (string, error) {
 	if !utf8.ValidString(value) {
 		return "", ErrInvalid

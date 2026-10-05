@@ -5,20 +5,34 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
 type ContentReader struct{ DB queries.DBTX }
 
-func (reader ContentReader) PublicContent(ctx context.Context) (map[string]interface{}, error) {
+// PublicContent is the published site content. Initiative and ledger entries
+// stay maps because they carry only an allowlisted subset of stored fields.
+type PublicContent struct {
+	Cadence       *string                      `json:"cadence"`
+	Initiatives   []map[string]json.RawMessage `json:"initiatives"`
+	Ledger        []map[string]json.RawMessage `json:"ledger"`
+	LedgerAsOf    *string                      `json:"ledger_as_of"`
+	PublicationID *pgtype.UUID                 `json:"publication_id,omitempty"`
+	PublishedAt   *time.Time                   `json:"published_at,omitempty"`
+	State         string                       `json:"state"`
+}
+
+func (reader ContentReader) PublicContent(ctx context.Context) (PublicContent, error) {
 	row, err := queries.New(reader.DB).PublishedContent(ctx)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return map[string]interface{}{"state": "unpublished", "initiatives": []interface{}{}, "ledger": []interface{}{}, "ledger_as_of": nil, "cadence": nil}, nil
+		return PublicContent{State: "unpublished", Initiatives: []map[string]json.RawMessage{}, Ledger: []map[string]json.RawMessage{}}, nil
 	}
 	if err != nil {
-		return nil, err
+		return PublicContent{}, err
 	}
 	var snapshot struct {
 		Initiatives []map[string]json.RawMessage `json:"initiatives"`
@@ -27,7 +41,7 @@ func (reader ContentReader) PublicContent(ctx context.Context) (map[string]inter
 		Cadence     string                       `json:"cadence"`
 	}
 	if err = json.Unmarshal(row.Payload, &snapshot); err != nil {
-		return nil, err
+		return PublicContent{}, err
 	}
 	// The public transport never serializes a whole database publication or source row.
 	initiatives := make([]map[string]json.RawMessage, 0, len(snapshot.Initiatives))
@@ -51,6 +65,6 @@ func (reader ContentReader) PublicContent(ctx context.Context) (map[string]inter
 		}
 		ledger = append(ledger, public)
 	}
-	return map[string]interface{}{"state": "published", "published_at": row.CreatedAt.Time, "publication_id": row.ID,
-		"ledger_as_of": snapshot.AsOf, "cadence": snapshot.Cadence, "initiatives": initiatives, "ledger": ledger}, nil
+	return PublicContent{State: "published", PublishedAt: &row.CreatedAt.Time, PublicationID: &row.ID,
+		LedgerAsOf: &snapshot.AsOf, Cadence: &snapshot.Cadence, Initiatives: initiatives, Ledger: ledger}, nil
 }

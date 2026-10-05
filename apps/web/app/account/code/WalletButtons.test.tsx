@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import WalletButtons from "./WalletButtons";
 
@@ -20,7 +20,7 @@ it("keeps provider failures recoverable and rejects an unexpected redirect host"
     .mockResolvedValueOnce(response({ url: "https://other.example/gp/v/save/token" })));
   render(<WalletButtons />);
   fireEvent.click(await screen.findByRole("button", { name: "Add to Google Wallet" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Your on-screen code still works");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Your on-screen code still works"));
   expect(screen.queryByRole("link")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Add to Google Wallet" })).toBeEnabled();
 });
@@ -29,6 +29,6 @@ it("does not offer a broken Apple pass when issuance fails", async () => {
     .mockResolvedValueOnce({ ok: false, status: 503 }));
   render(<WalletButtons />);
   fireEvent.click(await screen.findByRole("button", { name: "Add to Apple Wallet" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("pass could not be prepared");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("pass could not be prepared"));
   expect(screen.getByRole("button", { name: "Add to Apple Wallet" })).toBeEnabled();
 });

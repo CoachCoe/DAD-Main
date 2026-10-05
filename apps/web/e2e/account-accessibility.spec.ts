@@ -48,7 +48,7 @@ test("dashboard explains partial data and recovers from a connection failure", a
   await expect(page.getByRole("main").getByRole("alert")).toContainText("Check your connection");
   available = true;
   await page.getByRole("button", { name: "Refresh dashboard" }).click();
-  await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("main").getByRole("alert")).toBeEmpty();
   await expect(page.getByText("Referral totals are updating. Please refresh shortly.")).toBeVisible();
   await expect(page.getByText("Your streak is temporarily unavailable.", { exact: false })).toBeVisible();
   await page.getByRole("link", { name: "Share and invite", exact: true }).focus();

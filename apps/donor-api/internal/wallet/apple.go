@@ -94,11 +94,11 @@ func (i *Issuer) ApplePass(link string, now time.Time) ([]byte, error) {
 	if !a.validAt(now) {
 		return nil, ErrConfiguration
 	}
-	pass, err := json.Marshal(map[string]interface{}{
+	pass, err := json.Marshal(map[string]any{
 		"formatVersion": 1, "passTypeIdentifier": a.PassType, "teamIdentifier": a.Team, "serialNumber": passID(link), "organizationName": "Dynamic Aid Delivery",
 		"description": "DAD sandbox referral code", "logoText": "DAD · Sandbox", "foregroundColor": "rgb(20, 66, 54)", "backgroundColor": "rgb(255, 255, 255)", "labelColor": "rgb(20, 66, 54)",
 		"sharingProhibited": true, "barcodes": []map[string]string{{"format": "PKBarcodeFormatQR", "message": link, "messageEncoding": "iso-8859-1"}},
-		"generic": map[string]interface{}{"primaryFields": []map[string]string{{"key": "invite", "label": "INVITE SOMEONE", "value": "Join the circle"}}, "auxiliaryFields": []map[string]string{{"key": "amount", "label": "ABOUT A DOLLAR A DAY", "value": "$30/month"}}, "backFields": []map[string]string{{"key": "giving", "label": "DAD", "value": disclosure}, {"key": "replacement", "label": "Keep your code current", "value": "If you replace your referral link, remove this pass and add the new one from your DAD account."}}},
+		"generic": map[string]any{"primaryFields": []map[string]string{{"key": "invite", "label": "INVITE SOMEONE", "value": "Join the circle"}}, "auxiliaryFields": []map[string]string{{"key": "amount", "label": "ABOUT A DOLLAR A DAY", "value": "$30/month"}}, "backFields": []map[string]string{{"key": "giving", "label": "DAD", "value": disclosure}, {"key": "replacement", "label": "Keep your code current", "value": "If you replace your referral link, remove this pass and add the new one from your DAD account."}}},
 	})
 	if err != nil {
 		return nil, err

@@ -4,7 +4,6 @@ package recognition
 
 import (
 	"errors"
-	"math"
 	"reflect"
 	"sort"
 	"time"
@@ -17,6 +16,20 @@ var (
 )
 
 const Grace = 14 * 24 * time.Hour
+
+// NewYork is the zone of the Founding Donor cutoff and receipt tax years.
+var NewYork = mustLoadLocation("America/New_York")
+
+// FoundingCutoff is exclusive: a first gift must succeed before it.
+var FoundingCutoff = time.Date(2027, 4, 22, 0, 0, 0, 0, NewYork)
+
+func mustLoadLocation(name string) *time.Location {
+	zone, err := time.LoadLocation(name)
+	if err != nil {
+		panic(err)
+	}
+	return zone
+}
 
 type Candidate struct {
 	ReferrerID string    `json:"referrer_id"`
@@ -49,18 +62,10 @@ type Period struct {
 	Status  string    `json:"status"`
 }
 type Relationship struct {
-	DonorID     string    `json:"donor_id"`
-	FirstGiftID string    `json:"first_gift_id"`
-	ConvertedAt time.Time `json:"converted_at"`
-	ReferrerID  *string   `json:"referrer_id"`
-	Kind        *string   `json:"kind"`
-}
-type Totals struct {
-	LinkCount int64  `json:"link_count"`
-	IRLCount  int64  `json:"irl_count"`
-	LinkMinor int64  `json:"link_minor"`
-	IRLMinor  int64  `json:"irl_minor"`
-	Currency  string `json:"currency"`
+	DonorID     string  `json:"donor_id"`
+	FirstGiftID string  `json:"first_gift_id"`
+	ReferrerID  *string `json:"referrer_id"`
+	Kind        *string `json:"kind"`
 }
 type Streak struct {
 	Current     int64      `json:"current"`
@@ -168,7 +173,7 @@ func Relationships(input []Gift, asOf time.Time) (map[string]Relationship, error
 		if _, ok := result[g.DonorID]; ok || g.PaidAt.After(asOf) {
 			continue
 		}
-		r := Relationship{DonorID: g.DonorID, FirstGiftID: g.ID, ConvertedAt: g.PaidAt}
+		r := Relationship{DonorID: g.DonorID, FirstGiftID: g.ID}
 		if c := g.Candidate; c != nil && c.ReferrerID != g.DonorID && g.PaidAt.Before(c.ExpiresAt) {
 			r.ReferrerID = &c.ReferrerID
 			r.Kind = &c.Kind
@@ -177,60 +182,24 @@ func Relationships(input []Gift, asOf time.Time) (map[string]Relationship, error
 	}
 	return result, nil
 }
-func add(a, b int64) (int64, error) {
-	if b > math.MaxInt64-a {
-		return 0, ErrInvalid
+
+// FoundingQualifiedAt returns when donorID's first gift before the cutoff
+// succeeded, if one had by asOf.
+func FoundingQualifiedAt(input []Gift, donorID string, asOf time.Time) (time.Time, bool, error) {
+	if asOf.IsZero() {
+		return time.Time{}, false, ErrInvalid
 	}
-	return a + b, nil
-}
-func ReferralTotals(input []Gift, refunds []Refund, asOf time.Time) (map[string]Totals, error) {
 	gifts, err := cleanGifts(input)
 	if err != nil {
-		return nil, err
+		return time.Time{}, false, err
 	}
-	net, err := NetGifts(gifts, refunds, asOf)
-	if err != nil {
-		return nil, err
-	}
-	relations, err := Relationships(gifts, asOf)
-	if err != nil {
-		return nil, err
-	}
-	raised := map[string]int64{}
-	result := map[string]Totals{}
+	var first time.Time
 	for _, g := range gifts {
-		raised[g.DonorID], err = add(raised[g.DonorID], net[g.ID])
-		if err != nil {
-			return nil, err
+		if g.DonorID == donorID && !g.PaidAt.After(asOf) && g.PaidAt.Before(FoundingCutoff) && (first.IsZero() || g.PaidAt.Before(first)) {
+			first = g.PaidAt
 		}
 	}
-	for id, r := range relations {
-		if r.ReferrerID == nil {
-			continue
-		}
-		t := result[*r.ReferrerID]
-		t.Currency = "USD"
-		amount := raised[id]
-		if *r.Kind == "LINK" {
-			if amount > 0 {
-				t.LinkCount++
-			}
-			t.LinkMinor, err = add(t.LinkMinor, amount)
-		} else {
-			if amount > 0 {
-				t.IRLCount++
-			}
-			t.IRLMinor, err = add(t.IRLMinor, amount)
-		}
-		if err != nil {
-			return nil, err
-		}
-		if _, err = add(t.LinkMinor, t.IRLMinor); err != nil {
-			return nil, err
-		}
-		result[*r.ReferrerID] = t
-	}
-	return result, nil
+	return first, !first.IsZero(), nil
 }
 func Founding(input []Gift, donorID string, asOf time.Time, awarded bool) (bool, error) {
 	if asOf.IsZero() {
@@ -239,99 +208,36 @@ func Founding(input []Gift, donorID string, asOf time.Time, awarded bool) (bool,
 	if awarded {
 		return true, nil
 	}
-	gifts, err := cleanGifts(input)
-	if err != nil {
-		return false, err
-	}
-	zone, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		return false, err
-	}
-	cutoff := time.Date(2027, 4, 22, 0, 0, 0, 0, zone)
-	for _, g := range gifts {
-		if g.DonorID == donorID && !g.PaidAt.After(asOf) && g.PaidAt.Before(cutoff) {
-			return true, nil
-		}
-	}
-	return false, nil
+	_, qualified, err := FoundingQualifiedAt(input, donorID, asOf)
+	return qualified, err
 }
+
+// GivingStreak counts consecutive paid monthly periods as of asOf. A renewal
+// that is due but not yet observed keeps the current count for the grace
+// window, after which the history is incomplete until the invoice arrives.
 func GivingStreak(input []Gift, refunds []Refund, inputPeriods []Period, donorID string, asOf time.Time, previousBest int64, stops []time.Time, pauses []Pause) (Streak, error) {
-	fail := func(err error) (Streak, error) { return Streak{}, err }
 	if previousBest < 0 {
-		return fail(ErrInvalid)
+		return Streak{}, ErrInvalid
 	}
 	gifts, err := cleanGifts(input)
 	if err != nil {
-		return fail(err)
+		return Streak{}, err
 	}
 	net, err := NetGifts(gifts, refunds, asOf)
 	if err != nil {
-		return fail(err)
+		return Streak{}, err
 	}
-	seen := map[string]Period{}
-	periods := []Period{}
-	byID := map[string]Period{}
-	for _, p := range inputPeriods {
-		duration := p.EndsAt.Sub(p.DueAt)
-		if p.ID == "" || p.DonorID == "" || p.DueAt.IsZero() || p.EndsAt.IsZero() || duration < 27*24*time.Hour || duration > 32*24*time.Hour {
-			return fail(ErrInvalid)
-		}
-		switch p.Status {
-		case "EXPECTED", "FAILED", "SKIPPED":
-		default:
-			return fail(ErrInvalid)
-		}
-		p.DueAt = utc(p.DueAt)
-		p.EndsAt = utc(p.EndsAt)
-		if old, ok := seen[p.ID]; ok {
-			if old != p {
-				return fail(ErrInvalid)
-			}
-			continue
-		}
-		seen[p.ID] = p
-		if p.DonorID == donorID {
-			periods = append(periods, p)
-			byID[p.ID] = p
-		}
+	periods, err := donorPeriods(inputPeriods, donorID)
+	if err != nil {
+		return Streak{}, err
 	}
-	sort.Slice(periods, func(i, j int) bool { return periods[i].DueAt.Before(periods[j].DueAt) })
-	for i := 1; i < len(periods); i++ {
-		if periods[i-1].EndsAt.After(periods[i].DueAt) {
-			return fail(ErrInvalid)
-		}
+	paid, err := periodPayments(gifts, net, periods, donorID)
+	if err != nil {
+		return Streak{}, err
 	}
-	payments := map[string][]Gift{}
-	for _, g := range gifts {
-		if g.DonorID != donorID || g.Frequency != "MONTHLY" {
-			continue
-		}
-		if _, ok := net[g.ID]; !ok {
-			continue
-		}
-		p, ok := byID[g.PeriodID]
-		if !ok {
-			return fail(ErrIncomplete)
-		}
-		if p.Status == "SKIPPED" {
-			return fail(ErrInvalid)
-		}
-		payments[p.ID] = append(payments[p.ID], g)
-	}
-	stopped := map[time.Time]bool{}
-	for _, t := range stops {
-		if t.IsZero() {
-			return fail(ErrInvalid)
-		}
-		stopped[utc(t)] = true
-	}
-	for _, p := range pauses {
-		if p.Start.IsZero() || p.End.IsZero() {
-			return fail(ErrInvalid)
-		}
-		if !asOf.Before(p.Start) && asOf.Before(p.End) {
-			stopped[utc(p.Start)] = true
-		}
+	stopped, err := stoppedRenewals(stops, pauses, asOf)
+	if err != nil {
+		return Streak{}, err
 	}
 	elapsed := []Period{}
 	for _, p := range periods {
@@ -339,12 +245,99 @@ func GivingStreak(input []Gift, refunds []Refund, inputPeriods []Period, donorID
 			elapsed = append(elapsed, p)
 		}
 	}
-	if len(elapsed) > 0 {
-		last := elapsed[len(elapsed)-1]
-		if !last.EndsAt.After(asOf) && last.Status != "SKIPPED" && !stopped[last.EndsAt] {
-			return fail(ErrIncomplete)
+	if len(elapsed) == 0 {
+		return Streak{Best: previousBest}, nil
+	}
+	last := elapsed[len(elapsed)-1]
+	renewalDue := !last.EndsAt.After(asOf)
+	if renewalDue && !stopped[last.EndsAt] && !asOf.Before(last.EndsAt.Add(Grace)) {
+		return Streak{}, ErrIncomplete
+	}
+	result := countStreak(elapsed, paid, net, asOf)
+	result.Best = max(previousBest, result.Best)
+	if renewalDue && stopped[last.EndsAt] {
+		result.Current = 0
+		result.AtRisk = false
+		result.GraceEndsAt = nil
+	}
+	return result, nil
+}
+
+// donorPeriods validates every period and returns donorID's in due order.
+func donorPeriods(input []Period, donorID string) ([]Period, error) {
+	seen := map[string]Period{}
+	periods := []Period{}
+	for _, p := range input {
+		duration := p.EndsAt.Sub(p.DueAt)
+		if p.ID == "" || p.DonorID == "" || p.DueAt.IsZero() || p.EndsAt.IsZero() || duration < 27*24*time.Hour || duration > 32*24*time.Hour || (p.Status != "EXPECTED" && p.Status != "FAILED") {
+			return nil, ErrInvalid
+		}
+		p.DueAt = utc(p.DueAt)
+		p.EndsAt = utc(p.EndsAt)
+		if old, ok := seen[p.ID]; ok {
+			if old != p {
+				return nil, ErrInvalid
+			}
+			continue
+		}
+		seen[p.ID] = p
+		if p.DonorID == donorID {
+			periods = append(periods, p)
 		}
 	}
+	sort.Slice(periods, func(i, j int) bool { return periods[i].DueAt.Before(periods[j].DueAt) })
+	for i := 1; i < len(periods); i++ {
+		if periods[i-1].EndsAt.After(periods[i].DueAt) {
+			return nil, ErrInvalid
+		}
+	}
+	return periods, nil
+}
+
+// periodPayments groups donorID's settled monthly gifts by billing period.
+func periodPayments(gifts []Gift, net map[string]int64, periods []Period, donorID string) (map[string][]Gift, error) {
+	known := map[string]bool{}
+	for _, p := range periods {
+		known[p.ID] = true
+	}
+	result := map[string][]Gift{}
+	for _, g := range gifts {
+		if g.DonorID != donorID || g.Frequency != "MONTHLY" {
+			continue
+		}
+		if _, ok := net[g.ID]; !ok {
+			continue
+		}
+		if !known[g.PeriodID] {
+			return nil, ErrIncomplete
+		}
+		result[g.PeriodID] = append(result[g.PeriodID], g)
+	}
+	return result, nil
+}
+
+// stoppedRenewals returns the renewal boundaries skipped by cancellation or
+// by a pause in effect at asOf.
+func stoppedRenewals(stops []time.Time, pauses []Pause, asOf time.Time) (map[time.Time]bool, error) {
+	stopped := map[time.Time]bool{}
+	for _, t := range stops {
+		if t.IsZero() {
+			return nil, ErrInvalid
+		}
+		stopped[utc(t)] = true
+	}
+	for _, p := range pauses {
+		if p.Start.IsZero() || p.End.IsZero() {
+			return nil, ErrInvalid
+		}
+		if !asOf.Before(p.Start) && asOf.Before(p.End) {
+			stopped[utc(p.Start)] = true
+		}
+	}
+	return stopped, nil
+}
+
+func countStreak(elapsed []Period, payments map[string][]Gift, net map[string]int64, asOf time.Time) Streak {
 	result := Streak{}
 	var last, lastPaid time.Time
 	for _, p := range elapsed {
@@ -359,31 +352,23 @@ func GivingStreak(input []Gift, refunds []Refund, inputPeriods []Period, donorID
 		}
 		result.AtRisk = false
 		result.GraceEndsAt = nil
-		if !paid.IsZero() {
-			if !paid.Before(p.DueAt.Add(Grace)) || (!lastPaid.IsZero() && paid.Before(lastPaid)) {
+		deadline := p.DueAt.Add(Grace)
+		switch {
+		case !paid.IsZero():
+			if !paid.Before(deadline) || (!lastPaid.IsZero() && paid.Before(lastPaid)) {
 				result.Current = 0
 			}
 			result.Current++
 			lastPaid = paid
 			result.Best = max(result.Best, result.Current)
-		} else if p.Status == "SKIPPED" || len(payments[p.ID]) > 0 || !asOf.Before(p.DueAt.Add(Grace)) {
+		case len(payments[p.ID]) > 0 || !asOf.Before(deadline):
 			result.Current = 0
 			lastPaid = time.Time{}
-		} else if result.Current > 0 {
+		case result.Current > 0:
 			result.AtRisk = true
-			deadline := p.DueAt.Add(Grace)
 			result.GraceEndsAt = &deadline
 		}
 		last = p.EndsAt
 	}
-	result.Best = max(previousBest, result.Best)
-	if len(elapsed) > 0 {
-		last := elapsed[len(elapsed)-1]
-		if !last.EndsAt.After(asOf) && stopped[last.EndsAt] {
-			result.Current = 0
-			result.AtRisk = false
-			result.GraceEndsAt = nil
-		}
-	}
-	return result, nil
+	return result
 }

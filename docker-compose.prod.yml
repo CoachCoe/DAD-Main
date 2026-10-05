@@ -1,7 +1,7 @@
 name: impactgraph
 
 x-donor: &donor
-  image: ${IMAGE_PREFIX:-impactgraph}/api:${IMAGE_TAG:-latest}
+  image: ${IMAGE_PREFIX:-impactgraph}/api:${IMAGE_TAG:?set IMAGE_TAG}
   build:
     context: .
     dockerfile: apps/donor-api/Dockerfile
@@ -16,7 +16,7 @@ x-donor: &donor
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
@@ -33,6 +33,13 @@ services:
     <<: *donor
     environment:
       DONOR_GO_LISTEN: 0.0.0.0:8002
+      # Only the web proxy may supply X-Real-IP; it strips any client-sent copy.
+      DONOR_TRUSTED_PROXY_CIDRS: 172.30.42.10/32
+    # Wallet signing keys stay outside the image. Mount them read-only (files readable
+    # by uid 10001) and set DONOR_WALLET_*_FILE to the container paths, for example
+    # DONOR_WALLET_GOOGLE_KEY_FILE=/run/secrets/wallet/google.json.
+    # volumes:
+    #   - /etc/impactgraph/wallet:/run/secrets/wallet:ro
     ports: ["127.0.0.1:${API_PORT:-8002}:8002"]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8002/health/live]
@@ -77,20 +84,37 @@ services:
     restart: unless-stopped
 
   web:
-    image: ${IMAGE_PREFIX:-impactgraph}/web:${IMAGE_TAG:-latest}
+    image: ${IMAGE_PREFIX:-impactgraph}/web:${IMAGE_TAG:?set IMAGE_TAG}
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        DONOR_PUBLIC_ORIGIN: ${DONOR_PUBLIC_ORIGIN:?set DONOR_PUBLIC_ORIGIN}
     environment:
       DONOR_API_BASE_URL: http://api:8002
-      DONOR_CLIENT_IP_HEADER: ${DONOR_CLIENT_IP_HEADER:-}
+      # The ingress in front of WEB_PORT must overwrite this header with the peer address;
+      # set DONOR_CLIENT_IP_HEADER= (empty) to share one rate-limit quota instead.
+      DONOR_CLIENT_IP_HEADER: ${DONOR_CLIENT_IP_HEADER-X-Real-IP}
     depends_on:
       api:
         condition: service_healthy
+    networks:
+      default:
+        ipv4_address: 172.30.42.10
     ports: ["127.0.0.1:${WEB_PORT:-3000}:3000"]
+    read_only: true
+    tmpfs: [/tmp, /app/.next/cache]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     restart: unless-stopped
+
+networks:
+  default:
+    ipam:
+      config:
+        # Dynamic addresses come from ip_range so the web proxy's fixed address stays free.
+        - subnet: 172.30.42.0/24
+          ip_range: 172.30.42.128/25
 
 volumes:
   postgres-data:

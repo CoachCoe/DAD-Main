@@ -19,8 +19,11 @@ limits. The Next proxy exposes only `/donor/*`; it is not an arbitrary HTTP prox
 
 Stripe handles all card entry. Signed webhooks are verified before persistence; only
 allowlisted event fields are stored. Retryable commands are recorded before provider
-calls. Current remote state is reconciled rather than trusting webhook arrival order.
-Logs must exclude donor payloads, credentials, tokens, and remote response bodies.
+calls, and no donor lock is held during the call. Current remote state is reconciled rather than trusting webhook arrival order.
+Logs must exclude donor payloads, credentials, tokens, and remote response bodies; API
+failures are logged with route, status, and error type only. Every API response carries
+`no-store`, `nosniff`, `no-referrer`, and a `default-src 'none'; frame-ancestors 'none'`
+content security policy.
 
 Public content never includes donor data or private source files. Source documents use a
 dedicated encryption key and SHA-256 verification. CSV exports use field allowlists,
@@ -28,9 +31,12 @@ permission checks, private cache headers, formula neutralization, and audit trai
 Do not publish exports or treat a source document's existence as proof of its accuracy.
 
 The frontend restricts connections to its own origin, denies framing, uses no-referrer,
-and disables camera, microphone, and geolocation. Production CSP excludes unsafe-eval;
-inline scripts remain permitted for the current Next static rendering model. A nonce-based
-policy would require a reviewed rendering change. User content must never be inserted as
+and disables camera, microphone, and geolocation. Production CSP excludes unsafe-eval.
+Account and staff pages render per request with a nonce-based `'strict-dynamic'` script
+policy set in `proxy.ts`; public pages keep a static policy that permits inline scripts
+so they can be cached. Each response carries exactly one policy. A client-side navigation
+from a public page into the account keeps the policy of the document already loaded;
+direct loads and reloads receive the nonce policy. User content must never be inserted as
 raw HTML. Account tokens use fragments removed before network requests.
 
 Release still needs verified legal/entity details, approved retention and incident

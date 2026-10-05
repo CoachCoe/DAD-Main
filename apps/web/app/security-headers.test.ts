@@ -3,8 +3,12 @@
  * is dropped, the page still renders, and the protection is simply gone. This asserts the
  * ones that were missing entirely until they were added.
  */
-import { describe, expect, it } from "vitest";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
+import { NextRequest } from "next/server";
+import { getPathMatch } from "next/dist/shared/lib/router/utils/path-match";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import nextConfig from "../next.config";
+import { proxy, config as proxyConfig } from "../proxy";
 
 async function headerMap(): Promise<Map<string, string>> {
   const groups = await configuredHeaders();
@@ -19,10 +23,22 @@ async function configuredHeaders() {
 
 describe("security headers", () => {
   it("applies to every path rather than a subset", async () => {
-    const groups = await configuredHeaders();
-    expect(groups).toHaveLength(1);
-    expect(groups[0].source).toBe("/:path*");
+    const [everywhere] = await configuredHeaders();
+    expect(everywhere.source).toBe("/:path*");
+    expect(everywhere.headers.map((header) => header.key)).toEqual(
+      expect.arrayContaining(["X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Permissions-Policy", "Strict-Transport-Security"]));
   });
+
+  it.each(["/", "/ledger", "/donate", "/r/code", "/api/donor/me", "/accounts", "/account", "/account/dashboard", "/staff", "/staff/sign-in", "/staff/donors/abc", "/Account/dashboard"])(
+    "gives %s exactly one content security policy", async (path) => {
+      // Browsers enforce every CSP header they receive, so the static policy must stay off
+      // the paths where proxy.ts sets a nonce policy, and no path may be left with neither.
+      const groups = (await configuredHeaders()).filter((group) => group.headers.some((header) => header.key === "Content-Security-Policy"));
+      const fromConfig = groups.filter((group) => getPathMatch(group.source, { strict: true })(path) !== false).length;
+      const fromProxy = unstable_doesMiddlewareMatch({ config: proxyConfig, nextConfig, url: path })
+        && proxy(new NextRequest(`http://127.0.0.1:3000${path}`)).headers.has("Content-Security-Policy") ? 1 : 0;
+      expect(fromConfig + fromProxy).toBe(1);
+    });
 
   it.each([
     ["X-Content-Type-Options", "nosniff"],
@@ -47,10 +63,10 @@ describe("security headers", () => {
     },
   );
 
-  it("does not widen the script policy beyond what Next actually needs", async () => {
+  it("does not widen the static script policy beyond what Next actually needs", async () => {
     /**
-     * 'unsafe-inline' and 'unsafe-eval' are conceded for hydration and chunk evaluation
-     * and are documented as the ceiling. Anything further -- a wildcard host, or data:
+     * 'unsafe-inline' (and 'unsafe-eval' in development) are conceded to statically rendered
+     * public pages and are documented as the ceiling; proxy.test.ts covers the nonce policy. Anything further -- a wildcard host, or data:
      * as a script source -- would be a real loosening rather than the same concession.
      */
     const policy = (await headerMap()).get("Content-Security-Policy");
@@ -68,5 +84,24 @@ describe("security headers", () => {
     expect(policy).toContain("microphone=()");
     // R1 displays a referral code; scanning is done with the visitor's native camera.
     expect(policy).toContain("camera=()");
+  });
+});
+
+describe("insecure request upgrades", () => {
+  async function policyFor(origin: string) {
+    vi.stubEnv("DONOR_PUBLIC_ORIGIN", origin);
+    vi.resetModules();
+    const { default: config } = await import("../next.config");
+    const groups = await config.headers?.();
+    return groups?.flatMap((group) => group.headers).find((header) => header.key === "Content-Security-Policy")?.value;
+  }
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("are requested when the public origin is HTTPS", async () => {
+    expect(await policyFor("https://donors.example.org")).toContain("upgrade-insecure-requests");
+  });
+
+  it("are not requested for plain-HTTP local development", async () => {
+    expect(await policyFor("http://127.0.0.1:3000")).not.toContain("upgrade-insecure-requests");
   });
 });

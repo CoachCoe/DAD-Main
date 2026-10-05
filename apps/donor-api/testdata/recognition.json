@@ -985,7 +985,40 @@
     "error": "incomplete"
   },
   {
-    "name": "missing renewal rejected",
+    "name": "unobserved renewal incomplete after grace",
+    "operation": "streak",
+    "as_of": "2027-02-15T00:00:00Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "error": "incomplete"
+  },
+  {
+    "name": "unobserved renewal retains count at period end",
     "operation": "streak",
     "as_of": "2027-02-01T00:00:00Z",
     "gifts": [
@@ -1015,7 +1048,50 @@
     "previously_awarded": false,
     "stops": [],
     "pauses": [],
-    "error": "incomplete"
+    "expected": {
+      "current": 1,
+      "best": 1,
+      "at_risk": false,
+      "grace_ends_at": null
+    }
+  },
+  {
+    "name": "unobserved renewal retains count within grace",
+    "operation": "streak",
+    "as_of": "2027-02-14T23:59:59Z",
+    "gifts": [
+      {
+        "id": "g1",
+        "donor_id": "ben",
+        "amount_minor": 3000,
+        "paid_at": "2027-01-01T00:00:00Z",
+        "frequency": "MONTHLY",
+        "candidate": null,
+        "period_id": "jan",
+        "currency": "USD"
+      }
+    ],
+    "refunds": [],
+    "periods": [
+      {
+        "id": "jan",
+        "donor_id": "ben",
+        "due_at": "2027-01-01T00:00:00Z",
+        "ends_at": "2027-02-01T00:00:00Z",
+        "status": "EXPECTED"
+      }
+    ],
+    "donor_id": "ben",
+    "previous_best": 0,
+    "previously_awarded": false,
+    "stops": [],
+    "pauses": [],
+    "expected": {
+      "current": 1,
+      "best": 1,
+      "at_risk": false,
+      "grace_ends_at": null
+    }
   },
   {
     "name": "cancel boundary resets current retains best",

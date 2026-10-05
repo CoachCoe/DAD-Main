@@ -1,5 +1,6 @@
 -- name: GiftHistory :many
-SELECT g.*, c.referrer_id, c.referral_kind, c.referral_expires_at
+SELECT g.stripe_object_id,g.donor_id,g.amount_minor,g.currency,g.frequency,g.paid_at,g.period_id,
+g.referrer_id,g.referral_kind,c.referral_expires_at
 FROM donor_gifts g JOIN donor_checkouts c ON c.id=g.checkout_id WHERE g.donor_id=$1;
 
 -- name: RefundHistory :many
@@ -36,7 +37,8 @@ ON CONFLICT (donor_id) DO UPDATE SET
 referrer_id=EXCLUDED.referrer_id,referral_kind=EXCLUDED.referral_kind,first_gift_id=EXCLUDED.first_gift_id,
 net_minor=EXCLUDED.net_minor,founding_awarded_at=EXCLUDED.founding_awarded_at,
 best_streak=EXCLUDED.best_streak,current_streak=EXCLUDED.current_streak,at_risk=EXCLUDED.at_risk,
-grace_ends_at=EXCLUDED.grace_ends_at,computed_at=EXCLUDED.computed_at,next_refresh_at=EXCLUDED.next_refresh_at;
+grace_ends_at=EXCLUDED.grace_ends_at,computed_at=EXCLUDED.computed_at,next_refresh_at=EXCLUDED.next_refresh_at,
+refresh_failures=0,refresh_error=NULL;
 
 -- name: ReferralTotals :one
 SELECT count(*) FILTER (WHERE referral_kind='LINK' AND net_minor>0)::bigint AS link_count,
@@ -49,4 +51,4 @@ FROM donor_metric_projections WHERE referrer_id=$1;
 -- name: MissingReferredProjection :one
 SELECT EXISTS(SELECT 1 FROM donor_gifts g JOIN donor_checkouts c ON c.id=g.checkout_id
 LEFT JOIN donor_metric_projections p ON p.donor_id=g.donor_id
-WHERE c.referrer_id=$1 AND p.id IS NULL)::boolean;
+WHERE c.referrer_id=$1 AND p.net_minor IS NULL)::boolean;

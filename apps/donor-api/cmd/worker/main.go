@@ -7,9 +7,12 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/migrations"
@@ -19,87 +22,113 @@ import (
 	"impactgraph/donor-api/internal/workers"
 )
 
+// configError messages are written by this program and are safe to log.
+type configError string
+
+func (e configError) Error() string { return string(e) }
+
+var kinds = []string{"stripe", "projections", "login-email", "email-changes", "messages"}
+
 func run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("donor-worker", flag.ContinueOnError)
-	kind := flags.String("kind", "", "stripe, projections, login-email, email-changes, or messages")
+	kind := flags.String("kind", "", strings.Join(kinds, ", "))
 	once := flags.Bool("once", false, "process at most one item")
 	retry := flags.String("retry-event", "", "reset an unprocessed Stripe event's attempt budget")
 	if err := flags.Parse(args); err != nil {
-		return err
+		return configError("invalid worker arguments")
 	}
-	if flags.NArg() != 0 || (*kind != "stripe" && *kind != "projections" && *kind != "login-email" && *kind != "email-changes" && *kind != "messages") || (*retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_"))) {
-		return errors.New("invalid worker arguments")
+	if flags.NArg() != 0 || !slices.Contains(kinds, *kind) {
+		return configError("--kind must be one of " + strings.Join(kinds, ", "))
+	}
+	if *retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_")) {
+		return configError("--retry-event requires --kind stripe and an evt_ identifier")
 	}
 	if os.Getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
-		return errors.New("workers require DONOR_GO_WORKERS_ENABLED=true")
+		return configError("workers require DONOR_GO_WORKERS_ENABLED=true")
 	}
 	dsn := os.Getenv("DONOR_GO_DATABASE_URL")
 	if dsn == "" {
-		return errors.New("Go worker database is required")
+		return configError("DONOR_GO_DATABASE_URL is required")
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	pool, err := store.Open(startup, dsn)
 	cancel()
 	if err != nil {
-		return errors.New("donor worker database startup failed")
+		return configError("worker database is unreachable")
 	}
 	defer pool.Close()
 	check, finish := context.WithTimeout(ctx, 10*time.Second)
 	err = migrations.Verify(check, pool)
 	finish()
 	if err != nil {
-		return errors.New("donor schema is not current; run migrations before starting workers")
+		return configError("donor schema is not current; run migrations before starting workers")
 	}
 	if *retry != "" {
 		retryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		count, err := queries.New(pool).RetryStripeEvent(retryCtx, *retry)
 		cancel()
 		if err != nil || count != 1 {
-			return errors.New("expected an unprocessed Stripe event")
+			return configError("expected an unprocessed Stripe event")
 		}
 	}
-	var step func(context.Context) (bool, error)
-	if *kind == "stripe" {
-		gateway, err := payments.NewStripeGateway(os.Getenv("STRIPE_SECRET_KEY"))
-		if err != nil {
-			return err
-		}
-		step = store.EventWorker{DB: pool, Gateway: gateway}.ProcessNext
-	} else if *kind == "projections" {
-		step = func(ctx context.Context) (bool, error) {
-			return store.RefreshNextProjection(ctx, pool, time.Now().UTC())
-		}
-	} else {
-		configured, err := mail.FromEnvironment(os.Getenv)
-		if err != nil || configured == nil {
-			return mail.ErrConfiguration
-		}
-		settings := *configured
-		origin := os.Getenv("DONOR_PUBLIC_ORIGIN")
-		if origin == "" {
-			origin = "http://localhost:3000"
-		}
-		transport := mail.SMTPTransport{Settings: settings}
-		if *kind == "email-changes" {
-			worker := store.EmailChangeWorker{DB: pool, Settings: settings, Origin: origin, Transport: transport}
-			step = func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }
-		} else if *kind == "login-email" {
-			worker := store.LoginEmailWorker{DB: pool, Settings: settings, Origin: origin, Transport: transport}
-			step = func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }
-		} else {
-			worker := store.MessageWorker{DB: pool, Settings: settings, Origin: origin, Transport: transport}
-			step = func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }
-		}
+	step, err := stepFor(*kind, pool)
+	if err != nil {
+		return err
 	}
 	return workers.Run(ctx, *once, 2*time.Second, step)
 }
+
+type deliverer interface {
+	DeliverNext(context.Context, time.Time) (bool, error)
+}
+
+func stepFor(kind string, pool *pgxpool.Pool) (func(context.Context) (bool, error), error) {
+	switch kind {
+	case "stripe":
+		gateway, err := payments.NewStripeGateway(os.Getenv("STRIPE_SECRET_KEY"))
+		if err != nil {
+			return nil, configError("STRIPE_SECRET_KEY must be a Stripe test-mode secret key")
+		}
+		return store.EventWorker{DB: pool, Gateway: gateway}.ProcessNext, nil
+	case "projections":
+		return func(ctx context.Context) (bool, error) {
+			return store.RefreshNextProjection(ctx, pool, time.Now().UTC())
+		}, nil
+	}
+	settings, err := mail.FromEnvironment(os.Getenv)
+	if err != nil || settings == nil {
+		return nil, configError("SMTP settings are missing or invalid")
+	}
+	origin := os.Getenv("DONOR_PUBLIC_ORIGIN")
+	if payments.ValidateOrigin(origin) != nil {
+		return nil, configError("DONOR_PUBLIC_ORIGIN must be the public HTTPS origin used in email links")
+	}
+	transport := mail.SMTPTransport{Settings: *settings}
+	var worker deliverer
+	switch kind {
+	case "email-changes":
+		worker = store.EmailChangeWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+	case "login-email":
+		worker = store.LoginEmailWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+	default:
+		worker = store.MessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+	}
+	return func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }, nil
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, os.Args[1:]); err != nil && !errors.Is(err, context.Canceled) {
+	err := run(ctx, os.Args[1:])
+	if err == nil || errors.Is(err, context.Canceled) {
+		return
+	}
+	if reason, ok := errors.AsType[configError](err); ok {
+		slog.Error("donor worker stopped", "reason", string(reason))
+	} else {
 		// Database errors can carry row values. Keep service logs free of donor data.
 		slog.Error("donor worker stopped; inspect configuration and inbox state")
-		os.Exit(1)
 	}
+	os.Exit(1)
 }

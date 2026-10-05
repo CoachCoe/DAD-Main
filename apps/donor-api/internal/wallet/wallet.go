@@ -23,6 +23,12 @@ import (
 var ErrConfiguration = errors.New("wallet configuration is invalid")
 var ErrUnavailable = errors.New("wallet is not configured")
 
+var (
+	serviceAccountPattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.iam\.gserviceaccount\.com$`)
+	classIDPattern        = regexp.MustCompile(`^[0-9]+\.[a-zA-Z0-9._-]+$`)
+	referralPathPattern   = regexp.MustCompile(`^/r/[a-zA-Z0-9_-]+$`)
+)
+
 const disclosure = "About a dollar a day · $30/month. DAD launches in April 2027. Sandbox preview: no real donations."
 
 type Issuer struct {
@@ -97,7 +103,7 @@ func FromEnvironment(getenv func(string) string, origin string) (*Issuer, error)
 			Email string `json:"client_email"`
 			Key   string `json:"private_key"`
 		}
-		if json.Unmarshal(data, &credentials) != nil || credentials.Type != "service_account" || !regexp.MustCompile(`^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.iam\.gserviceaccount\.com$`).MatchString(credentials.Email) || !regexp.MustCompile(`^[0-9]+\.[a-zA-Z0-9._-]+$`).MatchString(classID) {
+		if json.Unmarshal(data, &credentials) != nil || credentials.Type != "service_account" || !serviceAccountPattern.MatchString(credentials.Email) || !classIDPattern.MatchString(classID) {
 			return nil, ErrConfiguration
 		}
 		key, err := privateKey([]byte(credentials.Key))
@@ -117,7 +123,7 @@ func FromEnvironment(getenv func(string) string, origin string) (*Issuer, error)
 }
 func (i *Issuer) validate(link string) error {
 	u, err := url.Parse(link)
-	if err != nil || u.Scheme+"://"+u.Host != i.Origin || u.User != nil || u.Fragment != "" || !regexp.MustCompile(`^/r/[a-zA-Z0-9_-]+$`).MatchString(u.Path) || u.RawQuery != "via=irl" {
+	if err != nil || u.Scheme+"://"+u.Host != i.Origin || u.User != nil || u.Fragment != "" || !referralPathPattern.MatchString(u.Path) || u.RawQuery != "via=irl" {
 		return ErrConfiguration
 	}
 	return nil
@@ -126,8 +132,8 @@ func passID(link string) string {
 	sum := sha256.Sum256([]byte(link))
 	return hex.EncodeToString(sum[:])
 }
-func localized(value string) map[string]interface{} {
-	return map[string]interface{}{"defaultValue": map[string]string{"language": "en-US", "value": value}}
+func localized(value string) map[string]any {
+	return map[string]any{"defaultValue": map[string]string{"language": "en-US", "value": value}}
 }
 func (i *Issuer) GoogleURL(link string, now time.Time) (string, error) {
 	if i == nil || i.Google == nil {
@@ -137,14 +143,14 @@ func (i *Issuer) GoogleURL(link string, now time.Time) (string, error) {
 		return "", err
 	}
 	g := i.Google
-	object := map[string]interface{}{
+	object := map[string]any{
 		"id": strings.SplitN(g.ClassID, ".", 2)[0] + ".dad_" + passID(link), "classId": g.ClassID, "state": "ACTIVE",
 		"cardTitle": localized("Dynamic Aid Delivery"), "header": localized("Invite someone to DAD"),
 		"subheader": localized("Sandbox referral code"), "hexBackgroundColor": "#FFFFFF",
 		"barcode":         map[string]string{"type": "QR_CODE", "value": link},
 		"textModulesData": []map[string]string{{"id": "giving", "header": "Join the circle", "body": disclosure}, {"id": "replacement", "header": "Keep your code current", "body": "If you replace your referral link, remove this pass and add the new one from your DAD account."}},
 	}
-	payload, err := json.Marshal(map[string]interface{}{"iss": g.Email, "aud": "google", "typ": "savetowallet", "iat": now.Unix(), "origins": []string{i.Origin}, "payload": map[string]interface{}{"genericObjects": []interface{}{object}}})
+	payload, err := json.Marshal(map[string]any{"iss": g.Email, "aud": "google", "typ": "savetowallet", "iat": now.Unix(), "origins": []string{i.Origin}, "payload": map[string]any{"genericObjects": []any{object}}})
 	if err != nil {
 		return "", err
 	}

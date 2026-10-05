@@ -113,7 +113,7 @@ func TestReferralSuppressionRechecksPreferencesAfterRendering(t *testing.T) {
 	if _, err = tx.Exec(ctx, `INSERT INTO donor_metric_projections(id,donor_id,referrer_id,referral_kind,net_minor,computed_at,next_refresh_at) VALUES($1,$2,$3,'IRL',3000,$4,$5)`, testID(t), referred, f.donorID, now, now.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err = queueMessage(ctx, q, f.donorID, "REFERRAL", "referral:"+referred.String(), map[string]interface{}{"referred_id": referred.String(), "kind": "IRL"}, now); err != nil {
+	if err = queueMessage(ctx, q, f.donorID, "REFERRAL", "referral:"+referred.String(), map[string]any{"referred_id": referred.String(), "kind": "IRL"}, now); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {

@@ -17,11 +17,11 @@ func (s AccountService) ClaimAccount(ctx context.Context, proof, oldSession stri
 		return "", err
 	}
 	defer tx.Rollback(ctx)
-	now := time.Now().UTC()
-	token, donor, err := ClaimInTx(ctx, tx, proof, now)
+	token, donor, err := ClaimInTx(ctx, tx, proof)
 	if err != nil {
 		return "", err
 	}
+	now := time.Now().UTC()
 	if _, err = RefreshProjectionInTx(ctx, tx, donor.ID, now); err != nil {
 		return "", err
 	}

@@ -1,111 +1,141 @@
 package httpapi
 
 import (
-	"encoding/json"
-	"io"
-	"mime"
+	"math"
 	"net"
 	"net/http"
 	"net/netip"
-	"strings"
+	"strconv"
 	"sync"
 	"time"
 )
 
-type replyFunc func(http.ResponseWriter, int, interface{})
-
-func (g *browserGuard) check(w http.ResponseWriter, r *http.Request, reply replyFunc) bool {
-	if status := g.allow(r, time.Now()); status != 0 {
-		detail := "Request origin is not allowed"
-		if status == 429 {
-			detail = "Too many requests"
-			w.Header().Set("Retry-After", "60")
-		}
-		reply(w, status, map[string]string{"detail": detail})
-		return false
-	}
-	return true
-}
-func decodeBody(w http.ResponseWriter, r *http.Request, target interface{}) bool {
-	return decodeBodyLimit(w, r, target, 256*1024)
-}
-func decodeBodyLimit(w http.ResponseWriter, r *http.Request, target interface{}, limit int64) bool {
-	if value := r.Header.Get("Content-Type"); value != "" {
-		media, _, err := mime.ParseMediaType(value)
-		if err != nil || (media != "application/json" && !(strings.HasPrefix(media, "application/") && strings.HasSuffix(media, "+json"))) {
-			return false
-		}
-	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
-	decoder.DisallowUnknownFields()
-	if decoder.Decode(target) != nil {
-		return false
-	}
-	var extra interface{}
-	return decoder.Decode(&extra) == io.EOF
-}
-func sessionToken(r *http.Request) string {
-	if cookie, err := r.Cookie("dad_donor_session"); err == nil {
-		return cookie.Value
-	}
-	return ""
+// rateClass separates budgets so a burst on one surface cannot starve another
+// for visitors sharing an address, such as everyone on an event's Wi-Fi.
+type rateClass struct {
+	name  string
+	limit int // requests per minute, also the burst size
 }
 
-// Only explicitly trusted proxy peers may provide a single client address.
-type browserGuard struct {
-	mu             sync.Mutex
-	origin         string
-	seen           map[string][]time.Time
-	trustedProxies []netip.Prefix
-	nextSweep      time.Time
-}
+var (
+	authLimit    = rateClass{"auth", 10}
+	visitorLimit = rateClass{"visitor", 60}
+	accountLimit = rateClass{"account", 30}
+	staffLimit   = rateClass{"staff", 60}
+)
 
 const maxRatePeers = 65536
 
-func (g *browserGuard) allow(r *http.Request, now time.Time) int {
+type rateKey struct {
+	class  string
+	client netip.Addr
+}
+
+type bucket struct {
+	tokens float64
+	last   time.Time
+}
+
+// browserGuard enforces the exact browser Origin and per-client rate limits.
+// Only explicitly trusted proxy peers may supply the client address.
+type browserGuard struct {
+	origin         string
+	trustedProxies []netip.Prefix
+
+	mu        sync.Mutex
+	buckets   map[rateKey]*bucket
+	nextSweep time.Time
+}
+
+func newBrowserGuard(origin string, trustedProxies []netip.Prefix) *browserGuard {
+	return &browserGuard{origin: origin, trustedProxies: trustedProxies, buckets: map[rateKey]*bucket{}}
+}
+
+// allow returns 0 when the request may proceed, otherwise the status to send
+// and, for 429, how long until a request would be admitted.
+func (g *browserGuard) allow(r *http.Request, class rateClass, now time.Time) (int, time.Duration) {
 	if r.Header.Get("Origin") != g.origin {
-		return http.StatusForbidden
+		return http.StatusForbidden, 0
 	}
-	peer, _, err := net.SplitHostPort(r.RemoteAddr)
+	key := rateKey{class.name, g.client(r)}
+	rate := float64(class.limit) / time.Minute.Seconds()
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if now.After(g.nextSweep) {
+		g.sweep(now)
+	}
+	b, ok := g.buckets[key]
+	if !ok {
+		if len(g.buckets) >= maxRatePeers {
+			g.evictOne()
+		}
+		b = &bucket{tokens: float64(class.limit), last: now}
+		g.buckets[key] = b
+	}
+	b.tokens = math.Min(float64(class.limit), b.tokens+now.Sub(b.last).Seconds()*rate)
+	b.last = now
+	if b.tokens < 1 {
+		return http.StatusTooManyRequests, time.Duration((1 - b.tokens) / rate * float64(time.Second))
+	}
+	b.tokens--
+	return 0, 0
+}
+
+func (g *browserGuard) client(r *http.Request) netip.Addr {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		peer = r.RemoteAddr
+		host = r.RemoteAddr
 	}
-	if address, err := netip.ParseAddr(peer); err == nil {
-		address = address.Unmap()
-		peer = address.String()
-		for _, prefix := range g.trustedProxies {
-			if !prefix.Contains(address) {
-				continue
-			}
-			if client, err := netip.ParseAddr(r.Header.Get("X-Real-IP")); err == nil {
-				peer = client.Unmap().String()
+	peer, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}
+	}
+	peer = peer.Unmap()
+	for _, prefix := range g.trustedProxies {
+		if prefix.Contains(peer) {
+			if forwarded, err := netip.ParseAddr(r.Header.Get("X-Real-IP")); err == nil {
+				peer = forwarded.Unmap()
 			}
 			break
 		}
 	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.seen == nil {
-		g.seen = map[string][]time.Time{}
+	// One IPv6 subscriber typically controls a whole /64.
+	if peer.Is6() {
+		peer = netip.PrefixFrom(peer, 64).Masked().Addr()
 	}
-	if now.After(g.nextSweep) {
-		for key, hits := range g.seen {
-			if len(hits) == 0 || now.Sub(hits[len(hits)-1]) > time.Minute {
-				delete(g.seen, key)
-			}
+	return peer
+}
+
+// sweep drops buckets that have refilled; they are indistinguishable from new ones.
+func (g *browserGuard) sweep(now time.Time) {
+	for key, b := range g.buckets {
+		if now.Sub(b.last) >= time.Minute {
+			delete(g.buckets, key)
 		}
-		g.nextSweep = now.Add(time.Minute)
 	}
-	if _, exists := g.seen[peer]; !exists && len(g.seen) >= maxRatePeers {
-		return http.StatusTooManyRequests
+	g.nextSweep = now.Add(time.Minute)
+}
+
+// evictOne bounds memory without refusing unseen clients, which would let a
+// flood of addresses lock everyone else out.
+func (g *browserGuard) evictOne() {
+	for key := range g.buckets {
+		delete(g.buckets, key)
+		return
 	}
-	hits := g.seen[peer]
-	for len(hits) > 0 && now.Sub(hits[0]) > time.Minute {
-		hits = hits[1:]
+}
+
+func (a *api) browser(class rateClass, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch status, wait := a.guard.allow(r, class, time.Now()); status {
+		case 0:
+			next(w, r)
+		case http.StatusTooManyRequests:
+			w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+			writeError(w, r, status, "Too many requests", nil)
+		default:
+			writeError(w, r, status, "Request origin is not allowed", nil)
+		}
 	}
-	if len(hits) >= 20 {
-		return http.StatusTooManyRequests
-	}
-	g.seen[peer] = append(hits, now)
-	return 0
 }

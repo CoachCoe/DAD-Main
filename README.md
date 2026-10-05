@@ -16,7 +16,8 @@ publish blockchain transactions. The enrolment export is an inactive R2 stub.
 
 ## Local setup
 
-Requires Go 1.27.1, Node 22.13+ (or Node 24), npm, Docker Compose, and PostgreSQL 16.
+Requires Go 1.27.1, Node 22.13+ (or Node 24), npm, and Docker Compose, which runs
+PostgreSQL 16 on 127.0.0.1.
 Commands below run from the repository root. The local database uses port 55432.
 
 ```sh
@@ -56,7 +57,8 @@ administrator permission. Provision two individual administrators; do not share 
 
 ## Payments and workers
 
-Configure a Stripe **test** secret key and webhook signing secret. The receiver accepts
+Configure a Stripe **test** secret key and webhook signing secret; the API refuses to
+start with only one of them. The receiver accepts
 snapshot events at `2026-09-30.endive`, matching stripe-go v87. Card entry and card updates
 are hosted by Stripe. Use `/api/donor/stripe/webhook` as the externally reachable route.
 See [operations](docs/operations.md) for supported events and recovery behavior.
@@ -90,38 +92,53 @@ docker run -d --name impactgraph-go-test-postgres -p 127.0.0.1:55440:5432 \
 export TEST_DATABASE_URL=postgresql://go_test:go_test@localhost:55440/donor_go
 (cd apps/donor-api && DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/migrate)
 make test
+make lint
 (cd apps/web && npx playwright install chromium)
 make test-browser-e2e
 ```
 
+Browser tests run against `next dev` by default; set `E2E_PRODUCTION=1` to run them
+against a production build (`npm run build && npm start`), where account and staff pages
+use the nonce-based CSP. Next allows
+one dev server per checkout, so stop any running `make web` first.
+
 `make test` checks Go formatting, vet, race-enabled tests, compilation, frontend lint,
 unit tests, generated route types, TypeScript, and the production build. Browser tests
 start a local Go API and Next server. Use a synthetic application database and no live
-SMTP settings for those tests. CI runs the same checks with PostgreSQL and Chromium.
+SMTP settings for those tests. `make lint` runs staticcheck, govulncheck, `npm audit`, and
+shellcheck when installed. CI runs all of these with PostgreSQL and Chromium, and also
+validates the production Compose file and builds both images. CI runs browser tests in
+both development and production modes. `npm start` serves the standalone build and copies
+its static assets first, matching the container's server. For a local production preview,
+run `HOSTNAME=127.0.0.1 PORT=3000 npm start` from `apps/web` after building.
 
 SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc; commit SQL and its
-generated Go query code together. Applied migrations are immutable and checksum-checked.
+generated Go query code together. `make check-generated` fails if they have drifted.
+Applied migrations are immutable and checksum-checked.
 
-Exercise a running synthetic deployment with read-only burst and soak tests:
+Exercise a running synthetic deployment with read-only burst and soak tests. `-url`
+takes a comma-separated mix of endpoints requested round-robin, such as the public
+content and a referral landing lookup:
 
 ```sh
 cd apps/donor-api
-go run ./cmd/loadtest -url http://localhost:8002/donor/public/content -duration 30s -concurrency 128
-go run ./cmd/loadtest -url http://localhost:8002/donor/public/content -duration 5m -concurrency 16
+API=http://localhost:8002
+go run ./cmd/loadtest -url "$API/donor/public/content,$API/donor/referrals/CODE" -duration 30s -concurrency 128 -max-p99 250ms
+go run ./cmd/loadtest -url "$API/donor/public/content" -duration 5m -concurrency 16 -max-p99 100ms
 ```
 
-The runner reports request counts, failures, throughput, and latency percentiles, and
-fails on non-200 responses, timeouts, or oversized bodies. For authenticated reads, set
-`DONOR_LOAD_COOKIE` to a synthetic donor's session cookie and select its read endpoint.
+The runner reports request counts, failures, throughput, and latency percentiles. It
+fails on non-200 responses (a missing referral code returns 404), timeouts, oversized
+bodies, or a p99 above `-max-p99`. For authenticated reads, set `DONOR_LOAD_COOKIE` to a
+synthetic donor's session cookie and target endpoints such as `/donor/me/dashboard`.
 Public empty-state results do not establish capacity for 50,000 donors: repeat against
 representative data, authenticated dashboards, and the intended deployment before launch.
 
 ## Containers and deployment
 
 See [operations](docs/operations.md). Docker images run as non-root users; Compose binds
-web and API ports to loopback for a separately managed HTTPS ingress. No command deploys
-contracts, seeds demonstration accounts, enables workers, or deletes database volumes
-implicitly. Test-only readiness is not approval to solicit live donations.
+web and API ports to loopback for a separately managed HTTPS ingress. No command
+enables workers or deletes database volumes implicitly. Test-only readiness is not approval to solicit live donations.
 
 ## Layout
 

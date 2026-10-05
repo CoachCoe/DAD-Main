@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"impactgraph/donor-api/internal/payments"
+	"impactgraph/donor-api/internal/recognition"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -39,7 +40,8 @@ func (w EventWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	applyErr := w.applyEvent(ctx, work, event, time.Now().UTC())
+	now := time.Now().UTC()
+	applyErr := w.applyEvent(ctx, work, event, now)
 	if applyErr == nil {
 		applyErr = work.Commit(ctx)
 	}
@@ -47,17 +49,27 @@ func (w EventWorker) ProcessNext(ctx context.Context) (bool, error) {
 		if err = work.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 			return false, err
 		}
-		category := "ValueError"
-		if errors.Is(applyErr, payments.ErrCheckoutUnavailable) {
-			category = "PaymentUnavailable"
-		}
-		if err = q.FailStripeEvent(ctx, queries.FailStripeEventParams{ID: event.ID, LastError: pgtype.Text{String: category, Valid: true}}); err != nil {
+		if err = q.FailStripeEvent(ctx, queries.FailStripeEventParams{ID: event.ID, LastError: pgtype.Text{String: eventFailure(applyErr), Valid: true}}); err != nil {
 			return false, err
 		}
-	} else if err = q.CompleteStripeEvent(ctx, queries.CompleteStripeEventParams{ID: event.ID, ProcessedAt: timestamp(time.Now())}); err != nil {
+	} else if err = q.CompleteStripeEvent(ctx, queries.CompleteStripeEventParams{ID: event.ID, ProcessedAt: timestamp(now)}); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)
+}
+
+// eventFailure classifies a failed event for operators without recording
+// processor data that error text may carry.
+func eventFailure(err error) string {
+	switch {
+	case errors.Is(err, payments.ErrCheckoutUnavailable):
+		return "PaymentUnavailable"
+	case errors.Is(err, pgx.ErrNoRows):
+		return "MissingRecord"
+	case errors.Is(err, payments.ErrFacts), errors.Is(err, recognition.ErrInvalid):
+		return "InvalidFacts"
+	}
+	return "ProcessingError"
 }
 
 func parseID(value string) (pgtype.UUID, error) {
@@ -67,6 +79,9 @@ func parseID(value string) (pgtype.UUID, error) {
 	}
 	return id, nil
 }
+
+// applyEvent fetches the processor state an event needs before taking the
+// donor lock, so a slow processor cannot block that donor's other work.
 func (w EventWorker) applyEvent(ctx context.Context, tx pgx.Tx, event queries.DonorStripeEvent, now time.Time) error {
 	q := queries.New(tx)
 	data, err := payments.DecodeObject(event.Data)
@@ -80,14 +95,7 @@ func (w EventWorker) applyEvent(ctx context.Context, tx pgx.Tx, event queries.Do
 		if err != nil {
 			return err
 		}
-		donorID, err = q.PaymentUpdateOwner(ctx, id)
-		if err != nil {
-			return err
-		}
-		if _, err = q.LockDonor(ctx, donorID); err != nil {
-			return err
-		}
-		row, err := q.PaymentUpdateByID(ctx, id)
+		snapshot, err := q.PaymentUpdateSnapshot(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -95,7 +103,19 @@ func (w EventWorker) applyEvent(ctx context.Context, tx pgx.Tx, event queries.Do
 		if !ok {
 			return payments.ErrCheckoutUnavailable
 		}
-		status, err := reconcilePaymentUpdate(ctx, tx, gateway, row, data.Text("id"), now)
+		facts, err := fetchPaymentUpdate(ctx, q, gateway, snapshot, data.Text("id"), now)
+		if err != nil {
+			return err
+		}
+		donorID = snapshot.DonorID
+		if _, err = q.LockDonor(ctx, donorID); err != nil {
+			return err
+		}
+		row, err := q.PaymentUpdateByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		status, err := applyPaymentUpdate(ctx, q, row, facts, now)
 		if err != nil {
 			return err
 		}
@@ -103,14 +123,38 @@ func (w EventWorker) applyEvent(ctx context.Context, tx pgx.Tx, event queries.Do
 			return payments.ErrFacts
 		}
 	case strings.HasPrefix(event.EventType, "refund."):
-		donorID, err = q.GiftOwnerByPayment(ctx, pgtype.Text{String: data.Text("payment_intent"), Valid: true})
+		payment := pgtype.Text{String: data.Text("payment_intent"), Valid: true}
+		snapshot, err := q.GiftSnapshotByPayment(ctx, payment)
 		if err != nil {
 			return err
 		}
+		observations, err := q.GiftRefundObservations(ctx, snapshot.ID)
+		if err != nil {
+			return err
+		}
+		current, err := w.retrieveRefund(ctx, data.Text("id"))
+		if err != nil {
+			return err
+		}
+		donorID = snapshot.DonorID
 		if _, err = q.LockDonor(ctx, donorID); err != nil {
 			return err
 		}
-		if err = w.reconcileRefund(ctx, tx, event, data, now); err != nil {
+		gift, err := q.GiftByPayment(ctx, payment)
+		if err != nil {
+			return err
+		}
+		recorded, err := q.GiftRefundObservations(ctx, gift.ID)
+		if err != nil {
+			return err
+		}
+		// Another refund state recorded meanwhile may be newer than the one read.
+		if recorded != observations || gift.ID != snapshot.ID {
+			if current, err = w.retrieveRefund(ctx, data.Text("id")); err != nil {
+				return err
+			}
+		}
+		if err = RecordRefundInTx(ctx, q, gift, current, event.ID, pgtype.UUID{}, now); err != nil {
 			return err
 		}
 	default:
@@ -122,6 +166,10 @@ func (w EventWorker) applyEvent(ctx context.Context, tx pgx.Tx, event queries.Do
 		if err != nil {
 			return err
 		}
+		facts, err := w.prefetch(ctx, q, event, data, draft)
+		if err != nil {
+			return err
+		}
 		donorID = draft.DonorID
 		if _, err = q.LockDonor(ctx, donorID); err != nil {
 			return err
@@ -130,12 +178,90 @@ func (w EventWorker) applyEvent(ctx context.Context, tx pgx.Tx, event queries.Do
 		if err != nil {
 			return err
 		}
-		if err = w.applyCheckoutEvent(ctx, tx, event, data, draft, attempt, now); err != nil {
+		if err = w.applyCheckoutEvent(ctx, tx, event, data, draft, attempt, facts, now); err != nil {
 			return err
 		}
 	}
 	_, err = RefreshProjectionInTx(ctx, tx, donorID, now)
 	return err
+}
+
+func (w EventWorker) retrieveRefund(ctx context.Context, id string) (payments.Object, error) {
+	if w.Gateway == nil {
+		return nil, payments.ErrCheckoutUnavailable
+	}
+	current, err := w.Gateway.RetrieveRefund(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if current.Text("id") != id {
+		return nil, payments.ErrFacts
+	}
+	return current, nil
+}
+
+// eventFacts is processor state for a checkout event, fetched before the
+// donor lock is taken.
+type eventFacts struct {
+	charged      time.Time
+	subscription *subscriptionSnapshot
+}
+
+func (w EventWorker) prefetch(ctx context.Context, q *queries.Queries, event queries.DonorStripeEvent, data payments.Object, draft queries.DonorCheckout) (eventFacts, error) {
+	var facts eventFacts
+	subscription := data.Text("subscription")
+	switch kind := event.EventType; {
+	case kind == "payment_intent.succeeded":
+		if draft.Frequency != "ONE_TIME" || data.Text("status") != "succeeded" {
+			return facts, payments.ErrFacts
+		}
+		var err error
+		facts.charged, err = w.chargeSucceededAt(ctx, data.Text("id"))
+		return facts, err
+	case strings.HasPrefix(kind, "customer.subscription."):
+		subscription = data.Text("id")
+	case strings.HasPrefix(kind, "invoice."):
+		pending, err := q.PendingAmountChange(ctx, draft.ID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return facts, err
+		}
+		if !pending {
+			return facts, nil
+		}
+	default:
+		return facts, nil
+	}
+	if !strings.HasPrefix(subscription, "sub_") {
+		return facts, payments.ErrFacts
+	}
+	attempt, err := q.AttemptSnapshotForCheckout(ctx, draft.ID)
+	if err != nil {
+		return facts, err
+	}
+	facts.subscription, err = fetchSubscription(ctx, q, w.Gateway, attempt.ID, subscription)
+	return facts, err
+}
+
+// chargeSucceededAt returns when a one-time gift's card charge succeeded,
+// which is what the Founding Donor cutoff names. The event may be created or
+// delivered later.
+func (w EventWorker) chargeSucceededAt(ctx context.Context, id string) (time.Time, error) {
+	if w.Gateway == nil {
+		return time.Time{}, payments.ErrCheckoutUnavailable
+	}
+	intent, err := w.Gateway.RetrievePaymentIntent(ctx, id)
+	if err != nil {
+		return time.Time{}, err
+	}
+	charge, err := intent.Object("latest_charge")
+	if err != nil {
+		return time.Time{}, err
+	}
+	created, err := charge.Int("created")
+	if err != nil || intent.Text("id") != id || intent.Text("status") != "succeeded" || !intent.BoolIs("livemode", false) || charge.Text("payment_intent") != id || charge.Text("status") != "succeeded" || !charge.BoolIs("paid", true) || !charge.BoolIs("livemode", false) || created < 0 || created > 253402300799 {
+		return time.Time{}, payments.ErrFacts
+	}
+	return time.Unix(created, 0).UTC(), nil
 }
 
 func bindSubscription(ctx context.Context, q *queries.Queries, attempt queries.DonorStripeCheckout, subscription string) error {
@@ -144,72 +270,25 @@ func bindSubscription(ctx context.Context, q *queries.Queries, attempt queries.D
 	}
 	return q.BindSubscription(ctx, queries.BindSubscriptionParams{ID: attempt.ID, StripeSubscriptionID: pgtype.Text{String: subscription, Valid: true}})
 }
-func (w EventWorker) applyCheckoutEvent(ctx context.Context, tx pgx.Tx, event queries.DonorStripeEvent, data payments.Object, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, now time.Time) error {
+func (w EventWorker) applyCheckoutEvent(ctx context.Context, tx pgx.Tx, event queries.DonorStripeEvent, data payments.Object, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, facts eventFacts, now time.Time) error {
 	q := queries.New(tx)
 	kind := event.EventType
-	if strings.HasPrefix(kind, "checkout.session.") {
-		if attempt.StripeSessionID.Valid && attempt.StripeSessionID.String != data.Text("id") {
-			return payments.ErrFacts
-		}
-		status := attempt.Status
-		if kind == "checkout.session.expired" {
-			if data.Text("status") != "expired" {
-				return payments.ErrFacts
-			}
-			if status != "COMPLETE" && status != "CANCELLED" {
-				status = "EXPIRED"
-				if err := q.ReleaseReservation(ctx, attempt.ID); err != nil {
-					return err
-				}
-			}
-		} else {
-			if data.Text("status") != "complete" {
-				return payments.ErrFacts
-			}
-			if status != "CANCELLED" {
-				status = "COMPLETE"
-			}
-			if subscription := data.Text("subscription"); subscription != "" {
-				if err := bindSubscription(ctx, q, attempt, subscription); err != nil {
-					return err
-				}
-			}
-		}
-		return q.RecordCheckoutSession(ctx, queries.RecordCheckoutSessionParams{ID: attempt.ID, StripeSessionID: pgtype.Text{String: data.Text("id"), Valid: true}, Status: status})
-	}
-	if strings.HasPrefix(kind, "customer.subscription.") {
+	switch {
+	case strings.HasPrefix(kind, "checkout.session."):
+		return applySessionEvent(ctx, q, kind, data, attempt)
+	case strings.HasPrefix(kind, "customer.subscription."):
 		if err := bindSubscription(ctx, q, attempt, data.Text("id")); err != nil {
 			return err
 		}
 		attempt.StripeSubscriptionID = pgtype.Text{String: data.Text("id"), Valid: true}
-		_, err := reconcileSubscription(ctx, tx, w.Gateway, draft, attempt, now)
+		_, err := reconcileSubscription(ctx, tx, w.Gateway, draft, attempt, facts.subscription, now)
 		return err
 	}
 	expected := draft.AmountMinor
 	if strings.HasPrefix(kind, "invoice.") {
-		pending, err := q.PendingAmountChange(ctx, draft.ID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		var err error
+		if expected, err = w.invoiceAmount(ctx, tx, data, draft, attempt, facts.subscription, now); err != nil {
 			return err
-		}
-		if pending {
-			if err = bindSubscription(ctx, q, attempt, data.Text("subscription")); err != nil {
-				return err
-			}
-			attempt.StripeSubscriptionID = pgtype.Text{String: data.Text("subscription"), Valid: true}
-			if _, err = reconcileSubscription(ctx, tx, w.Gateway, draft, attempt, now); err != nil {
-				return err
-			}
-		}
-		start, _, err := invoiceBounds(data)
-		if err != nil {
-			return err
-		}
-		amount, err := q.InvoiceAmountChange(ctx, queries.InvoiceAmountChangeParams{CheckoutID: draft.ID, EffectiveAt: timestamp(start)})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if err == nil {
-			expected = amount
 		}
 	}
 	if kind == "invoice.payment_failed" {
@@ -223,53 +302,129 @@ func (w EventWorker) applyCheckoutEvent(ctx context.Context, tx pgx.Tx, event qu
 		_, err = recordPeriod(ctx, q, draft, data, expected, false)
 		return err
 	}
-	var amount int64
-	var paid time.Time
-	var paymentIntent string
-	var period pgtype.UUID
-	var err error
-	switch kind {
-	case "payment_intent.succeeded":
-		if draft.Frequency != "ONE_TIME" || data.Text("status") != "succeeded" {
+	payment, err := paymentFacts(ctx, q, event, data, draft, attempt, expected, facts.charged)
+	if err != nil {
+		return err
+	}
+	return recordGift(ctx, tx, draft, payment, now)
+}
+
+func applySessionEvent(ctx context.Context, q *queries.Queries, kind string, data payments.Object, attempt queries.DonorStripeCheckout) error {
+	if attempt.StripeSessionID.Valid && attempt.StripeSessionID.String != data.Text("id") {
+		return payments.ErrFacts
+	}
+	status := attempt.Status
+	if kind == "checkout.session.expired" {
+		if data.Text("status") != "expired" {
 			return payments.ErrFacts
 		}
-		amount, err = data.Int("amount_received")
-		if err != nil {
-			return err
+		if status != "COMPLETE" && status != "CANCELLED" {
+			status = "EXPIRED"
+			if err := q.ReleaseReservation(ctx, attempt.ID); err != nil {
+				return err
+			}
 		}
-		paid = event.OccurredAt.Time
-		paymentIntent = data.Text("id")
+	} else {
+		if data.Text("status") != "complete" {
+			return payments.ErrFacts
+		}
+		if status != "CANCELLED" {
+			status = "COMPLETE"
+		}
+		if subscription := data.Text("subscription"); subscription != "" {
+			if err := bindSubscription(ctx, q, attempt, subscription); err != nil {
+				return err
+			}
+		}
+	}
+	return q.RecordCheckoutSession(ctx, queries.RecordCheckoutSessionParams{ID: attempt.ID, StripeSessionID: pgtype.Text{String: data.Text("id"), Valid: true}, Status: status})
+}
+
+// invoiceAmount returns the amount the invoice's period must charge: a
+// confirmed amount change applies from its effective renewal, never prorated.
+func (w EventWorker) invoiceAmount(ctx context.Context, tx pgx.Tx, data payments.Object, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, snapshot *subscriptionSnapshot, now time.Time) (int64, error) {
+	q := queries.New(tx)
+	pending, err := q.PendingAmountChange(ctx, draft.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return 0, err
+	}
+	if pending {
+		if err = bindSubscription(ctx, q, attempt, data.Text("subscription")); err != nil {
+			return 0, err
+		}
+		attempt.StripeSubscriptionID = pgtype.Text{String: data.Text("subscription"), Valid: true}
+		if _, err = reconcileSubscription(ctx, tx, w.Gateway, draft, attempt, snapshot, now); err != nil {
+			return 0, err
+		}
+	}
+	start, _, err := invoiceBounds(data)
+	if err != nil {
+		return 0, err
+	}
+	amount, err := q.InvoiceAmountChange(ctx, queries.InvoiceAmountChangeParams{CheckoutID: draft.ID, EffectiveAt: timestamp(start)})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return draft.AmountMinor, nil
+	}
+	return amount, err
+}
+
+type paidGift struct {
+	objectID      string
+	amount        int64
+	paid          time.Time
+	paymentIntent string
+	period        pgtype.UUID
+}
+
+func paymentFacts(ctx context.Context, q *queries.Queries, event queries.DonorStripeEvent, data payments.Object, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, expected int64, charged time.Time) (paidGift, error) {
+	out := paidGift{objectID: data.Text("id")}
+	var err error
+	switch event.EventType {
+	case "payment_intent.succeeded":
+		if draft.Frequency != "ONE_TIME" || data.Text("status") != "succeeded" {
+			return out, payments.ErrFacts
+		}
+		if out.amount, err = data.Int("amount_received"); err != nil {
+			return out, err
+		}
+		out.paid = charged
+		out.paymentIntent = data.Text("id")
 	case "invoice.payment_succeeded":
 		before, e1 := data.IntDefault("starting_balance")
 		after, e2 := data.IntDefault("ending_balance")
 		total, e3 := data.Int("total")
 		due, e4 := data.Int("amount_due")
-		amount, err = data.Int("amount_paid")
-		if draft.Frequency != "MONTHLY" || data.Text("status") != "paid" || !billingReason(data) || e1 != nil || e2 != nil || e3 != nil || e4 != nil || err != nil || before != 0 || after != 0 || amount != total || amount != due {
-			return payments.ErrFacts
+		out.amount, err = data.Int("amount_paid")
+		if draft.Frequency != "MONTHLY" || data.Text("status") != "paid" || !billingReason(data) || e1 != nil || e2 != nil || e3 != nil || e4 != nil || err != nil || before != 0 || after != 0 || out.amount != total || out.amount != due {
+			return out, payments.ErrFacts
 		}
 		if err = bindSubscription(ctx, q, attempt, data.Text("subscription")); err != nil {
-			return err
+			return out, err
 		}
 		epoch, err := data.Int("paid_at")
 		if err != nil || epoch < 0 || epoch > 253402300799 {
-			return payments.ErrFacts
+			return out, payments.ErrFacts
 		}
-		paid = time.Unix(epoch, 0).UTC()
-		paymentIntent, err = invoicePaymentIntent(data, amount)
-		if err != nil {
-			return err
+		out.paid = time.Unix(epoch, 0).UTC()
+		if out.paymentIntent, err = invoicePaymentIntent(data, out.amount); err != nil {
+			return out, err
 		}
-		period, err = recordPeriod(ctx, q, draft, data, expected, true)
-		if err != nil {
-			return err
+		if out.period, err = recordPeriod(ctx, q, draft, data, expected, true); err != nil {
+			return out, err
 		}
 	default:
-		return payments.ErrFacts
+		return out, payments.ErrFacts
 	}
-	if amount != expected || amount <= 0 || data.Text("currency") != "usd" {
-		return payments.ErrFacts
+	if out.amount != expected || out.amount <= 0 || data.Text("currency") != "usd" {
+		return out, payments.ErrFacts
 	}
+	return out, nil
+}
+
+// recordGift writes the payment with the checkout's attribution as it stood
+// when charged; an expired referral window leaves the gift unattributed.
+func recordGift(ctx context.Context, tx pgx.Tx, draft queries.DonorCheckout, p paidGift, now time.Time) error {
+	q := queries.New(tx)
 	donor, err := q.LockDonor(ctx, draft.DonorID)
 	if err != nil {
 		return err
@@ -282,18 +437,23 @@ func (w EventWorker) applyCheckoutEvent(ctx context.Context, tx pgx.Tx, event qu
 	if err != nil {
 		return err
 	}
-	pi := pgtype.Text{String: paymentIntent, Valid: true}
-	if err = q.InsertGift(ctx, queries.InsertGiftParams{ID: id, DonorID: donor.ID, CheckoutID: draft.ID, StripeObjectID: data.Text("id"), AmountMinor: amount, Frequency: draft.Frequency, PaidAt: timestamp(paid), StripePaymentIntentID: pi, PeriodID: period}); err != nil {
+	var referrer pgtype.UUID
+	var kind pgtype.Text
+	if draft.ReferrerID.Valid && p.paid.Before(draft.ReferralExpiresAt.Time) {
+		referrer, kind = draft.ReferrerID, draft.ReferralKind
+	}
+	pi := pgtype.Text{String: p.paymentIntent, Valid: true}
+	if err = q.InsertGift(ctx, queries.InsertGiftParams{ID: id, DonorID: donor.ID, CheckoutID: draft.ID, StripeObjectID: p.objectID, AmountMinor: p.amount, Frequency: draft.Frequency, PaidAt: timestamp(p.paid), StripePaymentIntentID: pi, PeriodID: p.period, ReferrerID: referrer, ReferralKind: kind}); err != nil {
 		return err
 	}
-	gift, err := q.GiftByStripeObject(ctx, data.Text("id"))
+	gift, err := q.GiftByStripeObject(ctx, p.objectID)
 	if err != nil {
 		return err
 	}
-	if gift.DonorID != donor.ID || gift.CheckoutID != draft.ID || gift.AmountMinor != amount || gift.Frequency != draft.Frequency || (gift.StripePaymentIntentID.Valid && gift.StripePaymentIntentID != pi) || (gift.PeriodID.Valid && gift.PeriodID != period) {
+	if gift.DonorID != donor.ID || gift.CheckoutID != draft.ID || gift.AmountMinor != p.amount || gift.Frequency != draft.Frequency || gift.ReferrerID != referrer || gift.ReferralKind != kind || (gift.StripePaymentIntentID.Valid && gift.StripePaymentIntentID != pi) || (gift.PeriodID.Valid && gift.PeriodID != p.period) {
 		return payments.ErrFacts
 	}
-	if err = q.EnrichGift(ctx, queries.EnrichGiftParams{ID: gift.ID, StripePaymentIntentID: pi, PeriodID: period}); err != nil {
+	if err = q.EnrichGift(ctx, queries.EnrichGiftParams{ID: gift.ID, StripePaymentIntentID: pi, PeriodID: p.period}); err != nil {
 		return err
 	}
 	if !hadGift && !donor.ClaimedAt.Valid {

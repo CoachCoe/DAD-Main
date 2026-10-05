@@ -20,16 +20,57 @@ func terminalSubscription(status string) bool {
 	return status == "canceled" || status == "incomplete_expired"
 }
 
-// The caller holds the donor lock. Read current processor state rather than an
-// event snapshot so delayed delivery cannot undo a newer cancellation or pause.
-func reconcileSubscription(ctx context.Context, tx pgx.Tx, gateway payments.FinancialGateway, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, now time.Time) (queries.DonorSubscription, error) {
-	empty := queries.DonorSubscription{}
-	if gateway == nil {
-		return empty, payments.ErrCheckoutUnavailable
+// subscriptionSnapshot is processor state fetched without holding the donor
+// lock, with the reconciliation it was read after.
+type subscriptionSnapshot struct {
+	attempt  pgtype.UUID
+	id       string
+	observed pgtype.Timestamptz
+	remote   payments.Object
+}
+
+// fetchSubscription reads an attempt's subscription from the processor. The
+// caller holds no donor lock, so a slow processor cannot block other work.
+func fetchSubscription(ctx context.Context, q *queries.Queries, gateway payments.FinancialGateway, attempt pgtype.UUID, id string) (*subscriptionSnapshot, error) {
+	observed, err := q.SubscriptionObservedAt(ctx, attempt)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
 	}
-	remote, err := gateway.RetrieveSubscription(ctx, attempt.StripeSubscriptionID.String)
+	if gateway == nil {
+		return nil, payments.ErrCheckoutUnavailable
+	}
+	remote, err := gateway.RetrieveSubscription(ctx, id)
 	if err != nil {
-		return empty, err
+		return nil, err
+	}
+	return &subscriptionSnapshot{attempt: attempt, id: id, observed: observed, remote: remote}, nil
+}
+
+// currentSubscription returns processor state for the locked attempt. A
+// snapshot is used only if nothing was reconciled after it was read; otherwise
+// it may predate the stored state, so the processor is read again.
+func currentSubscription(ctx context.Context, q *queries.Queries, gateway payments.FinancialGateway, attempt queries.DonorStripeCheckout, snapshot *subscriptionSnapshot) (payments.Object, error) {
+	if snapshot != nil && snapshot.attempt == attempt.ID && snapshot.id == attempt.StripeSubscriptionID.String {
+		observed, err := q.SubscriptionObservedAt(ctx, attempt.ID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		if observed.Valid == snapshot.observed.Valid && observed.Time.Equal(snapshot.observed.Time) {
+			return snapshot.remote, nil
+		}
+	}
+	if gateway == nil {
+		return nil, payments.ErrCheckoutUnavailable
+	}
+	return gateway.RetrieveSubscription(ctx, attempt.StripeSubscriptionID.String)
+}
+
+// The caller holds the donor lock. Use current processor state rather than an
+// event snapshot so delayed delivery cannot undo a newer cancellation or pause.
+func reconcileSubscription(ctx context.Context, tx pgx.Tx, gateway payments.FinancialGateway, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, snapshot *subscriptionSnapshot, now time.Time) (queries.DonorSubscription, error) {
+	remote, err := currentSubscription(ctx, queries.New(tx), gateway, attempt, snapshot)
+	if err != nil {
+		return queries.DonorSubscription{}, err
 	}
 	return reconcileRemoteSubscription(ctx, tx, draft, attempt, remote, now)
 }

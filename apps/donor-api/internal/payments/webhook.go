@@ -84,7 +84,7 @@ func VerifyEvent(body []byte, signature, secret string) (*VerifiedEvent, error) 
 	if envelope.Created == nil || *envelope.Created < 0 || *envelope.Created > 253402300799 || event.ID == "" || len(event.ID) > 255 || event.Data == nil {
 		return nil, ErrEventShape
 	}
-	var obj map[string]interface{}
+	var obj map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(event.Data.Raw))
 	decoder.UseNumber()
 	if err = decoder.Decode(&obj); err != nil || obj == nil {
@@ -104,24 +104,24 @@ func VerifyEvent(body []byte, signature, secret string) (*VerifiedEvent, error) 
 	return &VerifiedEvent{id: event.ID, kind: string(event.Type), occurred: time.Unix(*envelope.Created, 0).UTC(), data: encoded}, nil
 }
 
-func object(value interface{}) (map[string]interface{}, error) {
+func object(value any) (map[string]any, error) {
 	if value == nil {
-		return map[string]interface{}{}, nil
+		return map[string]any{}, nil
 	}
-	result, ok := value.(map[string]interface{})
+	result, ok := value.(map[string]any)
 	if !ok {
 		return nil, ErrEventShape
 	}
 	return result, nil
 }
-func pick(obj map[string]interface{}, names ...string) map[string]interface{} {
-	result := map[string]interface{}{}
+func pick(obj map[string]any, names ...string) map[string]any {
+	result := map[string]any{}
 	for _, key := range names {
 		result[key] = obj[key]
 	}
 	return result
 }
-func uuid(value interface{}) error {
+func uuid(value any) error {
 	if value == nil || value == "" {
 		return nil
 	}
@@ -135,7 +135,7 @@ func uuid(value interface{}) error {
 	}
 	return nil
 }
-func minimalObject(kind string, obj map[string]interface{}) (map[string]interface{}, bool, error) {
+func minimalObject(kind string, obj map[string]any) (map[string]any, bool, error) {
 	metadata, err := object(obj["metadata"])
 	if err != nil {
 		return nil, false, err
@@ -157,7 +157,7 @@ func minimalObject(kind string, obj map[string]interface{}) (map[string]interfac
 		subscription = details["subscription"]
 	}
 	checkout := metadata["dad_checkout_id"]
-	var update interface{}
+	var update any
 	if strings.HasPrefix(kind, "checkout.session.") {
 		update = metadata["dad_payment_update_id"]
 	}
@@ -177,7 +177,7 @@ func minimalObject(kind string, obj map[string]interface{}) (map[string]interfac
 	if !ok || id == "" || len(id) > 255 {
 		return nil, false, ErrEventShape
 	}
-	data := map[string]interface{}{"id": id, "checkout_id": checkout, "subscription": subscription}
+	data := map[string]any{"id": id, "checkout_id": checkout, "subscription": subscription}
 	for _, key := range []string{"status", "currency", "amount_received", "amount_paid", "amount_due", "total", "billing_reason", "starting_balance", "ending_balance"} {
 		if value, present := obj[key]; present {
 			data[key] = value
@@ -208,12 +208,12 @@ func minimalObject(kind string, obj map[string]interface{}) (map[string]interfac
 		data = pick(obj, "id", "payment_intent", "amount", "currency", "status")
 	}
 	if update != nil {
-		data = map[string]interface{}{"id": id, "payment_update_id": update}
+		data = map[string]any{"id": id, "payment_update_id": update}
 	}
 	return data, true, nil
 }
 
-func page(value interface{}) ([]interface{}, bool, error) {
+func page(value any) ([]any, bool, error) {
 	obj, err := object(value)
 	if err != nil {
 		return nil, false, err
@@ -221,20 +221,20 @@ func page(value interface{}) ([]interface{}, bool, error) {
 	complete, ok := obj["has_more"].(bool)
 	complete = ok && !complete
 	if obj["data"] == nil {
-		return []interface{}{}, complete, nil
+		return []any{}, complete, nil
 	}
-	rows, ok := obj["data"].([]interface{})
+	rows, ok := obj["data"].([]any)
 	if !ok {
 		return nil, false, ErrEventShape
 	}
 	return rows, complete, nil
 }
-func invoiceLines(value interface{}) (map[string]interface{}, error) {
+func invoiceLines(value any) (map[string]any, error) {
 	input, complete, err := page(value)
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]interface{}, 0, len(input))
+	rows := make([]any, 0, len(input))
 	for _, raw := range input {
 		line, err := object(raw)
 		if err != nil {
@@ -259,14 +259,14 @@ func invoiceLines(value interface{}) (map[string]interface{}, error) {
 		row["proration"] = details["proration"]
 		rows = append(rows, row)
 	}
-	return map[string]interface{}{"lines_complete": complete, "lines": rows}, nil
+	return map[string]any{"lines_complete": complete, "lines": rows}, nil
 }
-func invoicePayments(value interface{}) (map[string]interface{}, error) {
+func invoicePayments(value any) (map[string]any, error) {
 	input, complete, err := page(value)
 	if err != nil {
 		return nil, err
 	}
-	rows := make([]interface{}, 0, len(input))
+	rows := make([]any, 0, len(input))
 	for _, raw := range input {
 		p, err := object(raw)
 		if err != nil {
@@ -281,5 +281,5 @@ func invoicePayments(value interface{}) (map[string]interface{}, error) {
 		row["payment_intent"] = payment["payment_intent"]
 		rows = append(rows, row)
 	}
-	return map[string]interface{}{"payments_complete": complete, "payments": rows}, nil
+	return map[string]any{"payments_complete": complete, "payments": rows}, nil
 }

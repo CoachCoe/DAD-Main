@@ -18,7 +18,7 @@ func testID(t *testing.T) pgtype.UUID {
 	}
 	return id
 }
-func mustExec(t *testing.T, tx pgx.Tx, sql string, args ...interface{}) {
+func mustExec(t *testing.T, tx pgx.Tx, sql string, args ...any) {
 	t.Helper()
 	if _, err := tx.Exec(context.Background(), sql, args...); err != nil {
 		t.Fatal(err)
@@ -53,20 +53,20 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 		mustExec(t, tx, `INSERT INTO donor_billing_periods (id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status) VALUES ($1,$2,$3,$4,'sub_test',$5,$6,'PAID')`, p.id, donorID, checkout, "in_"+p.id.String(), p.start, p.end)
 	}
 	for _, g := range []struct {
-		id, period pgtype.UUID
-		paid       time.Time
-	}{{firstGift, firstPeriod, jan}, {secondGift, secondPeriod, feb}} {
-		mustExec(t, tx, `INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,period_id) VALUES ($1,$2,$3,$4,3000,'USD','MONTHLY',$5,$6)`, g.id, donorID, checkout, "in_"+g.period.String(), g.paid, g.period)
+		id, period, referrer pgtype.UUID
+		paid                 time.Time
+	}{{firstGift, firstPeriod, referrerID, jan}, {secondGift, secondPeriod, pgtype.UUID{}, feb}} {
+		mustExec(t, tx, `INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,period_id,referrer_id,referral_kind) VALUES ($1,$2,$3,$4,3000,'USD','MONTHLY',$5,$6,$7,CASE WHEN $7::uuid IS NULL THEN NULL ELSE 'IRL' END)`, g.id, donorID, checkout, "in_"+g.period.String(), g.paid, g.period, g.referrer)
 	}
 	preparing, err := Dashboard(ctx, q, referrerID, now)
-	if err != nil || preparing["state"] != "preparing" {
+	if err != nil || preparing.State != "preparing" {
 		t.Fatalf("missing projection: %v %v", preparing, err)
 	}
 	if _, err = refreshProjectionFactsInTx(ctx, tx, referrerID, now); err != nil {
 		t.Fatal(err)
 	}
 	missing, err := Dashboard(ctx, q, referrerID, now)
-	if err != nil || missing["referrals"] != nil {
+	if err != nil || missing.Referrals != nil {
 		t.Fatal("missing referred history shown as zero")
 	}
 	initial, err := refreshProjectionFactsInTx(ctx, tx, donorID, now)
@@ -77,8 +77,8 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	referrals := dashboard["referrals"].(map[string]interface{})
-	if referrals["irl"] != int64(1) || referrals["link"] != int64(0) || referrals["total_minor"] != int64(6000) {
+	referrals := dashboard.Referrals
+	if referrals == nil || referrals.IRL != 1 || referrals.Link != 0 || referrals.TotalMinor != 6000 {
 		t.Fatalf("wrong attribution: %v", referrals)
 	}
 	// A full refund breaks the current streak; the attained best and badge survive.
@@ -94,12 +94,18 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 		t.Fatalf("wrong refunded projection: %+v %v", refunded, err)
 	}
 	stale, err := Dashboard(ctx, q, referrerID, now.Add(24*time.Hour))
-	if err != nil || stale["referrals"] != nil || stale["streak"] != nil {
+	if err != nil || stale.Referrals != nil || stale.Streak != nil {
 		t.Fatal("stale values exposed")
 	}
-	// Missing renewal history cannot manufacture a zero streak.
-	late, err := refreshProjectionFactsInTx(ctx, tx, donorID, mar)
-	if err != nil || late.CurrentStreak.Valid || !late.NextRefreshAt.Time.Equal(mar.Add(5*time.Minute)) {
+	// An unobserved renewal keeps the current count through its grace window.
+	due, err := refreshProjectionFactsInTx(ctx, tx, donorID, mar)
+	if err != nil || !due.CurrentStreak.Valid || due.CurrentStreak.Int32 != 0 || due.AtRisk || !due.NextRefreshAt.Time.Equal(mar.Add(24*time.Hour)) {
+		t.Fatalf("unobserved renewal: %+v %v", due, err)
+	}
+	// Missing renewal history past grace cannot manufacture a zero streak.
+	lapsed := mar.Add(14 * 24 * time.Hour)
+	late, err := refreshProjectionFactsInTx(ctx, tx, donorID, lapsed)
+	if err != nil || late.CurrentStreak.Valid || !late.NextRefreshAt.Time.Equal(lapsed.Add(5*time.Minute)) {
 		t.Fatalf("missing history: %+v %v", late, err)
 	}
 }

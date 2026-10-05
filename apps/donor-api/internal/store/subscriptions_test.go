@@ -10,7 +10,7 @@ import (
 	"impactgraph/donor-api/internal/payments"
 )
 
-func paymentObject(t *testing.T, value map[string]interface{}) payments.Object {
+func paymentObject(t *testing.T, value map[string]any) payments.Object {
 	t.Helper()
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -22,11 +22,11 @@ func paymentObject(t *testing.T, value map[string]interface{}) payments.Object {
 	}
 	return out
 }
-func subscription(checkout string, start time.Time) map[string]interface{} {
-	return map[string]interface{}{"id": "sub_" + checkout, "livemode": false, "status": "active", "customer": "cus_fixture", "cancel_at_period_end": false, "cancel_at": nil, "metadata": map[string]interface{}{"dad_checkout_id": checkout}, "items": map[string]interface{}{"has_more": false, "data": []interface{}{map[string]interface{}{"id": "si_fixture", "quantity": 1, "current_period_start": start.Unix(), "current_period_end": start.Add(30 * 24 * time.Hour).Unix(), "price": map[string]interface{}{"currency": "usd", "unit_amount": 3000, "product": "prod_fixture", "recurring": map[string]interface{}{"interval": "month", "interval_count": 1}}}}}}
+func subscription(checkout string, start time.Time) map[string]any {
+	return map[string]any{"id": "sub_" + checkout, "livemode": false, "status": "active", "customer": "cus_fixture", "cancel_at_period_end": false, "cancel_at": nil, "metadata": map[string]any{"dad_checkout_id": checkout}, "items": map[string]any{"has_more": false, "data": []any{map[string]any{"id": "si_fixture", "quantity": 1, "current_period_start": start.Unix(), "current_period_end": start.Add(30 * 24 * time.Hour).Unix(), "price": map[string]any{"currency": "usd", "unit_amount": 3000, "product": "prod_fixture", "recurring": map[string]any{"interval": "month", "interval_count": 1}}}}}}
 }
-func subscriptionItem(remote map[string]interface{}) map[string]interface{} {
-	return remote["items"].(map[string]interface{})["data"].([]interface{})[0].(map[string]interface{})
+func subscriptionItem(remote map[string]any) map[string]any {
+	return remote["items"].(map[string]any)["data"].([]any)[0].(map[string]any)
 }
 func assertEventProcessed(t *testing.T, f *workerFixture, id string, want bool) {
 	t.Helper()
@@ -64,17 +64,17 @@ func TestSubscriptionUsesCurrentStateAndReleasesCancelledReservation(t *testing.
 	}
 }
 func TestInvalidSubscriptionRollsBackBindingAndProjection(t *testing.T) {
-	cases := map[string]func(map[string]interface{}){
-		"live":        func(r map[string]interface{}) { r["livemode"] = true },
-		"owner":       func(r map[string]interface{}) { r["metadata"] = map[string]interface{}{"dad_checkout_id": "another"} },
-		"extra items": func(r map[string]interface{}) { r["items"].(map[string]interface{})["has_more"] = true },
-		"quantity":    func(r map[string]interface{}) { subscriptionItem(r)["quantity"] = 2 },
-		"amount": func(r map[string]interface{}) {
-			subscriptionItem(r)["price"].(map[string]interface{})["unit_amount"] = 9000
+	cases := map[string]func(map[string]any){
+		"live":        func(r map[string]any) { r["livemode"] = true },
+		"owner":       func(r map[string]any) { r["metadata"] = map[string]any{"dad_checkout_id": "another"} },
+		"extra items": func(r map[string]any) { r["items"].(map[string]any)["has_more"] = true },
+		"quantity":    func(r map[string]any) { subscriptionItem(r)["quantity"] = 2 },
+		"amount": func(r map[string]any) {
+			subscriptionItem(r)["price"].(map[string]any)["unit_amount"] = 9000
 		},
-		"cancel midmonth": func(r map[string]interface{}) { r["cancel_at"] = time.Now().Unix() },
-		"pause without authorization": func(r map[string]interface{}) {
-			r["pause_collection"] = map[string]interface{}{"behavior": "void", "resumes_at": time.Now().Add(90 * 24 * time.Hour).Unix()}
+		"cancel midmonth": func(r map[string]any) { r["cancel_at"] = time.Now().Unix() },
+		"pause without authorization": func(r map[string]any) {
+			r["pause_collection"] = map[string]any{"behavior": "void", "resumes_at": time.Now().Add(90 * 24 * time.Hour).Unix()}
 		},
 	}
 	for name, edit := range cases {
@@ -117,8 +117,8 @@ func TestReconcileAuthorizedAmountPauseAndResumption(t *testing.T) {
 		t.Fatal(err)
 	}
 	remote := subscription(result.CheckoutID, start)
-	subscriptionItem(remote)["price"].(map[string]interface{})["unit_amount"] = 9000
-	remote["pause_collection"] = map[string]interface{}{"behavior": "void", "resumes_at": until.Unix()}
+	subscriptionItem(remote)["price"].(map[string]any)["unit_amount"] = 9000
+	remote["pause_collection"] = map[string]any{"behavior": "void", "resumes_at": until.Unix()}
 	f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, remote)
 	event := f.receive(t, "customer.subscription.updated", remote)
 	f.process(t)
@@ -132,7 +132,7 @@ func TestReconcileAuthorizedAmountPauseAndResumption(t *testing.T) {
 	if _, err := f.service.DB.Exec(ctx, `INSERT INTO donor_resumptions(id,donor_id,pause_id,next_renewal) VALUES($1,$2,$3,$4)`, resume, f.donorID, pause, end); err != nil {
 		t.Fatal(err)
 	}
-	remote["pause_collection"] = map[string]interface{}{"behavior": "void", "resumes_at": end.Unix()}
+	remote["pause_collection"] = map[string]any{"behavior": "void", "resumes_at": end.Unix()}
 	f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, remote)
 	event = f.receive(t, "customer.subscription.updated", remote)
 	f.process(t)
@@ -157,7 +157,7 @@ func TestInvoiceConfirmsPendingAmountWithoutRepricingPriorPeriod(t *testing.T) {
 		t.Fatal(err)
 	}
 	remote := subscription(result.CheckoutID, start)
-	subscriptionItem(remote)["price"].(map[string]interface{})["unit_amount"] = 9000
+	subscriptionItem(remote)["price"].(map[string]any)["unit_amount"] = 9000
 	f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, remote)
 	original := invoice(result.CheckoutID, "in_old_"+result.CheckoutID, start, true)
 	event := f.receive(t, "invoice.payment_succeeded", original)
@@ -167,8 +167,8 @@ func TestInvoiceConfirmsPendingAmountWithoutRepricingPriorPeriod(t *testing.T) {
 	renewal["amount_paid"] = 9000
 	renewal["amount_due"] = 9000
 	renewal["total"] = 9000
-	renewal["lines"].(map[string]interface{})["data"].([]interface{})[0].(map[string]interface{})["amount"] = 9000
-	renewal["payments"].(map[string]interface{})["data"].([]interface{})[0].(map[string]interface{})["amount_paid"] = 9000
+	renewal["lines"].(map[string]any)["data"].([]any)[0].(map[string]any)["amount"] = 9000
+	renewal["payments"].(map[string]any)["data"].([]any)[0].(map[string]any)["amount_paid"] = 9000
 	event = f.receive(t, "invoice.payment_succeeded", renewal)
 	f.process(t)
 	assertEventProcessed(t, f, event, true)

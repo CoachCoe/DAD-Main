@@ -1,5 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// E2E_PRODUCTION=1 runs the suite against an optimized build instead of the dev server,
+// which catches differences such as static rendering and minified hydration.
+const production = process.env.E2E_PRODUCTION === "1";
+
 export default defineConfig({
   testDir: "./e2e",
   timeout: 45_000,
@@ -25,10 +29,13 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      command: "npm run dev -- --hostname 127.0.0.1 --port 3000",
+      command: production
+        ? "npm run build && npm run start"
+        : "npm run dev -- --hostname 127.0.0.1 --port 3000",
+      env: { HOSTNAME: "127.0.0.1", PORT: "3000" },
       url: "http://127.0.0.1:3000",
-      reuseExistingServer: true,
-      timeout: 30_000,
+      reuseExistingServer: !production,
+      timeout: production ? 300_000 : 30_000,
     },
   ],
 });

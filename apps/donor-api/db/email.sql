@@ -14,11 +14,11 @@ UPDATE donor_login_emails SET encrypted_token=$2,expires_at=$3 WHERE id=$1;
 -- name: InsertLoginLink :exec
 INSERT INTO donor_login_links (id,donor_id,token_hash,expires_at) VALUES ($1,$2,$3,$4);
 
--- name: IncrementLoginEmailAttempt :exec
-UPDATE donor_login_emails SET attempts=attempts+1 WHERE id=$1;
-
 -- name: FailLoginEmail :exec
-UPDATE donor_login_emails SET last_error=$2,available_at=$3 WHERE id=$1;
+UPDATE donor_login_emails SET last_error=$2,available_at=$3 WHERE id=$1 AND completed_at IS NULL;
+
+-- name: ClaimLoginEmail :exec
+UPDATE donor_login_emails SET attempts=attempts+1,available_at=$2 WHERE id=$1;
 
 -- name: ReceiptGift :one
 SELECT * FROM donor_gifts WHERE id=$1 AND donor_id=$2 AND paid_at<=$3;
@@ -53,7 +53,10 @@ UPDATE donor_messages SET subject=$2,body=$3 WHERE id=$1;
 UPDATE donor_messages SET attempts=attempts+1 WHERE id=$1;
 
 -- name: FailMessage :exec
-UPDATE donor_messages SET last_error=$2,available_at=$3 WHERE id=$1;
+UPDATE donor_messages SET last_error=$2,available_at=$3 WHERE id=$1 AND completed_at IS NULL;
+
+-- name: ClaimMessage :exec
+UPDATE donor_messages SET attempts=attempts+1,available_at=$2 WHERE id=$1;
 
 -- name: DonorPreference :one
 SELECT * FROM donor_preferences WHERE donor_id=$1;

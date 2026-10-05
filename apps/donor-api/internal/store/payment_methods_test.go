@@ -13,9 +13,9 @@ type paymentUpdateFixture struct {
 	id       pgtype.UUID
 	checkout string
 	session  string
-	remote   map[string]interface{}
-	setup    map[string]interface{}
-	sub      map[string]interface{}
+	remote   map[string]any
+	setup    map[string]any
+	sub      map[string]any
 }
 
 func newPaymentUpdateFixture(t *testing.T) paymentUpdateFixture {
@@ -33,8 +33,8 @@ func newPaymentUpdateFixture(t *testing.T) paymentUpdateFixture {
 	if _, err := f.service.DB.Exec(ctx, `INSERT INTO donor_payment_updates(id,donor_id,attempt_id,customer_id,request_params,stripe_session_id,hosted_url,status) VALUES($1,$2,$3,'cus_fixture','{}',$4,'https://checkout.stripe.com/c/test','OPEN')`, id, f.donorID, attempt, session); err != nil {
 		t.Fatal(err)
 	}
-	remote := map[string]interface{}{"id": session, "livemode": false, "mode": "setup", "customer": "cus_fixture", "status": "complete", "setup_intent": setupID, "metadata": map[string]interface{}{"dad_payment_update_id": id.String()}}
-	setup := map[string]interface{}{"id": setupID, "livemode": false, "customer": "cus_fixture", "status": "succeeded", "usage": "off_session", "payment_method_types": []string{"card"}, "payment_method": "pm_fixture", "metadata": map[string]interface{}{"dad_payment_update_id": id.String()}}
+	remote := map[string]any{"id": session, "livemode": false, "mode": "setup", "customer": "cus_fixture", "status": "complete", "setup_intent": setupID, "metadata": map[string]any{"dad_payment_update_id": id.String()}}
+	setup := map[string]any{"id": setupID, "livemode": false, "customer": "cus_fixture", "status": "succeeded", "usage": "off_session", "payment_method_types": []string{"card"}, "payment_method": "pm_fixture", "metadata": map[string]any{"dad_payment_update_id": id.String()}}
 	sub := subscription(result.CheckoutID, time.Now().Add(-24*time.Hour))
 	p := paymentUpdateFixture{f: f, id: id, checkout: result.CheckoutID, session: session, remote: remote, setup: setup, sub: sub}
 	p.publish(t)
@@ -67,6 +67,7 @@ func TestPaymentUpdateRecoversLostProviderAcknowledgement(t *testing.T) {
 	p.f.process(t)
 	assertEventProcessed(t, p.f, event, false)
 	p.assertState(t, "OPEN")
+	p.f.retryNow(t)
 	p.f.process(t)
 	assertEventProcessed(t, p.f, event, true)
 	p.assertState(t, "APPLIED")
@@ -85,7 +86,7 @@ func TestPaymentUpdateRequiresVerifiedOwnershipAndCardSetup(t *testing.T) {
 		"session owner": func(p *paymentUpdateFixture) { p.remote["customer"] = "cus_other" },
 		"live setup":    func(p *paymentUpdateFixture) { p.setup["livemode"] = true },
 		"setup owner": func(p *paymentUpdateFixture) {
-			p.setup["metadata"] = map[string]interface{}{"dad_payment_update_id": testID(t).String()}
+			p.setup["metadata"] = map[string]any{"dad_payment_update_id": testID(t).String()}
 		},
 		"wrong usage":        func(p *paymentUpdateFixture) { p.setup["usage"] = "on_session" },
 		"not card":           func(p *paymentUpdateFixture) { p.setup["payment_method_types"] = []string{"us_bank_account"} },

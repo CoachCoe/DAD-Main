@@ -23,7 +23,7 @@ var exportDatasets = map[string]exportDataset{
 	"donors":           {"donors", "id created_at email claimed_at disabled public_name", "data.export"},
 	"email-changes":    {"donor_email_changes", "id donor_id old_email new_email stage expires_at created_at completed_at", "data.export"},
 	"identity-events":  {"donor_identity_events", "id donor_id email_change_id action created_at", "data.export"},
-	"gifts":            {"donor_gifts", "id donor_id checkout_id amount_minor currency frequency paid_at period_id", "data.export"},
+	"gifts":            {"donor_gifts", "id donor_id checkout_id amount_minor currency frequency paid_at period_id referrer_id referral_kind", "data.export"},
 	"refunds":          {"donor_refunds", "id gift_id amount_minor currency status observed_at stripe_refund_id", "data.export"},
 	"refund-history":   {"donor_refund_observations", "id refund_id source_event_id source_action_id status observed_at", "data.export"},
 	"billing-periods":  {"donor_billing_periods", "id donor_id checkout_id stripe_invoice_id due_at ends_at status", "data.export"},
@@ -39,17 +39,21 @@ var exportDatasets = map[string]exportDataset{
 	"messages":         {"donor_messages", "id donor_id kind available_at completed_at attempts last_error suppressed_reason created_at", "data.export"},
 	"staff-actions":    {"donor_staff_actions", "id actor_id donor_id kind target_id amount_minor period_end reason status stripe_refund_id completed_at created_at", "data.export"},
 	"staff":            {"donor_staff", "id name email role disabled created_at", "staff.manage"},
-	"audit":            {"donor_staff_audit", "id actor_id action target created_at", "audit.read"},
+	"audit":            {"donor_staff_audit", "id actor_id action target created_at details", "audit.read"},
 	"partner-signups":  {"donor_partner_signups", "id organization name email website message consent_version created_at", "content.publish"},
 	"content-sources":  {"donor_content_sources", "id actor_id name sha256 created_at", "content.publish"},
 	"publications":     {"donor_content_publications", "id actor_id payload created_at", "content.publish"},
 	"enrolments":       {"", "enrolment_id program_id submitted_at status", "data.export"},
 }
 
-func (s *StaffService) ExportDatasets(ctx context.Context, token string) (map[string]interface{}, error) {
+type ExportDatasets struct {
+	Datasets []string `json:"datasets"`
+}
+
+func (s *StaffService) ExportDatasets(ctx context.Context, token string) (ExportDatasets, error) {
 	actor, err := requireStaff(ctx, queries.New(s.DB), token, "data.export", time.Now().UTC())
 	if err != nil {
-		return nil, err
+		return ExportDatasets{}, err
 	}
 	names := []string{}
 	permissions := staffPermissions(actor.Role)
@@ -59,32 +63,34 @@ func (s *StaffService) ExportDatasets(ctx context.Context, token string) (map[st
 		}
 	}
 	slices.Sort(names)
-	return map[string]interface{}{"datasets": names}, nil
+	return ExportDatasets{Datasets: names}, nil
 }
 
-func safeCSVCell(value interface{}) (string, error) {
-	if value == nil {
-		return "", nil
-	}
+func safeCSVCell(value any) (string, error) {
 	var text string
 	switch v := value.(type) {
+	case nil:
+		return "", nil
 	case time.Time:
 		return v.UTC().Format(time.RFC3339Nano), nil
 	case [16]byte:
 		return (pgtype.UUID{Bytes: v, Valid: true}).String(), nil
 	case []byte:
-		text = string(v)
-	case map[string]interface{}, []interface{}:
+		return string(v), nil
+	case map[string]any, []any:
 		encoded, err := json.Marshal(v)
-		return string(encoded), err
-	default:
-		text = fmt.Sprint(value)
-	}
-	if _, ok := value.(string); ok {
-		trimmed := strings.TrimLeft(text, "\ufeff \t\r\n")
-		if strings.HasPrefix(text, "\t") || strings.HasPrefix(text, "\r") || strings.HasPrefix(text, "\n") || (len(trimmed) > 0 && strings.ContainsRune("=+-@", rune(trimmed[0]))) {
-			return "'" + text, nil
+		if err != nil {
+			return "", err
 		}
+		text = string(encoded)
+	case string:
+		text = v
+	default:
+		return fmt.Sprint(value), nil
+	}
+	trimmed := strings.TrimLeft(text, "\ufeff \t\r\n")
+	if strings.HasPrefix(text, "\t") || strings.HasPrefix(text, "\r") || strings.HasPrefix(text, "\n") || (len(trimmed) > 0 && strings.ContainsRune("=+-@", rune(trimmed[0]))) {
+		return "'" + text, nil
 	}
 	return text, nil
 }
@@ -113,7 +119,7 @@ func (s *StaffService) Export(ctx context.Context, token, name string, destinati
 		// Disconnection must still leave an incomplete-export audit record.
 		auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		err := auditStaff(auditCtx, queries.New(s.DB), actorID, "data.export_finished", name, map[string]interface{}{"export_id": exportID.String(), "completed": completed, "row_count": count, "finished_at": time.Now().UTC()}, time.Now().UTC())
+		err := auditStaff(auditCtx, queries.New(s.DB), actorID, "data.export_finished", name, map[string]any{"export_id": exportID.String(), "completed": completed, "row_count": count, "finished_at": time.Now().UTC()}, time.Now().UTC())
 		if resultErr == nil && err != nil {
 			resultErr = err
 		}
@@ -138,7 +144,12 @@ func (s *StaffService) Export(ctx context.Context, token, name string, destinati
 			query += " WHERE referrer_id IS NOT NULL"
 		}
 		query += " ORDER BY id"
-		rows, err := s.DB.Query(ctx, query)
+		tx, err := s.DB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		rows, err := tx.Query(ctx, query)
 		if err != nil {
 			return err
 		}

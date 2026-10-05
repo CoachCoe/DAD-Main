@@ -94,13 +94,13 @@ func requireStaff(ctx context.Context, q *queries.Queries, token, permission str
 	return staff, nil
 }
 
-func auditStaff(ctx context.Context, q *queries.Queries, actor pgtype.UUID, action, target string, details interface{}, now time.Time) error {
+func auditStaff(ctx context.Context, q *queries.Queries, actor pgtype.UUID, action, target string, details any, now time.Time) error {
 	id, err := NewID()
 	if err != nil {
 		return err
 	}
 	if details == nil {
-		details = map[string]interface{}{}
+		details = map[string]any{}
 	}
 	raw, err := json.Marshal(details)
 	if err != nil {

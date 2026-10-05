@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
-	"time"
 	"unicode/utf8"
 
 	"impactgraph/donor-api/internal/identity"
@@ -18,83 +16,83 @@ type AccountSource interface {
 	QueueLogin(context.Context, string) error
 }
 
-func installAccountRoutes(mux *http.ServeMux, services Services, guard *browserGuard, reply replyFunc) {
-	mux.HandleFunc("POST /donor/login", func(w http.ResponseWriter, r *http.Request) {
-		if !guard.check(w, r, reply) {
-			return
-		}
-		var body struct {
-			Email *string `json:"email"`
-		}
-		if !decodeBody(w, r, &body) || body.Email == nil || utf8.RuneCountInString(*body.Email) > 320 {
-			reply(w, 422, map[string]string{"detail": "Invalid request fields"})
-			return
-		}
-		if !services.EmailConfigured {
-			reply(w, 503, map[string]string{"detail": "Account email is not configured yet"})
-			return
-		}
-		if services.Account == nil {
-			reply(w, 503, map[string]string{"detail": "Account sign-in is temporarily unavailable"})
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		err := services.Account.QueueLogin(ctx, *body.Email)
-		if errors.Is(err, identity.ErrEmail) {
-			reply(w, 422, map[string]string{"detail": "Enter a valid email address"})
-			return
-		}
-		if err != nil {
-			reply(w, 503, map[string]string{"detail": "Account sign-in is temporarily unavailable"})
-			return
-		}
-		reply(w, 202, map[string]string{"message": "If this email matches a donor account, a sign-in link will arrive shortly."})
-	})
-	mux.HandleFunc("POST /donor/claim", func(w http.ResponseWriter, r *http.Request) {
-		if !guard.check(w, r, reply) {
-			return
-		}
-		var body struct {
-			Token *string `json:"token"`
-		}
-		if !decodeBody(w, r, &body) || body.Token == nil || utf8.RuneCountInString(*body.Token) < 32 || utf8.RuneCountInString(*body.Token) > 128 {
-			reply(w, 422, map[string]string{"detail": "Invalid request fields"})
-			return
-		}
-		if services.Account == nil {
-			reply(w, 503, map[string]string{"detail": "Account sign-in is temporarily unavailable"})
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		token, err := services.Account.ClaimAccount(ctx, *body.Token, sessionToken(r))
-		if errors.Is(err, store.ErrDenied) {
-			reply(w, 401, map[string]string{"detail": "This link is invalid or expired. Request a new link."})
-			return
-		}
-		if err != nil {
-			reply(w, 503, map[string]string{"detail": "Account sign-in is temporarily unavailable"})
-			return
-		}
-		http.SetCookie(w, &http.Cookie{Name: "dad_donor_session", Value: token, MaxAge: 30 * 86400, HttpOnly: true, Secure: strings.HasPrefix(guard.origin, "https:"), SameSite: http.SameSiteLaxMode, Path: "/"})
-		reply(w, 200, map[string]bool{"claimed": true})
-	})
-	mux.HandleFunc("POST /donor/logout", func(w http.ResponseWriter, r *http.Request) {
-		if !guard.check(w, r, reply) {
-			return
-		}
-		if services.Account == nil {
-			reply(w, 503, map[string]string{"detail": "Account sign-in is temporarily unavailable"})
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		if err := services.Account.SignOut(ctx, sessionToken(r)); err != nil {
-			reply(w, 503, map[string]string{"detail": "Sign-out is temporarily unavailable"})
-			return
-		}
-		http.SetCookie(w, &http.Cookie{Name: "dad_donor_session", MaxAge: -1, HttpOnly: true, Secure: strings.HasPrefix(guard.origin, "https:"), SameSite: http.SameSiteLaxMode, Path: "/"})
-		reply(w, 200, map[string]bool{"signed_out": true})
-	})
+const (
+	donorSessionAge = 30 * 24 * 60 * 60
+	maxEmailRunes   = 320
+)
+
+func validProof(token string) bool {
+	n := utf8.RuneCountInString(token)
+	return n >= 32 && n <= 128
+}
+
+func (a *api) login(w http.ResponseWriter, r *http.Request) {
+	const unavailable = "Account sign-in is temporarily unavailable"
+	var body struct {
+		Email *string `json:"email"`
+	}
+	if !decodeJSON(w, r, &body) || body.Email == nil || utf8.RuneCountInString(*body.Email) > maxEmailRunes {
+		invalidFields(w, r)
+		return
+	}
+	if !a.EmailConfigured {
+		writeError(w, r, http.StatusServiceUnavailable, "Account email is not configured yet", nil)
+		return
+	}
+	if a.Account == nil {
+		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	switch err := a.Account.QueueLogin(ctx, *body.Email); {
+	case errors.Is(err, identity.ErrEmail):
+		writeError(w, r, http.StatusUnprocessableEntity, "Enter a valid email address", nil)
+	case err != nil:
+		writeError(w, r, http.StatusServiceUnavailable, unavailable, err)
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]string{"message": "If this email matches a donor account, a sign-in link will arrive shortly."})
+	}
+}
+
+func (a *api) claim(w http.ResponseWriter, r *http.Request) {
+	const unavailable = "Account sign-in is temporarily unavailable"
+	var body struct {
+		Token *string `json:"token"`
+	}
+	if !decodeJSON(w, r, &body) || body.Token == nil || !validProof(*body.Token) {
+		invalidFields(w, r)
+		return
+	}
+	if a.Account == nil {
+		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	token, err := a.Account.ClaimAccount(ctx, *body.Token, cookieValue(r, donorCookie))
+	switch {
+	case errors.Is(err, store.ErrDenied):
+		writeError(w, r, http.StatusUnauthorized, "This link is invalid or expired. Request a new link.", nil)
+	case err != nil:
+		writeError(w, r, http.StatusServiceUnavailable, unavailable, err)
+	default:
+		a.setCookie(w, donorCookie, token, donorSessionAge, http.SameSiteLaxMode)
+		writeJSON(w, http.StatusOK, map[string]bool{"claimed": true})
+	}
+}
+
+func (a *api) logout(w http.ResponseWriter, r *http.Request) {
+	if a.Account == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "Account sign-in is temporarily unavailable", nil)
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	if err := a.Account.SignOut(ctx, cookieValue(r, donorCookie)); err != nil {
+		writeError(w, r, http.StatusServiceUnavailable, "Sign-out is temporarily unavailable", err)
+		return
+	}
+	a.setCookie(w, donorCookie, "", -1, http.SameSiteLaxMode)
+	writeJSON(w, http.StatusOK, map[string]bool{"signed_out": true})
 }

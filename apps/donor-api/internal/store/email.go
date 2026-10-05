@@ -42,63 +42,83 @@ func (w LoginEmailWorker) DeliverNext(ctx context.Context, now time.Time) (bool,
 	if err != nil || !worked || !id.Valid {
 		return worked, err
 	}
+	message, err := w.claim(ctx, id, now)
+	if err != nil || message == nil {
+		return err == nil, err
+	}
+	q := queries.New(w.DB)
+	if err = w.Transport.Send(ctx, *message); err != nil {
+		err = q.FailLoginEmail(ctx, queries.FailLoginEmailParams{ID: id, LastError: pgtype.Text{String: "DeliveryError", Valid: true}, AvailableAt: timestamp(now.Add(time.Minute))})
+	} else {
+		err = q.CompleteLoginEmail(ctx, queries.CompleteLoginEmailParams{ID: id, CompletedAt: timestamp(now)})
+	}
+	return err == nil, err
+}
+
+// claim rechecks the job under the donor lock and reserves it for one send,
+// which happens after the lock is released.
+func (w LoginEmailWorker) claim(ctx context.Context, id pgtype.UUID, now time.Time) (*mail.Message, error) {
 	tx, err := w.DB.Begin(ctx)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer tx.Rollback(ctx)
 	q := queries.New(tx)
 	job, err := q.LoginEmailByID(ctx, id)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if job.CompletedAt.Valid || job.AvailableAt.Time.After(now) || job.Attempts >= 5 {
-		return true, tx.Commit(ctx)
+		return nil, tx.Commit(ctx)
 	}
 	donor, err := q.LockDonor(ctx, job.DonorID)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if donor.Disabled || !job.ExpiresAt.Valid || !job.ExpiresAt.Time.After(now) {
 		if err = q.CompleteLoginEmail(ctx, queries.CompleteLoginEmailParams{ID: id, CompletedAt: timestamp(now)}); err != nil {
-			return false, err
+			return nil, err
 		}
-		return true, tx.Commit(ctx)
+		return nil, tx.Commit(ctx)
 	}
-	if err = q.IncrementLoginEmailAttempt(ctx, id); err != nil {
-		return false, err
+	if err = q.ClaimLoginEmail(ctx, queries.ClaimLoginEmailParams{ID: id, AvailableAt: timestamp(now.Add(deliveryLease))}); err != nil {
+		return nil, err
 	}
-	sendErr := func() error {
-		token, err := credentials.Decrypt(job.EncryptedToken, w.Settings.EncryptionKey)
-		if err != nil {
-			return err
-		}
-		// Old Python tokens are exactly 32 random bytes encoded as URL-safe text.
-		raw, err := base64.RawURLEncoding.Strict().DecodeString(string(token))
-		if err != nil || len(raw) != 32 {
-			return credentials.ErrInvalid
-		}
-		messageID, err := mail.MessageID(w.Settings.Sender, "login", id.String())
-		if err != nil {
-			return err
-		}
-		return w.Transport.Send(ctx, mail.Message{From: w.Settings.Sender, To: donor.Email, Subject: "Sign in to your DAD sandbox account", ID: messageID, Body: "Use this link to claim or sign in to your DAD sandbox donor account.\n\n" + w.Origin + "/account/claim#token=" + string(token) + "\n\n" +
-			"Confirm on the page to continue. This single-use link expires in 15 minutes.\n" +
-			"If you did not request it, ignore this email. No account access is granted until you confirm. This is an account access message, not a tax receipt.\n"})
-	}()
-	if sendErr != nil {
+	token, err := loginToken(job.EncryptedToken, w.Settings.EncryptionKey)
+	if err != nil {
 		category := "DeliveryError"
-		if errors.Is(sendErr, credentials.ErrInvalid) {
+		if errors.Is(err, credentials.ErrInvalid) {
 			category = "InvalidToken"
 		}
-		err = q.FailLoginEmail(ctx, queries.FailLoginEmailParams{ID: id, LastError: pgtype.Text{String: category, Valid: true}, AvailableAt: timestamp(now.Add(time.Minute))})
-	} else {
-		err = q.CompleteLoginEmail(ctx, queries.CompleteLoginEmailParams{ID: id, CompletedAt: timestamp(now)})
+		if err = q.FailLoginEmail(ctx, queries.FailLoginEmailParams{ID: id, LastError: pgtype.Text{String: category, Valid: true}, AvailableAt: timestamp(now.Add(time.Minute))}); err != nil {
+			return nil, err
+		}
+		return nil, tx.Commit(ctx)
 	}
+	messageID, err := mail.MessageID(w.Settings.Sender, "login", id.String())
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return true, tx.Commit(ctx)
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &mail.Message{From: w.Settings.Sender, To: donor.Email, Subject: "Sign in to your DAD sandbox account", ID: messageID, Body: "Use this link to claim or sign in to your DAD sandbox donor account.\n\n" + w.Origin + "/account/claim#token=" + token + "\n\n" +
+		"Confirm on the page to continue. This single-use link expires in 15 minutes.\n" +
+		"If you did not request it, ignore this email. No account access is granted until you confirm. This is an account access message, not a tax receipt.\n"}, nil
+}
+
+// loginToken decrypts a queued sign-in token. Tokens are 32 random bytes in
+// unpadded URL-safe base64, the contract shared with every issued claim link.
+func loginToken(ciphertext []byte, key string) (string, error) {
+	token, err := credentials.Decrypt(ciphertext, key)
+	if err != nil {
+		return "", err
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(string(token))
+	if err != nil || len(raw) != 32 {
+		return "", credentials.ErrInvalid
+	}
+	return string(token), nil
 }
 
 func (w LoginEmailWorker) prepare(ctx context.Context, now time.Time) (pgtype.UUID, bool, error) {

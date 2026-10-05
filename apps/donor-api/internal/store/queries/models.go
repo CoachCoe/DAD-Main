@@ -101,6 +101,8 @@ type DonorGift struct {
 	PeriodID              pgtype.UUID        `json:"period_id"`
 	ID                    pgtype.UUID        `json:"id"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	ReferrerID            pgtype.UUID        `json:"referrer_id"`
+	ReferralKind          pgtype.Text        `json:"referral_kind"`
 }
 
 type DonorLoginEmail struct {
@@ -155,6 +157,8 @@ type DonorMetricProjection struct {
 	NextRefreshAt     pgtype.Timestamptz `json:"next_refresh_at"`
 	ID                pgtype.UUID        `json:"id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	RefreshFailures   int32              `json:"refresh_failures"`
+	RefreshError      pgtype.Text        `json:"refresh_error"`
 }
 
 type DonorPartnerSignup struct {
@@ -294,6 +298,7 @@ type DonorStripeEvent struct {
 	LastError     pgtype.Text        `json:"last_error"`
 	ID            pgtype.UUID        `json:"id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	AvailableAt   pgtype.Timestamptz `json:"available_at"`
 }
 
 type DonorSubscription struct {

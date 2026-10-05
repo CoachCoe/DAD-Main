@@ -16,12 +16,12 @@ type countedQueries struct {
 	reads int
 }
 
-func (db *countedQueries) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (db *countedQueries) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	db.reads++
 	return db.DBTX.Query(ctx, sql, args...)
 }
 
-func (db *countedQueries) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (db *countedQueries) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	db.reads++
 	return db.DBTX.QueryRow(ctx, sql, args...)
 }

@@ -81,11 +81,11 @@ func TestCheckoutRetriesAndReservations(t *testing.T) {
 	if len(gateway.calls) != 2 || !bytes.Equal(gateway.calls[0].params, gateway.calls[1].params) || gateway.calls[0].key != gateway.calls[1].key {
 		t.Fatal("retry parameters or key changed")
 	}
-	var params map[string]interface{}
+	var params map[string]any
 	if err = json.Unmarshal(gateway.calls[0].params, &params); err != nil {
 		t.Fatal(err)
 	}
-	if params["customer"] != nil || params["customer_email"] != request.Email || params["mode"] != "subscription" || params["payment_method_types"] != nil || params["allowed_payment_method_types"].([]interface{})[0] != "card" {
+	if params["customer"] != nil || params["customer_email"] != request.Email || params["mode"] != "subscription" || params["payment_method_types"] != nil || params["allowed_payment_method_types"].([]any)[0] != "card" {
 		t.Fatalf("wrong guest parameters: %v", params)
 	}
 	repeated, err := service.BeginCheckout(ctx, request)
@@ -192,11 +192,11 @@ func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 	if _, err := service.BeginCheckout(ctx, request); err != nil {
 		t.Fatal(err)
 	}
-	var params map[string]interface{}
+	var params map[string]any
 	if err := json.Unmarshal(gateway.calls[1].params, &params); err != nil {
 		t.Fatal(err)
 	}
-	metadata := params["subscription_data"].(map[string]interface{})["metadata"].(map[string]interface{})
+	metadata := params["subscription_data"].(map[string]any)["metadata"].(map[string]any)
 	if metadata["dad_referrer_id"] != referrer.String() || metadata["dad_referral_kind"] != "IRL" {
 		t.Fatal("snapshot referral was lost on retry")
 	}
@@ -211,7 +211,7 @@ func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 	if err := json.Unmarshal(gateway.calls[2].params, &params); err != nil {
 		t.Fatal(err)
 	}
-	if params["metadata"].(map[string]interface{})["dad_referrer_id"] != nil {
+	if params["metadata"].(map[string]any)["dad_referrer_id"] != nil {
 		t.Fatal("self referral accepted")
 	}
 }

@@ -11,6 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const giftRefundObservations = `-- name: GiftRefundObservations :one
+SELECT count(*)::bigint FROM donor_refund_observations o JOIN donor_refunds r ON r.id=o.refund_id WHERE r.gift_id=$1
+`
+
+func (q *Queries) GiftRefundObservations(ctx context.Context, giftID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, giftRefundObservations, giftID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const insertStaffAction = `-- name: InsertStaffAction :exec
 INSERT INTO donor_staff_actions(id,actor_id,donor_id,kind,target_id,reason,amount_minor,period_end,created_at)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -102,7 +113,7 @@ func (q *Queries) StaffActionByID(ctx context.Context, id pgtype.UUID) (DonorSta
 }
 
 const staffGift = `-- name: StaffGift :one
-SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at FROM donor_gifts WHERE donor_id=$1 AND id=$2 FOR UPDATE
+SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at, referrer_id, referral_kind FROM donor_gifts WHERE donor_id=$1 AND id=$2 FOR UPDATE
 `
 
 type StaffGiftParams struct {
@@ -125,6 +136,38 @@ func (q *Queries) StaffGift(ctx context.Context, arg StaffGiftParams) (DonorGift
 		&i.PeriodID,
 		&i.ID,
 		&i.CreatedAt,
+		&i.ReferrerID,
+		&i.ReferralKind,
+	)
+	return i, err
+}
+
+const staffGiftSnapshot = `-- name: StaffGiftSnapshot :one
+SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at, referrer_id, referral_kind FROM donor_gifts WHERE donor_id=$1 AND id=$2
+`
+
+type StaffGiftSnapshotParams struct {
+	DonorID pgtype.UUID `json:"donor_id"`
+	ID      pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) StaffGiftSnapshot(ctx context.Context, arg StaffGiftSnapshotParams) (DonorGift, error) {
+	row := q.db.QueryRow(ctx, staffGiftSnapshot, arg.DonorID, arg.ID)
+	var i DonorGift
+	err := row.Scan(
+		&i.DonorID,
+		&i.CheckoutID,
+		&i.StripeObjectID,
+		&i.AmountMinor,
+		&i.Currency,
+		&i.Frequency,
+		&i.PaidAt,
+		&i.StripePaymentIntentID,
+		&i.PeriodID,
+		&i.ID,
+		&i.CreatedAt,
+		&i.ReferrerID,
+		&i.ReferralKind,
 	)
 	return i, err
 }

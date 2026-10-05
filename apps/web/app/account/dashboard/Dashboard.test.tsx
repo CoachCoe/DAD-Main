@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import DashboardPage from "./page";
+import DashboardPage from "./Dashboard";
 
 const data = { mode: "test", state: "ready", computed_at: "2027-01-01T00:00:00Z", founding_donor: true,
   referrals: { link: 2, irl: 3, total_minor: 12345, link_minor: 10000, irl_minor: 2345, currency: "USD" },
@@ -23,8 +23,19 @@ it("shows the five elements with separate channels and collected-dollar breakdow
   fireEvent.click(screen.getByText("View Link and IRL breakdown"));
   expect(screen.getByText("Link: $100.00")).toBeVisible();
   expect(screen.getByText("IRL: $23.45")).toBeVisible();
-  expect(screen.getByText("Earned in this sandbox")).toBeVisible();
+  const badge = screen.getByRole("heading", { name: "Founding Donor" }).closest("article");
+  if (!badge) throw new Error("Missing badge card");
+  expect(within(badge).getByText("Earned")).toBeVisible();
+  expect(screen.queryByText(/not yet earned/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Combined referrals/i)).not.toBeInTheDocument();
+});
+
+it("shows the badge only when earned, and otherwise explains how it is earned", async () => {
+  respond({ ...data, founding_donor: false }); render(<DashboardPage />);
+  expect(await screen.findByRole("heading", { name: "Link Referrals" })).toBeVisible();
+  expect(screen.queryByRole("heading", { name: "Founding Donor" })).not.toBeInTheDocument();
+  expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(4);
+  expect(screen.getByText(/Founding Donor badge: not yet earned/)).toHaveTextContent("first gift completed before DAD launches on 22 April 2027");
 });
 
 it("does not substitute zeros for unavailable metrics", async () => {
@@ -52,9 +63,11 @@ it("supports connection failure and retry", async () => {
   vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("Offline"))
     .mockResolvedValueOnce({ ok: true, json: async () => data }));
   render(<DashboardPage />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Check your connection");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Check your connection"));
+  expect(screen.getByRole("alert")).not.toHaveTextContent("Offline");
   fireEvent.click(screen.getByRole("button", { name: "Refresh dashboard" }));
   expect(await screen.findByText("$123.45")).toBeVisible();
+  expect(screen.getByRole("alert")).toBeEmptyDOMElement();
 });
 
 it("distinguishes preparing data from an empty account", async () => {

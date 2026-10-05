@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"impactgraph/donor-api/internal/identity"
+	"impactgraph/donor-api/internal/recognition"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -63,21 +64,21 @@ func contentSourceID(required map[pgtype.UUID]bool, value string) (string, error
 	return id.String(), nil
 }
 
-func (s ContentService) Publish(ctx context.Context, token string, r PublicationRequest) (map[string]interface{}, error) {
-	return staffTransaction(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (map[string]interface{}, error) {
-		zone, err := time.LoadLocation("America/New_York")
-		if err != nil {
-			return nil, err
-		}
-		today := now.In(zone).Format(time.DateOnly)
+type Publication struct {
+	PublicationID pgtype.UUID `json:"publication_id"`
+}
+
+func (s ContentService) Publish(ctx context.Context, token string, r PublicationRequest) (Publication, error) {
+	return staffTransaction(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (Publication, error) {
+		today := now.In(recognition.NewYork).Format(time.DateOnly)
 		asOf, err := time.Parse(time.DateOnly, r.AsOf)
 		cadence := identity.TrimSpace(r.Cadence)
 		if err != nil || asOf.Format(time.DateOnly) > today || len(cadence) == 0 || utf8.RuneCountInString(cadence) > 100 {
-			return nil, ErrStaffInput
+			return Publication{}, ErrStaffInput
 		}
 		initiatives, err := spreadsheetRows(r.InitiativesCSV, []string{"slug", "title", "summary", "partner", "planned_start", "board_approval_source_id", "approved_on"})
 		if err != nil {
-			return nil, err
+			return Publication{}, err
 		}
 		q := queries.New(tx)
 		requiredSources := make(map[pgtype.UUID]bool)
@@ -85,48 +86,48 @@ func (s ContentService) Publish(ctx context.Context, token string, r Publication
 		for _, row := range initiatives {
 			slug := row["slug"]
 			if len(slug) > 100 || !initiativeSlug.MatchString(slug) || slugs[slug] {
-				return nil, ErrStaffInput
+				return Publication{}, ErrStaffInput
 			}
 			slugs[slug] = true
 			for field, maximum := range map[string]int{"title": 150, "summary": 4000, "partner": 200} {
 				if identity.TrimSpace(row[field]) == "" || utf8.RuneCountInString(row[field]) > maximum {
-					return nil, ErrStaffInput
+					return Publication{}, ErrStaffInput
 				}
 			}
 			approved, err := time.Parse(time.DateOnly, row["approved_on"])
 			if err != nil || approved.Format(time.DateOnly) > today {
-				return nil, ErrStaffInput
+				return Publication{}, ErrStaffInput
 			}
 			if _, err = time.Parse(time.DateOnly, row["planned_start"]); err != nil {
-				return nil, ErrStaffInput
+				return Publication{}, ErrStaffInput
 			}
 			row["board_approval_source_id"], err = contentSourceID(requiredSources, row["board_approval_source_id"])
 			if err != nil {
-				return nil, err
+				return Publication{}, err
 			}
 		}
 		rows, err := spreadsheetRows(r.LedgerCSV, []string{"metric", "value", "unit", "source_id", "illustrative"})
 		if err != nil {
-			return nil, err
+			return Publication{}, err
 		}
-		ledger := make([]map[string]interface{}, 0, len(rows))
+		ledger := make([]map[string]any, 0, len(rows))
 		for _, row := range rows {
 			if identity.TrimSpace(row["metric"]) == "" || utf8.RuneCountInString(identity.TrimSpace(row["metric"])) > 150 || !ledgerInteger.MatchString(row["value"]) || !slices.Contains([]string{"USD_CENTS", "PEOPLE", "INITIATIVES", "PARTNERS"}, row["unit"]) || (row["illustrative"] != "true" && row["illustrative"] != "false") {
-				return nil, ErrStaffInput
+				return Publication{}, ErrStaffInput
 			}
 			value, err := strconv.ParseInt(row["value"], 10, 64)
 			if err != nil {
-				return nil, ErrStaffInput
+				return Publication{}, ErrStaffInput
 			}
 			illustrative := row["illustrative"] == "true"
-			var source interface{}
+			var source any
 			if row["source_id"] != "" || !illustrative {
 				source, err = contentSourceID(requiredSources, row["source_id"])
 				if err != nil {
-					return nil, err
+					return Publication{}, err
 				}
 			}
-			ledger = append(ledger, map[string]interface{}{"metric": row["metric"], "value": value, "unit": row["unit"], "source_id": source, "illustrative": illustrative})
+			ledger = append(ledger, map[string]any{"metric": row["metric"], "value": value, "unit": row["unit"], "source_id": source, "illustrative": illustrative})
 		}
 		if len(requiredSources) > 0 {
 			ids := make([]pgtype.UUID, 0, len(requiredSources))
@@ -135,29 +136,29 @@ func (s ContentService) Publish(ctx context.Context, token string, r Publication
 			}
 			found, err := q.ContentSourceIDs(ctx, ids)
 			if err != nil {
-				return nil, err
+				return Publication{}, err
 			}
 			if len(found) != len(ids) {
-				return nil, ErrStaffInput
+				return Publication{}, ErrStaffInput
 			}
 		}
-		payload, err := json.Marshal(map[string]interface{}{"initiatives": initiatives, "ledger": ledger, "ledger_as_of": r.AsOf, "cadence": cadence})
+		payload, err := json.Marshal(map[string]any{"initiatives": initiatives, "ledger": ledger, "ledger_as_of": r.AsOf, "cadence": cadence})
 		if err != nil {
-			return nil, err
+			return Publication{}, err
 		}
 		id, err := NewID()
 		if err != nil {
-			return nil, err
+			return Publication{}, err
 		}
 		if err = q.InsertPublication(ctx, queries.InsertPublicationParams{ID: id, ActorID: actor.ID, Payload: payload, CreatedAt: timestamp(now)}); err != nil {
-			return nil, err
+			return Publication{}, err
 		}
 		if err = q.PublishContentHead(ctx, id); err != nil {
-			return nil, err
+			return Publication{}, err
 		}
 		if err = auditStaff(ctx, q, actor.ID, "content.published", id.String(), map[string]int{"initiatives": len(initiatives), "metrics": len(ledger)}, now); err != nil {
-			return nil, err
+			return Publication{}, err
 		}
-		return map[string]interface{}{"publication_id": id}, nil
+		return Publication{PublicationID: id}, nil
 	})
 }

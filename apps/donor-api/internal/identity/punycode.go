@@ -58,14 +58,14 @@ func encode(prefix, s string) (string, error) {
 		}
 		delta += (m - n) * (h + 1)
 		if delta < 0 {
-			return "", fmt.Errorf("cookiejar: invalid label %q", s)
+			return "", fmt.Errorf("identity: invalid label %q", s)
 		}
 		n = m
 		for _, r := range s {
 			if r < n {
 				delta++
 				if delta < 0 {
-					return "", fmt.Errorf("cookiejar: invalid label %q", s)
+					return "", fmt.Errorf("identity: invalid label %q", s)
 				}
 				continue
 			}
@@ -105,7 +105,7 @@ func encodeDigit(digit int32) byte {
 	case 26 <= digit && digit < 36:
 		return byte(digit + ('0' - 26))
 	}
-	panic("cookiejar: internal error in punycode encoding")
+	panic("identity: internal error in punycode encoding")
 }
 
 // adapt is the bias adaptation function specified in section 6.1.

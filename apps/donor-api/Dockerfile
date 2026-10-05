@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.27.1 AS build
+FROM golang:1.27.1@sha256:e0174e51e81218523251d85d248a90d24c3d5e81543b4f07a5d66229397db190 AS build
 WORKDIR /src
 COPY apps/donor-api/go.mod apps/donor-api/go.sum ./
 RUN go mod download
@@ -10,7 +10,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/api ./cmd/api && \
     CGO_ENABLED=0 go build -trimpath -o /out/monitor ./cmd/monitor && \
     CGO_ENABLED=0 go build -trimpath -o /out/staff ./cmd/staff
 
-FROM alpine:3.22 AS runtime
+FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 AS runtime
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 donor
 COPY --from=build /out/ /usr/local/bin/
 USER donor

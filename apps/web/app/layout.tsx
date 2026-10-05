@@ -22,7 +22,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Dynamic Aid Delivery — Join the founding donors",
+  title: { default: "Dynamic Aid Delivery — Join the founding donors", template: "%s · Dynamic Aid Delivery" },
   description: "Give, invite people you know, and see your circle’s impact. DAD launches in April 2027.",
 };
 
