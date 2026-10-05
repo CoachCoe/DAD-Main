@@ -65,7 +65,7 @@ func Authenticated(ctx context.Context, q *queries.Queries, token string, now ti
 // ClaimInTx consumes email proof and inserts a hashed session. The caller must add
 // projection refresh and old-browser-session revocation in this SAME transaction,
 // commit it, and only then return the new cookie.
-func ClaimInTx(ctx context.Context, tx pgx.Tx, token string, now time.Time) (string, queries.Donor, error) {
+func ClaimInTx(ctx context.Context, tx pgx.Tx, token string) (string, queries.Donor, error) {
 	q := queries.New(tx)
 	empty := queries.Donor{}
 	link, err := q.LoginLink(ctx, HashToken(token))
@@ -85,6 +85,7 @@ func ClaimInTx(ctx context.Context, tx pgx.Tx, token string, now time.Time) (str
 	if donor.Disabled {
 		return "", empty, ErrDenied
 	}
+	now := time.Now().UTC()
 	if _, err = q.RedeemLoginLink(ctx, queries.RedeemLoginLinkParams{ID: link.ID, ConsumedAt: timestamp(now)}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = ErrDenied

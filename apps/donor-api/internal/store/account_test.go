@@ -22,7 +22,7 @@ func accountCleanup(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID) {
 		}
 	})
 }
-func claimProof(t *testing.T, pool *pgxpool.Pool, proof string, now time.Time) string {
+func claimProof(t *testing.T, pool *pgxpool.Pool, proof string) string {
 	t.Helper()
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
@@ -30,7 +30,7 @@ func claimProof(t *testing.T, pool *pgxpool.Pool, proof string, now time.Time) s
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	token, _, err := ClaimInTx(ctx, tx, proof, now)
+	token, _, err := ClaimInTx(ctx, tx, proof)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,8 +45,8 @@ func TestClaimRefreshesAndReplacesOnlyThisBrowser(t *testing.T) {
 	accountCleanup(t, pool, id)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	old := claimProof(t, pool, link(t, pool, id, now), now)
-	other := claimProof(t, pool, link(t, pool, id, now), now)
+	old := claimProof(t, pool, link(t, pool, id, now))
+	other := claimProof(t, pool, link(t, pool, id, now))
 	proof := link(t, pool, id, now)
 	service := AccountService{DB: pool}
 	token, err := service.ClaimAccount(ctx, proof, old)

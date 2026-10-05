@@ -17,7 +17,7 @@ func changeFixture(t *testing.T) (EmailChangeService, EmailChangeWorker, pgtype.
 	pool := database(t)
 	id, email := donor(t, pool)
 	accountCleanup(t, pool, id)
-	session := claimProof(t, pool, link(t, pool, id, time.Now()), time.Now())
+	session := claimProof(t, pool, link(t, pool, id, time.Now()))
 	t.Cleanup(func() {
 		for _, sql := range []string{"DELETE FROM donor_identity_events WHERE donor_id=$1", "DELETE FROM donor_email_changes WHERE donor_id=$1"} {
 			if _, err := pool.Exec(context.Background(), sql, id); err != nil {

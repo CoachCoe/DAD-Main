@@ -106,7 +106,7 @@ func (s *StaffService) SignIn(ctx context.Context, email, password, code string)
 	return token, nil
 }
 
-func staffInvitation(ctx context.Context, q *queries.Queries, token string, now time.Time) (queries.DonorStaffInvite, queries.DonorStaff, error) {
+func staffInvitation(ctx context.Context, q *queries.Queries, token string) (queries.DonorStaffInvite, queries.DonorStaff, error) {
 	var invite queries.DonorStaffInvite
 	var staff queries.DonorStaff
 	owner, err := q.StaffInviteOwner(ctx, HashToken(token))
@@ -127,7 +127,7 @@ func staffInvitation(ctx context.Context, q *queries.Queries, token string, now 
 	if err != nil {
 		return invite, staff, err
 	}
-	if invite.ConsumedAt.Valid || !invite.ExpiresAt.Time.After(now) || invite.Attempts >= 5 {
+	if invite.ConsumedAt.Valid || !invite.ExpiresAt.Time.After(time.Now().UTC()) || invite.Attempts >= 5 {
 		return invite, staff, ErrStaffDenied
 	}
 	return invite, staff, nil
@@ -140,7 +140,7 @@ func (s *StaffService) Provision(ctx context.Context, token string) (map[string]
 	}
 	defer tx.Rollback(ctx)
 	q := queries.New(tx)
-	invite, staff, err := staffInvitation(ctx, q, token, time.Now().UTC())
+	invite, staff, err := staffInvitation(ctx, q, token)
 	if err != nil {
 		return nil, err
 	}
@@ -184,11 +184,11 @@ func (s *StaffService) Activate(ctx context.Context, token, password, code strin
 	}
 	defer tx.Rollback(ctx)
 	q := queries.New(tx)
-	now := time.Now().UTC()
-	invite, staff, err := staffInvitation(ctx, q, token, now)
+	invite, staff, err := staffInvitation(ctx, q, token)
 	if err != nil {
 		return err
 	}
+	now := time.Now().UTC()
 	invite.Attempts++
 	counter := int64(-1)
 	if len(invite.PendingSecret) > 0 {
