@@ -47,6 +47,9 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 		if name == "referrals" && !slices.Contains(rows[0], "referral_kind") {
 			t.Fatal("referral type omitted")
 		}
+		if name == "referral-touches" && !slices.Contains(rows[0], "kind") {
+			t.Fatal("touch channel omitted")
+		}
 		if name == "donors" {
 			found := false
 			for _, row := range rows[1:] {

@@ -107,9 +107,11 @@ and [operations](operations.md) for runtime behavior and instructions.
 
 The receiving entity remains unverified and the application accepts test payments only.
 Gift records and summaries are explicitly sandbox records, not approved tax receipts.
-Terms, Privacy, and donor consent need approved content. Wallet pass issuance, analytics
-instrumentation, app design deliverables, physical-device QR acceptance, and operational
-release acceptance remain separate from the backend rewrite. The web referral-code page
+Terms, Privacy, and donor consent need approved content. [Wallet issuance](wallet.md) is
+implemented behind optional issuer configuration; real-provider/device acceptance remains
+open. [Analytics](analytics.md) defines available financial facts and the pending browser
+collection contract. App design deliverables and operational release acceptance remain
+separate from the backend rewrite. The web referral-code page
 offers full screen and manual brightness instructions; it cannot promise hardware
 brightness control. Email changes require single-use confirmations at both the current
 and proposed address, each expiring after 15 minutes. Completing a change preserves the
