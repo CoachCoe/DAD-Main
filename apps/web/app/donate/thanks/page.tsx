@@ -32,7 +32,7 @@ export default async function ThankYouPage({ searchParams }: PageProps<"/donate/
         <div className="claimCallout">
           <h2>Claim your account</h2>
           <p>Claiming gives you your giving streak and your personal referral link and code, so the people you invite count toward your circle.
-            We’ve emailed a claim link to the address you gave. If it hasn’t arrived, request a new one.</p>
+            Once your gift is confirmed, we’ll email a claim link to the address you gave. If it hasn’t arrived, request a new one.</p>
           <Link className="button" href="/account/sign-in">Claim your account</Link>
         </div>
         <p><Link className="secondary" href="/donate">Make another gift</Link></p>

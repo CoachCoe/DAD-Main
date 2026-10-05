@@ -67,7 +67,9 @@ describe("proxy scope", () => {
     expect(sets(url)).toBe(false);
   });
 
-  it("skips router prefetches, which are not documents", () => {
-    expect(sets("/account/dashboard", { "next-router-prefetch": "1" })).toBe(false);
+  it.each([["next-router-prefetch", "1"], ["purpose", "prefetch"]])("keeps the policy when a document request carries %s", (name, value) => {
+    const headers = { [name]: value };
+    expect(sets("/account/dashboard", headers)).toBe(true);
+    expect(sets("/staff/sign-in", headers)).toBe(true);
   });
 });

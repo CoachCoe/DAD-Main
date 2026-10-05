@@ -98,7 +98,7 @@ make test-browser-e2e
 ```
 
 Browser tests run against `next dev` by default; set `E2E_PRODUCTION=1` to run them
-against a production build (`next build && next start`), where account and staff pages
+against a production build (`npm run build && npm start`), where account and staff pages
 use the nonce-based CSP. Next allows
 one dev server per checkout, so stop any running `make web` first.
 
@@ -107,7 +107,10 @@ unit tests, generated route types, TypeScript, and the production build. Browser
 start a local Go API and Next server. Use a synthetic application database and no live
 SMTP settings for those tests. `make lint` runs staticcheck, govulncheck, `npm audit`, and
 shellcheck when installed. CI runs all of these with PostgreSQL and Chromium, and also
-validates the production Compose file and builds both images.
+validates the production Compose file and builds both images. CI runs browser tests in
+both development and production modes. `npm start` serves the standalone build and copies
+its static assets first, matching the container's server. For a local production preview,
+run `HOSTNAME=127.0.0.1 PORT=3000 npm start` from `apps/web` after building.
 
 SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc; commit SQL and its
 generated Go query code together. `make check-generated` fails if they have drifted.

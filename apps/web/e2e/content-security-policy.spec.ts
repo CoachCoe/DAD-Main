@@ -17,6 +17,16 @@ async function recordViolations(page: Page) {
 const hydrated = (page: Page, selector: string) =>
   page.locator(selector).first().evaluate((element) => Object.keys(element).some((key) => key.startsWith("__reactFiber")));
 
+test("prefetch headers cannot remove a private document's security policy", async ({ request }) => {
+  for (const path of ["/account/sign-in", "/staff/sign-in"]) {
+    for (const [name, value] of [["next-router-prefetch", "1"], ["purpose", "prefetch"]]) {
+      const response = await request.get(path, { headers: { [name]: value } });
+      expect(response.status()).toBe(200);
+      expect(response.headers()["content-security-policy"]).toMatch(/'nonce-[^']+' 'strict-dynamic'/);
+    }
+  }
+});
+
 test("the donor dashboard runs under a per-request nonce policy", async ({ page }) => {
   const violations = await recordViolations(page);
   const response = await page.goto("/account/dashboard");
