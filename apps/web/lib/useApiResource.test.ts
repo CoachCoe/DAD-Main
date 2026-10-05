@@ -24,6 +24,7 @@ it("loads data, reports it once to onLoad, and reloads on request", async () => 
 it.each([
   [reply(401), { state: "signedOut" }],
   [reply(403), { state: "forbidden" }],
+  [reply(404), { state: "notFound" }],
   [reply(429), { state: "error", rateLimited: true }],
   [reply(503), { state: "error", rateLimited: false }],
 ])("maps an HTTP failure to a screen state", async (response, expected) => {
@@ -63,4 +64,6 @@ it("gives each non-ready state its own copy", () => {
   expect(resourceMessages({ state: "error", rateLimited: true }, copy).alert).toBe(RATE_LIMITED_MESSAGE);
   expect(resourceMessages({ state: "error", rateLimited: false }, copy).alert).toBe("Could not load.");
   expect(resourceMessages({ state: "signedOut" }, copy)).toEqual({ status: "", alert: "" });
+  expect(resourceMessages({ state: "notFound" }, copy).alert).toBe("Could not load.");
+  expect(resourceMessages({ state: "notFound" }, { ...copy, notFound: "No such record." }).alert).toBe("No such record.");
 });

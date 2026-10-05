@@ -1,27 +1,19 @@
 "use client";
 import { useState } from "react";
+import Form from "next/form";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { api, ApiError, failureMessage } from "@/lib/api";
-import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
 export type StaffMember = { id: string; email: string; name: string; role: string; permissions: string[]; active: boolean; disabled: boolean };
 type Donors = { donors: { id: string; email: string; public_name: string | null; claimed: boolean; disabled: boolean }[]; next_offset: number | null };
-type Detail = { id: string; email: string; public_name: string | null;
-  streak: { current: number | null; best: number; at_risk: boolean; computed_at: string } | null;
-  referrer: { id: string; email: string; type: string } | null;
-  gifts: { id: string; amount_minor: number; currency: string; frequency: string; paid_at: string }[];
-  referred: { id: string; email: string; type: string; net_minor: number | null }[];
-  next_gifts_offset: number | null; next_referrals_offset: number | null };
 
-export default function Staff() {
+/** `q` is the submitted search, kept in the URL so Back from a donor record returns to it. */
+export default function Staff({ q }: { q: string | null }) {
   const [signedOut, setSignedOut] = useState(false);
   const { resource, data: actor, reload } = useApiResource<StaffMember>(signedOut ? null : "/donor/staff/me");
   const [error, setError] = useState("");
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<Donors | null>(null);
-  const [detail, setDetail] = useState<Detail | null>(null);
   const [accounts, setAccounts] = useState<StaffMember[] | null>(null);
   const [invitation, setInvitation] = useState("");
   const [email, setEmail] = useState("");
@@ -41,10 +33,6 @@ export default function Staff() {
       else setError(failureMessage(cause, "The request was not confirmed. Refresh to check its status before retrying."));
     } finally { setBusy(false); }
   }
-  const search = (offset = 0) => action(async () => { setResults(await api<Donors>(`/donor/staff/donors?q=${encodeURIComponent(q)}&offset=${offset}`)); setDetail(null); });
-  const open = (id: string, gifts = 0, referrals = 0) => action(async () => {
-    setDetail(await api<Detail>(`/donor/staff/donors/${encodeURIComponent(id)}?gifts_offset=${gifts}&referrals_offset=${referrals}`));
-  });
   const refreshAccounts = async () => setAccounts(await api<StaffMember[]>("/donor/staff/accounts"));
   const absent = signedOut || resource.state === "signedOut";
   return <section className="panel"><h1>DAD staff back office</h1><p>Sandbox donor records. Staff access and actions are audited.</p>
@@ -55,28 +43,11 @@ export default function Staff() {
         {actor.permissions.includes("content.publish") && <><Link href="/staff/content">Publish spreadsheet content</Link><Link href="/staff/partners">Partner inquiries</Link></>}
         {actor.permissions.includes("audit.read") && <Link href="/staff/audit">Audit history</Link>}
       </nav>
-      <form onSubmit={(event) => { event.preventDefault(); search(); }}>
-        <label>Find donor by email<input type="search" maxLength={320} value={q} onChange={(event) => setQ(event.target.value)} /></label>
-        <button type="submit" className="button" disabled={busy}>Search donors</button>
-      </form>
-      {results && <><h2>Donors</h2>{results.donors.length ? <ul>{results.donors.map((donor) => <li key={donor.id}>
-        <button type="button" className="quiet" disabled={busy} onClick={() => open(donor.id)}>{donor.email}</button> · {donor.claimed ? "Claimed" : "Guest"}{donor.disabled ? " · Disabled" : ""}
-      </li>)}</ul> : <p>No matching donors.</p>}
-        {results.next_offset !== null && <button type="button" className="secondary" disabled={busy} onClick={() => search(results.next_offset ?? 0)}>Next donor page</button>}
-      </>}
-      {detail && <article><h2>{detail.email}</h2><p><Link href={`/staff/messages?donor=${encodeURIComponent(detail.id)}`}>Delivery history and resends</Link></p><p>Public nickname: {detail.public_name || "Not shared"}</p>
-        <p>Streak: {detail.streak?.current ?? "Updating"} · Best: {detail.streak?.best ?? "Updating"}{detail.streak?.at_risk ? " · At risk" : ""}</p>
-        {detail.streak && <p>Computed {new Date(detail.streak.computed_at).toLocaleString()}</p>}
-        <p>Referrer: {detail.referrer ? `${detail.referrer.email} · ${detail.referrer.type}` : "No attributed referrer"}</p>
-        <h3>Gifts</h3>{actor.permissions.includes("gift.cancel") && <p><Link href={`/staff/finance?donor=${encodeURIComponent(detail.id)}`}>Cancel monthly giving</Link></p>}{detail.gifts.length ? <ul>{detail.gifts.map((gift) => <li key={gift.id}>
-          {formatMoney(gift.amount_minor, gift.currency)} · {gift.frequency} · {new Date(gift.paid_at).toLocaleString()} · <code>{gift.id}</code>{actor.permissions.includes("gift.refund") && <> · <Link href={`/staff/finance?donor=${encodeURIComponent(detail.id)}&gift=${encodeURIComponent(gift.id)}`}>Refund gift</Link></>}
-        </li>)}</ul> : <p>No gifts recorded.</p>}
-        {detail.next_gifts_offset !== null && <button type="button" className="secondary" disabled={busy} onClick={() => open(detail.id, detail.next_gifts_offset ?? 0)}>Older gifts</button>}
-        <h3>People referred</h3>{detail.referred.length ? <ul>{detail.referred.map((person) => <li key={person.id}>
-          {person.email} · {person.type} · Net {person.net_minor === null ? "Updating" : formatMoney(person.net_minor)}
-        </li>)}</ul> : <p>No converting referrals recorded.</p>}
-        {detail.next_referrals_offset !== null && <button type="button" className="secondary" disabled={busy} onClick={() => open(detail.id, 0, detail.next_referrals_offset ?? 0)}>More referrals</button>}
-      </article>}
+      <Form action="/staff" role="search">
+        <label>Find donor by email<input key={q} type="search" name="q" maxLength={320} defaultValue={q ?? ""} /></label>
+        <button type="submit" className="button">Search donors</button>
+      </Form>
+      {q !== null && <DonorSearch key={q} q={q} />}
       {actor.permissions.includes("staff.manage") && <section><h2>Staff access</h2>
         <button type="button" className="secondary" disabled={busy} onClick={() => action(refreshAccounts)}>Refresh staff accounts</button>
         {accounts && <ul>{accounts.map((account) => <li key={account.id}>{account.name} · {account.email} · {account.role} · {account.disabled ? "Disabled" : account.active ? "Active" : "Invited"}
@@ -113,5 +84,23 @@ export default function Staff() {
     </>}
     {(resource.state === "offline" || resource.state === "error") && <button type="button" className="secondary" onClick={reload}>Refresh access</button>}
     <Announcer status={absent ? "" : busy ? "Working…" : invitation ? "Invitation created." : messages.status} alert={absent ? "" : error || messages.alert} />
+  </section>;
+}
+
+function DonorSearch({ q }: { q: string }) {
+  const [offset, setOffset] = useState(0);
+  const { resource, data, reload } = useApiResource<Donors>(`/donor/staff/donors?q=${encodeURIComponent(q)}&offset=${offset}`);
+  const messages = resourceMessages(resource, { loading: "Searching donors…",
+    failure: "Donor search could not be completed right now. Please retry in a moment.",
+    forbidden: "Your staff role does not permit donor search." });
+  return <section aria-labelledby="donor-results"><h2 id="donor-results">Donors</h2>
+    {resource.state === "signedOut" && <p><Link className="button" href="/staff/sign-in">Staff sign-in</Link></p>}
+    {data && <>{data.donors.length ? <ul>{data.donors.map((donor) => <li key={donor.id}>
+      <Link href={`/staff/donors/${encodeURIComponent(donor.id)}`}>{donor.email}</Link> · {donor.claimed ? "Claimed" : "Guest"}{donor.disabled ? " · Disabled" : ""}
+    </li>)}</ul> : <p>No matching donors.</p>}
+      {data.next_offset !== null && <button type="button" className="secondary" onClick={() => setOffset(data.next_offset ?? 0)}>Next donor page</button>}
+    </>}
+    {(resource.state === "offline" || resource.state === "error") && <button type="button" className="secondary" onClick={reload}>Retry search</button>}
+    <Announcer status={messages.status} alert={messages.alert} />
   </section>;
 }

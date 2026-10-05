@@ -8,6 +8,7 @@ export type Resource<T> =
   | { state: "ready"; data: T }
   | { state: "signedOut" }
   | { state: "forbidden" }
+  | { state: "notFound" }
   | { state: "offline" }
   | { state: "error"; rateLimited: boolean };
 
@@ -41,7 +42,7 @@ export function useApiResource<T>(path: string | null, options: Options<T> = {})
     }).catch((cause) => {
       if (controller.signal.aborted) return;
       const failure = typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : classifyFailure(cause);
-      if (failure === "signedOut" || failure === "forbidden" || failure === "offline") setResource({ state: failure });
+      if (failure === "signedOut" || failure === "forbidden" || failure === "notFound" || failure === "offline") setResource({ state: failure });
       else setResource({ state: "error", rateLimited: failure === "rateLimited" });
     });
     return () => controller.abort();
@@ -53,11 +54,12 @@ export function useApiResource<T>(path: string | null, options: Options<T> = {})
 }
 
 /** The live-region copy for a resource that is not ready. */
-export function resourceMessages(resource: Resource<unknown>, copy: { loading: string; failure: string; forbidden?: string }) {
+export function resourceMessages(resource: Resource<unknown>, copy: { loading: string; failure: string; forbidden?: string; notFound?: string }) {
   switch (resource.state) {
     case "loading": return { status: copy.loading, alert: "" };
     case "offline": return { status: "", alert: OFFLINE_MESSAGE };
     case "forbidden": return { status: "", alert: copy.forbidden ?? "You don’t have permission to view this page." };
+    case "notFound": return { status: "", alert: copy.notFound ?? copy.failure };
     case "error": return { status: "", alert: resource.rateLimited ? RATE_LIMITED_MESSAGE : copy.failure };
     default: return { status: "", alert: "" };
   }

@@ -87,6 +87,62 @@ test("a staff page past sign-in is accessible", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+const staffDetail = { id: "donor-1", email: "pat.donor@example.org", public_name: "Pat",
+  streak: { current: 4, best: 6, at_risk: false, computed_at: "2027-01-01T00:00:00Z" },
+  referrer: { id: "donor-0", email: "friend@example.org", type: "IRL" },
+  gifts: [{ id: "4f1c2b9e-0d7a-4e55-9b0c-1a2b3c4d5e6f", amount_minor: 3000, currency: "USD", frequency: "MONTHLY", paid_at: "2027-01-01T00:00:00Z" }],
+  referred: [{ id: "donor-2", email: "invitee@example.org", type: "LINK", net_minor: 3000 }],
+  next_gifts_offset: null, next_referrals_offset: null };
+
+async function mockStaffDonor(page: Page) {
+  await page.route("**/api/donor/staff/**", (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api", "");
+    if (path === "/donor/staff/me") return route.fulfill({ json: {
+      id: "staff-1", email: "finance@example.org", name: "Fin Ance", role: "FINANCE", active: true, disabled: false,
+      permissions: ["gift.refund", "gift.cancel"] } });
+    if (path === "/donor/staff/donors") return route.fulfill({ json: { donors: [
+      { id: "donor-1", email: "pat.donor@example.org", public_name: null, claimed: true, disabled: false }], next_offset: null } });
+    if (path === "/donor/staff/donors/donor-1") return route.fulfill({ json: staffDetail });
+    if (path === "/donor/staff/donors/donor-1/actions") return route.fulfill({ json: url.searchParams.get("offset") === "0"
+      ? { actions: [{ id: "action-1", actor_id: "staff-1", kind: "REFUND", target_id: staffDetail.gifts[0].id, amount_minor: 1000,
+        period_end: null, reason: "Donor asked for a partial refund", status: "SUCCEEDED", completed_at: "2027-01-02T00:00:00Z" }], next_offset: 50 }
+      : { actions: [], next_offset: null } });
+    return route.fulfill({ status: 404, json: { detail: "Not found" } });
+  });
+}
+
+test("a donor record has its own accessible page and Back returns to the search", async ({ page }) => {
+  const errors = collectErrors(page);
+  await mockStaffDonor(page);
+  await page.goto("/staff");
+  await page.getByRole("searchbox", { name: "Find donor by email" }).fill("pat");
+  await page.getByRole("button", { name: "Search donors" }).click();
+  await expect(page).toHaveURL(/\/staff\?q=pat$/);
+  await page.getByRole("link", { name: "pat.donor@example.org" }).click();
+  await expect(page).toHaveURL(/\/staff\/donors\/donor-1$/);
+  await expect(page).toHaveTitle(/^Donor record · /);
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);
+  await expect(page.getByRole("heading", { level: 1, name: "pat.donor@example.org" })).toBeVisible();
+  await expect(page.getByText("Donor asked for a partial refund", { exact: false })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Refund gift" })).toBeVisible();
+  await expectAccessible(page);
+  await page.getByRole("button", { name: "Older actions" }).click();
+  await expect(page.getByText("No refunds or cancellations recorded.")).toBeVisible();
+  await page.goBack();
+  await expect(page).toHaveURL(/\/staff\?q=pat$/);
+  await expect(page.getByRole("searchbox", { name: "Find donor by email" })).toHaveValue("pat");
+  await expect(page.getByRole("link", { name: "pat.donor@example.org" })).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("a donor record link that matches no donor says so accessibly", async ({ page }) => {
+  await mockStaffDonor(page);
+  await page.goto("/staff/donors/missing");
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("No donor record matches this link");
+  await expectAccessible(page);
+});
+
 test("staff pages separate a missing session from a missing permission", async ({ page }) => {
   await page.route("**/api/donor/staff/audit*", (route) => route.fulfill({ status: 403, json: { detail: "Forbidden" } }));
   await page.goto("/staff/audit");

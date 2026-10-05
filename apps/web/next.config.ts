@@ -1,31 +1,11 @@
 import type { NextConfig } from "next";
 import { loadEnvConfig } from "@next/env";
 import path from "node:path";
+import { contentSecurityPolicy } from "./lib/csp";
 
 loadEnvConfig(path.resolve(process.cwd(), "../.."));
 
-// Upgrading on a plain-HTTP origin would break every subresource, so it follows the origin.
-const httpsOrigin = process.env.DONOR_PUBLIC_ORIGIN?.startsWith("https://") ?? false;
-
 const securityHeaders = [
-  {
-    key: "Content-Security-Policy",
-    value: [
-      "default-src 'self'",
-      // Static Next pages carry inline hydration scripts; eval is only for development.
-      `script-src 'self' 'unsafe-inline'${process.env.NODE_ENV === "development" ? " 'unsafe-eval'" : ""}`,
-      // styled-jsx and the font loader both emit inline styles.
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: blob:",
-      "font-src 'self' data:",
-      "connect-src 'self'",
-      "frame-ancestors 'none'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      "object-src 'none'",
-      ...(httpsOrigin ? ["upgrade-insecure-requests"] : []),
-    ].join("; "),
-  },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "no-referrer" },
@@ -42,7 +22,15 @@ const nextConfig: NextConfig = {
   // output: standalone a rewrite destination is baked in at build time, so a runtime
   // API_BASE_URL was silently ignored.
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // proxy.ts sets a nonce policy on these instead. Browsers enforce every CSP header they
+      // receive, so this one must not reach those responses as well.
+      {
+        source: "/((?!(?:account|staff)(?:/|$)).*)",
+        headers: [{ key: "Content-Security-Policy", value: contentSecurityPolicy() }],
+      },
+    ];
   },
 };
 

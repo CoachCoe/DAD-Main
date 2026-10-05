@@ -4,13 +4,16 @@ import StaffFinancePage from "./Finance";
 
 const quote = { gift_id: "gift", donor_id: "donor", amount_minor: 3000, available_minor: 3000 };
 const response = (value: unknown) => ({ ok: true, json: async () => value });
+const actions = (items: unknown[], next_offset: number | null = null) => response({ actions: items, next_offset });
+const saved = { id: "saved-request", actor_id: "staff", kind: "REFUND", target_id: "gift", amount_minor: 1000,
+  reason: "Donor requested refund", status: "AUTHORIZED" };
 afterEach(() => { vi.unstubAllGlobals(); });
 
 it("requires confirmation of exact refund cents and the audit reason", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response(quote)).mockResolvedValueOnce(response([]))
-    .mockResolvedValueOnce(response({ id: "staff" })).mockResolvedValueOnce(response({ status: "PENDING" }))
-    .mockResolvedValueOnce(response({ ...quote, available_minor: 1766 })).mockResolvedValueOnce(response([]))
-    .mockResolvedValueOnce(response({ id: "staff" }));
+  const fetch = vi.fn().mockResolvedValueOnce(response(quote)).mockResolvedValueOnce(response({ id: "staff" }))
+    .mockResolvedValueOnce(actions([])).mockResolvedValueOnce(response({ status: "PENDING" }))
+    .mockResolvedValueOnce(response({ ...quote, available_minor: 1766 })).mockResolvedValueOnce(response({ id: "staff" }))
+    .mockResolvedValueOnce(actions([]));
   vi.stubGlobal("fetch", fetch);
   render(<StaffFinancePage donor="donor" gift="gift" />);
   fireEvent.change(await screen.findByLabelText("Refund in USD"), { target: { value: "12.34" } });
@@ -26,10 +29,8 @@ it("requires confirmation of exact refund cents and the audit reason", async () 
 });
 
 it("reuses a persisted uncertain request rather than minting another refund", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response(quote)).mockResolvedValueOnce(response([
-    { id: "saved-request", actor_id: "staff", kind: "REFUND", target_id: "gift", amount_minor: 1000,
-      reason: "Donor requested refund", status: "AUTHORIZED" },
-  ])).mockResolvedValueOnce(response({ id: "staff" })).mockRejectedValue(new Error("Offline"));
+  const fetch = vi.fn().mockResolvedValueOnce(response(quote)).mockResolvedValueOnce(response({ id: "staff" }))
+    .mockResolvedValueOnce(actions([saved])).mockRejectedValue(new Error("Offline"));
   vi.stubGlobal("fetch", fetch);
   render(<StaffFinancePage donor="donor" gift="gift" />);
   fireEvent.click(await screen.findByRole("button", { name: "Retry original financial action" }));
@@ -38,9 +39,29 @@ it("reuses a persisted uncertain request rather than minting another refund", as
   expect(JSON.parse(fetch.mock.calls[3][1].body).amount_minor).toBe(1000);
 });
 
+it("finds an uncertain request on a later page of the action history", async () => {
+  const other = { ...saved, id: "someone-else", actor_id: "other-staff" };
+  const fetch = vi.fn().mockResolvedValueOnce(response(quote)).mockResolvedValueOnce(response({ id: "staff" }))
+    .mockResolvedValueOnce(actions([other], 50)).mockResolvedValueOnce(actions([saved]));
+  vi.stubGlobal("fetch", fetch);
+  render(<StaffFinancePage donor="donor" gift="gift" />);
+  expect(await screen.findByRole("button", { name: "Retry original financial action" })).toBeVisible();
+  expect(fetch.mock.calls.slice(2).map(([url]) => url)).toEqual([
+    "/api/donor/staff/donors/donor/actions?offset=0", "/api/donor/staff/donors/donor/actions?offset=50"]);
+});
+
+it("stops paging once the action history is exhausted", async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(response(quote)).mockResolvedValueOnce(response({ id: "staff" }))
+    .mockResolvedValueOnce(actions([{ ...saved, status: "SUCCEEDED" }]));
+  vi.stubGlobal("fetch", fetch);
+  render(<StaffFinancePage donor="donor" gift="gift" />);
+  expect(await screen.findByRole("button", { name: "Review financial action" })).toBeVisible();
+  expect(fetch).toHaveBeenCalledTimes(3);
+});
+
 it("ties refund validation errors to the field and keeps the request unsent", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response(quote)).mockResolvedValueOnce(response([]))
-    .mockResolvedValueOnce(response({ id: "staff" }));
+  const fetch = vi.fn().mockResolvedValueOnce(response(quote)).mockResolvedValueOnce(response({ id: "staff" }))
+    .mockResolvedValueOnce(actions([]));
   vi.stubGlobal("fetch", fetch);
   render(<StaffFinancePage donor="donor" gift="gift" />);
   const amount = await screen.findByLabelText("Refund in USD");

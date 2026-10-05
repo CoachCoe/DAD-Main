@@ -29,12 +29,13 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export type Failure = "signedOut" | "forbidden" | "rateLimited" | "unavailable" | "rejected" | "offline";
+export type Failure = "signedOut" | "forbidden" | "notFound" | "rateLimited" | "unavailable" | "rejected" | "offline";
 
 export function classifyFailure(cause: unknown): Failure {
   if (cause instanceof ApiError) {
     if (cause.status === 401) return "signedOut";
     if (cause.status === 403) return "forbidden";
+    if (cause.status === 404) return "notFound";
     if (cause.status === 429) return "rateLimited";
     return cause.status >= 500 ? "unavailable" : "rejected";
   }

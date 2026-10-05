@@ -35,6 +35,7 @@ it("lets the browser provide FormData boundaries and Blob content types", async 
 it.each([
   [new ApiError("Sign in required", 401), "signedOut"],
   [new ApiError("Forbidden", 403), "forbidden"],
+  [new ApiError("Not found", 404), "notFound"],
   [new ApiError("Slow down", 429), "rateLimited"],
   [new ApiError("Bad gateway", 502), "unavailable"],
   [new ApiError("Link expired", 410), "rejected"],
