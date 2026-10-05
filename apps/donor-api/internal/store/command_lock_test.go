@@ -138,6 +138,13 @@ func TestOutstandingProcessorRequestBlocksOtherSubscriptionCommands(t *testing.T
 		_, err := r.service.Pause(ctx, r.token, pause)
 		return err
 	}, func() {
+		if _, err := r.service.Pause(ctx, r.token, pause); !errors.Is(err, ErrSubscriptionConflict) {
+			t.Error("duplicate request raced its outstanding processor call", err)
+		}
+		var holder pgtype.UUID
+		if err := pool.QueryRow(ctx, "SELECT command_id FROM donor_subscription_leases WHERE attempt_id=$1", r.attempt).Scan(&holder); err != nil || holder != pause.RequestID {
+			t.Error("duplicate request released the active lease", holder, err)
+		}
 		if _, err := r.service.ChangeAmount(ctx, r.token, amount); !errors.Is(err, ErrSubscriptionConflict) {
 			t.Error("amount change raced an outstanding pause", err)
 		}

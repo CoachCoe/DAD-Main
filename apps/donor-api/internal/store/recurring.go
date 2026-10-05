@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -185,8 +187,8 @@ type subscriptionLease struct {
 	subscription     string
 }
 
-// leaseSubscription lets command resume its own lease, as after a crash, but
-// refuses while another command's lease is current.
+// Even an identical retry must wait: otherwise it can release the lease while
+// the original request is still in flight. Crash recovery waits for expiry.
 func leaseSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UUID, attempt queries.DonorStripeCheckout, command pgtype.UUID, now time.Time) (*subscriptionLease, error) {
 	n, err := q.AcquireSubscriptionLease(ctx, queries.AcquireSubscriptionLeaseParams{AttemptID: attempt.ID, DonorID: donor, CommandID: command, ExpiresAt: timestamp(now.Add(leaseTerm)), Now: timestamp(now)})
 	if err != nil {
@@ -217,7 +219,9 @@ func (s RecurringService) submit(ctx context.Context, lease *subscriptionLease, 
 func (s RecurringService) release(ctx context.Context, lease *subscriptionLease) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	_ = releaseLease(ctx, queries.New(s.DB), lease.attempt, lease.command)
+	if err := releaseLease(ctx, queries.New(s.DB), lease.attempt, lease.command); err != nil {
+		slog.Warn("subscription lease release failed; waiting for expiry", "cause", fmt.Sprintf("%T", err))
+	}
 }
 func (s RecurringService) read(ctx context.Context, tx pgx.Tx, attempt queries.DonorStripeCheckout, now time.Time, policy string, snapshot *subscriptionSnapshot) (queries.DonorSubscription, payments.Object, error) {
 	empty := queries.DonorSubscription{}

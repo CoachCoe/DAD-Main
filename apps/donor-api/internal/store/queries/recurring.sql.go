@@ -15,7 +15,7 @@ const acquireSubscriptionLease = `-- name: AcquireSubscriptionLease :execrows
 INSERT INTO donor_subscription_leases(attempt_id,donor_id,command_id,expires_at)
 VALUES($1,$2,$3,$4)
 ON CONFLICT (attempt_id) DO UPDATE SET command_id=EXCLUDED.command_id,expires_at=EXCLUDED.expires_at
-WHERE donor_subscription_leases.command_id=EXCLUDED.command_id OR donor_subscription_leases.expires_at<=$5
+WHERE donor_subscription_leases.expires_at<=$5
 `
 
 type AcquireSubscriptionLeaseParams struct {
