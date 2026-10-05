@@ -151,3 +151,44 @@ out-of-order webhooks, refund transitions, failed renewals, pauses, early resump
 month-end boundaries, and ambiguous responses. Local test doubles do not prove these
 provider behaviors. Physical QR scanning, assistive-technology checks, and viral-load
 acceptance also require explicit evidence.
+
+## Queue alerts and incident response
+
+Run `monitor` from the API image with its database environment (or
+`go run ./cmd/monitor` from `apps/donor-api`). It emits only aggregate JSON counts,
+parked counts, and oldest due age for Stripe, projections, financial mail, login mail,
+and email changes. It exits nonzero if any job is parked or a due item is older than
+five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends are
+excluded. Schema/database failure is also nonzero. Run this every minute from your
+private scheduler, alert on two consecutive failures, and send recovery notification
+when it returns to zero. Monitor process/container restarts and both health URLs too:
+queue age alone cannot detect an idle stopped worker. No public monitoring endpoint or
+third-party telemetry is enabled by this command.
+
+An alert owner must distinguish unavailable dependencies, invalid data, and a halted
+worker before retrying. Stop only the affected writer if facts may be wrong; preserve
+inbox entries, command keys, audit records, and database evidence. Check current Stripe
+state before ambiguous financial retries. Never reset all attempts or delete rows as a
+repair. For mail incidents, restore delivery configuration before replay and expect
+possible duplicate delivery after acknowledgement loss. Escalate incorrect recognition
+or money totals to the finance owner; publish corrections only after reconciliation.
+Assign primary/backup incident owners and test paging in the chosen hosting environment.
+
+## Backup and restore drill
+
+With PostgreSQL running and `ENV_FILE` pointing to the Compose environment:
+
+```sh
+./scripts/backup.sh /secure/backups/dad-2026-10-04.dump
+./scripts/verify-restore.sh /secure/backups/dad-2026-10-04.dump
+```
+
+The backup uses PostgreSQL's consistent custom-format dump and creates a private file
+without overwriting an existing path. Keep dumps outside the repository on encrypted
+storage with restricted access, retention, and independent copies. The drill creates a
+random disposable database, restores with fail-on-error, reads core donor/gift/identity
+tables, and drops only that temporary database. It never restores over the running app.
+A successful drill proves the dump restores, not disaster recovery time or key recovery.
+Rehearse the restored app in an isolated environment with preserved encryption keys and
+outbound Stripe/email disabled. Establish recovery-point and recovery-time objectives,
+backup scheduling, retention, alerting, and off-host recovery ownership before launch.
