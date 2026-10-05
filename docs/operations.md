@@ -90,7 +90,10 @@ unprocessed rather than becoming guessed financial facts. A single-item monthly 
 subscription with a complete card payment is the supported billing model.
 
 Monitor the oldest unprocessed `donor_stripe_events`, attempt counts, and worker health.
-Events park after ten failed attempts. Investigate the sanitized error class and current
+A failed event waits before its next attempt, doubling from one minute up to an hour,
+so a provider outage or an event that arrives before its gift is retried later rather
+than immediately. Events park after ten failed attempts. Investigate the error class
+(`PaymentUnavailable`, `MissingRecord`, `InvalidFacts`, or `ProcessingError`) and current
 Stripe state before explicitly retrying:
 
 ```sh
@@ -113,8 +116,12 @@ confirmation, reasons, and audit records. Never edit processor identifiers by ha
 Run projection, login-email, email-changes, and message workers separately. Email changes
 use the same mail configuration, require current-address proof before new-address proof,
 and park delivery after five failures. Requesting a replacement invalidates prior proofs.
-Projection refresh handles grace expiry, recurring boundaries, permanent recognition, and prior-year summaries.
-Unknown streak state displays Updating; it must not silently become zero.
+Projection refresh handles grace expiry, recurring boundaries, permanent recognition,
+and prior-year summaries. A donor whose facts cannot be projected is deferred with
+backoff, records an error class, and counts as parked in the monitor; other donors keep
+refreshing. Unknown streak state displays Updating; it must not silently become zero.
+Mail workers claim a job, then send outside the donor lock, so a slow SMTP server cannot
+block payments or staff actions.
 
 SMTP requires STARTTLS, certificate validation, and configured sender credentials.
 Delivery is at least once; acknowledgement loss may cause a duplicate. Stable Message-IDs
