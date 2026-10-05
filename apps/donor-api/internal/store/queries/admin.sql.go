@@ -285,6 +285,54 @@ func (q *Queries) StaffMessagePage(ctx context.Context, arg StaffMessagePagePara
 	return items, nil
 }
 
+const staffPendingAction = `-- name: StaffPendingAction :one
+SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at
+FROM donor_staff_actions
+WHERE donor_id=$1 AND actor_id=$2 AND target_id=$3 AND kind=$4 AND status='AUTHORIZED'
+ORDER BY created_at DESC,id LIMIT 1
+`
+
+type StaffPendingActionParams struct {
+	DonorID  pgtype.UUID `json:"donor_id"`
+	ActorID  pgtype.UUID `json:"actor_id"`
+	TargetID pgtype.UUID `json:"target_id"`
+	Kind     string      `json:"kind"`
+}
+
+type StaffPendingActionRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Kind        string             `json:"kind"`
+	TargetID    pgtype.UUID        `json:"target_id"`
+	AmountMinor pgtype.Int8        `json:"amount_minor"`
+	PeriodEnd   pgtype.Timestamptz `json:"period_end"`
+	Reason      string             `json:"reason"`
+	Status      string             `json:"status"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+}
+
+func (q *Queries) StaffPendingAction(ctx context.Context, arg StaffPendingActionParams) (StaffPendingActionRow, error) {
+	row := q.db.QueryRow(ctx, staffPendingAction,
+		arg.DonorID,
+		arg.ActorID,
+		arg.TargetID,
+		arg.Kind,
+	)
+	var i StaffPendingActionRow
+	err := row.Scan(
+		&i.ID,
+		&i.ActorID,
+		&i.Kind,
+		&i.TargetID,
+		&i.AmountMinor,
+		&i.PeriodEnd,
+		&i.Reason,
+		&i.Status,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const staffReferredPage = `-- name: StaffReferredPage :many
 SELECT d.id,d.email,p.referral_kind,p.net_minor FROM donors d
 JOIN donor_metric_projections p ON p.donor_id=d.id WHERE p.referrer_id=$1

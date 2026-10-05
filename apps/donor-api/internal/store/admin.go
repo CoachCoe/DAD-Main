@@ -78,6 +78,9 @@ type ActionPage struct {
 	Actions    []queries.StaffActionPageRow `json:"actions"`
 	NextOffset *int64                       `json:"next_offset"`
 }
+type PendingAction struct {
+	Action *queries.StaffPendingActionRow `json:"action"`
+}
 type Enrolments struct {
 	Enrolments []any  `json:"enrolments"`
 	State      string `json:"state"`
@@ -216,6 +219,25 @@ func (s *StaffService) DonorActions(ctx context.Context, token string, id pgtype
 		out := ActionPage{}
 		out.Actions, out.NextOffset = page(rows, offset)
 		return out, nil
+	})
+}
+
+func (s *StaffService) PendingAction(ctx context.Context, token string, donorID, targetID pgtype.UUID, kind string) (PendingAction, error) {
+	permission := "gift.refund"
+	if kind == "CANCEL" {
+		permission = "gift.cancel"
+	} else if kind != "REFUND" {
+		return PendingAction{}, ErrStaffInput
+	}
+	return staffTransaction(ctx, s, token, permission, func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (PendingAction, error) {
+		row, err := queries.New(tx).StaffPendingAction(ctx, queries.StaffPendingActionParams{DonorID: donorID, ActorID: actor.ID, TargetID: targetID, Kind: kind})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return PendingAction{}, nil
+		}
+		if err != nil {
+			return PendingAction{}, err
+		}
+		return PendingAction{Action: &row}, nil
 	})
 }
 

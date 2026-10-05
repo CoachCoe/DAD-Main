@@ -33,3 +33,9 @@ SELECT EXISTS(SELECT 1 FROM donor_messages WHERE donor_id=$1 AND kind=$2 AND cre
 SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at
 FROM donor_staff_actions WHERE donor_id=$1 ORDER BY created_at DESC,id
 LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+
+-- name: StaffPendingAction :one
+SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at
+FROM donor_staff_actions
+WHERE donor_id=$1 AND actor_id=$2 AND target_id=$3 AND kind=$4 AND status='AUTHORIZED'
+ORDER BY created_at DESC,id LIMIT 1;

@@ -133,6 +133,7 @@ func (a *api) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /donor/staff/donors/{donor_id}", a.donorDetail)
 	mux.HandleFunc("GET /donor/staff/donors/{donor_id}/messages", a.donorMessages)
 	mux.HandleFunc("GET /donor/staff/donors/{donor_id}/actions", a.donorActions)
+	mux.HandleFunc("GET /donor/staff/donors/{donor_id}/actions/pending", a.pendingAction)
 	mux.HandleFunc("GET /donor/staff/audit", a.auditEvents)
 	mux.HandleFunc("GET /donor/staff/enrolments", a.enrolments)
 	mux.HandleFunc("POST /donor/staff/donors/{donor_id}/claim-email", a.browser(staffLimit, a.requestClaim))
