@@ -25,8 +25,13 @@ idempotency keys. An ambiguous provider response is reconciled before another mu
 old unknown commands require operator review rather than a new blind request.
 
 The webhook verifies the raw request signature and persists allowlisted fields before
-acknowledging. Workers use transaction locks and current provider state to reconcile
-out-of-order events. Checkout completion is not collection. Gifts, billing periods,
+acknowledging. Workers fetch current provider state before taking the donor lock, then
+lock and apply it, fetching again only if another writer recorded newer state meanwhile;
+this reconciles out-of-order events without holding the lock across a network call.
+Donor and staff commands work in three steps: under the donor lock they validate and
+record the command and take a per-subscription lease, the processor is called with no
+lock held, and the result is applied under the lock again. The lease allows one
+outstanding change per subscription; a retry of the same command reuses it. Checkout completion is not collection. Gifts, billing periods,
 refund state, append-only observations, projections, and notification intents commit
 together. Money is integer USD cents. Referral credit is one level only.
 

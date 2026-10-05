@@ -108,6 +108,10 @@ Financial commands retain immutable inputs and processor idempotency keys. Unkno
 requests older than 23 hours require reconciliation. Hosted card-setup retries stop
 before their fixed expiry; an old unknown request is not permission to create a new one.
 Staff refund previews reconcile current provider state and reserve pending refunds.
+A second recurring change submitted while another is still with Stripe receives 409; the
+subscription lease expires after two minutes if a writer stops mid-command, and the same
+request ID can then resume it. One-time gifts take their paid time from the successful
+charge, so a restricted key needs read access to PaymentIntents and Charges.
 Refund and recurring cancellation are separate actions requiring named permissions,
 confirmation, reasons, and audit records. Never edit processor identifiers by hand.
 
@@ -120,8 +124,9 @@ Projection refresh handles grace expiry, recurring boundaries, permanent recogni
 and prior-year summaries. A donor whose facts cannot be projected is deferred with
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
-Mail workers claim a job, then send outside the donor lock, so a slow SMTP server cannot
-block payments or staff actions.
+Mail workers claim a job, then send outside the donor lock, and Stripe calls for commands,
+refunds, card setup, and webhooks likewise run without it, so a slow provider cannot block
+payments or staff actions for the same donor.
 
 SMTP requires STARTTLS, certificate validation, and configured sender credentials.
 Delivery is at least once; acknowledgement loss may cause a duplicate. Stable Message-IDs
@@ -143,6 +148,9 @@ sessions and replaces credentials through a private invitation; it never disable
 
 At `/staff/content`, upload private source documents, then publish complete CSV snapshots.
 Sources are limited to 10 MB, encrypted, SHA-256 checked, and permission-protected.
+Without `DONOR_CONTENT_ENCRYPTION_KEY`, uploads return 503 before the file is read;
+publishing still works. Donor records have linkable URLs (`/staff/donors/{id}`), and
+search keeps its query in `/staff?q=`.
 Each CSV is limited to 512 KB and 500 rows. Exact column order:
 
 ```csv

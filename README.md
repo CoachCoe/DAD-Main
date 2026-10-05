@@ -98,7 +98,8 @@ make test-browser-e2e
 ```
 
 Browser tests run against `next dev` by default; set `E2E_PRODUCTION=1` to run them
-against a production build (`next build && next start`) with its stricter CSP. Next allows
+against a production build (`next build && next start`), where account and staff pages
+use the nonce-based CSP. Next allows
 one dev server per checkout, so stop any running `make web` first.
 
 `make test` checks Go formatting, vet, race-enabled tests, compilation, frontend lint,
