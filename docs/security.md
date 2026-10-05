@@ -34,9 +34,10 @@ The frontend restricts connections to its own origin, denies framing, uses no-re
 and disables camera, microphone, and geolocation. Production CSP excludes unsafe-eval.
 Account and staff pages render per request with a nonce-based `'strict-dynamic'` script
 policy set in `proxy.ts`; public pages keep a static policy that permits inline scripts
-so they can be cached. Each response carries exactly one policy. A client-side navigation
-from a public page into the account keeps the policy of the document already loaded;
-direct loads and reloads receive the nonce policy. User content must never be inserted as
+so they can be cached. Each response carries exactly one policy. Public links into donor
+accounts use full-document navigation to install the nonce policy; staff entry is a
+direct document load. Any new public link into account or staff routes must use a native
+anchor rather than client routing. User content must never be inserted as
 raw HTML. Account tokens use fragments removed before network requests.
 
 Release still needs verified legal/entity details, approved retention and incident
