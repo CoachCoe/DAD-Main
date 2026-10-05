@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"impactgraph/donor-api/internal/credentials"
 	"impactgraph/donor-api/internal/httpapi"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/migrations"
@@ -20,18 +22,40 @@ import (
 	"impactgraph/donor-api/internal/wallet"
 )
 
+// shutdownTimeout lets in-flight processor calls finish within the server's
+// write timeout instead of being cut off and left for reconciliation.
+const shutdownTimeout = 35 * time.Second
+
+// trustedProxies parses DONOR_TRUSTED_PROXY_CIDRS. Ranges broader than a
+// private /8 (IPv4) or /32 (IPv6) are refused because trusting them would let
+// arbitrary clients choose their own rate-limit identity.
+func trustedProxies(value string) ([]netip.Prefix, error) {
+	var prefixes []netip.Prefix
+	for field := range strings.SplitSeq(value, ",") {
+		if field = strings.TrimSpace(field); field == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(field)
+		if err != nil {
+			return nil, errors.New("DONOR_TRUSTED_PROXY_CIDRS must contain valid CIDR ranges")
+		}
+		if (prefix.Addr().Is4() && prefix.Bits() < 8) || (prefix.Addr().Is6() && prefix.Bits() < 32) {
+			return nil, fmt.Errorf("DONOR_TRUSTED_PROXY_CIDRS range %s is too broad; list the proxy's own address or network", prefix)
+		}
+		prefixes = append(prefixes, prefix.Masked())
+	}
+	return prefixes, nil
+}
+
 func run() error {
 	address := os.Getenv("DONOR_GO_LISTEN")
 	if address == "" {
 		address = "127.0.0.1:8002"
 	}
 	var services httpapi.Services
-	for _, value := range strings.FieldsFunc(os.Getenv("DONOR_TRUSTED_PROXY_CIDRS"), func(r rune) bool { return r == ',' }) {
-		prefix, err := netip.ParsePrefix(strings.TrimSpace(value))
-		if err != nil {
-			return errors.New("DONOR_TRUSTED_PROXY_CIDRS must contain valid CIDR ranges")
-		}
-		services.TrustedProxies = append(services.TrustedProxies, prefix)
+	var err error
+	if services.TrustedProxies, err = trustedProxies(os.Getenv("DONOR_TRUSTED_PROXY_CIDRS")); err != nil {
+		return err
 	}
 	email, err := mail.FromEnvironment(os.Getenv)
 	if err != nil {
@@ -45,19 +69,31 @@ func run() error {
 	if err := payments.ValidateOrigin(services.Origin); err != nil {
 		return err
 	}
-	services.Wallet, err = wallet.FromEnvironment(os.Getenv, services.Origin)
-	if err != nil {
+	if services.Wallet, err = wallet.FromEnvironment(os.Getenv, services.Origin); err != nil {
 		return err
 	}
+	stripeKey, webhookSecret := os.Getenv("STRIPE_SECRET_KEY"), os.Getenv("STRIPE_WEBHOOK_SECRET")
+	if (stripeKey == "") != (webhookSecret == "") {
+		return errors.New("set both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or neither")
+	}
 	var gateway payments.StaffFinanceGateway
-	if key := os.Getenv("STRIPE_SECRET_KEY"); key != "" {
-		configured, err := payments.NewStripeGateway(key)
-		if err != nil {
+	if stripeKey != "" {
+		if gateway, err = payments.NewStripeGateway(stripeKey); err != nil {
 			return err
 		}
-		gateway = configured
 	}
-	if dsn := os.Getenv("DONOR_GO_DATABASE_URL"); dsn != "" {
+	staffKey, contentKey := os.Getenv("DONOR_STAFF_ENCRYPTION_KEY"), os.Getenv("DONOR_CONTENT_ENCRYPTION_KEY")
+	if staffKey != "" && credentials.ValidateKey(staffKey) != nil {
+		return errors.New("DONOR_STAFF_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
+	}
+	if contentKey != "" && credentials.ValidateKey(contentKey) != nil {
+		return errors.New("DONOR_CONTENT_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
+	}
+
+	dsn := os.Getenv("DONOR_GO_DATABASE_URL")
+	if dsn == "" {
+		slog.Warn("DONOR_GO_DATABASE_URL is unset; only health and static responses are available")
+	} else {
 		startup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		pool, err := store.Open(startup, dsn)
 		cancel()
@@ -75,30 +111,43 @@ func run() error {
 		services.Content = store.ContentReader{DB: pool}
 		services.Partner = store.PartnerService{DB: pool}
 		services.Dashboard = store.DashboardReader{DB: pool}
-		services.Webhook = payments.Receiver{Secret: os.Getenv("STRIPE_WEBHOOK_SECRET"), Inbox: store.StripeInbox{DB: pool}}
-		services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
 		services.Account = store.AccountService{DB: pool}
+		services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
+		services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
+		services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
+		if webhookSecret != "" {
+			services.Webhook = payments.Receiver{Secret: webhookSecret, Inbox: store.StripeInbox{DB: pool}}
+		}
 		if email != nil {
 			services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKey: email.EncryptionKey}
 		}
-		services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
-		services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
-		if key := os.Getenv("DONOR_STAFF_ENCRYPTION_KEY"); key != "" {
-			staff, staffErr := store.NewStaffService(pool, key)
-			if staffErr != nil {
+		if staffKey != "" {
+			staff, err := store.NewStaffService(pool, staffKey)
+			if err != nil {
 				return errors.New("staff configuration is invalid")
 			}
-			services.Staff, services.Admin = staff, staff
-			services.Exports = staff
-			services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKey: os.Getenv("DONOR_CONTENT_ENCRYPTION_KEY")}
+			services.Staff, services.Admin, services.Exports = staff, staff, staff
 			services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
+			services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKey: contentKey}
 		}
 	}
+	for feature, enabled := range map[string]bool{
+		"payments (STRIPE_SECRET_KEY)":                    gateway != nil,
+		"account email (SMTP settings)":                   email != nil,
+		"staff back office (DONOR_STAFF_ENCRYPTION_KEY)":  services.Staff != nil,
+		"source documents (DONOR_CONTENT_ENCRYPTION_KEY)": contentKey != "",
+	} {
+		if !enabled {
+			slog.Info("feature disabled until configured", "feature", feature)
+		}
+	}
+
 	server := httpapi.NewServer(address, services)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	failures := make(chan error, 1)
 	go func() { failures <- server.ListenAndServe() }()
+	slog.Info("donor API listening", "address", address)
 	select {
 	case err := <-failures:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -106,7 +155,7 @@ func run() error {
 		}
 		return err
 	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		shutdown, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		if err := server.Shutdown(shutdown); err != nil {
 			_ = server.Close()
@@ -115,6 +164,7 @@ func run() error {
 		return nil
 	}
 }
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	if err := run(); err != nil {

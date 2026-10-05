@@ -126,3 +126,15 @@ func TestPasswordBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateKeyRequiresThirtyTwoURLSafeBytes(t *testing.T) {
+	valid := base64.URLEncoding.EncodeToString(make([]byte, 32))
+	if err := ValidateKey(valid); err != nil {
+		t.Fatalf("valid key rejected: %v", err)
+	}
+	for _, invalid := range []string{"", "short", base64.URLEncoding.EncodeToString(make([]byte, 31)), base64.StdEncoding.EncodeToString([]byte(strings.Repeat("\xff", 32)))} {
+		if !errors.Is(ValidateKey(invalid), ErrInvalid) {
+			t.Errorf("key %q accepted", invalid)
+		}
+	}
+}

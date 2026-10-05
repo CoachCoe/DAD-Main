@@ -41,3 +41,42 @@ func TestCancellationInterruptsIdle(t *testing.T) {
 		t.Fatal("idle wait ignored shutdown")
 	}
 }
+
+func TestContinuousModeBacksOffAndRecoversFromFailures(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls []time.Time
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, false, 50*time.Millisecond, func(context.Context) (bool, error) {
+			calls = append(calls, time.Now())
+			switch len(calls) {
+			case 1, 2, 3:
+				return true, errors.New("transient")
+			case 4:
+				return true, nil
+			default:
+				cancel()
+				return false, nil
+			}
+		})
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker stopped retrying after a failure")
+	}
+	if len(calls) != 5 {
+		t.Fatalf("got %d steps, want 5", len(calls))
+	}
+	first, second, third := calls[1].Sub(calls[0]), calls[2].Sub(calls[1]), calls[3].Sub(calls[2])
+	if first < 50*time.Millisecond || second < 100*time.Millisecond || third < 200*time.Millisecond {
+		t.Fatalf("backoff did not grow: %v %v %v", first, second, third)
+	}
+	if gap := calls[4].Sub(calls[3]); gap >= 50*time.Millisecond {
+		t.Fatalf("successful work waited %v before continuing", gap)
+	}
+}

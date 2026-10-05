@@ -53,6 +53,14 @@ func key(value string) (*fernet.Key, error) {
 	copy(k[:], decoded)
 	return k, nil
 }
+
+// ValidateKey reports whether value is a usable encryption key, so services
+// can refuse to start instead of failing on first use.
+func ValidateKey(value string) error {
+	_, err := key(value)
+	return err
+}
+
 func Encrypt(value []byte, encodedKey string) ([]byte, error) {
 	k, err := key(encodedKey)
 	if err != nil {
