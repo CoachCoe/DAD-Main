@@ -35,7 +35,13 @@ SELECT * FROM donor_email_changes WHERE donor_id=$1 AND stage IN ('CURRENT','NEW
 AND sent_at IS NULL AND attempts<5 AND available_at<=$2 ORDER BY available_at,id LIMIT 1 FOR UPDATE;
 
 -- name: EmailChangeDelivered :exec
-UPDATE donor_email_changes SET sent_at=$2,encrypted_token=NULL WHERE id=$1;
+UPDATE donor_email_changes SET sent_at=$2,encrypted_token=NULL WHERE id=$1 AND stage=$3;
+
+-- name: ClaimEmailChangeDelivery :exec
+UPDATE donor_email_changes SET attempts=attempts+1,available_at=$2 WHERE id=$1;
+
+-- name: RetryEmailChangeDelivery :exec
+UPDATE donor_email_changes SET available_at=$2 WHERE id=$1 AND stage=$3 AND sent_at IS NULL;
 
 -- name: EmailChangeDeliveryFailed :exec
 UPDATE donor_email_changes SET attempts=attempts+1,available_at=$2 WHERE id=$1;

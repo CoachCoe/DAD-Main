@@ -190,7 +190,8 @@ func (q *Queries) EnrichGift(ctx context.Context, arg EnrichGiftParams) error {
 }
 
 const failStripeEvent = `-- name: FailStripeEvent :exec
-UPDATE donor_stripe_events SET last_error=$2 WHERE id=$1
+UPDATE donor_stripe_events SET last_error=$2,
+available_at=now()+least(power(2,attempts)*interval '30 seconds',interval '1 hour') WHERE id=$1
 `
 
 type FailStripeEventParams struct {
@@ -204,7 +205,7 @@ func (q *Queries) FailStripeEvent(ctx context.Context, arg FailStripeEventParams
 }
 
 const giftByPayment = `-- name: GiftByPayment :one
-SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at FROM donor_gifts WHERE stripe_payment_intent_id=$1 FOR UPDATE
+SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at, referrer_id, referral_kind FROM donor_gifts WHERE stripe_payment_intent_id=$1 FOR UPDATE
 `
 
 func (q *Queries) GiftByPayment(ctx context.Context, stripePaymentIntentID pgtype.Text) (DonorGift, error) {
@@ -222,12 +223,14 @@ func (q *Queries) GiftByPayment(ctx context.Context, stripePaymentIntentID pgtyp
 		&i.PeriodID,
 		&i.ID,
 		&i.CreatedAt,
+		&i.ReferrerID,
+		&i.ReferralKind,
 	)
 	return i, err
 }
 
 const giftByStripeObject = `-- name: GiftByStripeObject :one
-SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at FROM donor_gifts WHERE stripe_object_id=$1 FOR UPDATE
+SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at, referrer_id, referral_kind FROM donor_gifts WHERE stripe_object_id=$1 FOR UPDATE
 `
 
 func (q *Queries) GiftByStripeObject(ctx context.Context, stripeObjectID string) (DonorGift, error) {
@@ -245,6 +248,8 @@ func (q *Queries) GiftByStripeObject(ctx context.Context, stripeObjectID string)
 		&i.PeriodID,
 		&i.ID,
 		&i.CreatedAt,
+		&i.ReferrerID,
+		&i.ReferralKind,
 	)
 	return i, err
 }
@@ -309,8 +314,8 @@ func (q *Queries) InsertBillingPeriod(ctx context.Context, arg InsertBillingPeri
 }
 
 const insertGift = `-- name: InsertGift :exec
-INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,stripe_payment_intent_id,period_id)
-VALUES ($1,$2,$3,$4,$5,'USD',$6,$7,$8,$9) ON CONFLICT (stripe_object_id) DO NOTHING
+INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,stripe_payment_intent_id,period_id,referrer_id,referral_kind)
+VALUES ($1,$2,$3,$4,$5,'USD',$6,$7,$8,$9,$10,$11) ON CONFLICT (stripe_object_id) DO NOTHING
 `
 
 type InsertGiftParams struct {
@@ -323,6 +328,8 @@ type InsertGiftParams struct {
 	PaidAt                pgtype.Timestamptz `json:"paid_at"`
 	StripePaymentIntentID pgtype.Text        `json:"stripe_payment_intent_id"`
 	PeriodID              pgtype.UUID        `json:"period_id"`
+	ReferrerID            pgtype.UUID        `json:"referrer_id"`
+	ReferralKind          pgtype.Text        `json:"referral_kind"`
 }
 
 func (q *Queries) InsertGift(ctx context.Context, arg InsertGiftParams) error {
@@ -336,6 +343,8 @@ func (q *Queries) InsertGift(ctx context.Context, arg InsertGiftParams) error {
 		arg.PaidAt,
 		arg.StripePaymentIntentID,
 		arg.PeriodID,
+		arg.ReferrerID,
+		arg.ReferralKind,
 	)
 	return err
 }
@@ -461,8 +470,8 @@ func (q *Queries) MarkPeriodPaid(ctx context.Context, id pgtype.UUID) error {
 }
 
 const nextStripeEvent = `-- name: NextStripeEvent :one
-SELECT stripe_event_id, event_type, occurred_at, data, processed_at, attempts, last_error, id, created_at FROM donor_stripe_events WHERE processed_at IS NULL AND attempts<10
-ORDER BY created_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
+SELECT stripe_event_id, event_type, occurred_at, data, processed_at, attempts, last_error, id, created_at, available_at FROM donor_stripe_events WHERE processed_at IS NULL AND attempts<10 AND available_at<=now()
+ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
 func (q *Queries) NextStripeEvent(ctx context.Context) (DonorStripeEvent, error) {
@@ -478,6 +487,7 @@ func (q *Queries) NextStripeEvent(ctx context.Context) (DonorStripeEvent, error)
 		&i.LastError,
 		&i.ID,
 		&i.CreatedAt,
+		&i.AvailableAt,
 	)
 	return i, err
 }
@@ -590,7 +600,7 @@ func (q *Queries) ResumptionForPause(ctx context.Context, pauseID pgtype.UUID) (
 }
 
 const retryStripeEvent = `-- name: RetryStripeEvent :execrows
-UPDATE donor_stripe_events SET attempts=0,last_error=NULL WHERE stripe_event_id=$1 AND processed_at IS NULL
+UPDATE donor_stripe_events SET attempts=0,last_error=NULL,available_at=now() WHERE stripe_event_id=$1 AND processed_at IS NULL
 `
 
 func (q *Queries) RetryStripeEvent(ctx context.Context, stripeEventID string) (int64, error) {

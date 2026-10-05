@@ -2,25 +2,28 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"impactgraph/donor-api/internal/store"
 )
 
-type contentFunc func(context.Context) (map[string]interface{}, error)
+type contentFunc func(context.Context) (store.PublicContent, error)
 
-func (f contentFunc) PublicContent(ctx context.Context) (map[string]interface{}, error) {
+func (f contentFunc) PublicContent(ctx context.Context) (store.PublicContent, error) {
 	return f(ctx)
 }
 func TestPublishedContentCacheAndBoundedDatabaseContext(t *testing.T) {
-	reader := contentFunc(func(ctx context.Context) (map[string]interface{}, error) {
+	reader := contentFunc(func(ctx context.Context) (store.PublicContent, error) {
 		deadline, ok := ctx.Deadline()
 		if !ok || time.Until(deadline) > 3*time.Second {
 			t.Error("database request lacks bounded deadline")
 		}
-		return map[string]interface{}{"state": "unpublished", "initiatives": []string{}, "ledger": []string{}, "ledger_as_of": nil, "cadence": nil}, nil
+		return store.PublicContent{State: "unpublished", Initiatives: []map[string]json.RawMessage{}, Ledger: []map[string]json.RawMessage{}}, nil
 	})
 	response := httptest.NewRecorder()
 	server := NewServer("", Services{Content: reader})
@@ -30,8 +33,8 @@ func TestPublishedContentCacheAndBoundedDatabaseContext(t *testing.T) {
 	}
 }
 func TestDatabaseFailureIsPrivateAndNotCached(t *testing.T) {
-	reader := contentFunc(func(ctx context.Context) (map[string]interface{}, error) {
-		return nil, errors.New("private database detail")
+	reader := contentFunc(func(ctx context.Context) (store.PublicContent, error) {
+		return store.PublicContent{}, errors.New("private database detail")
 	})
 	response := httptest.NewRecorder()
 	server := NewServer("", Services{Content: reader})

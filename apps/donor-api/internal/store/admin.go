@@ -15,119 +15,188 @@ import (
 	"impactgraph/donor-api/internal/store/queries"
 )
 
+// Staff views below keep alphabetical field order so responses match the
+// original map encoding byte for byte.
+
+type DonorSummary struct {
+	Claimed    bool        `json:"claimed"`
+	Disabled   bool        `json:"disabled"`
+	Email      string      `json:"email"`
+	ID         pgtype.UUID `json:"id"`
+	PublicName pgtype.Text `json:"public_name"`
+}
+type DonorSearch struct {
+	Donors     []DonorSummary `json:"donors"`
+	NextOffset *int64         `json:"next_offset"`
+}
+type StaffStreak struct {
+	AtRisk     bool               `json:"at_risk"`
+	Best       int32              `json:"best"`
+	ComputedAt pgtype.Timestamptz `json:"computed_at"`
+	Current    pgtype.Int4        `json:"current"`
+}
+type ReferrerLink struct {
+	Email string      `json:"email"`
+	ID    pgtype.UUID `json:"id"`
+	Type  pgtype.Text `json:"type"`
+}
+type ReferredDonor struct {
+	Email    string      `json:"email"`
+	ID       pgtype.UUID `json:"id"`
+	NetMinor pgtype.Int8 `json:"net_minor"`
+	Type     pgtype.Text `json:"type"`
+}
+type DonorDetail struct {
+	AsOf                time.Time                   `json:"as_of"`
+	Email               string                      `json:"email"`
+	Gifts               []queries.DonorGiftsPageRow `json:"gifts"`
+	ID                  pgtype.UUID                 `json:"id"`
+	NextGiftsOffset     *int64                      `json:"next_gifts_offset"`
+	NextReferralsOffset *int64                      `json:"next_referrals_offset"`
+	PublicName          pgtype.Text                 `json:"public_name"`
+	Referred            []ReferredDonor             `json:"referred"`
+	Referrer            *ReferrerLink               `json:"referrer"`
+	Streak              *StaffStreak                `json:"streak"`
+}
+type AuditEvent struct {
+	Action  string             `json:"action"`
+	ActorID pgtype.UUID        `json:"actor_id"`
+	At      pgtype.Timestamptz `json:"at"`
+	Details json.RawMessage    `json:"details"`
+	ID      pgtype.UUID        `json:"id"`
+	Target  string             `json:"target"`
+}
+type AuditPage struct {
+	Events     []AuditEvent `json:"events"`
+	NextOffset *int64       `json:"next_offset"`
+}
+type MessagePage struct {
+	Messages   []queries.StaffMessagePageRow `json:"messages"`
+	NextOffset *int64                        `json:"next_offset"`
+}
+type Enrolments struct {
+	Enrolments []any  `json:"enrolments"`
+	State      string `json:"state"`
+}
+
 func pageOffsetValid(offset int64) bool { return offset >= 0 && offset <= math.MaxInt64-50 }
-func page[T any](rows []T, offset int64) ([]T, interface{}) {
+func page[T any](rows []T, offset int64) ([]T, *int64) {
 	if len(rows) > 50 {
-		return rows[:50], offset + 50
+		next := offset + 50
+		return rows[:50], &next
 	}
 	return rows, nil
 }
 
-func (s *StaffService) SearchDonors(ctx context.Context, token, term string, offset int64) (map[string]interface{}, error) {
+func (s *StaffService) SearchDonors(ctx context.Context, token, term string, offset int64) (DonorSearch, error) {
 	if !pageOffsetValid(offset) || utf8.RuneCountInString(term) > 320 {
-		return nil, ErrStaffInput
+		return DonorSearch{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (map[string]interface{}, error) {
+	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (DonorSearch, error) {
 		q := queries.New(tx)
 		pattern := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(identity.TrimSpace(term))
 		rows, err := q.StaffDonorSearch(ctx, queries.StaffDonorSearchParams{Term: "%" + pattern + "%", PageOffset: offset})
 		if err != nil {
-			return nil, err
+			return DonorSearch{}, err
 		}
 		rows, next := page(rows, offset)
-		result := make([]map[string]interface{}, 0, len(rows))
+		out := DonorSearch{Donors: make([]DonorSummary, 0, len(rows)), NextOffset: next}
 		for _, row := range rows {
-			result = append(result, map[string]interface{}{"id": row.ID, "email": row.Email, "public_name": row.PublicName, "claimed": row.ClaimedAt.Valid, "disabled": row.Disabled})
+			out.Donors = append(out.Donors, DonorSummary{ID: row.ID, Email: row.Email, PublicName: row.PublicName, Claimed: row.ClaimedAt.Valid, Disabled: row.Disabled})
 		}
-		if err = auditStaff(ctx, q, actor.ID, "donor.search", "donors", map[string]interface{}{"offset": offset, "result_count": len(rows)}, now); err != nil {
-			return nil, err
+		if err = auditStaff(ctx, q, actor.ID, "donor.search", "donors", map[string]any{"offset": offset, "result_count": len(rows)}, now); err != nil {
+			return DonorSearch{}, err
 		}
-		return map[string]interface{}{"donors": result, "next_offset": next}, nil
+		return out, nil
 	})
 }
 
-func (s *StaffService) DonorDetail(ctx context.Context, token string, id pgtype.UUID, giftsOffset, referralsOffset int64) (map[string]interface{}, error) {
+func (s *StaffService) DonorDetail(ctx context.Context, token string, id pgtype.UUID, giftsOffset, referralsOffset int64) (DonorDetail, error) {
 	if !pageOffsetValid(giftsOffset) || !pageOffsetValid(referralsOffset) {
-		return nil, ErrStaffInput
+		return DonorDetail{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (map[string]interface{}, error) {
+	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (DonorDetail, error) {
 		q := queries.New(tx)
 		donor, err := q.StaffDonorByID(ctx, id)
 		if err != nil {
-			return nil, err
+			return DonorDetail{}, err
 		}
+		out := DonorDetail{ID: donor.ID, Email: donor.Email, PublicName: donor.PublicName, AsOf: now}
 		projection, err := q.Projection(ctx, id)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return nil, err
+			return DonorDetail{}, err
 		}
-		var streak, referrer interface{}
 		if err == nil {
-			streak = map[string]interface{}{"current": projection.CurrentStreak, "best": projection.BestStreak, "at_risk": projection.AtRisk, "computed_at": projection.ComputedAt}
+			// A seeded projection has no facts yet; show it as updating rather than zero.
+			if projection.NetMinor.Valid {
+				out.Streak = &StaffStreak{Current: projection.CurrentStreak, Best: projection.BestStreak, AtRisk: projection.AtRisk, ComputedAt: projection.ComputedAt}
+			}
 			if projection.ReferrerID.Valid {
 				row, err := q.StaffDonorByID(ctx, projection.ReferrerID)
 				if err != nil {
-					return nil, err
+					return DonorDetail{}, err
 				}
-				referrer = map[string]interface{}{"id": row.ID, "email": row.Email, "type": projection.ReferralKind}
+				out.Referrer = &ReferrerLink{ID: row.ID, Email: row.Email, Type: projection.ReferralKind}
 			}
 		}
 		gifts, err := q.DonorGiftsPage(ctx, queries.DonorGiftsPageParams{DonorID: id, PageOffset: giftsOffset})
 		if err != nil {
-			return nil, err
+			return DonorDetail{}, err
 		}
-		gifts, nextGifts := page(gifts, giftsOffset)
+		out.Gifts, out.NextGiftsOffset = page(gifts, giftsOffset)
 		referrals, err := q.StaffReferredPage(ctx, queries.StaffReferredPageParams{ReferrerID: id, PageOffset: referralsOffset})
 		if err != nil {
-			return nil, err
+			return DonorDetail{}, err
 		}
-		referrals, nextReferrals := page(referrals, referralsOffset)
-		referred := make([]map[string]interface{}, 0, len(referrals))
+		referrals, out.NextReferralsOffset = page(referrals, referralsOffset)
+		out.Referred = make([]ReferredDonor, 0, len(referrals))
 		for _, row := range referrals {
-			referred = append(referred, map[string]interface{}{"id": row.ID, "email": row.Email, "type": row.ReferralKind, "net_minor": row.NetMinor})
+			out.Referred = append(out.Referred, ReferredDonor{ID: row.ID, Email: row.Email, Type: row.ReferralKind, NetMinor: row.NetMinor})
 		}
 		if err = auditStaff(ctx, q, actor.ID, "donor.view", id.String(), nil, now); err != nil {
-			return nil, err
+			return DonorDetail{}, err
 		}
-		return map[string]interface{}{"id": donor.ID, "email": donor.Email, "public_name": donor.PublicName, "streak": streak, "referrer": referrer, "gifts": gifts, "referred": referred, "next_gifts_offset": nextGifts, "next_referrals_offset": nextReferrals, "as_of": now}, nil
+		return out, nil
 	})
 }
 
-func (s *StaffService) AuditEvents(ctx context.Context, token string, offset int64) (map[string]interface{}, error) {
+func (s *StaffService) AuditEvents(ctx context.Context, token string, offset int64) (AuditPage, error) {
 	if !pageOffsetValid(offset) {
-		return nil, ErrStaffInput
+		return AuditPage{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s, token, "audit.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (map[string]interface{}, error) {
+	return staffTransaction(ctx, s, token, "audit.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (AuditPage, error) {
 		rows, err := queries.New(tx).StaffAuditPage(ctx, offset)
 		if err != nil {
-			return nil, err
+			return AuditPage{}, err
 		}
 		rows, next := page(rows, offset)
-		events := make([]map[string]interface{}, 0, len(rows))
+		out := AuditPage{Events: make([]AuditEvent, 0, len(rows)), NextOffset: next}
 		for _, row := range rows {
-			events = append(events, map[string]interface{}{"id": row.ID, "actor_id": row.ActorID, "action": row.Action, "target": row.Target, "at": row.CreatedAt, "details": json.RawMessage(row.Details)})
+			out.Events = append(out.Events, AuditEvent{ID: row.ID, ActorID: row.ActorID, Action: row.Action, Target: row.Target, At: row.CreatedAt, Details: json.RawMessage(row.Details)})
 		}
-		return map[string]interface{}{"events": events, "next_offset": next}, nil
+		return out, nil
 	})
 }
 
-func (s *StaffService) DonorMessages(ctx context.Context, token string, id pgtype.UUID, offset int64) (map[string]interface{}, error) {
+func (s *StaffService) DonorMessages(ctx context.Context, token string, id pgtype.UUID, offset int64) (MessagePage, error) {
 	if !pageOffsetValid(offset) {
-		return nil, ErrStaffInput
+		return MessagePage{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (map[string]interface{}, error) {
+	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (MessagePage, error) {
 		q := queries.New(tx)
 		if _, err := q.StaffDonorByID(ctx, id); err != nil {
-			return nil, err
+			return MessagePage{}, err
 		}
 		rows, err := q.StaffMessagePage(ctx, queries.StaffMessagePageParams{DonorID: id, PageOffset: offset})
 		if err != nil {
-			return nil, err
+			return MessagePage{}, err
 		}
-		rows, next := page(rows, offset)
+		out := MessagePage{}
+		out.Messages, out.NextOffset = page(rows, offset)
 		if err = auditStaff(ctx, q, actor.ID, "message.list", id.String(), nil, now); err != nil {
-			return nil, err
+			return MessagePage{}, err
 		}
-		return map[string]interface{}{"messages": rows, "next_offset": next}, nil
+		return out, nil
 	})
 }
 
@@ -137,9 +206,9 @@ func (s *StaffService) DonorActions(ctx context.Context, token string, id pgtype
 	})
 }
 
-func (s *StaffService) Enrolments(ctx context.Context, token string) (map[string]interface{}, error) {
+func (s *StaffService) Enrolments(ctx context.Context, token string) (Enrolments, error) {
 	if _, err := requireStaff(ctx, queries.New(s.DB), token, "data.export", time.Now().UTC()); err != nil {
-		return nil, err
+		return Enrolments{}, err
 	}
-	return map[string]interface{}{"state": "not_active_until_r2", "enrolments": []interface{}{}}, nil
+	return Enrolments{State: "not_active_until_r2", Enrolments: []any{}}, nil
 }

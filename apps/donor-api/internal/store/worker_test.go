@@ -98,7 +98,7 @@ func newWorkerFixture(t *testing.T, frequency string) *workerFixture {
 			"DELETE FROM donor_amount_changes WHERE donor_id=$1",
 			"DELETE FROM donor_payment_updates WHERE donor_id=$1",
 		} {
-			args := []interface{}{id}
+			args := []any{id}
 			if sql == "DELETE FROM donor_messages WHERE donor_id=$1 OR dedup_key=$2" {
 				args = append(args, "referral:"+id.String())
 			}
@@ -120,12 +120,12 @@ func (f *workerFixture) checkout(t *testing.T) payments.CheckoutResult {
 	}
 	return result
 }
-func (f *workerFixture) receive(t *testing.T, kind string, obj map[string]interface{}) string {
+func (f *workerFixture) receive(t *testing.T, kind string, obj map[string]any) string {
 	t.Helper()
 	eventID := "evt_" + f.request.RequestID.String() + "_" + strconv.Itoa(len(f.events))
 	f.events = append(f.events, eventID)
 	now := time.Now()
-	body, err := json.Marshal(map[string]interface{}{"id": eventID, "object": "event", "type": kind, "api_version": payments.APIVersion, "created": now.Unix(), "livemode": false, "data": map[string]interface{}{"object": obj}})
+	body, err := json.Marshal(map[string]any{"id": eventID, "object": "event", "type": kind, "api_version": payments.APIVersion, "created": now.Unix(), "livemode": false, "data": map[string]any{"object": obj}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,19 +144,27 @@ func (f *workerFixture) process(t *testing.T) {
 		t.Fatalf("worker did not handle event: %v", err)
 	}
 }
-func invoice(checkout, id string, start time.Time, paid bool) map[string]interface{} {
+
+// retryNow lifts the backoff on the fixture's failed events.
+func (f *workerFixture) retryNow(t *testing.T) {
+	t.Helper()
+	if _, err := f.service.DB.Exec(context.Background(), "UPDATE donor_stripe_events SET available_at=now() WHERE stripe_event_id=ANY($1::text[]) AND processed_at IS NULL", f.events); err != nil {
+		t.Fatal(err)
+	}
+}
+func invoice(checkout, id string, start time.Time, paid bool) map[string]any {
 	status, amountPaid := "open", 0
-	var paidAt interface{}
+	var paidAt any
 	if paid {
 		status = "paid"
 		amountPaid = 3000
 		paidAt = start.Add(time.Hour).Unix()
 	}
-	return map[string]interface{}{"id": id, "status": status, "currency": "usd", "amount_paid": amountPaid, "amount_due": 3000, "total": 3000, "starting_balance": 0, "ending_balance": 0, "billing_reason": "subscription_cycle",
-		"parent":             map[string]interface{}{"subscription_details": map[string]interface{}{"subscription": "sub_" + checkout, "metadata": map[string]interface{}{"dad_checkout_id": checkout}}},
-		"status_transitions": map[string]interface{}{"paid_at": paidAt},
-		"lines":              map[string]interface{}{"has_more": false, "data": []interface{}{map[string]interface{}{"amount": 3000, "currency": "usd", "period": map[string]interface{}{"start": start.Unix(), "end": start.Add(30 * 24 * time.Hour).Unix()}, "parent": map[string]interface{}{"type": "subscription_item_details", "subscription_item_details": map[string]interface{}{"subscription": "sub_" + checkout, "proration": false}}}}},
-		"payments":           map[string]interface{}{"has_more": false, "data": []interface{}{map[string]interface{}{"status": "paid", "amount_paid": 3000, "currency": "usd", "invoice": id, "livemode": false, "payment": map[string]interface{}{"type": "payment_intent", "payment_intent": "pi_" + id}}}},
+	return map[string]any{"id": id, "status": status, "currency": "usd", "amount_paid": amountPaid, "amount_due": 3000, "total": 3000, "starting_balance": 0, "ending_balance": 0, "billing_reason": "subscription_cycle",
+		"parent":             map[string]any{"subscription_details": map[string]any{"subscription": "sub_" + checkout, "metadata": map[string]any{"dad_checkout_id": checkout}}},
+		"status_transitions": map[string]any{"paid_at": paidAt},
+		"lines":              map[string]any{"has_more": false, "data": []any{map[string]any{"amount": 3000, "currency": "usd", "period": map[string]any{"start": start.Unix(), "end": start.Add(30 * 24 * time.Hour).Unix()}, "parent": map[string]any{"type": "subscription_item_details", "subscription_item_details": map[string]any{"subscription": "sub_" + checkout, "proration": false}}}}},
+		"payments":           map[string]any{"has_more": false, "data": []any{map[string]any{"status": "paid", "amount_paid": 3000, "currency": "usd", "invoice": id, "livemode": false, "payment": map[string]any{"type": "payment_intent", "payment_intent": "pi_" + id}}}},
 	}
 }
 func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
@@ -210,7 +218,7 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 		t.Fatal(err)
 	}
 	dashboard, err := (DashboardReader{DB: pool}).DonorDashboard(ctx, token)
-	if err != nil || dashboard["founding_donor"] != true || dashboard["streak"].(map[string]interface{})["current"] != int32(1) {
+	if err != nil || !dashboard.FoundingDonor || dashboard.Streak == nil || dashboard.Streak.Current != 1 {
 		t.Fatalf("claimed dashboard: %v %v", dashboard, err)
 	}
 	refToken, err := (AccountService{DB: pool}).ClaimAccount(ctx, link(t, pool, referrer, time.Now()), "")
@@ -221,12 +229,12 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attribution := refDashboard["referrals"].(map[string]interface{})
-	if attribution["irl"] != int64(1) || attribution["total_minor"] != int64(3000) {
+	attribution := refDashboard.Referrals
+	if attribution == nil || attribution.IRL != 1 || attribution.TotalMinor != 3000 {
 		t.Fatal("guest referral not credited")
 	}
 	refundID := "re_" + f.donorID.String()
-	raw, err := json.Marshal(map[string]interface{}{"id": refundID, "payment_intent": "pi_" + invoiceID, "amount": 3000, "currency": "usd", "status": "succeeded"})
+	raw, err := json.Marshal(map[string]any{"id": refundID, "payment_intent": "pi_" + invoiceID, "amount": 3000, "currency": "usd", "status": "succeeded"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +242,7 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.receive(t, "refund.updated", map[string]interface{}{"id": refundID, "payment_intent": "pi_" + invoiceID, "status": "pending"})
+	f.receive(t, "refund.updated", map[string]any{"id": refundID, "payment_intent": "pi_" + invoiceID, "status": "pending"})
 	f.process(t)
 	projection, err := queries.New(pool).Projection(ctx, f.donorID)
 	if err != nil || projection.NetMinor.Int64 != 0 || projection.CurrentStreak.Int32 != 0 || projection.BestStreak != 1 || !projection.FoundingAwardedAt.Valid {
@@ -244,8 +252,8 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	attribution = refDashboard["referrals"].(map[string]interface{})
-	if attribution["irl"] != int64(0) || attribution["total_minor"] != int64(0) {
+	attribution = refDashboard.Referrals
+	if attribution == nil || attribution.IRL != 0 || attribution.TotalMinor != 0 {
 		t.Fatal("refund retained collected dollars")
 	}
 }
@@ -277,24 +285,32 @@ func TestInvalidInvoiceRollsBackAllFinancialEffects(t *testing.T) {
 	ctx := context.Background()
 	obj := invoice(checkout.CheckoutID, "in_bad_"+f.donorID.String(), time.Now().Add(-24*time.Hour), true)
 	obj["amount_paid"], obj["amount_due"], obj["total"] = 9000, 9000, 9000 // Fails after recording the valid period inside the savepoint.
-	obj["payments"].(map[string]interface{})["data"].([]interface{})[0].(map[string]interface{})["amount_paid"] = 9000
+	obj["payments"].(map[string]any)["data"].([]any)[0].(map[string]any)["amount_paid"] = 9000
 	eventID := f.receive(t, "invoice.payment_succeeded", obj)
 	for i := 0; i < 10; i++ {
 		f.process(t)
+		f.retryNow(t)
 	}
 	if worked, err := f.worker.ProcessNext(ctx); err != nil || worked {
 		t.Fatal("exhausted event did not park")
 	}
-	for _, table := range []string{"donor_gifts", "donor_billing_periods", "donor_metric_projections", "donor_login_emails", "donor_messages"} {
+	for _, sql := range []string{
+		"SELECT count(*) FROM donor_gifts WHERE donor_id=$1",
+		"SELECT count(*) FROM donor_billing_periods WHERE donor_id=$1",
+		// Checkout seeds an uncomputed projection row; a computed one would be a partial write.
+		"SELECT count(*) FROM donor_metric_projections WHERE donor_id=$1 AND net_minor IS NOT NULL",
+		"SELECT count(*) FROM donor_login_emails WHERE donor_id=$1",
+		"SELECT count(*) FROM donor_messages WHERE donor_id=$1",
+	} {
 		var count int
-		if err := f.service.DB.QueryRow(ctx, "SELECT count(*) FROM "+table+" WHERE donor_id=$1", f.donorID).Scan(&count); err != nil || count != 0 {
-			t.Fatalf("partial financial write survived: %s %d %v", table, count, err)
+		if err := f.service.DB.QueryRow(ctx, sql, f.donorID).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("partial financial write survived: %s %d %v", sql, count, err)
 		}
 	}
 	var attempts int
 	var processed *time.Time
 	var failure string
-	if err := f.service.DB.QueryRow(ctx, "SELECT attempts,processed_at,last_error FROM donor_stripe_events WHERE stripe_event_id=$1", eventID).Scan(&attempts, &processed, &failure); err != nil || attempts != 10 || processed != nil || failure != "ValueError" {
+	if err := f.service.DB.QueryRow(ctx, "SELECT attempts,processed_at,last_error FROM donor_stripe_events WHERE stripe_event_id=$1", eventID).Scan(&attempts, &processed, &failure); err != nil || attempts != 10 || processed != nil || failure != "InvalidFacts" {
 		t.Fatal("failure budget not durable")
 	}
 }
@@ -302,7 +318,7 @@ func TestOneTimeInboxConcurrentWorkers(t *testing.T) {
 	f := newWorkerFixture(t, "ONE_TIME")
 	checkout := f.checkout(t)
 	ctx := context.Background()
-	f.receive(t, "payment_intent.succeeded", map[string]interface{}{"id": "pi_" + f.donorID.String(), "metadata": map[string]interface{}{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+	f.receive(t, "payment_intent.succeeded", map[string]any{"id": "pi_" + f.donorID.String(), "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
 	var wg sync.WaitGroup
 	results := make(chan bool, 2)
 	failures := make(chan error, 2)
@@ -333,5 +349,67 @@ func TestOneTimeInboxConcurrentWorkers(t *testing.T) {
 	}
 	if _, err = Authenticated(ctx, queries.New(f.service.DB), "", time.Now()); !errors.Is(err, ErrDenied) {
 		t.Fatal("payment granted account access")
+	}
+}
+
+func eventRetryState(t *testing.T, f *workerFixture, id string) (attempts int, failure string, delay time.Duration) {
+	t.Helper()
+	var seconds float64
+	if err := f.service.DB.QueryRow(context.Background(), "SELECT attempts,coalesce(last_error,''),extract(epoch FROM available_at-now()) FROM donor_stripe_events WHERE stripe_event_id=$1", id).Scan(&attempts, &failure, &seconds); err != nil {
+		t.Fatal(err)
+	}
+	return attempts, failure, time.Duration(seconds * float64(time.Second))
+}
+func TestTransientGatewayFailureBacksOffThenSucceeds(t *testing.T) {
+	f := newWorkerFixture(t, "ONE_TIME")
+	checkout := f.checkout(t)
+	ctx := context.Background()
+	payment := "pi_" + f.donorID.String()
+	f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+	f.process(t)
+	refundID := "re_" + f.donorID.String()
+	event := f.receive(t, "refund.updated", map[string]any{"id": refundID, "payment_intent": payment, "status": "succeeded"})
+	for attempt, want := range []time.Duration{time.Minute, 2 * time.Minute} {
+		if attempt > 0 {
+			f.retryNow(t)
+		}
+		f.process(t)
+		attempts, failure, delay := eventRetryState(t, f, event)
+		if attempts != attempt+1 || failure != "PaymentUnavailable" || delay < want-10*time.Second || delay > want {
+			t.Fatalf("attempt %d: attempts=%d failure=%s delay=%s", attempt+1, attempts, failure, delay)
+		}
+		assertEventProcessed(t, f, event, false)
+	}
+	f.gateway.refunds[refundID] = paymentObject(t, map[string]any{"id": refundID, "payment_intent": payment, "amount": 1000, "currency": "usd", "status": "succeeded"})
+	f.retryNow(t)
+	f.process(t)
+	assertEventProcessed(t, f, event, true)
+	p, err := queries.New(f.service.DB).Projection(ctx, f.donorID)
+	if err != nil || p.NetMinor.Int64 != 2000 {
+		t.Fatal("retried refund not applied", p.NetMinor, err)
+	}
+}
+func TestRefundBeforeGiftIsRetriedAfterGiftExists(t *testing.T) {
+	f := newWorkerFixture(t, "ONE_TIME")
+	checkout := f.checkout(t)
+	ctx := context.Background()
+	payment := "pi_" + f.donorID.String()
+	refundID := "re_" + f.donorID.String()
+	f.gateway.refunds[refundID] = paymentObject(t, map[string]any{"id": refundID, "payment_intent": payment, "amount": 3000, "currency": "usd", "status": "succeeded"})
+	refund := f.receive(t, "refund.created", map[string]any{"id": refundID, "payment_intent": payment, "status": "succeeded"})
+	f.process(t)
+	if attempts, failure, delay := eventRetryState(t, f, refund); attempts != 1 || failure != "MissingRecord" || delay <= 0 {
+		t.Fatalf("early refund: attempts=%d failure=%s delay=%s", attempts, failure, delay)
+	}
+	gift := f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+	f.process(t)
+	assertEventProcessed(t, f, gift, true)
+	assertEventProcessed(t, f, refund, false)
+	f.retryNow(t)
+	f.process(t)
+	assertEventProcessed(t, f, refund, true)
+	p, err := queries.New(f.service.DB).Projection(ctx, f.donorID)
+	if err != nil || p.NetMinor.Int64 != 0 || !p.FoundingAwardedAt.Valid {
+		t.Fatal("late refund not reconciled", p.NetMinor, err)
 	}
 }

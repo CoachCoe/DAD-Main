@@ -27,7 +27,7 @@ func (g *refundGateway) ListPaymentRefunds(context.Context, string) ([]payments.
 }
 func (g *refundGateway) CreateRefund(_ context.Context, payment string, amount int64, command string) (payments.Object, error) {
 	g.creates++
-	g.refund = paymentObject(g.t, map[string]interface{}{"id": "re_" + command, "payment_intent": payment, "currency": "usd", "amount": amount, "status": "succeeded", "metadata": map[string]string{"dad_staff_action": command}})
+	g.refund = paymentObject(g.t, map[string]any{"id": "re_" + command, "payment_intent": payment, "currency": "usd", "amount": amount, "status": "succeeded", "metadata": map[string]string{"dad_staff_action": command}})
 	if g.loseAcknowledgement {
 		g.loseAcknowledgement = false
 		return nil, payments.ErrCheckoutUnavailable
@@ -73,7 +73,7 @@ func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 	}
 	for range 2 {
 		result, err := s.Refund(ctx, finance, r)
-		if err != nil || result["status"] != "SUCCEEDED" {
+		if err != nil || result.Status != "SUCCEEDED" {
 			t.Fatal("refund reconciliation failed", result, err)
 		}
 	}

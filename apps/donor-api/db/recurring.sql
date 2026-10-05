@@ -7,6 +7,14 @@ SELECT a.* FROM donor_stripe_checkouts a JOIN donor_checkouts d ON d.id=a.checko
 WHERE d.donor_id=$1 AND d.frequency='MONTHLY' AND a.status<>'EXPIRED'
 ORDER BY a.created_at DESC,a.id DESC LIMIT 1 FOR UPDATE OF a;
 
+-- name: LatestMonthlyAttemptSnapshot :one
+SELECT a.* FROM donor_stripe_checkouts a JOIN donor_checkouts d ON d.id=a.checkout_id
+WHERE d.donor_id=$1 AND d.frequency='MONTHLY' AND a.status<>'EXPIRED'
+ORDER BY a.created_at DESC,a.id DESC LIMIT 1;
+
+-- name: SubscriptionObservedAt :one
+SELECT observed_at FROM donor_subscriptions WHERE attempt_id=$1;
+
 -- name: LatestConfirmedAmount :one
 SELECT amount_minor FROM donor_amount_changes WHERE checkout_id=$1 AND confirmed_at IS NOT NULL ORDER BY created_at DESC LIMIT 1;
 

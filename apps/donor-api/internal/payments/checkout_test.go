@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/stripe/stripe-go/v87"
@@ -98,5 +99,44 @@ func TestFinancialGatewayUsesPinnedSDKAndIdempotentCardUpdate(t *testing.T) {
 	}
 	if calls != 5 {
 		t.Fatalf("requests=%d", calls)
+	}
+}
+func TestSubscriptionMutationsNeverProrate(t *testing.T) {
+	var forms []map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/v1/subscriptions/sub_fixture" || r.Header.Get("Idempotency-Key") != "key" {
+			t.Error("Stripe boundary changed", r.Method, r.URL.Path)
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		form := map[string]string{}
+		for name := range r.PostForm {
+			form[name] = r.PostForm.Get(name)
+		}
+		forms = append(forms, form)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"sub_fixture","object":"subscription"}`))
+	}))
+	defer server.Close()
+	backends := stripe.NewBackendsWithConfig(&stripe.BackendConfig{URL: stripe.String(server.URL), HTTPClient: server.Client(), MaxNetworkRetries: stripe.Int64(0), LeveledLogger: &stripe.LeveledLogger{Level: stripe.LevelNull}})
+	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
+	ctx := context.Background()
+	for _, err := range []error{
+		gateway.ScheduleCancellation(ctx, "sub_fixture", 1800000000, "key"),
+		gateway.PauseCollection(ctx, "sub_fixture", 1900000000, "key"),
+		gateway.ChangeMonthlyAmount(ctx, "sub_fixture", "si_fixture", "prod_fixture", 9000, "key"),
+	} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []map[string]string{
+		{"cancel_at": "1800000000", "proration_behavior": "none"},
+		{"pause_collection[behavior]": "void", "pause_collection[resumes_at]": "1900000000", "proration_behavior": "none"},
+		{"items[0][id]": "si_fixture", "items[0][quantity]": "1", "items[0][price_data][currency]": "usd", "items[0][price_data][product]": "prod_fixture", "items[0][price_data][recurring][interval]": "month", "items[0][price_data][unit_amount]": "9000", "proration_behavior": "none"},
+	}
+	if !reflect.DeepEqual(forms, want) {
+		t.Fatalf("got %v\nwant %v", forms, want)
 	}
 }

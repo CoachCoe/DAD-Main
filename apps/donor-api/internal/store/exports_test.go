@@ -50,6 +50,12 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 		if name == "referral-touches" && !slices.Contains(rows[0], "kind") {
 			t.Fatal("touch channel omitted")
 		}
+		if name == "gifts" && (!slices.Contains(rows[0], "referrer_id") || !slices.Contains(rows[0], "referral_kind")) {
+			t.Fatal("payment attribution omitted")
+		}
+		if name == "audit" && !slices.Contains(rows[0], "details") {
+			t.Fatal("audit details omitted")
+		}
 		if name == "donors" {
 			found := false
 			for _, row := range rows[1:] {
@@ -76,5 +82,22 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 	var incomplete int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='data.export_finished' AND details->>'completed'='false'", actor).Scan(&incomplete); err != nil || incomplete != 1 {
 		t.Fatal("incomplete export not audited", err)
+	}
+}
+func TestSafeCSVCellNeutralizesTextButNotNumbers(t *testing.T) {
+	for _, c := range []struct {
+		in   any
+		want string
+	}{
+		{"=1+1", "'=1+1"},
+		{" @SUM(A1)", "' @SUM(A1)"},
+		{"\tplain", "'\tplain"},
+		{int64(-5), "-5"},
+		{map[string]any{"reason": "=HYPERLINK()"}, `{"reason":"=HYPERLINK()"}`},
+		{nil, ""},
+	} {
+		if got, err := safeCSVCell(c.in); err != nil || got != c.want {
+			t.Fatalf("%#v: got %q %v", c.in, got, err)
+		}
 	}
 }

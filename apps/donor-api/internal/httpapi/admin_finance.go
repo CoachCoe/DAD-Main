@@ -14,10 +14,10 @@ import (
 )
 
 type StaffFinanceSource interface {
-	RefundQuote(context.Context, string, pgtype.UUID, pgtype.UUID) (map[string]any, error)
-	CancellationQuote(context.Context, string, pgtype.UUID) (map[string]any, error)
-	Refund(context.Context, string, store.StaffFinancialRequest) (map[string]any, error)
-	Cancel(context.Context, string, store.StaffFinancialRequest) (map[string]any, error)
+	RefundQuote(context.Context, string, pgtype.UUID, pgtype.UUID) (store.RefundQuote, error)
+	CancellationQuote(context.Context, string, pgtype.UUID) (store.RecurringDetails, error)
+	Refund(context.Context, string, store.StaffFinancialRequest) (store.StaffRefund, error)
+	Cancel(context.Context, string, store.StaffFinancialRequest) (store.StaffCancellation, error)
 }
 
 func financeStatus(err error) (int, string) {
@@ -33,7 +33,7 @@ func validReason(reason string) bool {
 }
 
 // finance runs a staff financial request with the processor time budget.
-func (a *api) finance(w http.ResponseWriter, r *http.Request, run func(context.Context, string) (map[string]any, error)) {
+func (a *api) finance(w http.ResponseWriter, r *http.Request, run func(context.Context, string) (any, error)) {
 	if a.StaffFinance == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "Financial actions are temporarily unavailable", nil)
 		return
@@ -51,7 +51,7 @@ func (a *api) refundQuote(w http.ResponseWriter, r *http.Request) {
 		staffInvalid(w, r)
 		return
 	}
-	a.finance(w, r, func(ctx context.Context, session string) (map[string]any, error) {
+	a.finance(w, r, func(ctx context.Context, session string) (any, error) {
 		return a.StaffFinance.RefundQuote(ctx, session, donorID, giftID)
 	})
 }
@@ -62,7 +62,7 @@ func (a *api) cancellationQuote(w http.ResponseWriter, r *http.Request) {
 		staffInvalid(w, r)
 		return
 	}
-	a.finance(w, r, func(ctx context.Context, session string) (map[string]any, error) {
+	a.finance(w, r, func(ctx context.Context, session string) (any, error) {
 		return a.StaffFinance.CancellationQuote(ctx, session, donorID)
 	})
 }
@@ -80,7 +80,7 @@ func (a *api) refund(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request := store.StaffFinancialRequest{RequestID: key, DonorID: donorID, TargetID: giftID, Amount: body.Amount, Reason: body.Reason}
-	a.finance(w, r, func(ctx context.Context, session string) (map[string]any, error) {
+	a.finance(w, r, func(ctx context.Context, session string) (any, error) {
 		return a.StaffFinance.Refund(ctx, session, request)
 	})
 }
@@ -98,7 +98,7 @@ func (a *api) cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request := store.StaffFinancialRequest{RequestID: key, DonorID: donorID, TargetID: body.ID, PeriodEnd: body.End.Truncate(time.Microsecond), Reason: body.Reason}
-	a.finance(w, r, func(ctx context.Context, session string) (map[string]any, error) {
+	a.finance(w, r, func(ctx context.Context, session string) (any, error) {
 		return a.StaffFinance.Cancel(ctx, session, request)
 	})
 }

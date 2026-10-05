@@ -18,7 +18,7 @@ import (
 )
 
 type DashboardSource interface {
-	DonorDashboard(context.Context, string) (map[string]any, error)
+	DonorDashboard(context.Context, string) (store.DonorDashboard, error)
 }
 
 type DonorSource interface {

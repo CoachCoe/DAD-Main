@@ -116,15 +116,15 @@ type countedOutbox struct {
 	calls int
 }
 
-func (db *countedOutbox) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+func (db *countedOutbox) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	db.calls++
 	return db.DBTX.Exec(ctx, sql, args...)
 }
-func (db *countedOutbox) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (db *countedOutbox) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	db.calls++
 	return db.DBTX.Query(ctx, sql, args...)
 }
-func (db *countedOutbox) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (db *countedOutbox) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	db.calls++
 	return db.DBTX.QueryRow(ctx, sql, args...)
 }

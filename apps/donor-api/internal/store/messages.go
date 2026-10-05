@@ -141,12 +141,19 @@ func renderMessage(ctx context.Context, q *queries.Queries, job queries.DonorMes
 		return "", "", payments.ErrFacts
 	}
 }
+
+// deliveryLease reserves a claimed job while its send is in flight. It outlasts
+// a worker step, so a claim abandoned by a crashed worker is retried later.
+const deliveryLease = 5 * time.Minute
+
+func messageRetryAt(now time.Time, attempts int32) pgtype.Timestamptz {
+	return timestamp(now.Add(time.Duration(min(60, 1<<uint(attempts))) * time.Minute))
+}
 func failMessage(ctx context.Context, q *queries.Queries, job queries.DonorMessage, now time.Time, category string) error {
 	if err := q.IncrementMessageAttempt(ctx, job.ID); err != nil {
 		return err
 	}
-	minutes := min(60, 1<<uint(job.Attempts+1))
-	return q.FailMessage(ctx, queries.FailMessageParams{ID: job.ID, LastError: pgtype.Text{String: category, Valid: true}, AvailableAt: timestamp(now.Add(time.Duration(minutes) * time.Minute))})
+	return q.FailMessage(ctx, queries.FailMessageParams{ID: job.ID, LastError: pgtype.Text{String: category, Valid: true}, AvailableAt: messageRetryAt(now, job.Attempts+1)})
 }
 func completeMessage(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time, reason string) error {
 	return q.CompleteMessage(ctx, queries.CompleteMessageParams{ID: id, CompletedAt: timestamp(now), SuppressedReason: pgtype.Text{String: reason, Valid: reason != ""}})
@@ -192,7 +199,7 @@ func (w MessageWorker) prepare(ctx context.Context, now time.Time) (pgtype.UUID,
 		if !messageDataError(err) {
 			return empty, false, err
 		}
-		if err = failMessage(ctx, q, job, now, "ValueError"); err != nil {
+		if err = failMessage(ctx, q, job, now, "InvalidMessage"); err != nil {
 			return empty, false, err
 		}
 		return empty, true, tx.Commit(ctx)
@@ -213,53 +220,67 @@ func (w MessageWorker) DeliverNext(ctx context.Context, now time.Time) (bool, er
 	if err != nil || !worked || !id.Valid {
 		return worked, err
 	}
+	message, attempts, err := w.claim(ctx, id, now)
+	if err != nil || message == nil {
+		return err == nil, err
+	}
+	// The donor lock is released before SMTP; the claim keeps other workers off
+	// the job, and a crash before completion resends with the same Message-ID.
+	sendErr := w.Transport.Send(ctx, *message)
+	q := queries.New(w.DB)
+	if sendErr != nil {
+		err = q.FailMessage(ctx, queries.FailMessageParams{ID: id, LastError: pgtype.Text{String: "DeliveryError", Valid: true}, AvailableAt: messageRetryAt(now, attempts)})
+	} else {
+		err = completeMessage(ctx, q, id, now, "")
+	}
+	return err == nil, err
+}
+
+// claim rechecks eligibility under the donor lock and reserves the job for one
+// send. It returns no message when the job was completed, suppressed or failed instead.
+func (w MessageWorker) claim(ctx context.Context, id pgtype.UUID, now time.Time) (*mail.Message, int32, error) {
 	tx, err := w.DB.Begin(ctx)
 	if err != nil {
-		return false, err
+		return nil, 0, err
 	}
 	defer tx.Rollback(ctx)
 	q := queries.New(tx)
 	job, err := q.MessageByID(ctx, id)
 	if err != nil {
-		return false, err
+		return nil, 0, err
 	}
 	if job.CompletedAt.Valid || job.Attempts >= 5 || job.AvailableAt.Time.After(now) {
-		return true, tx.Commit(ctx)
+		return nil, 0, tx.Commit(ctx)
 	}
 	donor, err := q.LockDonor(ctx, job.DonorID)
 	if err != nil {
-		return false, err
+		return nil, 0, err
 	}
 	reason, err := messageSuppression(ctx, q, job, donor, now)
 	if err != nil {
 		if !messageDataError(err) {
-			return false, err
+			return nil, 0, err
 		}
-		if err = failMessage(ctx, q, job, now, "ValueError"); err != nil {
-			return false, err
+		if err = failMessage(ctx, q, job, now, "InvalidMessage"); err != nil {
+			return nil, 0, err
 		}
-		return true, tx.Commit(ctx)
+		return nil, 0, tx.Commit(ctx)
 	}
 	if reason != "" {
 		if err = completeMessage(ctx, q, id, now, reason); err != nil {
-			return false, err
+			return nil, 0, err
 		}
-		return true, tx.Commit(ctx)
+		return nil, 0, tx.Commit(ctx)
 	}
 	messageID, err := mail.MessageID(w.Settings.Sender, "message", id.String())
 	if err != nil {
-		return false, err
+		return nil, 0, err
 	}
-	sendErr := w.Transport.Send(ctx, mail.Message{From: w.Settings.Sender, To: donor.Email, Subject: job.Subject.String, Body: job.Body.String, ID: messageID})
-	if sendErr != nil {
-		err = failMessage(ctx, q, job, now, "DeliveryError")
-	} else {
-		if err = q.IncrementMessageAttempt(ctx, id); err == nil {
-			err = completeMessage(ctx, q, id, now, "")
-		}
+	if err = q.ClaimMessage(ctx, queries.ClaimMessageParams{ID: id, AvailableAt: timestamp(now.Add(deliveryLease))}); err != nil {
+		return nil, 0, err
 	}
-	if err != nil {
-		return false, err
+	if err = tx.Commit(ctx); err != nil {
+		return nil, 0, err
 	}
-	return true, tx.Commit(ctx)
+	return &mail.Message{From: w.Settings.Sender, To: donor.Email, Subject: job.Subject.String, Body: job.Body.String, ID: messageID}, job.Attempts + 1, nil
 }

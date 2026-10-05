@@ -183,3 +183,99 @@ func TestLoginEmailSuppressesDisabledExpiredAndParksFailures(t *testing.T) {
 		})
 	}
 }
+
+// blockingMail holds every send open until released.
+type blockingMail struct {
+	started chan mail.Message
+	release chan struct{}
+}
+
+func (b *blockingMail) Send(ctx context.Context, m mail.Message) error {
+	b.started <- m
+	select {
+	case <-b.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+func TestSlowSendReleasesDonorLockAndKeepsJobClaimed(t *testing.T) {
+	queued := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC) // Isolates this queue from other tests' due work.
+	settings := mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: emailTestKey}
+	for _, kind := range []string{"login", "message"} {
+		t.Run(kind, func(t *testing.T) {
+			pool := database(t)
+			ctx := context.Background()
+			id, email := donor(t, pool)
+			accountCleanup(t, pool, id)
+			transport := &blockingMail{started: make(chan mail.Message, 2), release: make(chan struct{})}
+			tx, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback(ctx)
+			var deliver func() (bool, error)
+			completed := "SELECT completed_at IS NOT NULL FROM donor_login_emails WHERE donor_id=$1"
+			if kind == "login" {
+				err = QueueLoginEmailInTx(ctx, tx, email, queued)
+				w := LoginEmailWorker{DB: pool, Settings: settings, Origin: "https://donor.example.org", Transport: transport}
+				deliver = func() (bool, error) { return w.DeliverNext(ctx, queued) }
+			} else {
+				referred := testID(t)
+				t.Cleanup(func() {
+					for _, c := range []struct {
+						sql string
+						id  pgtype.UUID
+					}{{"DELETE FROM donor_preferences WHERE donor_id=$1", id}, {"DELETE FROM donor_metric_projections WHERE donor_id=$1", referred}, {"DELETE FROM donors WHERE id=$1", referred}} {
+						if _, err := pool.Exec(context.Background(), c.sql, c.id); err != nil {
+							t.Error(err)
+						}
+					}
+				})
+				mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", referred, referred.String()+"@example.org")
+				mustExec(t, tx, "INSERT INTO donor_preferences(id,donor_id,version,referral_emails,marketing_emails) VALUES($1,$2,1,true,false)", testID(t), id)
+				mustExec(t, tx, "INSERT INTO donor_metric_projections(id,donor_id,referrer_id,referral_kind,net_minor,computed_at,next_refresh_at) VALUES($1,$2,$3,'LINK',3000,$4,$4)", testID(t), referred, id, queued)
+				err = queueMessage(ctx, queries.New(tx), id, "REFERRAL", "referral:"+referred.String(), map[string]any{"referred_id": referred.String(), "kind": "LINK"}, queued)
+				w := MessageWorker{DB: pool, Settings: settings, Origin: "https://donor.example.org", Transport: transport}
+				deliver = func() (bool, error) { return w.DeliverNext(ctx, queued) }
+				completed = "SELECT completed_at IS NOT NULL FROM donor_messages WHERE donor_id=$1"
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = tx.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan error, 1)
+			go func() { _, err := deliver(); done <- err }()
+			var sent mail.Message
+			select {
+			case sent = <-transport.started:
+			case <-time.After(10 * time.Second):
+				t.Fatal("send did not start")
+			}
+			lock, err := pool.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mustExec(t, lock, "SET LOCAL lock_timeout='2s'")
+			if _, err = queries.New(lock).LockDonor(ctx, id); err != nil {
+				t.Fatal("send held the donor lock", err)
+			}
+			if err = lock.Rollback(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if worked, err := deliver(); err != nil || worked {
+				t.Fatal("claimed job was available to another worker", worked, err)
+			}
+			close(transport.release)
+			if err = <-done; err != nil {
+				t.Fatal(err)
+			}
+			var finished bool
+			if err = pool.QueryRow(ctx, completed, id).Scan(&finished); err != nil || !finished || len(transport.started) != 0 || sent.To != email {
+				t.Fatal("send not completed exactly once", err)
+			}
+		})
+	}
+}

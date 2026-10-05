@@ -19,12 +19,12 @@ func ownedPause(ctx context.Context, q *queries.Queries, donor, id pgtype.UUID) 
 	return pause, err
 }
 
-func (s RecurringService) Resume(ctx context.Context, token string, r ResumptionRequest) (map[string]interface{}, error) {
+func (s RecurringService) Resume(ctx context.Context, token string, r ResumptionRequest) (Resumption, error) {
 	if !ValidRequestID(r.RequestID) || r.NextRenewal.IsZero() {
-		return nil, payments.ErrFacts
+		return Resumption{}, payments.ErrFacts
 	}
 	owner := donorOwner(token)
-	ready, err := s.transaction(ctx, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (map[string]interface{}, error) {
+	ready, err := ownerTransaction(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*Resumption, error) {
 		q := queries.New(tx)
 		pause, err := ownedPause(ctx, q, d.ID, r.PauseID)
 		if err != nil {
@@ -46,7 +46,7 @@ func (s RecurringService) Resume(ctx context.Context, token string, r Resumption
 			if err != nil {
 				return nil, err
 			}
-			schedule, _, err := s.read(ctx, tx, attempt, now, "pause")
+			schedule, _, err := s.read(ctx, tx, attempt, now, "pause", nil)
 			if err != nil {
 				return nil, err
 			}
@@ -75,7 +75,7 @@ func (s RecurringService) Resume(ctx context.Context, token string, r Resumption
 		if err != nil {
 			return nil, err
 		}
-		schedule, remote, err := s.read(ctx, tx, attempt, now, "pause")
+		schedule, remote, err := s.read(ctx, tx, attempt, now, "pause", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -88,52 +88,55 @@ func (s RecurringService) Resume(ctx context.Context, token string, r Resumption
 		}
 		return nil, q.InsertResumption(ctx, queries.InsertResumptionParams{ID: r.RequestID, DonorID: d.ID, PauseID: pause.ID, NextRenewal: timestamp(r.NextRenewal), CreatedAt: timestamp(now)})
 	})
-	if err != nil || ready != nil {
-		return ready, err
+	if err != nil {
+		return Resumption{}, err
 	}
-	return s.transaction(ctx, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (map[string]interface{}, error) {
+	if ready != nil {
+		return *ready, nil
+	}
+	return ownerTransaction(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (Resumption, error) {
 		q := queries.New(tx)
 		pause, err := ownedPause(ctx, q, d.ID, r.PauseID)
 		if err != nil {
-			return nil, err
+			return Resumption{}, err
 		}
 		attempt, err := ownedAttempt(ctx, q, d.ID, pause.AttemptID)
 		if err != nil {
-			return nil, err
+			return Resumption{}, err
 		}
-		schedule, _, err := s.read(ctx, tx, attempt, now, "pause")
+		schedule, _, err := s.read(ctx, tx, attempt, now, "pause", nil)
 		if err != nil {
-			return nil, err
+			return Resumption{}, err
 		}
 		if schedule.Status != "active" || schedule.StopsAt.Valid {
-			return nil, ErrSubscriptionConflict
+			return Resumption{}, ErrSubscriptionConflict
 		}
 		command, err := q.ResumptionByID(ctx, r.RequestID)
 		if err != nil {
-			return nil, err
+			return Resumption{}, err
 		}
 		if !command.ConfirmedAt.Valid {
 			if !schedule.PeriodEnd.Time.Equal(command.NextRenewal.Time) || !now.Before(command.NextRenewal.Time) || now.Sub(command.CreatedAt.Time) >= 23*time.Hour {
-				return nil, ErrSubscriptionConflict
+				return Resumption{}, ErrSubscriptionConflict
 			}
 			// Shorten the voiding window without charging any skipped invoices.
 			if err = s.Gateway.PauseCollection(ctx, attempt.StripeSubscriptionID.String, command.NextRenewal.Time.Unix(), "dad-resume-"+command.ID.String()); err != nil {
-				return nil, err
+				return Resumption{}, err
 			}
-			if _, _, err = s.read(ctx, tx, attempt, now, "pause"); err != nil {
-				return nil, err
+			if _, _, err = s.read(ctx, tx, attempt, now, "pause", nil); err != nil {
+				return Resumption{}, err
 			}
 			command, err = q.ResumptionByID(ctx, r.RequestID)
 			if err != nil {
-				return nil, err
+				return Resumption{}, err
 			}
 			if !command.ConfirmedAt.Valid {
-				return nil, ErrSubscriptionConflict
+				return Resumption{}, ErrSubscriptionConflict
 			}
 		}
 		if _, err = RefreshProjectionInTx(ctx, tx, d.ID, now); err != nil {
-			return nil, err
+			return Resumption{}, err
 		}
-		return resumptionView(command), nil
+		return *resumptionView(command), nil
 	})
 }

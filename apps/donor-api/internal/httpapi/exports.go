@@ -5,10 +5,12 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"impactgraph/donor-api/internal/store"
 )
 
 type ExportSource interface {
-	ExportDatasets(context.Context, string) (map[string]any, error)
+	ExportDatasets(context.Context, string) (store.ExportDatasets, error)
 	Export(context.Context, string, string, io.Writer) error
 }
 

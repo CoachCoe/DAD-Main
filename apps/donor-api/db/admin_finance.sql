@@ -1,6 +1,12 @@
 -- name: StaffGift :one
 SELECT * FROM donor_gifts WHERE donor_id=$1 AND id=$2 FOR UPDATE;
 
+-- name: StaffGiftSnapshot :one
+SELECT * FROM donor_gifts WHERE donor_id=$1 AND id=$2;
+
+-- name: GiftRefundObservations :one
+SELECT count(*)::bigint FROM donor_refund_observations o JOIN donor_refunds r ON r.id=o.refund_id WHERE r.gift_id=$1;
+
 -- name: StaffActionByID :one
 SELECT * FROM donor_staff_actions WHERE id=$1;
 

@@ -11,11 +11,12 @@ import (
 	"time"
 
 	"impactgraph/donor-api/internal/payments"
+	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/wallet"
 )
 
 type ContentSource interface {
-	PublicContent(context.Context) (map[string]any, error)
+	PublicContent(context.Context) (store.PublicContent, error)
 }
 type WebhookReceiver interface {
 	Receive(context.Context, []byte, string) error
@@ -106,11 +107,11 @@ func (a *api) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /donor/me/wallet/apple", a.browser(accountLimit, a.signedIn(a.applePass)))
 	mux.HandleFunc("POST /donor/me/wallet/google", a.browser(accountLimit, a.signedIn(a.googlePass)))
 
-	mux.HandleFunc("GET /donor/me/recurring", a.signedIn(a.recurringRead(RecurringSource.Details)))
-	mux.HandleFunc("GET /donor/me/recurring/amount", a.signedIn(a.recurringRead(RecurringSource.AmountOptions)))
-	mux.HandleFunc("GET /donor/me/recurring/pause", a.signedIn(a.recurringRead(RecurringSource.PauseOptions)))
-	mux.HandleFunc("GET /donor/me/recurring/resume", a.signedIn(a.recurringRead(RecurringSource.ResumeOptions)))
-	mux.HandleFunc("GET /donor/me/payment-method", a.signedIn(a.recurringRead(RecurringSource.PaymentMethodStatus)))
+	mux.HandleFunc("GET /donor/me/recurring", a.signedIn(recurringRead(a, RecurringSource.Details)))
+	mux.HandleFunc("GET /donor/me/recurring/amount", a.signedIn(recurringRead(a, RecurringSource.AmountOptions)))
+	mux.HandleFunc("GET /donor/me/recurring/pause", a.signedIn(recurringRead(a, RecurringSource.PauseOptions)))
+	mux.HandleFunc("GET /donor/me/recurring/resume", a.signedIn(recurringRead(a, RecurringSource.ResumeOptions)))
+	mux.HandleFunc("GET /donor/me/payment-method", a.signedIn(recurringRead(a, RecurringSource.PaymentMethodStatus)))
 	mux.HandleFunc("POST /donor/me/recurring/cancel", a.browser(accountLimit, a.signedIn(recurringCommand(a, cancelRecurring))))
 	mux.HandleFunc("POST /donor/me/recurring/pause", a.browser(accountLimit, a.signedIn(recurringCommand(a, pauseRecurring))))
 	mux.HandleFunc("POST /donor/me/recurring/resume", a.browser(accountLimit, a.signedIn(recurringCommand(a, resumeRecurring))))

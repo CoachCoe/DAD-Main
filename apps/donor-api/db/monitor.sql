@@ -1,6 +1,6 @@
 -- name: QueueHealth :many
 WITH queues AS (
- SELECT 'stripe'::text AS queue,created_at AS due_at,attempts>=10 AS parked FROM donor_stripe_events WHERE processed_at IS NULL
+ SELECT 'stripe'::text AS queue,available_at AS due_at,attempts>=10 AS parked FROM donor_stripe_events WHERE processed_at IS NULL
  UNION ALL
  SELECT 'messages',available_at,attempts>=5 FROM donor_messages WHERE completed_at IS NULL
  UNION ALL
@@ -8,7 +8,8 @@ WITH queues AS (
  UNION ALL
  SELECT 'email-changes',available_at,attempts>=5 FROM donor_email_changes WHERE stage IN ('CURRENT','NEW') AND sent_at IS NULL
  UNION ALL
- SELECT 'projections',coalesce(p.next_refresh_at,d.created_at),false FROM donors d LEFT JOIN donor_metric_projections p ON p.donor_id=d.id
+ SELECT 'projections',next_refresh_at,refresh_error IS NOT NULL FROM donor_metric_projections
+ WHERE next_refresh_at<=sqlc.arg(as_of)::timestamptz
 ), names AS (
  SELECT unnest(ARRAY['stripe','messages','login-email','email-changes','projections']) AS queue
 )

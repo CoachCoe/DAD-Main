@@ -20,6 +20,7 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 	now := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 	id := testID(t)
 	mustExec(t, tx, "INSERT INTO donors(id,email,created_at) VALUES($1,$2,$3)", id, id.String()+"@example.org", now)
+	mustExec(t, tx, "INSERT INTO donor_metric_projections(id,donor_id,computed_at,next_refresh_at) VALUES($1,$2,$3,$3)", testID(t), id, now)
 	for i, delta := range []time.Duration{-time.Hour, -time.Minute, time.Hour, -time.Hour} {
 		job := testID(t)
 		mustExec(t, tx, `INSERT INTO donor_messages(id,donor_id,kind,dedup_key,context,available_at,attempts,completed_at)

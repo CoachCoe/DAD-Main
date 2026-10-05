@@ -13,16 +13,16 @@ import (
 )
 
 type RecurringSource interface {
-	Details(context.Context, string) (map[string]any, error)
-	AmountOptions(context.Context, string) (map[string]any, error)
-	PauseOptions(context.Context, string) (map[string]any, error)
-	ResumeOptions(context.Context, string) (map[string]any, error)
-	PaymentMethodStatus(context.Context, string) (map[string]any, error)
-	Cancel(context.Context, string, store.CancellationRequest) (map[string]any, error)
-	Pause(context.Context, string, store.PauseRequest) (map[string]any, error)
-	Resume(context.Context, string, store.ResumptionRequest) (map[string]any, error)
-	ChangeAmount(context.Context, string, store.AmountRequest) (map[string]any, error)
-	BeginPaymentUpdate(context.Context, string, pgtype.UUID) (map[string]any, error)
+	Details(context.Context, string) (store.RecurringDetails, error)
+	AmountOptions(context.Context, string) (store.AmountOptions, error)
+	PauseOptions(context.Context, string) (store.PauseOptions, error)
+	ResumeOptions(context.Context, string) (store.ResumeOptions, error)
+	PaymentMethodStatus(context.Context, string) (store.PaymentMethodStatus, error)
+	Cancel(context.Context, string, store.CancellationRequest) (store.RecurringDetails, error)
+	Pause(context.Context, string, store.PauseRequest) (store.PauseResult, error)
+	Resume(context.Context, string, store.ResumptionRequest) (store.Resumption, error)
+	ChangeAmount(context.Context, string, store.AmountRequest) (store.AmountChange, error)
+	BeginPaymentUpdate(context.Context, string, pgtype.UUID) (store.PaymentUpdate, error)
 }
 
 func recurringStatus(err error) (int, string) {
@@ -41,7 +41,7 @@ func (a *api) recurringAvailable(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // Recurring reads reconcile with the processor, so they get the provider budget.
-func (a *api) recurringRead(read func(RecurringSource, context.Context, string) (map[string]any, error)) sessionHandler {
+func recurringRead[R any](a *api, read func(RecurringSource, context.Context, string) (R, error)) sessionHandler {
 	return func(w http.ResponseWriter, r *http.Request, session string) {
 		if !a.recurringAvailable(w, r) {
 			return
@@ -56,7 +56,7 @@ func (a *api) recurringRead(read func(RecurringSource, context.Context, string) 
 type requestBody interface{ valid() bool }
 
 // recurringCommand runs an idempotent donor command against their subscription.
-func recurringCommand[T requestBody](a *api, run func(RecurringSource, context.Context, string, pgtype.UUID, T) (map[string]any, error)) sessionHandler {
+func recurringCommand[T requestBody, R any](a *api, run func(RecurringSource, context.Context, string, pgtype.UUID, T) (R, error)) sessionHandler {
 	return func(w http.ResponseWriter, r *http.Request, session string) {
 		if !a.recurringAvailable(w, r) {
 			return
@@ -83,7 +83,7 @@ type cancelBody struct {
 
 func (b cancelBody) valid() bool { return b.ID.Valid && !b.End.IsZero() }
 
-func cancelRecurring(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b cancelBody) (map[string]any, error) {
+func cancelRecurring(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b cancelBody) (store.RecurringDetails, error) {
 	return s.Cancel(ctx, session, store.CancellationRequest{RequestID: key, AttemptID: b.ID, PeriodEnd: b.End.Truncate(time.Microsecond)})
 }
 
@@ -98,7 +98,7 @@ func (b pauseBody) valid() bool {
 	return b.ID.Valid && b.Months >= 1 && b.Months <= 3 && !b.Start.IsZero() && !b.End.IsZero()
 }
 
-func pauseRecurring(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b pauseBody) (map[string]any, error) {
+func pauseRecurring(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b pauseBody) (store.PauseResult, error) {
 	return s.Pause(ctx, session, store.PauseRequest{RequestID: key, AttemptID: b.ID, Months: b.Months, StartsAt: b.Start.Truncate(time.Microsecond), ResumesAt: b.End.Truncate(time.Microsecond)})
 }
 
@@ -109,7 +109,7 @@ type resumeBody struct {
 
 func (b resumeBody) valid() bool { return b.ID.Valid && !b.Next.IsZero() }
 
-func resumeRecurring(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b resumeBody) (map[string]any, error) {
+func resumeRecurring(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b resumeBody) (store.Resumption, error) {
 	return s.Resume(ctx, session, store.ResumptionRequest{RequestID: key, PauseID: b.ID, NextRenewal: b.Next.Truncate(time.Microsecond)})
 }
 
@@ -124,7 +124,7 @@ func (b amountBody) valid() bool {
 	return b.ID.Valid && validAmount(b.Amount) && validAmount(b.Previous) && !b.Effective.IsZero()
 }
 
-func changeAmount(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b amountBody) (map[string]any, error) {
+func changeAmount(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b amountBody) (store.AmountChange, error) {
 	return s.ChangeAmount(ctx, session, store.AmountRequest{RequestID: key, AttemptID: b.ID, Amount: b.Amount, Previous: b.Previous, EffectiveAt: b.Effective.Truncate(time.Microsecond)})
 }
 

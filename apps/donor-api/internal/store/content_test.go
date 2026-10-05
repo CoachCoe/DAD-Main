@@ -23,7 +23,7 @@ func TestPublicContentUsesMigratedSchemaAndOmitsPrivateSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if empty["state"] != "unpublished" {
+	if empty.State != "unpublished" {
 		t.Fatal("unpublished ledger must be explicit")
 	}
 	staffID, err := NewID()
@@ -52,7 +52,7 @@ func TestPublicContentUsesMigratedSchemaAndOmitsPrivateSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result["state"] != "published" || !strings.Contains(string(encoded), `"illustrative":true`) {
+	if result.State != "published" || !strings.Contains(string(encoded), `"illustrative":true`) {
 		t.Fatalf("wrong publication: %s", encoded)
 	}
 	for _, private := range []string{"private-approval", "private-source", "board_approval_source_id", "approved_on", "source_id"} {

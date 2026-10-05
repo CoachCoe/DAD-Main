@@ -51,7 +51,7 @@ func donor(t *testing.T, pool *pgxpool.Pool) (pgtype.UUID, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		for _, query := range []string{"DELETE FROM donor_sessions WHERE donor_id=$1", "DELETE FROM donor_login_links WHERE donor_id=$1", "DELETE FROM donors WHERE id=$1"} {
+		for _, query := range []string{"DELETE FROM donor_sessions WHERE donor_id=$1", "DELETE FROM donor_login_links WHERE donor_id=$1", "DELETE FROM donor_metric_projections WHERE donor_id=$1", "DELETE FROM donors WHERE id=$1"} {
 			if _, err := pool.Exec(ctx, query, id); err != nil {
 				t.Error(err)
 			}

@@ -12,25 +12,22 @@ import (
 )
 
 const giftHistory = `-- name: GiftHistory :many
-SELECT g.donor_id, g.checkout_id, g.stripe_object_id, g.amount_minor, g.currency, g.frequency, g.paid_at, g.stripe_payment_intent_id, g.period_id, g.id, g.created_at, c.referrer_id, c.referral_kind, c.referral_expires_at
+SELECT g.stripe_object_id,g.donor_id,g.amount_minor,g.currency,g.frequency,g.paid_at,g.period_id,
+g.referrer_id,g.referral_kind,c.referral_expires_at
 FROM donor_gifts g JOIN donor_checkouts c ON c.id=g.checkout_id WHERE g.donor_id=$1
 `
 
 type GiftHistoryRow struct {
-	DonorID               pgtype.UUID        `json:"donor_id"`
-	CheckoutID            pgtype.UUID        `json:"checkout_id"`
-	StripeObjectID        string             `json:"stripe_object_id"`
-	AmountMinor           int64              `json:"amount_minor"`
-	Currency              string             `json:"currency"`
-	Frequency             string             `json:"frequency"`
-	PaidAt                pgtype.Timestamptz `json:"paid_at"`
-	StripePaymentIntentID pgtype.Text        `json:"stripe_payment_intent_id"`
-	PeriodID              pgtype.UUID        `json:"period_id"`
-	ID                    pgtype.UUID        `json:"id"`
-	CreatedAt             pgtype.Timestamptz `json:"created_at"`
-	ReferrerID            pgtype.UUID        `json:"referrer_id"`
-	ReferralKind          pgtype.Text        `json:"referral_kind"`
-	ReferralExpiresAt     pgtype.Timestamptz `json:"referral_expires_at"`
+	StripeObjectID    string             `json:"stripe_object_id"`
+	DonorID           pgtype.UUID        `json:"donor_id"`
+	AmountMinor       int64              `json:"amount_minor"`
+	Currency          string             `json:"currency"`
+	Frequency         string             `json:"frequency"`
+	PaidAt            pgtype.Timestamptz `json:"paid_at"`
+	PeriodID          pgtype.UUID        `json:"period_id"`
+	ReferrerID        pgtype.UUID        `json:"referrer_id"`
+	ReferralKind      pgtype.Text        `json:"referral_kind"`
+	ReferralExpiresAt pgtype.Timestamptz `json:"referral_expires_at"`
 }
 
 func (q *Queries) GiftHistory(ctx context.Context, donorID pgtype.UUID) ([]GiftHistoryRow, error) {
@@ -43,17 +40,13 @@ func (q *Queries) GiftHistory(ctx context.Context, donorID pgtype.UUID) ([]GiftH
 	for rows.Next() {
 		var i GiftHistoryRow
 		if err := rows.Scan(
-			&i.DonorID,
-			&i.CheckoutID,
 			&i.StripeObjectID,
+			&i.DonorID,
 			&i.AmountMinor,
 			&i.Currency,
 			&i.Frequency,
 			&i.PaidAt,
-			&i.StripePaymentIntentID,
 			&i.PeriodID,
-			&i.ID,
-			&i.CreatedAt,
 			&i.ReferrerID,
 			&i.ReferralKind,
 			&i.ReferralExpiresAt,
@@ -71,7 +64,7 @@ func (q *Queries) GiftHistory(ctx context.Context, donorID pgtype.UUID) ([]GiftH
 const missingReferredProjection = `-- name: MissingReferredProjection :one
 SELECT EXISTS(SELECT 1 FROM donor_gifts g JOIN donor_checkouts c ON c.id=g.checkout_id
 LEFT JOIN donor_metric_projections p ON p.donor_id=g.donor_id
-WHERE c.referrer_id=$1 AND p.id IS NULL)::boolean
+WHERE c.referrer_id=$1 AND p.net_minor IS NULL)::boolean
 `
 
 func (q *Queries) MissingReferredProjection(ctx context.Context, referrerID pgtype.UUID) (bool, error) {
@@ -155,7 +148,7 @@ func (q *Queries) PeriodHistory(ctx context.Context, donorID pgtype.UUID) ([]Don
 }
 
 const projection = `-- name: Projection :one
-SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at FROM donor_metric_projections WHERE donor_id=$1
+SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error FROM donor_metric_projections WHERE donor_id=$1
 `
 
 func (q *Queries) Projection(ctx context.Context, donorID pgtype.UUID) (DonorMetricProjection, error) {
@@ -176,6 +169,8 @@ func (q *Queries) Projection(ctx context.Context, donorID pgtype.UUID) (DonorMet
 		&i.NextRefreshAt,
 		&i.ID,
 		&i.CreatedAt,
+		&i.RefreshFailures,
+		&i.RefreshError,
 	)
 	return i, err
 }
@@ -309,7 +304,8 @@ ON CONFLICT (donor_id) DO UPDATE SET
 referrer_id=EXCLUDED.referrer_id,referral_kind=EXCLUDED.referral_kind,first_gift_id=EXCLUDED.first_gift_id,
 net_minor=EXCLUDED.net_minor,founding_awarded_at=EXCLUDED.founding_awarded_at,
 best_streak=EXCLUDED.best_streak,current_streak=EXCLUDED.current_streak,at_risk=EXCLUDED.at_risk,
-grace_ends_at=EXCLUDED.grace_ends_at,computed_at=EXCLUDED.computed_at,next_refresh_at=EXCLUDED.next_refresh_at
+grace_ends_at=EXCLUDED.grace_ends_at,computed_at=EXCLUDED.computed_at,next_refresh_at=EXCLUDED.next_refresh_at,
+refresh_failures=0,refresh_error=NULL
 `
 
 type SaveProjectionParams struct {

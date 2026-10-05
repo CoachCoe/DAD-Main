@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/recognition"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -101,11 +102,8 @@ func ReadReceipt(ctx context.Context, q *queries.Queries, donor, gift pgtype.UUI
 	return Receipt{Mode: "test", AsOf: iso(now), ID: "DAD-TEST-" + gift.String(), Gift: record}, err
 }
 func ReadAnnualSummary(ctx context.Context, q *queries.Queries, donor pgtype.UUID, year int, now time.Time) (AnnualSummary, error) {
-	out := AnnualSummary{Mode: "test", Year: year, Timezone: "America/New_York", AsOf: iso(now), Currency: "USD", Gifts: []GiftRecord{}}
-	zone, err := time.LoadLocation(out.Timezone)
-	if err != nil {
-		return out, err
-	}
+	zone := recognition.NewYork
+	out := AnnualSummary{Mode: "test", Year: year, Timezone: zone.String(), AsOf: iso(now), Currency: "USD", Gifts: []GiftRecord{}}
 	if year < 2026 || year > now.In(zone).Year() {
 		return out, ErrReceipt
 	}

@@ -230,6 +230,29 @@ func (q *Queries) LatestMonthlyAttempt(ctx context.Context, donorID pgtype.UUID)
 	return i, err
 }
 
+const latestMonthlyAttemptSnapshot = `-- name: LatestMonthlyAttemptSnapshot :one
+SELECT a.checkout_id, a.request_hash, a.request_params, a.stripe_session_id, a.stripe_subscription_id, a.hosted_url, a.status, a.id, a.created_at FROM donor_stripe_checkouts a JOIN donor_checkouts d ON d.id=a.checkout_id
+WHERE d.donor_id=$1 AND d.frequency='MONTHLY' AND a.status<>'EXPIRED'
+ORDER BY a.created_at DESC,a.id DESC LIMIT 1
+`
+
+func (q *Queries) LatestMonthlyAttemptSnapshot(ctx context.Context, donorID pgtype.UUID) (DonorStripeCheckout, error) {
+	row := q.db.QueryRow(ctx, latestMonthlyAttemptSnapshot, donorID)
+	var i DonorStripeCheckout
+	err := row.Scan(
+		&i.CheckoutID,
+		&i.RequestHash,
+		&i.RequestParams,
+		&i.StripeSessionID,
+		&i.StripeSubscriptionID,
+		&i.HostedUrl,
+		&i.Status,
+		&i.ID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const latestPaymentUpdate = `-- name: LatestPaymentUpdate :one
 SELECT donor_id, attempt_id, customer_id, request_params, stripe_session_id, hosted_url, status, completed_at, id, created_at FROM donor_payment_updates WHERE donor_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1
 `
@@ -315,6 +338,17 @@ func (q *Queries) ResumptionByID(ctx context.Context, id pgtype.UUID) (DonorResu
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const subscriptionObservedAt = `-- name: SubscriptionObservedAt :one
+SELECT observed_at FROM donor_subscriptions WHERE attempt_id=$1
+`
+
+func (q *Queries) SubscriptionObservedAt(ctx context.Context, attemptID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, subscriptionObservedAt, attemptID)
+	var observed_at pgtype.Timestamptz
+	err := row.Scan(&observed_at)
+	return observed_at, err
 }
 
 const unfinishedPaymentUpdate = `-- name: UnfinishedPaymentUpdate :one

@@ -36,6 +36,15 @@ SELECT $1,$2,$3,$3 WHERE NOT EXISTS
 (SELECT 1 FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 minute');
 
 -- name: DueProjectionDonor :one
-SELECT d.id FROM donors d LEFT JOIN donor_metric_projections p ON p.donor_id=d.id
-WHERE p.id IS NULL OR p.next_refresh_at<=$1 ORDER BY d.id
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.next_refresh_at<=$1 ORDER BY p.next_refresh_at
 LIMIT 1 FOR UPDATE OF d SKIP LOCKED;
+
+-- name: SeedProjection :exec
+INSERT INTO donor_metric_projections (id,donor_id,computed_at,next_refresh_at)
+VALUES ($1,$2,$3,$3) ON CONFLICT (donor_id) DO NOTHING;
+
+-- name: DeferProjection :exec
+UPDATE donor_metric_projections SET refresh_failures=refresh_failures+1,refresh_error=$2,
+next_refresh_at=sqlc.arg(as_of)::timestamptz+least(power(2,refresh_failures)*interval '5 minutes',interval '1 day')
+WHERE donor_id=$1;

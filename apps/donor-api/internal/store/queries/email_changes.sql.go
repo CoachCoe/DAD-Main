@@ -43,6 +43,20 @@ func (q *Queries) CancelEmailChanges(ctx context.Context, donorID pgtype.UUID) e
 	return err
 }
 
+const claimEmailChangeDelivery = `-- name: ClaimEmailChangeDelivery :exec
+UPDATE donor_email_changes SET attempts=attempts+1,available_at=$2 WHERE id=$1
+`
+
+type ClaimEmailChangeDeliveryParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+}
+
+func (q *Queries) ClaimEmailChangeDelivery(ctx context.Context, arg ClaimEmailChangeDeliveryParams) error {
+	_, err := q.db.Exec(ctx, claimEmailChangeDelivery, arg.ID, arg.AvailableAt)
+	return err
+}
+
 const completeEmailChange = `-- name: CompleteEmailChange :exec
 UPDATE donor_email_changes SET stage='COMPLETED',encrypted_token=NULL,completed_at=$2 WHERE id=$1
 `
@@ -83,16 +97,17 @@ func (q *Queries) EmailChangeByToken(ctx context.Context, tokenHash string) (Don
 }
 
 const emailChangeDelivered = `-- name: EmailChangeDelivered :exec
-UPDATE donor_email_changes SET sent_at=$2,encrypted_token=NULL WHERE id=$1
+UPDATE donor_email_changes SET sent_at=$2,encrypted_token=NULL WHERE id=$1 AND stage=$3
 `
 
 type EmailChangeDeliveredParams struct {
 	ID     pgtype.UUID        `json:"id"`
 	SentAt pgtype.Timestamptz `json:"sent_at"`
+	Stage  string             `json:"stage"`
 }
 
 func (q *Queries) EmailChangeDelivered(ctx context.Context, arg EmailChangeDeliveredParams) error {
-	_, err := q.db.Exec(ctx, emailChangeDelivered, arg.ID, arg.SentAt)
+	_, err := q.db.Exec(ctx, emailChangeDelivered, arg.ID, arg.SentAt, arg.Stage)
 	return err
 }
 
@@ -211,6 +226,21 @@ func (q *Queries) RecordIdentityEvent(ctx context.Context, arg RecordIdentityEve
 		arg.EmailChangeID,
 		arg.Action,
 	)
+	return err
+}
+
+const retryEmailChangeDelivery = `-- name: RetryEmailChangeDelivery :exec
+UPDATE donor_email_changes SET available_at=$2 WHERE id=$1 AND stage=$3 AND sent_at IS NULL
+`
+
+type RetryEmailChangeDeliveryParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	Stage       string             `json:"stage"`
+}
+
+func (q *Queries) RetryEmailChangeDelivery(ctx context.Context, arg RetryEmailChangeDeliveryParams) error {
+	_, err := q.db.Exec(ctx, retryEmailChangeDelivery, arg.ID, arg.AvailableAt, arg.Stage)
 	return err
 }
 

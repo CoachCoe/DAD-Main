@@ -106,7 +106,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 		return &copy
 	}
 	referrer, guest := browser(), browser()
-	call := func(client *http.Client, method, path string, body interface{}, headers map[string]string, status int) []byte {
+	call := func(client *http.Client, method, path string, body any, headers map[string]string, status int) []byte {
 		t.Helper()
 		var data []byte
 		if raw, ok := body.([]byte); ok {
@@ -158,9 +158,9 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	if !bytes.Contains(body, []byte(`"captured":true`)) || bytes.Contains(body, []byte(ownerEmail)) {
 		t.Fatal("referral capture privacy or state mismatch")
 	}
-	call(referrer, "POST", "/donor/me/preferences", map[string]interface{}{"version": 0, "referral_emails": true, "marketing_emails": false}, nil, 200)
-	call(referrer, "POST", "/donor/me/preferences", map[string]interface{}{"version": 0, "referral_emails": false, "marketing_emails": false}, nil, 409)
-	checkoutBody := map[string]interface{}{"email": guestEmail, "amount_minor": 3000, "frequency": "ONE_TIME"}
+	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": true, "marketing_emails": false}, nil, 200)
+	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": false, "marketing_emails": false}, nil, 409)
+	checkoutBody := map[string]any{"email": guestEmail, "amount_minor": 3000, "frequency": "ONE_TIME"}
 	body = call(guest, "POST", "/donor/checkouts", checkoutBody, map[string]string{"Idempotency-Key": requestID.String()}, 201)
 	var checkout payments.CheckoutResult
 	if err = json.Unmarshal(body, &checkout); err != nil {
@@ -171,7 +171,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 		t.Fatal("checkout retry changed response")
 	}
 	now := time.Now()
-	raw, err := json.Marshal(map[string]interface{}{"id": eventID, "object": "event", "type": "payment_intent.succeeded", "api_version": payments.APIVersion, "livemode": false, "created": now.Unix(), "data": map[string]interface{}{"object": map[string]interface{}{"id": "pi_" + requestID.String(), "object": "payment_intent", "status": "succeeded", "currency": "usd", "amount_received": 3000, "metadata": map[string]interface{}{"dad_checkout_id": checkout.CheckoutID}}}})
+	raw, err := json.Marshal(map[string]any{"id": eventID, "object": "event", "type": "payment_intent.succeeded", "api_version": payments.APIVersion, "livemode": false, "created": now.Unix(), "data": map[string]any{"object": map[string]any{"id": "pi_" + requestID.String(), "object": "payment_intent", "status": "succeeded", "currency": "usd", "amount_received": 3000, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

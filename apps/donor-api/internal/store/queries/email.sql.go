@@ -12,7 +12,7 @@ import (
 )
 
 const annualGifts = `-- name: AnnualGifts :many
-SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at FROM donor_gifts WHERE donor_id=$1 AND paid_at>=$2
+SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at, referrer_id, referral_kind FROM donor_gifts WHERE donor_id=$1 AND paid_at>=$2
 AND paid_at<$3 AND paid_at<=$4 ORDER BY paid_at,id
 `
 
@@ -49,6 +49,8 @@ func (q *Queries) AnnualGifts(ctx context.Context, arg AnnualGiftsParams) ([]Don
 			&i.PeriodID,
 			&i.ID,
 			&i.CreatedAt,
+			&i.ReferrerID,
+			&i.ReferralKind,
 		); err != nil {
 			return nil, err
 		}
@@ -108,6 +110,34 @@ func (q *Queries) AnnualRefunds(ctx context.Context, arg AnnualRefundsParams) ([
 	return items, nil
 }
 
+const claimLoginEmail = `-- name: ClaimLoginEmail :exec
+UPDATE donor_login_emails SET attempts=attempts+1,available_at=$2 WHERE id=$1
+`
+
+type ClaimLoginEmailParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+}
+
+func (q *Queries) ClaimLoginEmail(ctx context.Context, arg ClaimLoginEmailParams) error {
+	_, err := q.db.Exec(ctx, claimLoginEmail, arg.ID, arg.AvailableAt)
+	return err
+}
+
+const claimMessage = `-- name: ClaimMessage :exec
+UPDATE donor_messages SET attempts=attempts+1,available_at=$2 WHERE id=$1
+`
+
+type ClaimMessageParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+}
+
+func (q *Queries) ClaimMessage(ctx context.Context, arg ClaimMessageParams) error {
+	_, err := q.db.Exec(ctx, claimMessage, arg.ID, arg.AvailableAt)
+	return err
+}
+
 const completeLoginEmail = `-- name: CompleteLoginEmail :exec
 UPDATE donor_login_emails SET completed_at=$2,encrypted_token=NULL,last_error=NULL WHERE id=$1
 `
@@ -156,7 +186,7 @@ func (q *Queries) DonorPreference(ctx context.Context, donorID pgtype.UUID) (Don
 }
 
 const failLoginEmail = `-- name: FailLoginEmail :exec
-UPDATE donor_login_emails SET last_error=$2,available_at=$3 WHERE id=$1
+UPDATE donor_login_emails SET last_error=$2,available_at=$3 WHERE id=$1 AND completed_at IS NULL
 `
 
 type FailLoginEmailParams struct {
@@ -171,7 +201,7 @@ func (q *Queries) FailLoginEmail(ctx context.Context, arg FailLoginEmailParams) 
 }
 
 const failMessage = `-- name: FailMessage :exec
-UPDATE donor_messages SET last_error=$2,available_at=$3 WHERE id=$1
+UPDATE donor_messages SET last_error=$2,available_at=$3 WHERE id=$1 AND completed_at IS NULL
 `
 
 type FailMessageParams struct {
@@ -182,15 +212,6 @@ type FailMessageParams struct {
 
 func (q *Queries) FailMessage(ctx context.Context, arg FailMessageParams) error {
 	_, err := q.db.Exec(ctx, failMessage, arg.ID, arg.LastError, arg.AvailableAt)
-	return err
-}
-
-const incrementLoginEmailAttempt = `-- name: IncrementLoginEmailAttempt :exec
-UPDATE donor_login_emails SET attempts=attempts+1 WHERE id=$1
-`
-
-func (q *Queries) IncrementLoginEmailAttempt(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, incrementLoginEmailAttempt, id)
 	return err
 }
 
@@ -360,7 +381,7 @@ func (q *Queries) PrepareLoginEmail(ctx context.Context, arg PrepareLoginEmailPa
 }
 
 const receiptGift = `-- name: ReceiptGift :one
-SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at FROM donor_gifts WHERE id=$1 AND donor_id=$2 AND paid_at<=$3
+SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at, referrer_id, referral_kind FROM donor_gifts WHERE id=$1 AND donor_id=$2 AND paid_at<=$3
 `
 
 type ReceiptGiftParams struct {
@@ -384,6 +405,8 @@ func (q *Queries) ReceiptGift(ctx context.Context, arg ReceiptGiftParams) (Donor
 		&i.PeriodID,
 		&i.ID,
 		&i.CreatedAt,
+		&i.ReferrerID,
+		&i.ReferralKind,
 	)
 	return i, err
 }

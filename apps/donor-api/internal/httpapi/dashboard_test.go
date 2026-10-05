@@ -17,13 +17,13 @@ type dashboardStub struct {
 	calls int
 }
 
-func (s *dashboardStub) DonorDashboard(ctx context.Context, token string) (map[string]interface{}, error) {
+func (s *dashboardStub) DonorDashboard(ctx context.Context, token string) (store.DonorDashboard, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		panic("unbounded database access")
 	}
 	s.calls++
 	s.token = token
-	return map[string]interface{}{"mode": "test", "state": "preparing"}, s.err
+	return store.DonorDashboard{Mode: "test", State: "preparing"}, s.err
 }
 func TestDashboardAuthenticationAndPrivateErrors(t *testing.T) {
 	for _, tc := range []struct {

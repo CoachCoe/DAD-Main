@@ -71,31 +71,25 @@ type SubscriptionGateway interface {
 	ChangeMonthlyAmount(context.Context, string, string, string, int64, string) error
 }
 
-func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, values map[string]interface{}, key string) error {
-	raw, err := json.Marshal(values)
-	if err != nil {
-		return ErrCheckoutUnavailable
-	}
-	var params stripe.SubscriptionUpdateParams
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err = decoder.Decode(&params); err != nil {
-		return ErrCheckoutUnavailable
-	}
+// Recurring changes never prorate: a new amount, pause, or cancellation takes
+// effect at a renewal boundary.
+func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, params *stripe.SubscriptionUpdateParams, key string) error {
+	params.ProrationBehavior = stripe.String("none")
 	params.SetIdempotencyKey(key)
-	if _, err = g.client.V1Subscriptions.Update(ctx, id, &params); err != nil {
+	if _, err := g.client.V1Subscriptions.Update(ctx, id, params); err != nil {
 		return ErrCheckoutUnavailable
 	}
 	return nil
 }
 func (g *StripeGateway) ScheduleCancellation(ctx context.Context, id string, end int64, key string) error {
-	return g.mutateSubscription(ctx, id, map[string]interface{}{"cancel_at": end, "proration_behavior": "none"}, key)
+	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{CancelAt: stripe.Int64(end)}, key)
 }
 func (g *StripeGateway) PauseCollection(ctx context.Context, id string, resumes int64, key string) error {
-	return g.mutateSubscription(ctx, id, map[string]interface{}{"pause_collection": map[string]interface{}{"behavior": "void", "resumes_at": resumes}, "proration_behavior": "none"}, key)
+	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{PauseCollection: &stripe.SubscriptionUpdatePauseCollectionParams{Behavior: stripe.String("void"), ResumesAt: stripe.Int64(resumes)}}, key)
 }
 func (g *StripeGateway) ChangeMonthlyAmount(ctx context.Context, id, item, product string, amount int64, key string) error {
-	return g.mutateSubscription(ctx, id, map[string]interface{}{"items": []interface{}{map[string]interface{}{"id": item, "quantity": 1, "price_data": map[string]interface{}{"currency": "usd", "product": product, "recurring": map[string]interface{}{"interval": "month"}, "unit_amount": amount}}}, "proration_behavior": "none"}, key)
+	price := &stripe.SubscriptionUpdateItemPriceDataParams{Currency: stripe.String("usd"), Product: stripe.String(product), Recurring: &stripe.SubscriptionUpdateItemPriceDataRecurringParams{Interval: stripe.String("month")}, UnitAmount: stripe.Int64(amount)}
+	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{Items: []*stripe.SubscriptionUpdateItemParams{{ID: stripe.String(item), Quantity: stripe.Int64(1), PriceData: price}}}, key)
 }
 
 func (g *StripeGateway) RetrieveCheckout(ctx context.Context, id string) (Object, error) {

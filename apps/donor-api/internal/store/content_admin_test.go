@@ -44,7 +44,7 @@ func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id := source["id"].(pgtype.UUID)
+	id := source.ID
 	var ciphertext []byte
 	if err = pool.QueryRow(ctx, "SELECT encrypted_data FROM donor_content_sources WHERE id=$1", id).Scan(&ciphertext); err != nil || bytes.Contains(ciphertext, data) {
 		t.Fatal("source not encrypted", err)

@@ -6,18 +6,19 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
 type AdminSource interface {
-	SearchDonors(context.Context, string, string, int64) (map[string]any, error)
-	DonorDetail(context.Context, string, pgtype.UUID, int64, int64) (map[string]any, error)
-	AuditEvents(context.Context, string, int64) (map[string]any, error)
-	DonorMessages(context.Context, string, pgtype.UUID, int64) (map[string]any, error)
+	SearchDonors(context.Context, string, string, int64) (store.DonorSearch, error)
+	DonorDetail(context.Context, string, pgtype.UUID, int64, int64) (store.DonorDetail, error)
+	AuditEvents(context.Context, string, int64) (store.AuditPage, error)
+	DonorMessages(context.Context, string, pgtype.UUID, int64) (store.MessagePage, error)
 	DonorActions(context.Context, string, pgtype.UUID) ([]queries.StaffActionPageRow, error)
-	Enrolments(context.Context, string) (map[string]any, error)
+	Enrolments(context.Context, string) (store.Enrolments, error)
 	RequestClaim(context.Context, string, pgtype.UUID) error
-	ResendMessage(context.Context, string, pgtype.UUID, pgtype.UUID) (map[string]any, error)
+	ResendMessage(context.Context, string, pgtype.UUID, pgtype.UUID) (store.QueuedMessage, error)
 }
 
 // adminCall runs a staff request; the store authorizes the session and permission.

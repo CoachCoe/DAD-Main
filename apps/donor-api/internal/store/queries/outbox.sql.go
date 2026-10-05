@@ -11,9 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deferProjection = `-- name: DeferProjection :exec
+UPDATE donor_metric_projections SET refresh_failures=refresh_failures+1,refresh_error=$2,
+next_refresh_at=$3::timestamptz+least(power(2,refresh_failures)*interval '5 minutes',interval '1 day')
+WHERE donor_id=$1
+`
+
+type DeferProjectionParams struct {
+	DonorID      pgtype.UUID        `json:"donor_id"`
+	RefreshError pgtype.Text        `json:"refresh_error"`
+	AsOf         pgtype.Timestamptz `json:"as_of"`
+}
+
+func (q *Queries) DeferProjection(ctx context.Context, arg DeferProjectionParams) error {
+	_, err := q.db.Exec(ctx, deferProjection, arg.DonorID, arg.RefreshError, arg.AsOf)
+	return err
+}
+
 const dueProjectionDonor = `-- name: DueProjectionDonor :one
-SELECT d.id FROM donors d LEFT JOIN donor_metric_projections p ON p.donor_id=d.id
-WHERE p.id IS NULL OR p.next_refresh_at<=$1 ORDER BY d.id
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.next_refresh_at<=$1 ORDER BY p.next_refresh_at
 LIMIT 1 FOR UPDATE OF d SKIP LOCKED
 `
 
@@ -103,5 +120,21 @@ type QueueLoginEmailParams struct {
 
 func (q *Queries) QueueLoginEmail(ctx context.Context, arg QueueLoginEmailParams) error {
 	_, err := q.db.Exec(ctx, queueLoginEmail, arg.ID, arg.DonorID, arg.AvailableAt)
+	return err
+}
+
+const seedProjection = `-- name: SeedProjection :exec
+INSERT INTO donor_metric_projections (id,donor_id,computed_at,next_refresh_at)
+VALUES ($1,$2,$3,$3) ON CONFLICT (donor_id) DO NOTHING
+`
+
+type SeedProjectionParams struct {
+	ID         pgtype.UUID        `json:"id"`
+	DonorID    pgtype.UUID        `json:"donor_id"`
+	ComputedAt pgtype.Timestamptz `json:"computed_at"`
+}
+
+func (q *Queries) SeedProjection(ctx context.Context, arg SeedProjectionParams) error {
+	_, err := q.db.Exec(ctx, seedProjection, arg.ID, arg.DonorID, arg.ComputedAt)
 	return err
 }

@@ -14,11 +14,11 @@ import (
 
 type ContentAdminSource interface {
 	Authorize(context.Context, string) error
-	Inventory(context.Context, string) (map[string]any, error)
-	StoreSource(context.Context, string, string, []byte) (map[string]any, error)
+	Inventory(context.Context, string) (store.ContentInventory, error)
+	StoreSource(context.Context, string, string, []byte) (store.StoredSource, error)
 	ReadSource(context.Context, string, pgtype.UUID) (store.ContentDocument, error)
-	Publish(context.Context, string, store.PublicationRequest) (map[string]any, error)
-	Partners(context.Context, string, int64) (map[string]any, error)
+	Publish(context.Context, string, store.PublicationRequest) (store.Publication, error)
+	Partners(context.Context, string, int64) (store.PartnerPage, error)
 }
 
 type PartnerSource interface {
