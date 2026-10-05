@@ -119,13 +119,13 @@ func (s *StaffService) Bootstrap(ctx context.Context, email, name string) (strin
 }
 
 func (s *StaffService) Invite(ctx context.Context, token, email, name, role string) (string, error) {
-	return staffTransaction(ctx, s, token, "staff.manage", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (string, error) {
+	return staffTransaction(ctx, s, token, "staff.manage", func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (string, error) {
 		q := queries.New(tx)
 		// Recheck after locking so a concurrent administrator cannot revoke this action.
 		if _, err := q.StaffByID(ctx, actor.ID); err != nil {
 			return "", err
 		}
-		now = time.Now().UTC()
+		now := time.Now().UTC()
 		if _, err := requireStaff(ctx, q, token, "staff.manage", now); err != nil {
 			return "", err
 		}
@@ -156,19 +156,28 @@ func (s *StaffService) Accounts(ctx context.Context, token string) ([]StaffView,
 	})
 }
 
-func (s *StaffService) ChangeAccess(ctx context.Context, token string, targetID pgtype.UUID, action, role string) (map[string]interface{}, error) {
-	return staffTransaction(ctx, s, token, "staff.manage", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (map[string]interface{}, error) {
+// AccessChange reports the effect of a staff access action. Token is the
+// one-use recovery invitation and is never serialized.
+type AccessChange struct {
+	Disabled bool       `json:"disabled,omitempty"`
+	Staff    *StaffView `json:"staff,omitempty"`
+	Token    string     `json:"-"`
+}
+
+func (s *StaffService) ChangeAccess(ctx context.Context, token string, targetID pgtype.UUID, action, role string) (AccessChange, error) {
+	return staffTransaction(ctx, s, token, "staff.manage", func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (AccessChange, error) {
+		var result AccessChange
 		q := queries.New(tx)
 		rows, err := q.LockStaffAccounts(ctx)
 		if err != nil {
-			return nil, err
+			return result, err
 		}
-		now = time.Now().UTC()
+		now := time.Now().UTC()
 		if _, err = requireStaff(ctx, q, token, "staff.manage", now); err != nil {
-			return nil, err
+			return result, err
 		}
 		if targetID == actor.ID {
-			return nil, ErrStaffConflict
+			return result, ErrStaffConflict
 		}
 		var target queries.DonorStaff
 		otherAdmins := 0
@@ -180,57 +189,58 @@ func (s *StaffService) ChangeAccess(ctx context.Context, token string, targetID 
 			}
 		}
 		if !target.ID.Valid {
-			return nil, pgx.ErrNoRows
+			return result, pgx.ErrNoRows
 		}
 		if otherAdmins == 0 {
-			return nil, ErrStaffConflict
+			return result, ErrStaffConflict
 		}
-		result := map[string]interface{}{}
-		var details interface{}
+		var details any
 		var event string
 		switch action {
 		case "disable":
 			target.Disabled = true
 			event = "staff.disabled"
-			result["disabled"] = true
+			result.Disabled = true
 		case "role":
 			if len(staffPermissions(role)) == 0 {
-				return nil, ErrStaffInput
+				return result, ErrStaffInput
 			}
 			if target.Role == role {
-				return map[string]interface{}{"staff": staffView(target)}, nil
+				view := staffView(target)
+				return AccessChange{Staff: &view}, nil
 			}
 			details = map[string]string{"previous": target.Role, "role": role}
 			target.Role = role
 			event = "staff.role_changed"
-			result["staff"] = staffView(target)
+			view := staffView(target)
+			result.Staff = &view
 		case "recovery":
 			details = map[string]bool{"previously_disabled": target.Disabled, "previously_active": target.PasswordHash.Valid}
 			target.PasswordHash, target.TotpSecret, target.Disabled = pgtype.Text{}, nil, false
 			target.TotpCounter, target.Failures, target.LockedUntil = -1, 0, pgtype.Timestamptz{}
 			if err = saveStaffCredentials(ctx, q, target); err != nil {
-				return nil, err
+				return result, err
 			}
 			if err = q.InvalidateStaffInvites(ctx, queries.InvalidateStaffInvitesParams{StaffID: target.ID, ConsumedAt: timestamp(now)}); err != nil {
-				return nil, err
+				return result, err
 			}
 			invitation, err := createStaffInvite(ctx, q, target.ID, now)
 			if err != nil {
-				return nil, err
+				return result, err
 			}
-			result["token"] = invitation
+			result.Token = invitation
 			event = "staff.recovery_invited"
 		default:
-			return nil, ErrStaffInput
+			return result, ErrStaffInput
 		}
 		if err = q.SetStaffAccess(ctx, queries.SetStaffAccessParams{ID: target.ID, Disabled: target.Disabled, Role: target.Role}); err != nil {
-			return nil, err
+			return result, err
 		}
 		if err = q.RevokeStaffSessions(ctx, queries.RevokeStaffSessionsParams{StaffID: target.ID, RevokedAt: timestamp(now)}); err != nil {
-			return nil, err
+			return result, err
 		}
 		if err = auditStaff(ctx, q, actor.ID, event, target.ID.String(), details, now); err != nil {
-			return nil, err
+			return result, err
 		}
 		return result, nil
 	})

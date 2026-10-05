@@ -26,7 +26,7 @@ type PartnerRequest struct {
 type PartnerService struct{ DB *pgxpool.Pool }
 
 func (s PartnerService) Signup(ctx context.Context, id pgtype.UUID, r PartnerRequest) error {
-	if !requestIDValid(id) || !r.Consent {
+	if !ValidRequestID(id) || !r.Consent {
 		return ErrStaffInput
 	}
 	for _, field := range []struct {

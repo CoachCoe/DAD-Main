@@ -12,7 +12,7 @@ import (
 )
 
 func (s RecurringService) ChangeAmount(ctx context.Context, token string, r AmountRequest) (map[string]interface{}, error) {
-	if !requestIDValid(r.RequestID) || r.Amount < 100 || r.Amount > 99999999 || r.Previous < 100 || r.Previous > 99999999 || r.EffectiveAt.IsZero() {
+	if !ValidRequestID(r.RequestID) || r.Amount < 100 || r.Amount > 99999999 || r.Previous < 100 || r.Previous > 99999999 || r.EffectiveAt.IsZero() {
 		return nil, payments.ErrFacts
 	}
 	owner := donorOwner(token)

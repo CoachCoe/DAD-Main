@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 	"unicode/utf8"
 
@@ -150,7 +151,7 @@ func (s CheckoutService) prepare(ctx context.Context, request payments.CheckoutR
 	price := map[string]interface{}{"currency": "usd", "unit_amount": request.Amount, "product_data": map[string]string{"name": name}}
 	params := map[string]interface{}{"mode": mode, "customer_email": donor.Email, "client_reference_id": checkoutID.String(), "metadata": metadata,
 		"line_items": []interface{}{map[string]interface{}{"price_data": price, "quantity": 1}}, "allowed_payment_method_types": []string{"card"},
-		"success_url": s.Origin + "/donate/thanks?session_id={CHECKOUT_SESSION_ID}", "cancel_url": s.Origin + "/donate"}
+		"success_url": fmt.Sprintf("%s/donate/thanks?session_id={CHECKOUT_SESSION_ID}&amount_minor=%d&frequency=%s", s.Origin, request.Amount, request.Frequency), "cancel_url": s.Origin + "/donate"}
 	if monthly {
 		price["recurring"] = map[string]string{"interval": "month"}
 		params["subscription_data"] = map[string]interface{}{"metadata": metadata}

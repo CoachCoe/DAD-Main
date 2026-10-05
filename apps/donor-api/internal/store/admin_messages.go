@@ -27,7 +27,7 @@ func (s *StaffService) RequestClaim(ctx context.Context, token string, id pgtype
 }
 
 func (s *StaffService) ResendMessage(ctx context.Context, token string, messageID, requestID pgtype.UUID) (map[string]interface{}, error) {
-	if !requestIDValid(requestID) {
+	if !ValidRequestID(requestID) {
 		return nil, ErrStaffInput
 	}
 	return staffTransaction(ctx, s, token, "message.resend", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (map[string]interface{}, error) {

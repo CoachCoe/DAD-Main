@@ -11,7 +11,7 @@ import (
 )
 
 func (s RecurringService) Pause(ctx context.Context, token string, r PauseRequest) (map[string]interface{}, error) {
-	if !requestIDValid(r.RequestID) || r.Months < 1 || r.Months > 3 || r.StartsAt.IsZero() || r.ResumesAt.IsZero() {
+	if !ValidRequestID(r.RequestID) || r.Months < 1 || r.Months > 3 || r.StartsAt.IsZero() || r.ResumesAt.IsZero() {
 		return nil, payments.ErrFacts
 	}
 	owner := donorOwner(token)

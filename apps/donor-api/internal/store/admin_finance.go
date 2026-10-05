@@ -88,7 +88,7 @@ func (s StaffFinanceService) refunds(ctx context.Context, gift queries.DonorGift
 
 func (s StaffFinanceService) stage(ctx context.Context, token, kind string, r StaffFinancialRequest) error {
 	r.Reason = identity.TrimSpace(r.Reason)
-	if !requestIDValid(r.RequestID) || utf8.RuneCountInString(r.Reason) < 5 || utf8.RuneCountInString(r.Reason) > 500 {
+	if !ValidRequestID(r.RequestID) || utf8.RuneCountInString(r.Reason) < 5 || utf8.RuneCountInString(r.Reason) > 500 {
 		return ErrStaffInput
 	}
 	permission := "gift.cancel"

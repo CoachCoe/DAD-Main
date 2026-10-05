@@ -13,7 +13,7 @@ func TestUnconfiguredServerCannotAdvertiseReadiness(t *testing.T) {
 	for _, test := range []struct {
 		path   string
 		status int
-	}{{"/health/live", 200}, {"/health/ready", 503}, {"/donor/checkouts", 404}} {
+	}{{"/health/live", 200}, {"/health/ready", 503}, {"/donor/checkouts", 405}, {"/donor/unknown", 404}} {
 		request := httptest.NewRequest("GET", test.path, nil)
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, request)
@@ -47,6 +47,27 @@ func TestReadinessChecksDatabaseWithinDeadline(t *testing.T) {
 		}
 		if failure != nil && strings.Contains(response.Body.String(), failure.Error()) {
 			t.Fatal("database details exposed")
+		}
+	}
+}
+
+func TestUnmatchedRoutesAnswerInJSONAndKeepAllow(t *testing.T) {
+	server := NewServer("", Services{})
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, httptest.NewRequest("DELETE", "/donor/checkouts", nil))
+	if response.Code != 405 || response.Header().Get("Allow") != "POST" || response.Header().Get("Content-Type") != "application/json" || !strings.Contains(response.Body.String(), `"detail":"Method Not Allowed"`) {
+		t.Fatalf("%d %v %s", response.Code, response.Header(), response.Body.String())
+	}
+}
+
+func TestSecurityHeadersApplyToEveryResponse(t *testing.T) {
+	server := NewServer("", Services{})
+	for _, path := range []string{"/health/live", "/donor/unknown", "/donor/me/profile"} {
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
+		h := response.Header()
+		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" || !strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+			t.Fatalf("%s missing security headers: %v", path, h)
 		}
 	}
 }

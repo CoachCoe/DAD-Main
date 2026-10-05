@@ -27,7 +27,7 @@ func (s RecurringService) PaymentMethodStatus(ctx context.Context, token string)
 }
 
 func (s RecurringService) BeginPaymentUpdate(ctx context.Context, token string, requestID pgtype.UUID) (map[string]interface{}, error) {
-	if !requestIDValid(requestID) {
+	if !ValidRequestID(requestID) {
 		return nil, payments.ErrFacts
 	}
 	if s.Gateway == nil || payments.ValidateOrigin(s.Origin) != nil {

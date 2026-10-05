@@ -35,7 +35,7 @@ func run(ctx context.Context, args []string) error {
 	}
 	dsn := os.Getenv("DONOR_GO_DATABASE_URL")
 	if dsn == "" {
-		return errors.New("Go worker database is required")
+		return errors.New("worker database is required")
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	pool, err := store.Open(startup, dsn)

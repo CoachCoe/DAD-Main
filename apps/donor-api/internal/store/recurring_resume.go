@@ -20,7 +20,7 @@ func ownedPause(ctx context.Context, q *queries.Queries, donor, id pgtype.UUID) 
 }
 
 func (s RecurringService) Resume(ctx context.Context, token string, r ResumptionRequest) (map[string]interface{}, error) {
-	if !requestIDValid(r.RequestID) || r.NextRenewal.IsZero() {
+	if !ValidRequestID(r.RequestID) || r.NextRenewal.IsZero() {
 		return nil, payments.ErrFacts
 	}
 	owner := donorOwner(token)

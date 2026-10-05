@@ -4,19 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/sharing"
 	"impactgraph/donor-api/internal/store"
 )
+
+type DashboardSource interface {
+	DonorDashboard(context.Context, string) (map[string]any, error)
+}
 
 type DonorSource interface {
 	Profile(context.Context, string) (store.Profile, error)
@@ -24,237 +27,275 @@ type DonorSource interface {
 	SignOutEverywhere(context.Context, string) error
 	Sharing(context.Context, string) (store.Sharing, error)
 	SaveSharing(context.Context, string, string, bool) (store.Sharing, error)
+	ReferrerName(context.Context, string) (string, error)
 	CaptureReferral(context.Context, string, string, string, time.Time) (store.ReferralCapture, error)
 	Gifts(context.Context, string, int64) (store.GiftsPage, error)
 	Receipt(context.Context, string, pgtype.UUID) (store.Receipt, error)
 	AnnualSummary(context.Context, string, int) (store.AnnualSummary, error)
 }
 
-func donorReply(w http.ResponseWriter, reply replyFunc, body interface{}, err error) {
-	status, detail := 200, ""
-	switch {
-	case errors.Is(err, store.ErrDenied):
-		status, detail = 401, "Sign in required"
-	case errors.Is(err, store.ErrPreferenceConflict):
-		status, detail = 409, "Preferences changed. Refresh before saving again"
-	case errors.Is(err, store.ErrPublicName):
-		status, detail = 422, "Choose a public first name or nickname of 1 to 80 characters"
-	case errors.Is(err, pgx.ErrNoRows):
-		status, detail = 404, "Gift not found"
-	case errors.Is(err, store.ErrReceipt):
-		status, detail = 409, "Gift records are unavailable for this request"
-	case errors.Is(err, payments.ErrFacts):
-		status, detail = 422, "Invalid request fields"
-	case err != nil:
-		status, detail = 503, "Donor account is temporarily unavailable"
-	}
-	if err != nil {
-		reply(w, status, map[string]string{"detail": detail})
-	} else {
-		reply(w, 200, body)
+const (
+	referralCookieAge = 30 * 24 * 60 * 60
+	maxPublicName     = 80
+	donorUnavailable  = "Donor account is temporarily unavailable"
+)
+
+type sessionHandler func(w http.ResponseWriter, r *http.Request, session string)
+
+// signedIn rejects requests without a donor session before they reach storage;
+// the store still authenticates the session itself.
+func (a *api) signedIn(next sessionHandler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		session := cookieValue(r, donorCookie)
+		if session == "" {
+			writeError(w, r, http.StatusUnauthorized, "Sign in required", nil)
+			return
+		}
+		next(w, r, session)
 	}
 }
-func installDonorRoutes(mux *http.ServeMux, services Services, guard *browserGuard, reply replyFunc) {
-	source := services.Donor
-	ready := func(w http.ResponseWriter) bool {
-		if source == nil {
-			reply(w, 503, map[string]string{"detail": "Donor account is temporarily unavailable"})
-			return false
-		}
-		return true
+
+func (a *api) donorAvailable(w http.ResponseWriter, r *http.Request) bool {
+	if a.Donor == nil {
+		writeError(w, r, http.StatusServiceUnavailable, donorUnavailable, nil)
+		return false
 	}
-	invalid := func(w http.ResponseWriter) { reply(w, 422, map[string]string{"detail": "Invalid request fields"}) }
-	mux.HandleFunc("GET /donor/me/profile", func(w http.ResponseWriter, r *http.Request) {
-		if !ready(w) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		body, err := source.Profile(ctx, sessionToken(r))
-		donorReply(w, reply, body, err)
-	})
-	mux.HandleFunc("POST /donor/me/preferences", func(w http.ResponseWriter, r *http.Request) {
-		if !guard.check(w, r, reply) {
-			return
-		}
-		var body struct {
-			Version   *int32 `json:"version"`
-			Referral  *bool  `json:"referral_emails"`
-			Marketing *bool  `json:"marketing_emails"`
-		}
-		if !decodeBody(w, r, &body) || body.Version == nil || *body.Version < 0 || body.Referral == nil || body.Marketing == nil {
-			invalid(w)
-			return
-		}
-		if !ready(w) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		result, err := source.SavePreferences(ctx, sessionToken(r), store.Preferences{Version: *body.Version, ReferralEmails: *body.Referral, MarketingEmails: *body.Marketing})
-		donorReply(w, reply, result, err)
-	})
-	mux.HandleFunc("POST /donor/logout-all", func(w http.ResponseWriter, r *http.Request) {
-		if !guard.check(w, r, reply) || !ready(w) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		err := source.SignOutEverywhere(ctx, sessionToken(r))
-		if err == nil {
-			http.SetCookie(w, &http.Cookie{Name: "dad_donor_session", MaxAge: -1, HttpOnly: true, Secure: strings.HasPrefix(guard.origin, "https:"), SameSite: http.SameSiteLaxMode, Path: "/"})
-		}
-		donorReply(w, reply, map[string]bool{"signed_out": true}, err)
-	})
-	mux.HandleFunc("GET /donor/me/sharing", func(w http.ResponseWriter, r *http.Request) {
-		if !ready(w) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		body, err := source.Sharing(ctx, sessionToken(r))
-		donorReply(w, reply, body, err)
-	})
-	mux.HandleFunc("POST /donor/me/sharing", func(w http.ResponseWriter, r *http.Request) {
-		if !guard.check(w, r, reply) {
-			return
-		}
-		var body struct {
-			Name    *string         `json:"public_name"`
-			Replace json.RawMessage `json:"replace_code"`
-		}
-		replace := false
-		if !decodeBody(w, r, &body) || body.Name == nil || utf8.RuneCountInString(*body.Name) < 1 || utf8.RuneCountInString(*body.Name) > 80 {
-			invalid(w)
-			return
-		}
-		if len(body.Replace) > 0 {
-			if string(body.Replace) == "null" || json.Unmarshal(body.Replace, &replace) != nil {
-				invalid(w)
-				return
-			}
-		}
-		if !ready(w) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		result, err := source.SaveSharing(ctx, sessionToken(r), *body.Name, replace)
-		donorReply(w, reply, result, err)
-	})
-	mux.HandleFunc("GET /donor/me/referral-code.svg", func(w http.ResponseWriter, r *http.Request) {
-		if !ready(w) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		details, err := source.Sharing(ctx, sessionToken(r))
-		if err != nil {
-			donorReply(w, reply, nil, err)
-			return
-		}
-		if details.IRLLink == nil {
-			reply(w, 409, map[string]string{"detail": "Choose a public nickname before showing your referral code"})
-			return
-		}
-		image, err := sharing.SVG(*details.IRLLink)
-		if err != nil {
-			donorReply(w, reply, nil, err)
-			return
-		}
-		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Header().Set("Content-Disposition", "inline")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
-		_, _ = w.Write(image)
-	})
-	mux.HandleFunc("POST /donor/referrals/{code}", func(w http.ResponseWriter, r *http.Request) {
-		if !guard.check(w, r, reply) {
-			return
-		}
-		var body struct {
-			Kind json.RawMessage `json:"kind"`
-		}
-		kind := "LINK"
-		if !decodeBody(w, r, &body) {
-			invalid(w)
-			return
-		}
-		if len(body.Kind) > 0 {
-			if string(body.Kind) == "null" || json.Unmarshal(body.Kind, &kind) != nil {
-				invalid(w)
-				return
-			}
-		}
-		if kind != "LINK" && kind != "IRL" {
-			invalid(w)
-			return
-		}
-		if !ready(w) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		visitor := ""
-		if cookie, err := r.Cookie("dad_referral"); err == nil {
-			visitor = cookie.Value
-		}
-		result, err := source.CaptureReferral(ctx, r.PathValue("code"), kind, visitor, time.Now().UTC())
-		if err != nil {
-			donorReply(w, reply, nil, err)
-			return
-		}
-		age := 30 * 86400
-		if result.Token == "" {
-			age = -1
-		}
-		http.SetCookie(w, &http.Cookie{Name: "dad_referral", Value: result.Token, MaxAge: age, HttpOnly: true, Secure: strings.HasPrefix(guard.origin, "https:"), SameSite: http.SameSiteLaxMode, Path: "/"})
-		reply(w, 200, map[string]interface{}{"captured": result.Token != "", "public_name": result.PublicName})
-	})
-	mux.HandleFunc("GET /donor/me/gifts", func(w http.ResponseWriter, r *http.Request) {
-		offset := int64(0)
-		if value, exists := r.URL.Query()["offset"]; exists {
-			var err error
-			offset, err = strconv.ParseInt(value[len(value)-1], 10, 64)
-			if err != nil || offset < 0 || offset > math.MaxInt64-50 {
-				invalid(w)
-				return
-			}
-		}
-		if !ready(w) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		result, err := source.Gifts(ctx, sessionToken(r), offset)
-		donorReply(w, reply, result, err)
-	})
-	mux.HandleFunc("GET /donor/me/receipts/{gift_id}", func(w http.ResponseWriter, r *http.Request) {
-		var id pgtype.UUID
-		if err := id.Scan(r.PathValue("gift_id")); err != nil || !id.Valid {
-			invalid(w)
-			return
-		}
-		if !ready(w) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		result, err := source.Receipt(ctx, sessionToken(r), id)
-		donorReply(w, reply, result, err)
-	})
-	mux.HandleFunc("GET /donor/me/annual-summary/{year}", func(w http.ResponseWriter, r *http.Request) {
-		year, err := strconv.Atoi(r.PathValue("year"))
-		if err != nil {
-			invalid(w)
-			return
-		}
-		if !ready(w) {
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-		result, err := source.AnnualSummary(ctx, sessionToken(r), year)
-		donorReply(w, reply, result, err)
-	})
+	return true
+}
+
+func donorStatus(err error) (int, string) {
+	switch {
+	case errors.Is(err, store.ErrDenied):
+		return http.StatusUnauthorized, "Sign in required"
+	case errors.Is(err, store.ErrPreferenceConflict):
+		return http.StatusConflict, "Preferences changed. Refresh before saving again"
+	case errors.Is(err, store.ErrPublicName):
+		return http.StatusUnprocessableEntity, "Choose a public first name or nickname of 1 to 80 characters"
+	case errors.Is(err, pgx.ErrNoRows):
+		return http.StatusNotFound, "Record not found"
+	case errors.Is(err, store.ErrReceipt):
+		return http.StatusConflict, "Gift records are unavailable for this request"
+	case errors.Is(err, payments.ErrFacts):
+		return http.StatusUnprocessableEntity, "Invalid request fields"
+	default:
+		return http.StatusServiceUnavailable, donorUnavailable
+	}
+}
+
+func (a *api) dashboard(w http.ResponseWriter, r *http.Request, session string) {
+	if a.Dashboard == nil {
+		writeError(w, r, http.StatusServiceUnavailable, "Donor database unavailable", nil)
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	body, err := a.Dashboard.DonorDashboard(ctx, session)
+	respond(w, r, body, err, donorStatus)
+}
+
+func (a *api) profile(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.donorAvailable(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	body, err := a.Donor.Profile(ctx, session)
+	respond(w, r, body, err, donorStatus)
+}
+
+func (a *api) savePreferences(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.donorAvailable(w, r) {
+		return
+	}
+	var body struct {
+		Version   *int32 `json:"version"`
+		Referral  *bool  `json:"referral_emails"`
+		Marketing *bool  `json:"marketing_emails"`
+	}
+	if !decodeJSON(w, r, &body) || body.Version == nil || *body.Version < 0 || body.Referral == nil || body.Marketing == nil {
+		invalidFields(w, r)
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	result, err := a.Donor.SavePreferences(ctx, session, store.Preferences{Version: *body.Version, ReferralEmails: *body.Referral, MarketingEmails: *body.Marketing})
+	respond(w, r, result, err, donorStatus)
+}
+
+func (a *api) logoutAll(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.donorAvailable(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	err := a.Donor.SignOutEverywhere(ctx, session)
+	if err == nil || errors.Is(err, store.ErrDenied) {
+		a.setCookie(w, donorCookie, "", -1, http.SameSiteLaxMode)
+	}
+	respond(w, r, map[string]bool{"signed_out": true}, err, donorStatus)
+}
+
+func (a *api) sharing(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.donorAvailable(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	body, err := a.Donor.Sharing(ctx, session)
+	respond(w, r, body, err, donorStatus)
+}
+
+func (a *api) saveSharing(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.donorAvailable(w, r) {
+		return
+	}
+	var body struct {
+		Name    *string         `json:"public_name"`
+		Replace json.RawMessage `json:"replace_code"`
+	}
+	if !decodeJSON(w, r, &body) || body.Name == nil {
+		invalidFields(w, r)
+		return
+	}
+	replace, ok := optional(body.Replace, false)
+	if n := utf8.RuneCountInString(*body.Name); !ok || n < 1 || n > maxPublicName {
+		invalidFields(w, r)
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	result, err := a.Donor.SaveSharing(ctx, session, *body.Name, replace)
+	respond(w, r, result, err, donorStatus)
+}
+
+// irlLink returns the donor's in-person referral URL, answering the request
+// itself when the donor cannot have one yet.
+func (a *api) irlLink(w http.ResponseWriter, r *http.Request, session, missing string) (string, bool) {
+	if !a.donorAvailable(w, r) {
+		return "", false
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	details, err := a.Donor.Sharing(ctx, session)
+	if err != nil {
+		status, detail := donorStatus(err)
+		writeError(w, r, status, detail, err)
+		return "", false
+	}
+	if details.IRLLink == nil {
+		writeError(w, r, http.StatusConflict, missing, nil)
+		return "", false
+	}
+	return *details.IRLLink, true
+}
+
+func (a *api) referralCode(w http.ResponseWriter, r *http.Request, session string) {
+	link, ok := a.irlLink(w, r, session, "Choose a public nickname before showing your referral code")
+	if !ok {
+		return
+	}
+	image, err := sharing.SVG(link)
+	if err != nil {
+		writeError(w, r, http.StatusServiceUnavailable, donorUnavailable, err)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Content-Disposition", "inline")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	_, _ = w.Write(image)
+}
+
+func (a *api) referrer(w http.ResponseWriter, r *http.Request) {
+	if !a.donorAvailable(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	name, err := a.Donor.ReferrerName(ctx, r.PathValue("code"))
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, r, http.StatusNotFound, "This referral link is no longer available", nil)
+		return
+	}
+	respond(w, r, map[string]string{"public_name": name}, err, donorStatus)
+}
+
+func (a *api) captureReferral(w http.ResponseWriter, r *http.Request) {
+	if !a.donorAvailable(w, r) {
+		return
+	}
+	var body struct {
+		Kind json.RawMessage `json:"kind"`
+	}
+	if !decodeJSON(w, r, &body) {
+		invalidFields(w, r)
+		return
+	}
+	kind, ok := optional(body.Kind, "LINK")
+	if !ok || (kind != "LINK" && kind != "IRL") {
+		invalidFields(w, r)
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	result, err := a.Donor.CaptureReferral(ctx, r.PathValue("code"), kind, cookieValue(r, referralCookie), time.Now().UTC())
+	if err != nil {
+		status, detail := donorStatus(err)
+		writeError(w, r, status, detail, err)
+		return
+	}
+	age := referralCookieAge
+	if result.Token == "" {
+		age = -1
+	}
+	a.setCookie(w, referralCookie, result.Token, age, http.SameSiteLaxMode)
+	writeJSON(w, http.StatusOK, map[string]any{"captured": result.Token != "", "public_name": result.PublicName})
+}
+
+func (a *api) gifts(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.donorAvailable(w, r) {
+		return
+	}
+	offset, ok := offsetParam(r, "offset")
+	if !ok {
+		invalidFields(w, r)
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	result, err := a.Donor.Gifts(ctx, session, offset)
+	respond(w, r, result, err, donorStatus)
+}
+
+func (a *api) receipt(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.donorAvailable(w, r) {
+		return
+	}
+	id, ok := pathUUID(r, "gift_id")
+	if !ok {
+		invalidFields(w, r)
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	result, err := a.Donor.Receipt(ctx, session, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, r, http.StatusNotFound, "Gift not found", nil)
+		return
+	}
+	respond(w, r, result, err, donorStatus)
+}
+
+func (a *api) annualSummary(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.donorAvailable(w, r) {
+		return
+	}
+	year, err := strconv.Atoi(r.PathValue("year"))
+	if err != nil || year < 2000 || year > 9999 {
+		invalidFields(w, r)
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	result, err := a.Donor.AnnualSummary(ctx, session, year)
+	respond(w, r, result, err, donorStatus)
 }

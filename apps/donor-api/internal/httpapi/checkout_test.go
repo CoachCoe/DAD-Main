@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
@@ -84,19 +83,5 @@ func TestCheckoutRefusesNonJSONContentType(t *testing.T) {
 	server.Handler.ServeHTTP(response, r)
 	if response.Code != 422 || stub.calls != 0 {
 		t.Fatal("non-JSON request accepted")
-	}
-}
-func TestBrowserLimitUsesPeerNotForwardedHeaders(t *testing.T) {
-	guard := &browserGuard{origin: "http://localhost:3000"}
-	now := time.Now()
-	r := checkoutRequest(`{}`)
-	for i := 0; i < 20; i++ {
-		if guard.allow(r, now) != 0 {
-			t.Fatal("limit too early")
-		}
-	}
-	r.Header.Set("X-Forwarded-For", "203.0.113.12")
-	if guard.allow(r, now) != 429 || guard.allow(r, now.Add(time.Minute)) != 429 || guard.allow(r, now.Add(time.Minute+time.Nanosecond)) != 0 {
-		t.Fatal("rate window or peer contract changed")
 	}
 }

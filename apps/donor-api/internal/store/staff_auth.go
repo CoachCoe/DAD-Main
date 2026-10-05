@@ -36,13 +36,12 @@ func (s *StaffService) SignIn(ctx context.Context, email, password, code string)
 	}
 	defer tx.Rollback(ctx)
 	q := queries.New(tx)
-	now := time.Now().UTC()
 	staff, err := q.StaffByEmail(ctx, canonical)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return "", err
 	}
 	found := err == nil
-	now = time.Now().UTC()
+	now := time.Now().UTC()
 	hash := s.dummyHash
 	if found && staff.PasswordHash.Valid {
 		hash = staff.PasswordHash.String

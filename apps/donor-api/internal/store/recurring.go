@@ -72,7 +72,9 @@ func (s RecurringService) transaction(ctx context.Context, owner ownerResolver, 
 	}
 	return result, nil
 }
-func requestIDValid(id pgtype.UUID) bool {
+
+// ValidRequestID reports whether id is a version-4 UUID, the only form accepted as an idempotency key.
+func ValidRequestID(id pgtype.UUID) bool {
 	return id.Valid && id.Bytes[6]>>4 == 4 && id.Bytes[8]&0xc0 == 0x80
 }
 func ownedAttempt(ctx context.Context, q *queries.Queries, donor, id pgtype.UUID) (queries.DonorStripeCheckout, error) {
@@ -162,7 +164,7 @@ func (s RecurringService) Cancel(ctx context.Context, token string, request Canc
 	return s.cancelAuthorized(ctx, donorOwner(token), request)
 }
 func (s RecurringService) cancelAuthorized(ctx context.Context, owner ownerResolver, r CancellationRequest) (map[string]interface{}, error) {
-	if !requestIDValid(r.RequestID) || r.PeriodEnd.IsZero() {
+	if !ValidRequestID(r.RequestID) || r.PeriodEnd.IsZero() {
 		return nil, payments.ErrFacts
 	}
 	_, err := s.transaction(ctx, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (map[string]interface{}, error) {
