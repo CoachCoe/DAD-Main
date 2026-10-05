@@ -8,7 +8,7 @@ Keep recipient workflows, AI, blockchain, and aid disbursement outside this rele
 Do not add dependencies without a concrete need. Do not commit working notes, progress
 trackers, generated build output, credentials, or editor files.
 
-Follow the [README](README.md) setup, then run `make test` and
+Follow the [README](README.md) setup, then run `make test`, `make lint`, and
 `make test-browser-e2e`. Database integration tests use only the dedicated `donor_go`
 database. They do not replace Stripe test-account acceptance or real-device checks.
 Never weaken assertions, skip a failing test, or fabricate production facts to pass CI.

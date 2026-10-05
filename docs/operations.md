@@ -12,7 +12,8 @@ unreadable. No automatic key-rotation or backup service is included.
 
 ```sh
 cp .env.production.example .env.production
-# Fill in database settings, public HTTPS origin, and required test-mode secrets.
+# Fill in IMAGE_TAG (for example the git commit), database settings, the public HTTPS
+# origin, and required test-mode secrets. Keep the previous IMAGE_TAG for rollback.
 ./scripts/deploy.sh build
 ./scripts/deploy.sh migrate
 ./scripts/deploy.sh up
@@ -28,8 +29,17 @@ require a reviewed migration, not a forced baseline stamp.
 
 `up` starts the API and web service, not workers. Set `DONOR_GO_WORKERS_ENABLED=true`
 only when ready to process test payments and deliver configured email, then run
-`./scripts/deploy.sh workers`. `down` stops services without deleting database volumes.
-`logs` follows service logs. No command pushes images or activates live donations.
+`./scripts/deploy.sh workers`; the script refuses while the flag is unset. `down` stops
+services without deleting database volumes. `logs` follows service logs. No command
+pushes images or activates live donations. `ENV_FILE` may be relative to the current
+directory. The web container runs with a read-only filesystem and tmpfs mounts for
+`/tmp` and `/app/.next/cache`.
+
+The API refuses to start with only one of `STRIPE_SECRET_KEY` and
+`STRIPE_WEBHOOK_SECRET`, with a malformed encryption key, or with a trusted proxy range
+broader than an IPv4 /8 or IPv6 /32. It logs which optional features are disabled.
+Workers that hit a database or provider failure log the error type and retry with
+exponential backoff up to one minute; persistent failures show up as queue age.
 
 Terminate TLS at a controlled ingress, restrict API access, set the exact
 `DONOR_PUBLIC_ORIGIN`, and route browsers through the web service. Compose exposes ports
@@ -37,15 +47,22 @@ only on loopback. Configure trusted client abuse limits at ingress; the API's lo
 rate limiter alone is not a distributed public-release defense. Never trust an arbitrary
 client-supplied forwarding header. Configure database TLS for remote database connections.
 
-For per-visitor API limits behind Next, configure ingress to overwrite a single-IP
-header (for example `X-Real-IP`), then set `DONOR_CLIENT_IP_HEADER` on the web service
-to that header and `DONOR_TRUSTED_PROXY_CIDRS` on the API to the web proxy's exact
-address or isolated network. Block direct browser access around that ingress. The web
-service strips incoming forwarding headers unless configured, and the API trusts
-`X-Real-IP` only from those peers. Without this configuration, all proxied requests
-share the proxy's quota. The in-process limiter permits 20 mutations per rolling minute
-per address, retains at most 65,536 addresses, and fails closed when full; capacity
-and distributed limits must be validated against the agreed launch spike.
+Rate limits are per visitor. Production Compose gives the web service the fixed
+address `172.30.42.10` on the `172.30.42.0/24` network, sets the API's
+`DONOR_TRUSTED_PROXY_CIDRS` to that address, and defaults the web service's
+`DONOR_CLIENT_IP_HEADER` to `X-Real-IP`. The host ingress **must** overwrite `X-Real-IP`
+with the connecting client's address on every request; otherwise clients could choose
+their own identity. Setting `DONOR_CLIENT_IP_HEADER` empty makes all visitors share the
+proxy's quota. Edit the Compose network if that range clashes on the host. Block direct
+browser access around the ingress; the API trusts `X-Real-IP` only from listed peers.
+
+The in-process limiter keeps a token bucket per client (IPv6 clients per /64) and per
+class, so a burst on one surface cannot starve another for visitors sharing an address:
+sign-in and claim links 10 per minute, giving, referral capture, and partner signup 60,
+other donor actions 30, and staff actions 60. Rejections carry an exact `Retry-After`.
+It tracks at most 65,536 buckets and evicts an existing bucket rather than refusing new
+clients when full. Capacity and distributed limits must still be validated against the
+agreed launch spike.
 
 `/health/live` checks process availability. `/health/ready` checks the migration history
 through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is intentionally
@@ -96,8 +113,7 @@ confirmation, reasons, and audit records. Never edit processor identifiers by ha
 Run projection, login-email, email-changes, and message workers separately. Email changes
 use the same mail configuration, require current-address proof before new-address proof,
 and park delivery after five failures. Requesting a replacement invalidates prior proofs.
-Projection refresh handles
-grace expiry, recurring boundaries, permanent recognition, and prior-year summaries.
+Projection refresh handles grace expiry, recurring boundaries, permanent recognition, and prior-year summaries.
 Unknown streak state displays Updating; it must not silently become zero.
 
 SMTP requires STARTTLS, certificate validation, and configured sender credentials.
@@ -154,8 +170,8 @@ acceptance also require explicit evidence.
 
 ## Queue alerts and incident response
 
-Run `monitor` from the API image with its database environment (or
-`go run ./cmd/monitor` from `apps/donor-api`). It emits only aggregate JSON counts,
+Run `./scripts/deploy.sh monitor [--max-age 10m]` (or `go run ./cmd/monitor` from
+`apps/donor-api` with the database environment loaded). It emits only aggregate JSON counts,
 parked counts, and oldest due age for Stripe, projections, financial mail, login mail,
 and email changes. It exits nonzero if any job is parked or a due item is older than
 five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends are
@@ -183,8 +199,8 @@ With PostgreSQL running and `ENV_FILE` pointing to the Compose environment:
 ./scripts/verify-restore.sh /secure/backups/dad-2026-10-04.dump
 ```
 
-The backup uses PostgreSQL's consistent custom-format dump and creates a private file
-without overwriting an existing path. Keep dumps outside the repository on encrypted
+Both scripts require an absolute dump path. The backup uses PostgreSQL's consistent
+custom-format dump and creates a private file without overwriting an existing path. Keep dumps outside the repository on encrypted
 storage with restricted access, retention, and independent copies. The drill creates a
 random disposable database, restores with fail-on-error, reads core donor/gift/identity
 tables, and drops only that temporary database. It never restores over the running app.

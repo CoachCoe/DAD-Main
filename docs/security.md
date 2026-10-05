@@ -20,7 +20,10 @@ limits. The Next proxy exposes only `/donor/*`; it is not an arbitrary HTTP prox
 Stripe handles all card entry. Signed webhooks are verified before persistence; only
 allowlisted event fields are stored. Retryable commands are recorded before provider
 calls. Current remote state is reconciled rather than trusting webhook arrival order.
-Logs must exclude donor payloads, credentials, tokens, and remote response bodies.
+Logs must exclude donor payloads, credentials, tokens, and remote response bodies; API
+failures are logged with route, status, and error type only. Every API response carries
+`no-store`, `nosniff`, `no-referrer`, and a `default-src 'none'; frame-ancestors 'none'`
+content security policy.
 
 Public content never includes donor data or private source files. Source documents use a
 dedicated encryption key and SHA-256 verification. CSV exports use field allowlists,
