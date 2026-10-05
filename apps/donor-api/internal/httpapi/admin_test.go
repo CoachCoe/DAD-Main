@@ -16,6 +16,47 @@ import (
 type actionsStub struct {
 	AdminSource
 	offsets []int64
+	target  pgtype.UUID
+	kind    string
+}
+
+func (s *actionsStub) PendingAction(_ context.Context, session string, _ pgtype.UUID, target pgtype.UUID, kind string) (store.PendingAction, error) {
+	if session != "staff-session" {
+		return store.PendingAction{}, store.ErrStaffDenied
+	}
+	s.target, s.kind = target, kind
+	return store.PendingAction{}, nil
+}
+
+func TestPendingActionValidatesTargetAndKind(t *testing.T) {
+	stub := &actionsStub{}
+	server := NewServer("", Services{Admin: stub})
+	id := "7d6f6b1c-6f4e-4c3e-9a51-6f1d9c1e2a3b"
+	for _, tc := range []struct {
+		query  string
+		status int
+	}{
+		{"?target_id=" + id + "&kind=REFUND", 200},
+		{"?target_id=" + id + "&kind=CANCEL", 200},
+		{"?target_id=" + id + "&kind=UNKNOWN", 422},
+		{"?target_id=bad&kind=REFUND", 422},
+		{"?kind=REFUND", 422},
+	} {
+		stub.kind = ""
+		r := httptest.NewRequest("GET", "/donor/staff/donors/"+id+"/actions/pending"+tc.query, nil)
+		r.AddCookie(&http.Cookie{Name: staffCookie, Value: "staff-session"})
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, r)
+		if response.Code != tc.status {
+			t.Fatalf("%s: %d %s", tc.query, response.Code, response.Body)
+		}
+		if tc.status == 200 && (stub.target.String() != id || stub.kind == "") {
+			t.Fatal("lookup filters not forwarded")
+		}
+		if tc.status != 200 && stub.kind != "" {
+			t.Fatal("invalid lookup reached store")
+		}
+	}
 }
 
 func (s *actionsStub) DonorActions(_ context.Context, session string, _ pgtype.UUID, offset int64) (store.ActionPage, error) {

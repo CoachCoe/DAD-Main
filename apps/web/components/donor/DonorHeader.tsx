@@ -28,7 +28,9 @@ export function DonorHeader() {
       onClick={() => setOpenOn(open ? null : pathname)}><span aria-hidden /><span aria-hidden /><span aria-hidden /></button>
     <div className="headerMenu" id="dad-menu" data-open={open}>
       <nav aria-label="Primary navigation">{destinations.map(([href, label]) =>
-        <Link key={href} href={href} aria-current={pathname === href ? "page" : undefined}>{label}</Link>)}</nav>
+        href.startsWith("/account/")
+          ? <a key={href} href={href} aria-current={pathname === href ? "page" : undefined}>{label}</a>
+          : <Link key={href} href={href} aria-current={pathname === href ? "page" : undefined}>{label}</Link>)}</nav>
       <div className="headerRight"><Link className="button" href="/donate" aria-current={pathname === "/donate" ? "page" : undefined}>Give</Link></div>
     </div>
   </header>;

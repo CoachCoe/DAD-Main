@@ -182,3 +182,65 @@ func TestStaffActionHistoryPagesNewestFirst(t *testing.T) {
 		t.Fatal("negative offset accepted", err)
 	}
 }
+
+func TestPendingActionIsScopedAndIndependentOfHistoryPages(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	actor, token := staffFixture(t, pool, "FINANCE")
+	otherActor, otherToken := staffFixture(t, pool, "FINANCE")
+	_, supportToken := staffFixture(t, pool, "SUPPORT")
+	donorID, _ := donor(t, pool)
+	otherDonor, _ := donor(t, pool)
+	t.Cleanup(func() {
+		if _, err := pool.Exec(ctx, "DELETE FROM donor_staff_actions WHERE donor_id=$1 OR donor_id=$2", donorID, otherDonor); err != nil {
+			t.Error(err)
+		}
+	})
+	target := testID(t)
+	base := time.Now().UTC().Add(-time.Hour)
+	insert := func(owner, donor, target pgtype.UUID, kind, status string, at time.Time) pgtype.UUID {
+		t.Helper()
+		id := testID(t)
+		var amount any = int64(1000)
+		var period any
+		if kind == "CANCEL" {
+			amount, period = nil, base.AddDate(0, 1, 0)
+		}
+		_, err := pool.Exec(ctx, "INSERT INTO donor_staff_actions(id,actor_id,donor_id,kind,target_id,amount_minor,period_end,reason,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,'Donor requested change',$8,$9)", id, owner, donor, kind, target, amount, period, status, at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	saved := insert(actor, donorID, target, "REFUND", "AUTHORIZED", base)
+	for i := range 55 {
+		insert(actor, donorID, target, "REFUND", "OBSERVED", base.Add(time.Duration(i+1)*time.Second))
+	}
+	other := insert(otherActor, donorID, target, "REFUND", "AUTHORIZED", base.Add(time.Minute))
+	insert(actor, otherDonor, target, "REFUND", "AUTHORIZED", base.Add(time.Minute))
+	insert(actor, donorID, testID(t), "REFUND", "AUTHORIZED", base.Add(time.Minute))
+	cancellation := insert(actor, donorID, target, "CANCEL", "AUTHORIZED", base.Add(time.Minute))
+	s := &StaffService{DB: pool}
+	for _, tc := range []struct {
+		token, kind string
+		want        pgtype.UUID
+	}{{token, "REFUND", saved}, {otherToken, "REFUND", other}, {token, "CANCEL", cancellation}} {
+		got, err := s.PendingAction(ctx, tc.token, donorID, target, tc.kind)
+		if err != nil || got.Action == nil || got.Action.ID != tc.want {
+			t.Fatalf("%s lookup: %+v %v", tc.kind, got, err)
+		}
+	}
+	empty, err := s.PendingAction(ctx, token, donorID, testID(t), "REFUND")
+	if err != nil || empty.Action != nil || jsonView(t, empty)["action"] != nil {
+		t.Fatalf("missing action: %+v %v", empty, err)
+	}
+	if _, err := s.PendingAction(ctx, supportToken, donorID, target, "REFUND"); !errors.Is(err, ErrStaffForbidden) {
+		t.Fatalf("support lookup permitted: %v", err)
+	}
+	if _, err := s.PendingAction(ctx, "", donorID, target, "CANCEL"); err == nil {
+		t.Fatal("anonymous lookup permitted")
+	}
+	if _, err := s.PendingAction(ctx, token, donorID, target, "UNKNOWN"); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("invalid kind accepted: %v", err)
+	}
+}

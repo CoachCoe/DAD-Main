@@ -59,3 +59,25 @@ test("public pages keep the static, cacheable policy", async ({ page }) => {
   await expect.poll(() => hydrated(page, "main")).toBe(true);
   expect(violations).toEqual([]);
 });
+
+test("public account links load a new document with the private CSP", async ({ page }) => {
+  const violations = await recordViolations(page);
+  for (const [source, label, destination] of [
+    ["/", "My account", "/account/dashboard"],
+    ["/donate/thanks", "Claim your account", "/account/sign-in"],
+  ]) {
+    await page.goto(source);
+    await expect.poll(() => hydrated(page, "main")).toBe(true);
+    if (label === "My account" && await page.getByRole("button", { name: "Menu", exact: true }).isVisible()) {
+      await page.getByRole("button", { name: "Menu", exact: true }).click();
+    }
+    const documentResponse = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === destination && response.request().resourceType() === "document");
+    await page.getByRole("link", { name: label, exact: true }).click();
+    const response = await documentResponse;
+    expect(response.headers()["content-security-policy"]).toMatch(/'nonce-[^']+' 'strict-dynamic'/);
+    expect(response.headers()["content-security-policy"]).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+    await expect.poll(() => hydrated(page, "main")).toBe(true);
+  }
+  expect(violations).toEqual([]);
+});

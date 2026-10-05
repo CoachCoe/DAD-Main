@@ -341,6 +341,40 @@ func (q *Queries) IncrementEventAttempt(ctx context.Context, id pgtype.UUID) err
 	return err
 }
 
+const insertBillingObservation = `-- name: InsertBillingObservation :exec
+INSERT INTO donor_billing_observations
+(id,period_id,source_event_id,status,amount_minor,currency,billing_reason,occurred_at,event_created_at,recorded_at)
+VALUES ($1,$2,$3,$4,$5,'USD',$6,$7,$8,$9)
+ON CONFLICT (source_event_id) DO NOTHING
+`
+
+type InsertBillingObservationParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	PeriodID       pgtype.UUID        `json:"period_id"`
+	SourceEventID  pgtype.UUID        `json:"source_event_id"`
+	Status         string             `json:"status"`
+	AmountMinor    int64              `json:"amount_minor"`
+	BillingReason  string             `json:"billing_reason"`
+	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
+	EventCreatedAt pgtype.Timestamptz `json:"event_created_at"`
+	RecordedAt     pgtype.Timestamptz `json:"recorded_at"`
+}
+
+func (q *Queries) InsertBillingObservation(ctx context.Context, arg InsertBillingObservationParams) error {
+	_, err := q.db.Exec(ctx, insertBillingObservation,
+		arg.ID,
+		arg.PeriodID,
+		arg.SourceEventID,
+		arg.Status,
+		arg.AmountMinor,
+		arg.BillingReason,
+		arg.OccurredAt,
+		arg.EventCreatedAt,
+		arg.RecordedAt,
+	)
+	return err
+}
+
 const insertBillingPeriod = `-- name: InsertBillingPeriod :exec
 INSERT INTO donor_billing_periods (id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status)
 VALUES ($1,$2,$3,$4,$5,$6,$7,'FAILED') ON CONFLICT (stripe_invoice_id) DO NOTHING

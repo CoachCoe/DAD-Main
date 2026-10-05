@@ -15,6 +15,7 @@ type AdminSource interface {
 	AuditEvents(context.Context, string, int64) (store.AuditPage, error)
 	DonorMessages(context.Context, string, pgtype.UUID, int64) (store.MessagePage, error)
 	DonorActions(context.Context, string, pgtype.UUID, int64) (store.ActionPage, error)
+	PendingAction(context.Context, string, pgtype.UUID, pgtype.UUID, string) (store.PendingAction, error)
 	Enrolments(context.Context, string) (store.Enrolments, error)
 	RequestClaim(context.Context, string, pgtype.UUID) error
 	ResendMessage(context.Context, string, pgtype.UUID, pgtype.UUID) (store.QueuedMessage, error)
@@ -77,6 +78,19 @@ func (a *api) donorActions(w http.ResponseWriter, r *http.Request) {
 	}
 	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
 		return a.Admin.DonorActions(ctx, session, id, offset)
+	})
+}
+
+func (a *api) pendingAction(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathUUID(r, "donor_id")
+	var target pgtype.UUID
+	kind := r.URL.Query().Get("kind")
+	if !ok || target.Scan(r.URL.Query().Get("target_id")) != nil || !target.Valid || (kind != "REFUND" && kind != "CANCEL") {
+		staffInvalid(w, r)
+		return
+	}
+	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
+		return a.Admin.PendingAction(ctx, session, id, target, kind)
 	})
 }
 

@@ -11,10 +11,9 @@ type Quote = { gift_id: string; donor_id: string; amount_minor: number; availabl
   subscription: { id: string; amount_minor: number; period_end: string; stops_at: string | null } | null;
 };
 type Action = { id: string; actor_id: string; kind: string; target_id: string; amount_minor: number | null; period_end: string | null; reason: string; status: string };
-type Actions = { actions: Action[]; next_offset: number | null };
 type Confirmation = { amount_minor: number; reason: string } | { subscription_id: string; period_end: string; reason: string };
 type Result = { status?: string; subscription?: { stops_at: string | null } };
-type Loaded = { quote: Quote; pending: Action | undefined };
+type Loaded = { quote: Quote; pending: Action | null };
 
 export default function Finance({ donor, gift }: { donor: string; gift: string }) {
   const path = `/donor/staff/donors/${encodeURIComponent(donor)}/${gift ? `gifts/${encodeURIComponent(gift)}/refund` : "cancellation"}`;
@@ -25,16 +24,13 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
   const [invalid, setInvalid] = useState<"amount" | "reason" | null>(null);
   const { resource, data, reload } = useApiResource<Loaded>(donor ? path : null, {
     load: async (signal) => {
-      const [quote, actor] = await Promise.all([api<Quote>(path, { signal }), api<{ id: string }>("/donor/staff/me", { signal })]);
+      const quote = await api<Quote>(path, { signal });
       const target = "gift_id" in quote ? quote.gift_id : quote.subscription?.id;
-      // An uncertain request must be resumed with its own key wherever it sits in the
-      // history; missing it would let a second refund be minted.
-      let pending: Action | undefined;
-      for (let offset: number | null = 0; offset !== null && !pending;) {
-        const page: Actions = await api<Actions>(`/donor/staff/donors/${encodeURIComponent(donor)}/actions?offset=${offset}`, { signal });
-        pending = page.actions.find((item) => item.target_id === target && item.status === "AUTHORIZED" && item.actor_id === actor.id);
-        offset = page.next_offset;
-      }
+      const kind = "gift_id" in quote ? "REFUND" : "CANCEL";
+      // Read after quote reconciliation, which may settle an uncertain request.
+      const pending = target ? (await api<{ action: Action | null }>(
+        `/donor/staff/donors/${encodeURIComponent(donor)}/actions/pending?${new URLSearchParams({ target_id: target, kind })}`, { signal },
+      )).action : null;
       if (pending && ((pending.kind === "REFUND" && pending.amount_minor === null) || (pending.kind === "CANCEL" && pending.period_end === null))) {
         throw new ApiError("The saved financial action is incomplete.", 500);
       }

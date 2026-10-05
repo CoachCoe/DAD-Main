@@ -49,6 +49,12 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,'FAILED') ON CONFLICT (stripe_invoice_id) DO NOTHIN
 -- name: MarkPeriodPaid :exec
 UPDATE donor_billing_periods SET status='PAID' WHERE id=$1;
 
+-- name: InsertBillingObservation :exec
+INSERT INTO donor_billing_observations
+(id,period_id,source_event_id,status,amount_minor,currency,billing_reason,occurred_at,event_created_at,recorded_at)
+VALUES ($1,$2,$3,$4,$5,'USD',$6,$7,$8,$9)
+ON CONFLICT (source_event_id) DO NOTHING;
+
 -- name: HasGift :one
 SELECT EXISTS(SELECT 1 FROM donor_gifts WHERE donor_id=$1)::boolean;
 

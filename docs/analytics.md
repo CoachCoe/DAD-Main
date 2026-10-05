@@ -18,6 +18,7 @@ Use stable record IDs for deduplication, not email addresses, names, or webhook 
 | `gift_collected.v1` | gifts / gift ID | Verified processor collection. One-time and recurring are explicit; checkout completion is insufficient. Carries the referrer and LINK/IRL kind valid at the moment of charge. |
 | `refund_observed.v1` | refund-history / observation ID | Provider or audited staff observation of a refund transition. Count successful current refund state once per refund ID when calculating net dollars. |
 | `billing_period_observed.v1` | billing-periods / period ID | Current billing outcome and due date. Current FAILED state alone is not a permanent history of all failures. |
+| `billing_attempt_observed.v1` | billing-history / source event ID | Verified FAILED or PAID invoice observation, with amount, billing reason, processor event creation, effective occurrence, and local recording timestamps. A replay of the same event does not add a row. |
 | `account_claimed.v1` | donors / donor ID, claimed_at | First account claim, separate from first gift. Giving before claim is normal. |
 | `referral_recognized.v1` | referrals / referred donor ID | Direct-only referrer/channel and realized net giving from projections. Check freshness before using totals. |
 | `recognition_computed.v1` | streaks / donor ID, computed_at | Current and best streak, risk/grace, and permanent founding award. Unknown is not zero. |
@@ -41,7 +42,7 @@ refunds or referrals to avoid multiplying collected dollars.
 | Viral coefficient | Converting direct referrals credited to a donor cohort divided by donors in that cohort, with acquisition dates and observation window stated. No second-level credit. Publish gross first conversions separately from currently qualified referrals after full refunds. |
 | Gift mix | Successful gift count and collected dollars grouped by MONTHLY/ONE_TIME. Also report first-gift donor mix; do not confuse gifts with unique donors. |
 | Month-three/six retention | First-recurring-gift cohort with successful consecutive recurring periods at milestone / cohort old enough to reach that milestone. Grace, pauses, late recovery, and full refunds follow the domain rules. Current streak snapshots alone cannot reconstruct historical retention. |
-| Involuntary churn/recovery | Scheduled recurring value lost to payment failure after the retry window, with later recovery count/value against that failed-period cohort. Voluntary cancellation and intentional pauses are separate. Requires historical failure/recovery events, not only current period state. |
+| Involuntary churn/recovery | Scheduled recurring value lost to payment failure after the retry window, with later recovery count/value against that failed-period cohort. Join billing-history to billing-periods and apply the cohort rules below. Voluntary cancellation and intentional pauses are separate. |
 | Time to first gift | Median elapsed time from an eligible journey's first landing to its verified first collection; report sample size and missing-journey rate. A receipt page view is not collection time. |
 | Referral dollars | Actual collected referred gifts less successful refunds, direct-only, with LINK/IRL split. Never promised recurring value or projections of future gifts. |
 
@@ -49,6 +50,40 @@ Self-referral exclusion, first-touch conflicts, refunds, and streak rules are go
 [the donor domain](donor-domain.md). Retain both gross first-conversion and currently
 qualified-referral measures so refund behavior cannot silently rewrite acquisition reports.
 Cohort identity is a donor ID, so a verified email change must not create another donor.
+
+## Billing failure and recovery history
+
+The event worker appends `billing-history` in the same transaction as the validated
+period, gift, and projection writes. Invalid facts roll back together. `source_event_id`
+references the verified Stripe inbox; the unique constraint makes worker replay safe.
+Distinct events remain distinct observations, including repeated failures and duplicate
+success notifications. They are not additional lost gifts or additional recoveries.
+
+`occurred_at` is the successful payment's processor timestamp for PAID, and the verified
+event creation time for FAILED (the available failure timestamp). `event_created_at`
+always retains processor event creation; `recorded_at` is local processing time. Use
+occurrence time, not delivery order: a failure delivered after a success stays in the
+history without changing the current PAID period. Do not infer exact ordering between
+observations with identical occurrence timestamps.
+
+For renewal reporting, select `subscription_cycle`; report `subscription_create` failures
+separately from churn of existing donors. Join `period_id` to `billing-periods.id` for
+donor identity and the scheduled date. Count each failed period once, using its earliest
+failure and first successful payment. The retry deadline is `due_at + 14 days`, matching
+the streak rule. At an observation cutoff, an eligible failed renewal with no successful
+payment by that deadline becomes lost value once the deadline has passed; later success
+is recovered value for that same cohort. Success within grace is recovered before churn.
+Never multiply amounts by retry count, webhook count, or the number of joined rows.
+Use each period's scheduled amount once for lost value and its verified collection for
+recovered value, checking amount consistency before aggregation. Keep pauses and voluntary
+cancellations separate using their effective dates and the subscription/pauses/cancellations
+exports; a period skipped intentionally is not an involuntary loss.
+
+Collection begins when the worker version supporting migration `0005_billing_history.sql`
+is deployed. The migration does not invent observations for existing period snapshots.
+Reports spanning earlier history must flag incomplete coverage; missing history is not
+zero failures. Exports require `data.export` and use the existing export audit trail.
+No anonymous identifier, browser event, or new third-party destination is introduced.
 
 ## Browser event contract and collection boundary
 
@@ -77,6 +112,7 @@ approved, rather than an implied live collection policy:
 Acceptance must include both referral channels, direct guest giving, claim after gift,
 expired/conflicting touches, retry/replay, share cancellation, full/partial refunds,
 failed-and-recovered renewal, and email change. Reconcile acquisition counts and realized
-dollars against the financial exports before trusting campaign reports. Missing browser
-instrumentation and failure-history collection remain explicit release gaps; their
-metrics must be marked unavailable, never displayed as fabricated zeros.
+dollars against the financial exports before trusting campaign reports. Browser
+instrumentation remains a release gap; metrics requiring it must be marked unavailable,
+never displayed as fabricated zeros. Billing-history reports must disclose their coverage
+start and observation cutoff.

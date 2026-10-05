@@ -143,6 +143,45 @@ test("a donor record link that matches no donor says so accessibly", async ({ pa
   await expectAccessible(page);
 });
 
+test("staff resume an uncertain refund with the saved key and amount", async ({ page }) => {
+  const errors = collectErrors(page);
+  const gift = staffDetail.gifts[0].id;
+  const requests: string[] = [];
+  let resumed = false;
+  await page.route("**/api/donor/staff/**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    requests.push(url.pathname);
+    if (url.pathname.endsWith("/actions/pending")) {
+      expect(url.searchParams.get("target_id")).toBe(gift);
+      expect(url.searchParams.get("kind")).toBe("REFUND");
+      return route.fulfill({ json: { action: resumed ? null : {
+        id: "saved-refund", kind: "REFUND", target_id: gift, amount_minor: 1000,
+        period_end: null, reason: "Donor requested a partial refund", status: "AUTHORIZED",
+      } } });
+    }
+    if (url.pathname.endsWith("/refund")) {
+      if (request.method() === "POST") {
+        expect(request.headers()["idempotency-key"]).toBe("saved-refund");
+        expect(request.postDataJSON()).toEqual({ amount_minor: 1000, reason: "Donor requested a partial refund" });
+        resumed = true;
+        return route.fulfill({ json: { status: "SUCCEEDED" } });
+      }
+      return route.fulfill({ json: { gift_id: gift, donor_id: "donor-1", amount_minor: 3000, available_minor: resumed ? 2000 : 3000 } });
+    }
+    return route.fulfill({ status: 404, json: { detail: "Unexpected staff lookup" } });
+  });
+  await page.goto(`/staff/finance?donor=donor-1&gift=${gift}`);
+  await expect(page.getByText("Refund $10.00 USD to the original payment method.")).toBeVisible();
+  await expectAccessible(page);
+  await page.getByRole("button", { name: "Retry original financial action" }).click();
+  await expect(page.getByRole("status")).toHaveText("Stripe refund status: SUCCEEDED. Only successful refunds reduce collected totals.");
+  await expect(page.getByText(/Available to refund: \$20.00/)).toBeVisible();
+  expect(resumed).toBe(true);
+  expect(requests.every((path) => path.endsWith("/actions/pending") || path.endsWith("/refund"))).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test("staff pages separate a missing session from a missing permission", async ({ page }) => {
   await page.route("**/api/donor/staff/audit*", (route) => route.fulfill({ status: 403, json: { detail: "Forbidden" } }));
   await page.goto("/staff/audit");

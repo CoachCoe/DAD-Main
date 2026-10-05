@@ -170,6 +170,12 @@ for actual accuracy and board approval; uploading a source cannot establish eith
 
 Exports use fixed field allowlists, omit credentials and message bodies, neutralize CSV
 formula prefixes, and audit completion/interruption. Referral rows retain channel.
+The `billing-history` CSV contains verified failed and successful invoice observations.
+Apply migration `0005_billing_history.sql` before starting the updated API/workers. Earlier
+period snapshots are not backfilled into invented failure events; reporting must disclose
+the worker rollout date as its coverage boundary. See [analytics](analytics.md) for timestamp,
+replay, and renewal-cohort rules. No browser analytics is enabled by this migration.
+
 The enrolment CSV has headers only until R2. Keep exports private and apply an approved
 retention policy. Sensitive source documents have separate authenticated downloads.
 
