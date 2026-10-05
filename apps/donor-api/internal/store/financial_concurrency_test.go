@@ -1,0 +1,99 @@
+package store
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/store/queries"
+)
+
+func TestConcurrentFinancialRefreshPreservesLongHistories(t *testing.T) {
+	pool := database(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	const donors = 32
+	ids := make([]pgtype.UUID, donors)
+	for i := range ids {
+		ids[i] = testID(t)
+	}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			for _, table := range []string{"donor_messages", "donor_metric_projections", "donor_gifts", "donor_billing_periods", "donor_checkouts"} {
+				if _, err := pool.Exec(context.Background(), "DELETE FROM "+table+" WHERE donor_id=$1", id); err != nil {
+					t.Error(err)
+				}
+			}
+			if _, err := pool.Exec(context.Background(), "DELETE FROM donors WHERE id=$1", id); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	now := time.Date(2028, 1, 15, 12, 0, 0, 0, time.UTC)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	for _, id := range ids {
+		mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id.String()+"@example.org")
+		checkout := testID(t)
+		mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','MONTHLY')", checkout, id)
+		mustExec(t, tx, `INSERT INTO donor_billing_periods(id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status)
+  SELECT gen_random_uuid(),$1,$2,'in_'||($1::uuid)::text||'_'||n,'sub_'||($1::uuid)::text,
+  '2026-02-01 12:00Z'::timestamptz+n*interval '1 month','2026-03-01 12:00Z'::timestamptz+n*interval '1 month','PAID' FROM generate_series(0,23) n`, id, checkout)
+		mustExec(t, tx, `INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,period_id)
+  SELECT gen_random_uuid(),donor_id,checkout_id,stripe_invoice_id,3000,'USD','MONTHLY',due_at,id FROM donor_billing_periods WHERE donor_id=$1`, id)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	var wg sync.WaitGroup
+	failures := make(chan error, donors*2)
+	// Two independent writers contend for every donor; locking must prevent duplicate intents.
+	for round := range 2 {
+		for _, id := range ids {
+			wg.Add(1)
+			go func(id pgtype.UUID, round int) {
+				defer wg.Done()
+				tx, err := pool.Begin(ctx)
+				if err != nil {
+					failures <- err
+					return
+				}
+				defer tx.Rollback(ctx)
+				facts, err := RefreshProjectionInTx(ctx, tx, id, now)
+				if err == nil && (!facts.CurrentStreak.Valid || facts.CurrentStreak.Int32 != 24 || facts.BestStreak != 24 || facts.NetMinor.Int64 != 72000) {
+					err = fmt.Errorf("incorrect financial projection in writer %d", round)
+				}
+				if err == nil {
+					err = tx.Commit(ctx)
+				}
+				if err != nil {
+					failures <- err
+				}
+			}(id, round)
+		}
+	}
+	wg.Wait()
+	close(failures)
+	for err := range failures {
+		t.Error(err)
+	}
+	for _, id := range ids {
+		var receipts, annual int
+		err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE kind='RECEIPT'),count(*) FILTER(WHERE kind='ANNUAL') FROM donor_messages WHERE donor_id=$1`, id).Scan(&receipts, &annual)
+		if err != nil || receipts != 24 || annual != 2 {
+			t.Fatal("duplicate or lost notification intents", receipts, annual, err)
+		}
+		p, err := queries.New(pool).Projection(ctx, id)
+		if err != nil || p.BestStreak != 24 {
+			t.Fatal(p, err)
+		}
+	}
+	t.Logf("64 contending financial refreshes, 32 donors, 768 gifts: %s", time.Since(start))
+}
