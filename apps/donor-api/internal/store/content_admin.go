@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"time"
 	"unicode/utf8"
 
@@ -12,6 +13,8 @@ import (
 	"impactgraph/donor-api/internal/credentials"
 	"impactgraph/donor-api/internal/store/queries"
 )
+
+var ErrSourceStorageUnconfigured = errors.New("source document storage is not configured")
 
 type ContentService struct {
 	Staff         *StaffService
@@ -25,6 +28,18 @@ type ContentDocument struct {
 func (s ContentService) Authorize(ctx context.Context, token string) error {
 	_, err := requireStaff(ctx, queries.New(s.Staff.DB), token, "content.publish", time.Now().UTC())
 	return err
+}
+
+// AuthorizeSourceUpload also refuses when sources cannot be encrypted, so the
+// caller can reject an upload before reading its body.
+func (s ContentService) AuthorizeSourceUpload(ctx context.Context, token string) error {
+	if err := s.Authorize(ctx, token); err != nil {
+		return err
+	}
+	if s.EncryptionKey == "" {
+		return ErrSourceStorageUnconfigured
+	}
+	return nil
 }
 
 // Content views keep alphabetical field order so responses match the original
@@ -85,6 +100,9 @@ func (s ContentService) StoreSource(ctx context.Context, token, name string, dat
 		}
 	}
 	return staffTransaction(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (StoredSource, error) {
+		if s.EncryptionKey == "" {
+			return StoredSource{}, ErrSourceStorageUnconfigured
+		}
 		ciphertext, err := credentials.Encrypt(data, s.EncryptionKey)
 		if err != nil {
 			return StoredSource{}, err

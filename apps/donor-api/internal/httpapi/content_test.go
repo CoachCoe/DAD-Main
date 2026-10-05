@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -41,5 +43,48 @@ func TestDatabaseFailureIsPrivateAndNotCached(t *testing.T) {
 	server.Handler.ServeHTTP(response, httptest.NewRequest("GET", "/donor/public/content", nil))
 	if response.Code != 503 || response.Header().Get("Cache-Control") != "no-store" || strings.Contains(response.Body.String(), "private") {
 		t.Fatalf("unsafe error %s", response.Body.String())
+	}
+}
+
+type uploadStub struct {
+	ContentAdminSource
+	authorizeErr error
+	stored       int
+}
+
+func (s *uploadStub) AuthorizeSourceUpload(context.Context, string) error { return s.authorizeErr }
+func (s *uploadStub) StoreSource(_ context.Context, _, name string, data []byte) (store.StoredSource, error) {
+	s.stored++
+	return store.StoredSource{Name: name}, nil
+}
+
+type unreadBody struct{ t *testing.T }
+
+func (b unreadBody) Read([]byte) (int, error) {
+	b.t.Error("upload body read before storage was known to be configured")
+	return 0, io.EOF
+}
+
+func TestSourceUploadWithoutStorageKeyIsRejectedBeforeBody(t *testing.T) {
+	upload := func(stub *uploadStub, body io.Reader) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", "/donor/staff/content/sources?name=source.pdf", body)
+		r.Header.Set("Origin", "http://localhost:3000")
+		r.AddCookie(&http.Cookie{Name: staffCookie, Value: "staff-session"})
+		response := httptest.NewRecorder()
+		NewServer("", Services{ContentAdmin: stub}).Handler.ServeHTTP(response, r)
+		return response
+	}
+	stub := &uploadStub{authorizeErr: store.ErrSourceStorageUnconfigured}
+	response := upload(stub, unreadBody{t})
+	if response.Code != 503 || !strings.Contains(response.Body.String(), "Source document storage is not configured") || stub.stored != 0 {
+		t.Fatalf("unconfigured storage: %d %s", response.Code, response.Body)
+	}
+	stub = &uploadStub{authorizeErr: store.ErrStaffForbidden}
+	if response = upload(stub, unreadBody{t}); response.Code != 403 {
+		t.Fatalf("forbidden upload: %d", response.Code)
+	}
+	stub = &uploadStub{}
+	if response = upload(stub, strings.NewReader("signed record")); response.Code != 200 || stub.stored != 1 {
+		t.Fatalf("configured upload: %d %s", response.Code, response.Body)
 	}
 }

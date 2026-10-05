@@ -26,6 +26,9 @@ type subscriptionGateway struct {
 	refundRows     []payments.Object
 	refundLists    int
 	beforeList     func()
+	beforeMutate   func()
+	// loseAcknowledgement applies the next mutation but reports a failure.
+	loseAcknowledgement bool
 }
 
 func (g *subscriptionGateway) RetrieveSubscription(ctx context.Context, id string) (payments.Object, error) {
@@ -39,13 +42,38 @@ func (g *subscriptionGateway) RetrieveSubscription(ctx context.Context, id strin
 	}
 	return g.financialGateway.RetrieveSubscription(ctx, id)
 }
-func (g *subscriptionGateway) CreateCheckout(context.Context, []byte, string) (payments.RemoteCheckout, error) {
-	return payments.RemoteCheckout{}, payments.ErrCheckoutUnavailable
+func (g *subscriptionGateway) CreateCheckout(_ context.Context, _ []byte, key string) (payments.RemoteCheckout, error) {
+	g.intercept(key)
+	live := false
+	return payments.RemoteCheckout{ID: "cs_test_" + key, URL: "https://checkout.stripe.com/c/test", Livemode: &live}, nil
+}
+
+// stall pauses the next mutation until the returned gate opens.
+func (g *subscriptionGateway) stall(t *testing.T) *gate {
+	stalled := newGate(t)
+	g.mu.Lock()
+	g.beforeMutate = stalled.wait
+	g.mu.Unlock()
+	return stalled
+}
+
+// intercept runs any pending stall outside the lock, then records key.
+func (g *subscriptionGateway) intercept(key string) {
+	g.mu.Lock()
+	hook := g.beforeMutate
+	g.beforeMutate = nil
+	g.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	g.mu.Lock()
+	g.keys = append(g.keys, key)
+	g.mu.Unlock()
 }
 func (g *subscriptionGateway) mutate(id, key string, edit func(map[string]any)) error {
+	g.intercept(key)
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.keys = append(g.keys, key)
 	if err := g.fail; err != nil {
 		g.fail = nil
 		return err
@@ -60,6 +88,10 @@ func (g *subscriptionGateway) mutate(id, key string, edit func(map[string]any)) 
 	}
 	edit(remote)
 	g.subscriptions[id] = paymentObject(g.t, remote)
+	if g.loseAcknowledgement {
+		g.loseAcknowledgement = false
+		return payments.ErrCheckoutUnavailable
+	}
 	return nil
 }
 func (g *subscriptionGateway) ScheduleCancellation(_ context.Context, id string, end int64, key string) error {

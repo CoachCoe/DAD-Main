@@ -23,7 +23,12 @@ func (s RecurringService) Resume(ctx context.Context, token string, r Resumption
 	if !ValidRequestID(r.RequestID) || r.NextRenewal.IsZero() {
 		return Resumption{}, payments.ErrFacts
 	}
+	snapshot, err := s.donorSnapshot(ctx, token)
+	if err != nil {
+		return Resumption{}, err
+	}
 	owner := donorOwner(token)
+	var lease *subscriptionLease
 	ready, err := ownerTransaction(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*Resumption, error) {
 		q := queries.New(tx)
 		pause, err := ownedPause(ctx, q, d.ID, r.PauseID)
@@ -31,68 +36,78 @@ func (s RecurringService) Resume(ctx context.Context, token string, r Resumption
 			return nil, err
 		}
 		command, err := q.ResumptionByID(ctx, r.RequestID)
-		if err == nil {
-			if command.DonorID != d.ID || command.PauseID != pause.ID || !command.NextRenewal.Time.Equal(r.NextRenewal) {
+		fresh := errors.Is(err, pgx.ErrNoRows)
+		if err != nil && !fresh {
+			return nil, err
+		}
+		if !fresh && (command.DonorID != d.ID || command.PauseID != pause.ID || !command.NextRenewal.Time.Equal(r.NextRenewal)) {
+			return nil, ErrSubscriptionConflict
+		}
+		if fresh {
+			if _, err = q.ResumptionForPause(ctx, pause.ID); err == nil {
 				return nil, ErrSubscriptionConflict
 			}
-			if !command.ConfirmedAt.Valid {
-				return nil, nil
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return nil, err
 			}
+		}
+		if fresh || command.ConfirmedAt.Valid {
 			latest, err := q.LatestPause(ctx, pause.AttemptID)
 			if err != nil {
 				return nil, err
 			}
-			attempt, err := ownedAttempt(ctx, q, d.ID, pause.AttemptID)
-			if err != nil {
-				return nil, err
-			}
-			schedule, _, err := s.read(ctx, tx, attempt, now, "pause", nil)
-			if err != nil {
-				return nil, err
-			}
-			if latest.ID != pause.ID || schedule.StopsAt.Valid || schedule.Status != "active" {
+			if latest.ID != pause.ID {
 				return nil, ErrSubscriptionConflict
 			}
-			return resumptionView(command), nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return nil, err
-		}
-		if _, err = q.ResumptionForPause(ctx, pause.ID); err == nil {
-			return nil, ErrSubscriptionConflict
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return nil, err
-		}
-		latest, err := q.LatestPause(ctx, pause.AttemptID)
-		if err != nil {
-			return nil, err
-		}
-		if latest.ID != pause.ID {
-			return nil, ErrSubscriptionConflict
 		}
 		attempt, err := ownedAttempt(ctx, q, d.ID, pause.AttemptID)
 		if err != nil {
 			return nil, err
 		}
-		schedule, remote, err := s.read(ctx, tx, attempt, now, "pause", nil)
+		schedule, remote, err := s.read(ctx, tx, attempt, now, "pause", snapshot)
 		if err != nil {
 			return nil, err
 		}
-		pause, err = q.PauseByID(ctx, pause.ID)
-		if err != nil {
-			return nil, err
-		}
-		if !pause.ConfirmedAt.Valid || absent(remote, "pause_collection") || schedule.Status != "active" || schedule.StopsAt.Valid || !schedule.PeriodEnd.Time.Equal(r.NextRenewal) || !now.Before(r.NextRenewal) || !r.NextRenewal.Before(pause.ResumesAt.Time) {
+		if schedule.Status != "active" || schedule.StopsAt.Valid {
 			return nil, ErrSubscriptionConflict
 		}
-		return nil, q.InsertResumption(ctx, queries.InsertResumptionParams{ID: r.RequestID, DonorID: d.ID, PauseID: pause.ID, NextRenewal: timestamp(r.NextRenewal), CreatedAt: timestamp(now)})
+		if fresh {
+			if pause, err = q.PauseByID(ctx, pause.ID); err != nil {
+				return nil, err
+			}
+			if !pause.ConfirmedAt.Valid || absent(remote, "pause_collection") || !schedule.PeriodEnd.Time.Equal(r.NextRenewal) || !now.Before(r.NextRenewal) || !r.NextRenewal.Before(pause.ResumesAt.Time) {
+				return nil, ErrSubscriptionConflict
+			}
+			if err = q.InsertResumption(ctx, queries.InsertResumptionParams{ID: r.RequestID, DonorID: d.ID, PauseID: pause.ID, NextRenewal: timestamp(r.NextRenewal), CreatedAt: timestamp(now)}); err != nil {
+				return nil, err
+			}
+		}
+		if command, err = q.ResumptionByID(ctx, r.RequestID); err != nil {
+			return nil, err
+		}
+		if command.ConfirmedAt.Valid {
+			result, err := completeResumption(ctx, tx, d.ID, attempt.ID, command, now)
+			return &result, err
+		}
+		if !schedule.PeriodEnd.Time.Equal(command.NextRenewal.Time) || !now.Before(command.NextRenewal.Time) || now.Sub(command.CreatedAt.Time) >= 23*time.Hour {
+			return nil, ErrSubscriptionConflict
+		}
+		lease, err = leaseSubscription(ctx, q, d.ID, attempt, command.ID, now)
+		return nil, err
 	})
 	if err != nil {
 		return Resumption{}, err
 	}
 	if ready != nil {
 		return *ready, nil
+	}
+	defer s.release(ctx, lease)
+	// Shorten the voiding window without charging any skipped invoices.
+	snapshot, err = s.submit(ctx, lease, func(ctx context.Context) error {
+		return s.Gateway.PauseCollection(ctx, lease.subscription, r.NextRenewal.Unix(), "dad-resume-"+r.RequestID.String())
+	})
+	if err != nil {
+		return Resumption{}, err
 	}
 	return ownerTransaction(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (Resumption, error) {
 		q := queries.New(tx)
@@ -104,7 +119,7 @@ func (s RecurringService) Resume(ctx context.Context, token string, r Resumption
 		if err != nil {
 			return Resumption{}, err
 		}
-		schedule, _, err := s.read(ctx, tx, attempt, now, "pause", nil)
+		schedule, _, err := s.read(ctx, tx, attempt, now, "pause", snapshot)
 		if err != nil {
 			return Resumption{}, err
 		}
@@ -116,27 +131,17 @@ func (s RecurringService) Resume(ctx context.Context, token string, r Resumption
 			return Resumption{}, err
 		}
 		if !command.ConfirmedAt.Valid {
-			if !schedule.PeriodEnd.Time.Equal(command.NextRenewal.Time) || !now.Before(command.NextRenewal.Time) || now.Sub(command.CreatedAt.Time) >= 23*time.Hour {
-				return Resumption{}, ErrSubscriptionConflict
-			}
-			// Shorten the voiding window without charging any skipped invoices.
-			if err = s.Gateway.PauseCollection(ctx, attempt.StripeSubscriptionID.String, command.NextRenewal.Time.Unix(), "dad-resume-"+command.ID.String()); err != nil {
-				return Resumption{}, err
-			}
-			if _, _, err = s.read(ctx, tx, attempt, now, "pause", nil); err != nil {
-				return Resumption{}, err
-			}
-			command, err = q.ResumptionByID(ctx, r.RequestID)
-			if err != nil {
-				return Resumption{}, err
-			}
-			if !command.ConfirmedAt.Valid {
-				return Resumption{}, ErrSubscriptionConflict
-			}
+			return Resumption{}, ErrSubscriptionConflict
 		}
-		if _, err = RefreshProjectionInTx(ctx, tx, d.ID, now); err != nil {
-			return Resumption{}, err
-		}
-		return *resumptionView(command), nil
+		return completeResumption(ctx, tx, d.ID, attempt.ID, command, now)
 	})
+}
+func completeResumption(ctx context.Context, tx pgx.Tx, donor, attempt pgtype.UUID, command queries.DonorResumption, now time.Time) (Resumption, error) {
+	if err := releaseLease(ctx, queries.New(tx), attempt, command.ID); err != nil {
+		return Resumption{}, err
+	}
+	if _, err := RefreshProjectionInTx(ctx, tx, donor, now); err != nil {
+		return Resumption{}, err
+	}
+	return *resumptionView(command), nil
 }

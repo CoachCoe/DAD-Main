@@ -183,6 +183,7 @@ func TestGiftStoresAttributionValidWhenCharged(t *testing.T) {
 		}
 	})
 	pay := func(checkout, payment string) {
+		f.charge(t, payment, time.Now())
 		f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
 		f.process(t)
 	}

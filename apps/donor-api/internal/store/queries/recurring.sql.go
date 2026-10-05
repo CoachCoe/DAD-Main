@@ -11,6 +11,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acquireSubscriptionLease = `-- name: AcquireSubscriptionLease :execrows
+INSERT INTO donor_subscription_leases(attempt_id,donor_id,command_id,expires_at)
+VALUES($1,$2,$3,$4)
+ON CONFLICT (attempt_id) DO UPDATE SET command_id=EXCLUDED.command_id,expires_at=EXCLUDED.expires_at
+WHERE donor_subscription_leases.command_id=EXCLUDED.command_id OR donor_subscription_leases.expires_at<=$5
+`
+
+type AcquireSubscriptionLeaseParams struct {
+	AttemptID pgtype.UUID        `json:"attempt_id"`
+	DonorID   pgtype.UUID        `json:"donor_id"`
+	CommandID pgtype.UUID        `json:"command_id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	Now       pgtype.Timestamptz `json:"now"`
+}
+
+func (q *Queries) AcquireSubscriptionLease(ctx context.Context, arg AcquireSubscriptionLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, acquireSubscriptionLease,
+		arg.AttemptID,
+		arg.DonorID,
+		arg.CommandID,
+		arg.ExpiresAt,
+		arg.Now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const amountChangeByID = `-- name: AmountChangeByID :one
 SELECT donor_id, checkout_id, previous_minor, amount_minor, effective_at, item_id, product_id, confirmed_at, id, created_at FROM donor_amount_changes WHERE id=$1
 `
@@ -320,6 +349,20 @@ func (q *Queries) PauseByID(ctx context.Context, id pgtype.UUID) (DonorPause, er
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const releaseSubscriptionLease = `-- name: ReleaseSubscriptionLease :exec
+DELETE FROM donor_subscription_leases WHERE attempt_id=$1 AND command_id=$2
+`
+
+type ReleaseSubscriptionLeaseParams struct {
+	AttemptID pgtype.UUID `json:"attempt_id"`
+	CommandID pgtype.UUID `json:"command_id"`
+}
+
+func (q *Queries) ReleaseSubscriptionLease(ctx context.Context, arg ReleaseSubscriptionLeaseParams) error {
+	_, err := q.db.Exec(ctx, releaseSubscriptionLease, arg.AttemptID, arg.CommandID)
+	return err
 }
 
 const resumptionByID = `-- name: ResumptionByID :one

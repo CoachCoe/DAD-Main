@@ -5,33 +5,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-func (w EventWorker) reconcileRefund(ctx context.Context, tx pgx.Tx, event queries.DonorStripeEvent, data payments.Object, now time.Time) error {
-	q := queries.New(tx)
-	gift, err := q.GiftByPayment(ctx, pgtype.Text{String: data.Text("payment_intent"), Valid: true})
-	if err != nil {
-		return err
-	}
-	if w.Gateway == nil {
-		return payments.ErrCheckoutUnavailable
-	}
-	current, err := w.Gateway.RetrieveRefund(ctx, data.Text("id"))
-	if err != nil {
-		return err
-	}
-	if current.Text("id") != data.Text("id") {
-		return payments.ErrFacts
-	}
-	return RecordRefundInTx(ctx, q, gift, current, event.ID, pgtype.UUID{}, now)
-}
-
-// The caller holds the donor then gift lock. Read current processor state under
-// those locks; webhook timestamps cannot order competing refund states reliably.
+// The caller holds the donor then gift lock, and current was read from the
+// processor after the gift's latest recorded refund state; webhook timestamps
+// cannot order competing refund states reliably.
 func RecordRefundInTx(ctx context.Context, q *queries.Queries, gift queries.DonorGift, current payments.Object, eventID, actionID pgtype.UUID, now time.Time) error {
 	amount, err := current.Int("amount")
 	status := strings.ToUpper(current.Text("status"))

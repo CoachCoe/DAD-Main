@@ -53,6 +53,48 @@ func (q *Queries) AttemptForCheckout(ctx context.Context, checkoutID pgtype.UUID
 	return i, err
 }
 
+const attemptSnapshotByID = `-- name: AttemptSnapshotByID :one
+SELECT checkout_id, request_hash, request_params, stripe_session_id, stripe_subscription_id, hosted_url, status, id, created_at FROM donor_stripe_checkouts WHERE id=$1
+`
+
+func (q *Queries) AttemptSnapshotByID(ctx context.Context, id pgtype.UUID) (DonorStripeCheckout, error) {
+	row := q.db.QueryRow(ctx, attemptSnapshotByID, id)
+	var i DonorStripeCheckout
+	err := row.Scan(
+		&i.CheckoutID,
+		&i.RequestHash,
+		&i.RequestParams,
+		&i.StripeSessionID,
+		&i.StripeSubscriptionID,
+		&i.HostedUrl,
+		&i.Status,
+		&i.ID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const attemptSnapshotForCheckout = `-- name: AttemptSnapshotForCheckout :one
+SELECT checkout_id, request_hash, request_params, stripe_session_id, stripe_subscription_id, hosted_url, status, id, created_at FROM donor_stripe_checkouts WHERE checkout_id=$1
+`
+
+func (q *Queries) AttemptSnapshotForCheckout(ctx context.Context, checkoutID pgtype.UUID) (DonorStripeCheckout, error) {
+	row := q.db.QueryRow(ctx, attemptSnapshotForCheckout, checkoutID)
+	var i DonorStripeCheckout
+	err := row.Scan(
+		&i.CheckoutID,
+		&i.RequestHash,
+		&i.RequestParams,
+		&i.StripeSessionID,
+		&i.StripeSubscriptionID,
+		&i.HostedUrl,
+		&i.Status,
+		&i.ID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const billingPeriodByInvoice = `-- name: BillingPeriodByInvoice :one
 SELECT donor_id, checkout_id, stripe_invoice_id, stripe_subscription_id, due_at, ends_at, status, id, created_at FROM donor_billing_periods WHERE stripe_invoice_id=$1
 `
@@ -254,15 +296,29 @@ func (q *Queries) GiftByStripeObject(ctx context.Context, stripeObjectID string)
 	return i, err
 }
 
-const giftOwnerByPayment = `-- name: GiftOwnerByPayment :one
-SELECT donor_id FROM donor_gifts WHERE stripe_payment_intent_id=$1
+const giftSnapshotByPayment = `-- name: GiftSnapshotByPayment :one
+SELECT donor_id, checkout_id, stripe_object_id, amount_minor, currency, frequency, paid_at, stripe_payment_intent_id, period_id, id, created_at, referrer_id, referral_kind FROM donor_gifts WHERE stripe_payment_intent_id=$1
 `
 
-func (q *Queries) GiftOwnerByPayment(ctx context.Context, stripePaymentIntentID pgtype.Text) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, giftOwnerByPayment, stripePaymentIntentID)
-	var donor_id pgtype.UUID
-	err := row.Scan(&donor_id)
-	return donor_id, err
+func (q *Queries) GiftSnapshotByPayment(ctx context.Context, stripePaymentIntentID pgtype.Text) (DonorGift, error) {
+	row := q.db.QueryRow(ctx, giftSnapshotByPayment, stripePaymentIntentID)
+	var i DonorGift
+	err := row.Scan(
+		&i.DonorID,
+		&i.CheckoutID,
+		&i.StripeObjectID,
+		&i.AmountMinor,
+		&i.Currency,
+		&i.Frequency,
+		&i.PaidAt,
+		&i.StripePaymentIntentID,
+		&i.PeriodID,
+		&i.ID,
+		&i.CreatedAt,
+		&i.ReferrerID,
+		&i.ReferralKind,
+	)
+	return i, err
 }
 
 const hasGift = `-- name: HasGift :one
@@ -514,15 +570,26 @@ func (q *Queries) PaymentUpdateByID(ctx context.Context, id pgtype.UUID) (DonorP
 	return i, err
 }
 
-const paymentUpdateOwner = `-- name: PaymentUpdateOwner :one
-SELECT donor_id FROM donor_payment_updates WHERE id=$1
+const paymentUpdateSnapshot = `-- name: PaymentUpdateSnapshot :one
+SELECT donor_id, attempt_id, customer_id, request_params, stripe_session_id, hosted_url, status, completed_at, id, created_at FROM donor_payment_updates WHERE id=$1
 `
 
-func (q *Queries) PaymentUpdateOwner(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, paymentUpdateOwner, id)
-	var donor_id pgtype.UUID
-	err := row.Scan(&donor_id)
-	return donor_id, err
+func (q *Queries) PaymentUpdateSnapshot(ctx context.Context, id pgtype.UUID) (DonorPaymentUpdate, error) {
+	row := q.db.QueryRow(ctx, paymentUpdateSnapshot, id)
+	var i DonorPaymentUpdate
+	err := row.Scan(
+		&i.DonorID,
+		&i.AttemptID,
+		&i.CustomerID,
+		&i.RequestParams,
+		&i.StripeSessionID,
+		&i.HostedUrl,
+		&i.Status,
+		&i.CompletedAt,
+		&i.ID,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const pendingAmountChange = `-- name: PendingAmountChange :one

@@ -6,17 +6,20 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/store/queries"
 )
 
-func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
-	pool := database(t)
+// restoreContent removes actor's sources and publications and restores the
+// public snapshot that was current before the test.
+func restoreContent(t *testing.T, pool *pgxpool.Pool, actor pgtype.UUID) {
+	t.Helper()
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "ADMIN")
-	_, support := staffFixture(t, pool, "SUPPORT")
 	var previous pgtype.UUID
 	if err := pool.QueryRow(ctx, "SELECT publication_id FROM donor_content_head WHERE id='r1'").Scan(&previous); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatal(err)
@@ -35,6 +38,47 @@ func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestSourceUploadsRequireEncryptionKeyButPublishingDoesNot(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	actor, token := staffFixture(t, pool, "ADMIN")
+	_, support := staffFixture(t, pool, "SUPPORT")
+	restoreContent(t, pool, actor)
+	s := ContentService{Staff: &StaffService{DB: pool}}
+	if err := s.AuthorizeSourceUpload(ctx, support); !errors.Is(err, ErrStaffForbidden) {
+		t.Fatal("unauthorized caller learned storage configuration", err)
+	}
+	if err := s.AuthorizeSourceUpload(ctx, token); !errors.Is(err, ErrSourceStorageUnconfigured) {
+		t.Fatal("upload authorized without an encryption key", err)
+	}
+	if _, err := s.StoreSource(ctx, token, "source.txt", []byte("Private signed source record")); !errors.Is(err, ErrSourceStorageUnconfigured) {
+		t.Fatal("source stored without an encryption key", err)
+	}
+	var stored int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_content_sources WHERE actor_id=$1", actor).Scan(&stored); err != nil || stored != 0 {
+		t.Fatal("unencrypted source persisted", stored, err)
+	}
+	if err := s.Authorize(ctx, token); err != nil {
+		t.Fatal("publishing authorization needs the source key", err)
+	}
+	source := testID(t)
+	if err := queries.New(pool).InsertContentSource(ctx, queries.InsertContentSourceParams{ID: source, ActorID: actor, Name: "approval.pdf", Sha256: strings.Repeat("0", 64), EncryptedData: []byte("ciphertext")}); err != nil {
+		t.Fatal(err)
+	}
+	r := PublicationRequest{AsOf: "2026-01-01", Cadence: "Monthly", InitiativesCSV: fmt.Sprintf("slug,title,summary,partner,planned_start,board_approval_source_id,approved_on\nfirst,First,Planned initiative,Partner,2027-04-22,%s,2026-01-01\n", source.String()), LedgerCSV: fmt.Sprintf("metric,value,unit,source_id,illustrative\nCollected,3000,USD_CENTS,%s,false\n", source.String())}
+	if _, err := s.Publish(ctx, token, r); err != nil {
+		t.Fatal("publishing failed without the source key", err)
+	}
+}
+
+func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	actor, token := staffFixture(t, pool, "ADMIN")
+	_, support := staffFixture(t, pool, "SUPPORT")
+	restoreContent(t, pool, actor)
 	s := ContentService{Staff: &StaffService{DB: pool}, EncryptionKey: base64.URLEncoding.EncodeToString(make([]byte, 32))}
 	data := []byte("Private signed source record")
 	if _, err := s.StoreSource(ctx, support, "source.txt", data); !errors.Is(err, ErrStaffForbidden) {

@@ -74,6 +74,10 @@ type MessagePage struct {
 	Messages   []queries.StaffMessagePageRow `json:"messages"`
 	NextOffset *int64                        `json:"next_offset"`
 }
+type ActionPage struct {
+	Actions    []queries.StaffActionPageRow `json:"actions"`
+	NextOffset *int64                       `json:"next_offset"`
+}
 type Enrolments struct {
 	Enrolments []any  `json:"enrolments"`
 	State      string `json:"state"`
@@ -200,9 +204,18 @@ func (s *StaffService) DonorMessages(ctx context.Context, token string, id pgtyp
 	})
 }
 
-func (s *StaffService) DonorActions(ctx context.Context, token string, id pgtype.UUID) ([]queries.StaffActionPageRow, error) {
-	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) ([]queries.StaffActionPageRow, error) {
-		return queries.New(tx).StaffActionPage(ctx, id)
+func (s *StaffService) DonorActions(ctx context.Context, token string, id pgtype.UUID, offset int64) (ActionPage, error) {
+	if !pageOffsetValid(offset) {
+		return ActionPage{}, ErrStaffInput
+	}
+	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (ActionPage, error) {
+		rows, err := queries.New(tx).StaffActionPage(ctx, queries.StaffActionPageParams{DonorID: id, PageOffset: offset})
+		if err != nil {
+			return ActionPage{}, err
+		}
+		out := ActionPage{}
+		out.Actions, out.NextOffset = page(rows, offset)
+		return out, nil
 	})
 }
 

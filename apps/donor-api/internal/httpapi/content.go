@@ -14,6 +14,7 @@ import (
 
 type ContentAdminSource interface {
 	Authorize(context.Context, string) error
+	AuthorizeSourceUpload(context.Context, string) error
 	Inventory(context.Context, string) (store.ContentInventory, error)
 	StoreSource(context.Context, string, string, []byte) (store.StoredSource, error)
 	ReadSource(context.Context, string, pgtype.UUID) (store.ContentDocument, error)
@@ -72,8 +73,8 @@ func (a *api) uploadSource(w http.ResponseWriter, r *http.Request) {
 	session := cookieValue(r, staffCookie)
 	ctx, cancel := withTimeout(r, staffTimeout)
 	defer cancel()
-	if err := a.ContentAdmin.Authorize(ctx, session); err != nil {
-		respond(w, r, nil, err, staffStatus)
+	if err := a.ContentAdmin.AuthorizeSourceUpload(ctx, session); err != nil {
+		respond(w, r, nil, err, sourceStatus)
 		return
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSourceBytes))
@@ -86,7 +87,14 @@ func (a *api) uploadSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body, err := a.ContentAdmin.StoreSource(ctx, session, r.URL.Query().Get("name"), data)
-	respond(w, r, body, err, staffStatus)
+	respond(w, r, body, err, sourceStatus)
+}
+
+func sourceStatus(err error) (int, string) {
+	if errors.Is(err, store.ErrSourceStorageUnconfigured) {
+		return http.StatusServiceUnavailable, "Source document storage is not configured"
+	}
+	return staffStatus(err)
 }
 
 func (a *api) downloadSource(w http.ResponseWriter, r *http.Request) {

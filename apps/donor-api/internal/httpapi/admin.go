@@ -7,7 +7,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"impactgraph/donor-api/internal/store"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 type AdminSource interface {
@@ -15,7 +14,7 @@ type AdminSource interface {
 	DonorDetail(context.Context, string, pgtype.UUID, int64, int64) (store.DonorDetail, error)
 	AuditEvents(context.Context, string, int64) (store.AuditPage, error)
 	DonorMessages(context.Context, string, pgtype.UUID, int64) (store.MessagePage, error)
-	DonorActions(context.Context, string, pgtype.UUID) ([]queries.StaffActionPageRow, error)
+	DonorActions(context.Context, string, pgtype.UUID, int64) (store.ActionPage, error)
 	Enrolments(context.Context, string) (store.Enrolments, error)
 	RequestClaim(context.Context, string, pgtype.UUID) error
 	ResendMessage(context.Context, string, pgtype.UUID, pgtype.UUID) (store.QueuedMessage, error)
@@ -70,13 +69,14 @@ func (a *api) donorMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) donorActions(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathUUID(r, "donor_id")
-	if !ok {
+	id, okID := pathUUID(r, "donor_id")
+	offset, okOffset := offsetParam(r, "offset")
+	if !okID || !okOffset {
 		staffInvalid(w, r)
 		return
 	}
 	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
-		return a.Admin.DonorActions(ctx, session, id)
+		return a.Admin.DonorActions(ctx, session, id, offset)
 	})
 }
 

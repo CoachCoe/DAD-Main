@@ -18,11 +18,17 @@ SELECT * FROM donor_checkouts WHERE id=$1;
 -- name: AttemptForCheckout :one
 SELECT * FROM donor_stripe_checkouts WHERE checkout_id=$1 FOR UPDATE;
 
--- name: GiftOwnerByPayment :one
-SELECT donor_id FROM donor_gifts WHERE stripe_payment_intent_id=$1;
+-- name: AttemptSnapshotForCheckout :one
+SELECT * FROM donor_stripe_checkouts WHERE checkout_id=$1;
 
--- name: PaymentUpdateOwner :one
-SELECT donor_id FROM donor_payment_updates WHERE id=$1;
+-- name: AttemptSnapshotByID :one
+SELECT * FROM donor_stripe_checkouts WHERE id=$1;
+
+-- name: GiftSnapshotByPayment :one
+SELECT * FROM donor_gifts WHERE stripe_payment_intent_id=$1;
+
+-- name: PaymentUpdateSnapshot :one
+SELECT * FROM donor_payment_updates WHERE id=$1;
 
 -- name: BindSubscription :exec
 UPDATE donor_stripe_checkouts SET stripe_subscription_id=$2 WHERE id=$1;

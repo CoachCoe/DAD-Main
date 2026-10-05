@@ -52,6 +52,7 @@ func ValidateOrigin(origin string) error {
 type StripeGateway struct{ client *stripe.Client }
 
 type FinancialGateway interface {
+	RetrievePaymentIntent(context.Context, string) (Object, error)
 	RetrieveRefund(context.Context, string) (Object, error)
 	RetrieveSubscription(context.Context, string) (Object, error)
 }
@@ -115,6 +116,17 @@ func (g *StripeGateway) UpdateSubscriptionPaymentMethod(ctx context.Context, id,
 	return nil
 }
 
+// RetrievePaymentIntent expands the latest charge, whose creation is when a
+// card payment succeeded.
+func (g *StripeGateway) RetrievePaymentIntent(ctx context.Context, id string) (Object, error) {
+	params := &stripe.PaymentIntentRetrieveParams{}
+	params.AddExpand("latest_charge")
+	result, err := g.client.V1PaymentIntents.Retrieve(ctx, id, params)
+	if err != nil || result == nil || result.LastResponse == nil {
+		return nil, ErrCheckoutUnavailable
+	}
+	return DecodeObject(result.LastResponse.RawJSON)
+}
 func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, error) {
 	result, err := g.client.V1Refunds.Retrieve(ctx, id, nil)
 	if err != nil || result == nil || result.LastResponse == nil {

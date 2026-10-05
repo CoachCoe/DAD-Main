@@ -30,6 +30,23 @@ func (journeyGateway) CreateCheckout(_ context.Context, _ []byte, key string) (p
 	return payments.RemoteCheckout{ID: "cs_test_" + strings.TrimPrefix(key, "dad-checkout-"), URL: "https://checkout.stripe.com/c/test", Livemode: &live}, nil
 }
 
+// journeyCharges reports each payment intent's card charge as succeeding at a fixed time.
+type journeyCharges struct{ at time.Time }
+
+func (g journeyCharges) RetrievePaymentIntent(_ context.Context, id string) (payments.Object, error) {
+	raw, err := json.Marshal(map[string]any{"id": id, "status": "succeeded", "livemode": false, "latest_charge": map[string]any{"id": "ch_" + id, "payment_intent": id, "status": "succeeded", "paid": true, "livemode": false, "created": g.at.Unix()}})
+	if err != nil {
+		return nil, err
+	}
+	return payments.DecodeObject(raw)
+}
+func (journeyCharges) RetrieveRefund(context.Context, string) (payments.Object, error) {
+	return nil, payments.ErrCheckoutUnavailable
+}
+func (journeyCharges) RetrieveSubscription(context.Context, string) (payments.Object, error) {
+	return nil, payments.ErrCheckoutUnavailable
+}
+
 type journeyMail struct{ message mail.Message }
 
 func (m *journeyMail) Send(_ context.Context, message mail.Message) error {
@@ -179,7 +196,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		call(guest, "POST", "/donor/stripe/webhook", raw, map[string]string{"Stripe-Signature": signature}, 200)
 	}
-	if worked, err := (store.EventWorker{DB: pool}).ProcessNext(ctx); err != nil || !worked {
+	if worked, err := (store.EventWorker{DB: pool, Gateway: journeyCharges{at: now}}).ProcessNext(ctx); err != nil || !worked {
 		t.Fatal(worked, err)
 	}
 	body = call(referrer, "GET", "/donor/me/dashboard", nil, nil, 200)

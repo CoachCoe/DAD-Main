@@ -56,8 +56,13 @@ func (q *Queries) RecentDonorMessage(ctx context.Context, arg RecentDonorMessage
 const staffActionPage = `-- name: StaffActionPage :many
 SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at
 FROM donor_staff_actions WHERE donor_id=$1 ORDER BY created_at DESC,id
-LIMIT 100
+LIMIT 51 OFFSET $2::bigint
 `
+
+type StaffActionPageParams struct {
+	DonorID    pgtype.UUID `json:"donor_id"`
+	PageOffset int64       `json:"page_offset"`
+}
 
 type StaffActionPageRow struct {
 	ID          pgtype.UUID        `json:"id"`
@@ -71,8 +76,8 @@ type StaffActionPageRow struct {
 	CompletedAt pgtype.Timestamptz `json:"completed_at"`
 }
 
-func (q *Queries) StaffActionPage(ctx context.Context, donorID pgtype.UUID) ([]StaffActionPageRow, error) {
-	rows, err := q.db.Query(ctx, staffActionPage, donorID)
+func (q *Queries) StaffActionPage(ctx context.Context, arg StaffActionPageParams) ([]StaffActionPageRow, error) {
+	rows, err := q.db.Query(ctx, staffActionPage, arg.DonorID, arg.PageOffset)
 	if err != nil {
 		return nil, err
 	}

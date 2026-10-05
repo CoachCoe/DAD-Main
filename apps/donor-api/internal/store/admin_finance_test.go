@@ -16,6 +16,7 @@ type refundGateway struct {
 	refund              payments.Object
 	creates             int
 	loseAcknowledgement bool
+	beforeCreate        func()
 	t                   *testing.T
 }
 
@@ -26,6 +27,9 @@ func (g *refundGateway) ListPaymentRefunds(context.Context, string) ([]payments.
 	return []payments.Object{g.refund}, nil
 }
 func (g *refundGateway) CreateRefund(_ context.Context, payment string, amount int64, command string) (payments.Object, error) {
+	if g.beforeCreate != nil {
+		g.beforeCreate()
+	}
 	g.creates++
 	g.refund = paymentObject(g.t, map[string]any{"id": "re_" + command, "payment_intent": payment, "currency": "usd", "amount": amount, "status": "succeeded", "metadata": map[string]string{"dad_staff_action": command}})
 	if g.loseAcknowledgement {
@@ -91,5 +95,46 @@ func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 	r.Amount = 2000
 	if _, err = s.Refund(ctx, finance, r); !errors.Is(err, ErrStaffConflict) {
 		t.Fatal("idempotency payload changed", err)
+	}
+}
+
+func TestStaffRefundCallsProcessorOutsideDonorLock(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	_, finance := staffFixture(t, pool, "FINANCE")
+	f := newWorkerFixture(t, "MONTHLY")
+	checkout := f.checkout(t)
+	f.receive(t, "invoice.payment_succeeded", invoice(checkout.CheckoutID, "in_lock_"+f.donorID.String(), time.Now().Add(-48*time.Hour), true))
+	f.process(t)
+	var giftID pgtype.UUID
+	if err := pool.QueryRow(ctx, "SELECT id FROM donor_gifts WHERE donor_id=$1", f.donorID).Scan(&giftID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for _, sql := range []string{
+			"DELETE FROM donor_refund_observations WHERE source_action_id IN (SELECT id FROM donor_staff_actions WHERE donor_id=$1)",
+			"DELETE FROM donor_staff_actions WHERE donor_id=$1",
+		} {
+			if _, err := pool.Exec(context.Background(), sql, f.donorID); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	stalled := newGate(t)
+	gateway := &refundGateway{t: t, beforeCreate: stalled.wait}
+	s := StaffFinanceService{Staff: &StaffService{DB: pool}, Gateway: gateway, Origin: "https://example.org"}
+	r := StaffFinancialRequest{RequestID: testID(t), DonorID: f.donorID, TargetID: giftID, Amount: 1000, Reason: "Donor requested partial refund"}
+	var result StaffRefund
+	err := whileStalled(t, stalled, func() error {
+		var err error
+		result, err = s.Refund(ctx, finance, r)
+		return err
+	}, func() { assertDonorUnlocked(t, pool, f.donorID) })
+	if err != nil || result.Status != "SUCCEEDED" || gateway.creates != 1 {
+		t.Fatal("refund not recorded", result, err)
+	}
+	var status string
+	if err = pool.QueryRow(ctx, "SELECT status FROM donor_staff_actions WHERE id=$1", r.RequestID).Scan(&status); err != nil || status != "OBSERVED" {
+		t.Fatal("staff action not completed", status, err)
 	}
 }
