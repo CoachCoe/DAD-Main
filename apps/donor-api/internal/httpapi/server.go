@@ -17,6 +17,7 @@ import (
 
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
+	"impactgraph/donor-api/internal/wallet"
 )
 
 type ContentSource interface {
@@ -32,6 +33,7 @@ type CheckoutSource interface {
 	BeginCheckout(context.Context, payments.CheckoutRequest) (payments.CheckoutResult, error)
 }
 type Services struct {
+	Wallet          *wallet.Issuer
 	Ready           func(context.Context) error
 	Content         ContentSource
 	Dashboard       DashboardSource
@@ -69,6 +71,7 @@ func NewServer(address string, services Services) *http.Server {
 	installAccountRoutes(mux, services, guard, reply)
 	installEmailChangeRoutes(mux, services, guard, reply)
 	installDonorRoutes(mux, services, guard, reply)
+	installWalletRoutes(mux, services, guard, reply)
 	installRecurringRoutes(mux, services, guard, reply)
 	installStaffRoutes(mux, services, guard, reply)
 	installAdminRoutes(mux, services, guard, reply)

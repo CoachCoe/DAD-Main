@@ -9,6 +9,7 @@ require (
 	github.com/makiuchi-d/gozxing v0.1.1
 	github.com/pquerna/otp v1.5.0
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e
+	github.com/smallstep/pkcs7 v0.2.3
 	github.com/stripe/stripe-go/v87 v87.0.0
 )
 

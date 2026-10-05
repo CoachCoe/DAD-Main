@@ -17,6 +17,7 @@ import (
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
+	"impactgraph/donor-api/internal/wallet"
 )
 
 func run() error {
@@ -42,6 +43,10 @@ func run() error {
 		services.Origin = "http://localhost:3000"
 	}
 	if err := payments.ValidateOrigin(services.Origin); err != nil {
+		return err
+	}
+	services.Wallet, err = wallet.FromEnvironment(os.Getenv, services.Origin)
+	if err != nil {
 		return err
 	}
 	var gateway payments.StaffFinanceGateway

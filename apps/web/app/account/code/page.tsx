@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import WalletButtons from "./WalletButtons";
 import { api, ApiError } from "@/lib/api";
 
 export default function CodePage() {
@@ -51,6 +52,7 @@ export default function CodePage() {
           <button type="button" onClick={fullscreen}>{full ? "Exit full screen" : "Show full screen"}</button>
           <p>About a dollar a day · $30/month. DAD launches in April 2027.</p>
           <p>This preview collects no real donations.</p>
+          <WalletButtons />
         </>}
       </>}
     {error && <><p role="alert">{error}</p><button type="button" onClick={() => setRetry((value) => value + 1)}>Retry code</button></>}
