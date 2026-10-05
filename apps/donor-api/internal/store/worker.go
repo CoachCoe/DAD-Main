@@ -299,14 +299,34 @@ func (w EventWorker) applyCheckoutEvent(ctx context.Context, tx pgx.Tx, event qu
 		if err = bindSubscription(ctx, q, attempt, data.Text("subscription")); err != nil {
 			return err
 		}
-		_, err = recordPeriod(ctx, q, draft, data, expected, false)
-		return err
+		period, err := recordPeriod(ctx, q, draft, data, expected, false)
+		if err != nil {
+			return err
+		}
+		return recordBillingObservation(ctx, q, period, event, "FAILED", amount, data.Text("billing_reason"), event.OccurredAt.Time, now)
 	}
 	payment, err := paymentFacts(ctx, q, event, data, draft, attempt, expected, facts.charged)
 	if err != nil {
 		return err
 	}
-	return recordGift(ctx, tx, draft, payment, now)
+	if err = recordGift(ctx, tx, draft, payment, now); err != nil {
+		return err
+	}
+	if payment.period.Valid {
+		return recordBillingObservation(ctx, q, payment.period, event, "PAID", payment.amount, data.Text("billing_reason"), payment.paid, now)
+	}
+	return nil
+}
+
+func recordBillingObservation(ctx context.Context, q *queries.Queries, period pgtype.UUID, event queries.DonorStripeEvent, status string, amount int64, reason string, occurred, recorded time.Time) error {
+	id, err := NewID()
+	if err != nil {
+		return err
+	}
+	return q.InsertBillingObservation(ctx, queries.InsertBillingObservationParams{
+		ID: id, PeriodID: period, SourceEventID: event.ID, Status: status, AmountMinor: amount,
+		BillingReason: reason, OccurredAt: timestamp(occurred), EventCreatedAt: event.OccurredAt, RecordedAt: timestamp(recorded),
+	})
 }
 
 func applySessionEvent(ctx context.Context, q *queries.Queries, kind string, data payments.Object, attempt queries.DonorStripeCheckout) error {

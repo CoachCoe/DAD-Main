@@ -95,6 +95,7 @@ func newWorkerFixture(t *testing.T, frequency string) *workerFixture {
 		ctx := context.Background()
 		for _, sql := range []string{
 			"DELETE FROM donor_messages WHERE donor_id=$1 OR dedup_key=$2",
+			"DELETE FROM donor_billing_observations WHERE period_id IN (SELECT id FROM donor_billing_periods WHERE donor_id=$1)",
 			"DELETE FROM donor_refund_observations WHERE refund_id IN (SELECT r.id FROM donor_refunds r JOIN donor_gifts g ON g.id=r.gift_id WHERE g.donor_id=$1)",
 			"DELETE FROM donor_refunds WHERE gift_id IN (SELECT id FROM donor_gifts WHERE donor_id=$1)",
 			"DELETE FROM donor_gifts WHERE donor_id=$1",
@@ -139,10 +140,15 @@ func (f *workerFixture) charge(t *testing.T, payment string, at time.Time) {
 }
 func (f *workerFixture) receive(t *testing.T, kind string, obj map[string]any) string {
 	t.Helper()
+	return f.receiveAt(t, kind, obj, time.Now())
+}
+
+func (f *workerFixture) receiveAt(t *testing.T, kind string, obj map[string]any, occurred time.Time) string {
+	t.Helper()
 	eventID := "evt_" + f.request.RequestID.String() + "_" + strconv.Itoa(len(f.events))
 	f.events = append(f.events, eventID)
 	now := time.Now()
-	body, err := json.Marshal(map[string]any{"id": eventID, "object": "event", "type": kind, "api_version": payments.APIVersion, "created": now.Unix(), "livemode": false, "data": map[string]any{"object": obj}})
+	body, err := json.Marshal(map[string]any{"id": eventID, "object": "event", "type": kind, "api_version": payments.APIVersion, "created": occurred.Unix(), "livemode": false, "data": map[string]any{"object": obj}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,6 +319,7 @@ func TestInvalidInvoiceRollsBackAllFinancialEffects(t *testing.T) {
 	}
 	for _, sql := range []string{
 		"SELECT count(*) FROM donor_gifts WHERE donor_id=$1",
+		"SELECT count(*) FROM donor_billing_observations WHERE source_event_id IN (SELECT id FROM donor_stripe_events WHERE data->>'checkout_id' IN (SELECT id::text FROM donor_checkouts WHERE donor_id=$1))",
 		"SELECT count(*) FROM donor_billing_periods WHERE donor_id=$1",
 		// Checkout seeds an uncomputed projection row; a computed one would be a partial write.
 		"SELECT count(*) FROM donor_metric_projections WHERE donor_id=$1 AND net_minor IS NOT NULL",
@@ -360,6 +367,10 @@ func TestOneTimeInboxConcurrentWorkers(t *testing.T) {
 	}
 	if processed != 1 {
 		t.Fatal("event claimed by multiple workers")
+	}
+	var observations int
+	if err := f.service.DB.QueryRow(ctx, "SELECT count(*) FROM donor_billing_observations WHERE source_event_id IN (SELECT id FROM donor_stripe_events WHERE stripe_event_id=ANY($1::text[]))", f.events).Scan(&observations); err != nil || observations != 0 {
+		t.Fatalf("one-time gift entered recurring history: %d %v", observations, err)
 	}
 	p, err := queries.New(f.service.DB).Projection(ctx, f.donorID)
 	if err != nil || p.NetMinor.Int64 != 3000 || p.CurrentStreak.Int32 != 0 {

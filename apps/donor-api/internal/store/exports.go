@@ -27,6 +27,7 @@ var exportDatasets = map[string]exportDataset{
 	"refunds":          {"donor_refunds", "id gift_id amount_minor currency status observed_at stripe_refund_id", "data.export"},
 	"refund-history":   {"donor_refund_observations", "id refund_id source_event_id source_action_id status observed_at", "data.export"},
 	"billing-periods":  {"donor_billing_periods", "id donor_id checkout_id stripe_invoice_id due_at ends_at status", "data.export"},
+	"billing-history":  {"donor_billing_observations", "id period_id source_event_id status amount_minor currency billing_reason occurred_at event_created_at recorded_at", "data.export"},
 	"referrals":        {"donor_metric_projections", "donor_id referrer_id referral_kind first_gift_id net_minor computed_at", "data.export"},
 	"streaks":          {"donor_metric_projections", "donor_id current_streak best_streak at_risk grace_ends_at founding_awarded_at computed_at", "data.export"},
 	"subscriptions":    {"donor_subscriptions", "id donor_id attempt_id status period_end stops_at observed_at", "data.export"},
