@@ -1,13 +1,10 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-
-const css = readFileSync(join(__dirname, "globals.css"), "utf8");
+import { webTokenVariables } from "@/design/web";
 
 function token(name: string): string {
-  const match = css.match(new RegExp(`--${name}\\s*:\\s*(#[0-9a-fA-F]{3,6})`));
-  if (!match) throw new Error(`--${name} is not defined as a hex colour`);
-  return match[1];
+  const value = (webTokenVariables as Record<string, unknown>)[`--${name}`];
+  if (typeof value !== "string" || !/^#[0-9a-fA-F]{3,6}$/.test(value)) throw new Error(`--${name} is not defined as a hex colour`);
+  return value;
 }
 
 function luminance(hex: string): number {

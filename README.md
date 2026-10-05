@@ -8,6 +8,8 @@ PostgreSQL. Licensed under MIT.
 **This build accepts Stripe test payments only.** Live donations, approved tax receipts,
 Wallet passes, and release acceptance are not established by running it locally. See
 [the product contract](docs/donor-domain.md) and [security](SECURITY.md).
+Optional [Wallet signing](docs/wallet.md), [analytics definitions](docs/analytics.md),
+and [shared design values](docs/design-system.md) have separate setup and acceptance boundaries.
 
 R1 is a donor product. It does not deliver aid, assess recipients, run AI services, or
 publish blockchain transactions. The enrolment export is an inactive R2 stub.

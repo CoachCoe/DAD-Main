@@ -1,4 +1,4 @@
-/* Shared R1 design tokens and responsive donor/staff surfaces. */
+/* Web typography/layout; shared palette and radii come from design/tokens.ts. */
 :root{
   --font-sans:var(--font-sans-face),Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
   --font-display:var(--font-display-face),"Space Grotesk",var(--font-sans);
@@ -7,52 +7,8 @@
   --track-display-lg:-.02em;
   --track-label:.3em;
   --track-label-sm:.14em;
-  --paper:#f8f9fa;
-  --card:#fff;
-  --card-quiet:#fcfdfd;
-  --field:#f9fafa;
-  --line:#e3e6e8;
-  --ink:#0e1e1e;
-  --ink-deep:#0a1616;
-  --ink-soft:#4a5757;
-  --muted:#5a6666;
-  --brand:#ff4a22;
-  --brand-ink:#c8340f;
-  --brand-wash:#ffece7;
-  --brand-rule:rgba(255,74,34,.34);
-  --ok:#007a7a;
-  --ok-ink:#0a5f5f;
-  --ok-wash:#d6eded;
-  --ok-quiet:#f4fafa;
-  --ok-rule:#cfe3e3;
-  --wait:#3f4f4c;
-  --wait-wash:#e8ecea;
-  --warn:#995b0a;
-  --warn-wash:#fff2d7;
-  --warn-dot:#e3a23b;
-  --fail:#9d3434;
-  --fail-ink:#7a3030;
-  --fail-wash:#fae4e4;
-  --fail-field:#fdf3f3;
-  --fail-line:#e7b9b9;
-  --dkmut:#b9c6c6;
-  --dkline:rgba(248,249,250,.12);
-  --dkgrid:rgba(248,249,250,.035);
-  --glow-brand:rgba(255,74,34,.16);
-  --glow-ok:rgba(0,122,122,.22);
-  --sheen:rgba(255,255,255,.18);
-  --ghost-line:rgba(14,30,30,.55);
-  --ghost-line-dark:rgba(248,249,250,.42);
-  --stone:#e9ecec;
-  --hero-a:#f8f9fa;
-  --hero-b:#fdf1ec;
-  --hero-c:#eef6f6;
-  --deep-a:#0a1616;
-  --deep-b:#0f4a4a;
   --shadow:0 18px 50px rgba(14,30,30,.08);
   --shadow-soft:0 8px 30px rgba(14,30,30,.04);
-  --radius-card:18px;
-  --radius-pill:100px;
   --gutter:max(24px,calc((100vw - 1160px)/2));
 }
 *{box-sizing:border-box}
@@ -178,5 +134,6 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
 .donorSurface details{margin:16px 0}
 .donorSurface pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .donorSurface article+article{margin-top:24px}
+.donorSurface .donorMetrics article{margin-top:0}
 @media (max-width:800px){.dadHeader .brand{max-width:210px;font-size:16px;line-height:1.2}.dadHeader nav{margin-right:0}.donorSurface>.panel{padding:20px 16px}}
 @media print{.donorSurface button,.donorSurface form{display:none}}

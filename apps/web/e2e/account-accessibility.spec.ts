@@ -21,6 +21,13 @@ for (const [path, fixture] of Object.entries(profiles)) {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText(/Loading (your dashboard|profile|your sharing details)/)).toHaveCount(0);
+    if (path === "/account/dashboard" && (page.viewportSize()?.width ?? 0) > 600) {
+      const link = await page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Link Referrals", exact: true }) }).boundingBox();
+      const irl = await page.getByRole("article").filter({ has: page.getByRole("heading", { name: "IRL Referrals", exact: true }) }).boundingBox();
+      expect(link).not.toBeNull(); expect(irl).not.toBeNull();
+      expect(link?.y).toBe(irl?.y);
+      expect(link?.width).toBe(irl?.width);
+    }
     if (path === "/account/profile") {
       await page.getByText("Change account email", { exact: true }).click();
       await expect(page.getByLabel("New email address")).toBeVisible();

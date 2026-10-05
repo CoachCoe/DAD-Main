@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Inter, Space_Grotesk } from "next/font/google";
 import { SiteFrame } from "@/components/donor/SiteFrame";
 import "./globals.css";
+import { webTokenVariables } from "@/design/web";
 
 // Inter and Space Grotesk are variable fonts, so they load their whole weight axis and
 // must not be given a `weight`. IBM Plex Mono is static and has to name its weights.
@@ -27,7 +28,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${sans.variable} ${display.variable} ${mono.variable}`}>
+    <html lang="en" style={webTokenVariables} className={`${sans.variable} ${display.variable} ${mono.variable}`}>
       <body>
         <SiteFrame>{children}</SiteFrame>
       </body>
