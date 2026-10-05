@@ -7,9 +7,15 @@ consumes them. React Native can consume the same color strings and numeric radii
 copying CSS. Typography loading, responsive layout, focus treatment, and browser motion
 preferences remain web concerns in the stylesheet and root layout.
 
-The donor dashboard keeps Link and IRL counts at equal visual weight, with realized
-dollars, streak, and founding recognition as the other three elements. Responsive grid
-items must not inherit vertical document-flow spacing. Browser tests cover desktop,
+The donor dashboard keeps Link and IRL counts side by side at equal visual weight, with
+realized dollars, streak, and founding recognition in a row of three beneath them. The
+Founding Donor card appears only once earned; otherwise a single line explains how it is
+earned. Responsive grid items must not inherit vertical document-flow spacing.
+
+Buttons follow one hierarchy: `.button` is the primary brand action (one per view),
+`.secondary` is the outlined default, `.quiet` is a text-weight action, and
+`.secondary.danger` confirms destructive steps. Amount presets are outlined until
+selected, and show the monthly amount and daily framing at equal weight. Browser tests cover desktop,
 mobile, and tablet layouts, automated WCAG 2.2 checks, keyboard confirmation, and partial
 or failed data recovery. Automated checks do not establish full assistive-technology
 conformance.

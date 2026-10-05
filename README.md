@@ -97,6 +97,10 @@ make lint
 make test-browser-e2e
 ```
 
+Browser tests run against `next dev` by default; set `E2E_PRODUCTION=1` to run them
+against a production build (`next build && next start`) with its stricter CSP. Next allows
+one dev server per checkout, so stop any running `make web` first.
+
 `make test` checks Go formatting, vet, race-enabled tests, compilation, frontend lint,
 unit tests, generated route types, TypeScript, and the production build. Browser tests
 start a local Go API and Next server. Use a synthetic application database and no live

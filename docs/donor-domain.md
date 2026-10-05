@@ -112,8 +112,8 @@ implemented behind optional issuer configuration; real-provider/device acceptanc
 open. [Analytics](analytics.md) defines available financial facts and the pending browser
 collection contract. App design deliverables and operational release acceptance remain
 separate from the backend rewrite. The web referral-code page
-offers full screen and manual brightness instructions; it cannot promise hardware
-brightness control. Email changes require single-use confirmations at both the current
+offers full screen, keeps the display awake while shown, and gives manual brightness
+instructions; it cannot promise hardware brightness control. Email changes require single-use confirmations at both the current
 and proposed address, each expiring after 15 minutes. Completing a change preserves the
 donor ID, revokes existing sessions and sign-in links, and records identity audit events.
 An address already attached to another donor is rejected after verification; accounts

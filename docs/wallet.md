@@ -41,7 +41,8 @@ They do not prove Apple/Google acceptance. Release acceptance requires real issu
 accounts/certificates, approved visual assets/button treatment, installation on actual
 iOS/Android devices, lock-screen access, and native-camera scans under glare, low
 brightness, and at angles. A website cannot reliably change system screen brightness;
-the web code page provides a high-contrast full-screen code and brightness instructions.
+the web code page provides a high-contrast full-screen code, keeps the screen awake
+while it is shown, and gives brightness instructions.
 Apple and Google render the pass barcode themselves, so its error-correction level is
 provider-controlled; the level-H guarantee that a cracked or partly obscured screen still
 scans applies only to the web code screen.
