@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
-for (const path of ["/", "/donate", "/initiatives", "/ledger", "/how-it-works", "/partners", "/account/sign-in", "/staff/sign-in"]) {
+for (const path of ["/", "/donate", "/donate/thanks", "/donate/thanks?session_id=cs_test&amount_minor=3000&frequency=MONTHLY", "/initiatives", "/ledger", "/how-it-works", "/about", "/legal", "/partners", "/account/sign-in", "/staff/sign-in"]) {
   test(`accessible public surface: ${path}`, async ({ page }) => {
     const runtimeErrors: string[] = [];
     page.on("pageerror", (error) => runtimeErrors.push(error.message));

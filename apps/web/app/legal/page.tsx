@@ -1,3 +1,7 @@
+import type { Metadata } from "next";
+
+export const metadata: Metadata = { title: "Terms, privacy, and donor consent" };
+
 export default function LegalPage() {
   return <section className="panel"><h1>Terms, privacy, and donor consent</h1>
     <p><strong>Sandbox preview. Approved legal documents have not been published here.</strong></p>

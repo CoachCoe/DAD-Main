@@ -1,12 +1,30 @@
+import type { Metadata } from "next";
 import Link from "next/link";
+
+export const metadata: Metadata = {
+  title: "About DAD and how it works",
+  description: "How giving, referrals, streaks, and the Founding Donor badge work, and what DAD’s April 2027 launch brings.",
+};
+
 export default function HowItWorks() {
-  return <section className="panel"><h1>How Dynamic Aid Delivery works</h1>
-    <p>Donors support DAD. DAD assembles initiatives with partner organizations and board approval. Programs invite recipients to enrol in that work.</p>
-    <h2>Giving and your circle</h2><p>Choose recurring or one-time giving on the web. About $1 a day is billed as $30/month; the monthly amount is what your card is charged.</p>
-    <p>After giving, claim your account to share a personal referral link or show your on-screen code. A Link Referral begins with a shared link; an IRL Referral begins with the marked code link. Credit is direct only and starts with a completed first gift.</p>
-    <h2>Streaks and recognition</h2><p>Successful recurring months build a streak. One-time gifts contribute money but do not build a streak. Failed payments have a recovery grace period.</p>
-    <p>A first gift before launch earns permanent Founding Donor recognition. DAD launches on 22 April 2027.</p>
-    <h2>Programs start at launch</h2><p>This donor release does not enrol recipients or send money to them. Partners can register interest with the website form. Recipient and partner accounts arrive with R2.</p>
-    <p>This is a sandbox preview. <Link href="/donate">Try giving</Link> · <Link href="/partners">Partner interest form</Link></p>
+  return <section className="panel">
+    <span className="eyebrow">DYNAMIC AID DELIVERY</span>
+    <h1>A small gift. A growing circle.</h1>
+    <p>DAD brings donors and partner organizations together to support practical aid work. Each initiative is assembled with a partner and approved by the board. Programs invite people to enrol in that work.</p>
+    <h2>Giving</h2>
+    <p>Choose recurring or one-time giving on the web, without creating an account first. Recurring giving starts at about a dollar a day, billed as $30/month: the monthly amount is what your card is charged. One-time gifts are welcome too.</p>
+    <h2>Your circle</h2>
+    <p>After giving, claim your account to share your personal link or show your referral code on your phone. A Link Referral begins with a shared link; an IRL Referral begins when someone scans your code. Your dashboard counts them separately, once a first gift completes.</p>
+    <p>Your circle includes only people you personally refer. Attributed dollars reflect money actually collected, less successful refunds.</p>
+    <h2>Streaks and recognition</h2>
+    <p>Successful monthly gifts build your streak; one-time gifts contribute money but do not. A failed payment has a recovery grace period before a streak resets.</p>
+    <p>DAD launches on 22 April 2027. A first gift completed before launch earns a permanent Founding Donor badge.</p>
+    <h2>Clear records, honest limits</h2>
+    <p>The impact ledger is updated by staff on a stated cadence. Figures carry an as-of date, illustrative figures are labeled, and reported figures cite a source document.</p>
+    <h2>Programs start at launch</h2>
+    <p>This donor release does not enrol recipients or send money to them. Aid programs begin at launch. With R2, recipients and partners get their own accounts, and the DAD donor app arrives for iOS and Android. Until then, partners can register interest with the website form.</p>
+    <p>This environment is a sandbox preview using Stripe test payments. No real donation is collected.</p>
+    <div className="uploadActions"><Link className="button" href="/donate">Try giving</Link><Link className="secondary" href="/ledger">Read the impact ledger</Link></div>
+    <p><Link href="/partners">Partner interest form</Link></p>
   </section>;
 }

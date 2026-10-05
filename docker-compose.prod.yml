@@ -88,6 +88,8 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        DONOR_PUBLIC_ORIGIN: ${DONOR_PUBLIC_ORIGIN:?set DONOR_PUBLIC_ORIGIN}
     environment:
       DONOR_API_BASE_URL: http://api:8002
       # The ingress in front of WEB_PORT must overwrite this header with the peer address;

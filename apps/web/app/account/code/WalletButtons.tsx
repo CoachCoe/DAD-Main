@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Announcer } from "@/components/donor/Announcer";
 import { api } from "@/lib/api";
 
 export default function WalletButtons() {
@@ -9,9 +10,10 @@ export default function WalletButtons() {
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [googleURL, setGoogleURL] = useState("");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retry is the retry trigger, deliberately unread
   useEffect(() => {
     const controller = new AbortController();
-    api<typeof providers>("/donor/me/wallet", { signal: controller.signal, cache: retry > 0 ? "reload" : "default" }).then((value) => {
+    api<typeof providers>("/donor/me/wallet", { signal: controller.signal }).then((value) => {
       if (!controller.signal.aborted) { setProviders(value); setError(""); }
     }).catch(() => { if (!controller.signal.aborted) setError("Wallet availability could not be checked. Your on-screen code still works."); });
     return () => controller.abort();
@@ -37,10 +39,10 @@ export default function WalletButtons() {
     finally { setBusy(false); }
   }
   return <div>
-    {providers.apple && <button type="button" disabled={busy} onClick={() => add("apple")}>Add to Apple Wallet</button>}
-    {providers.google && (googleURL ? <a href={googleURL} rel="noreferrer">Save to Google Wallet</a>
-      : <button type="button" disabled={busy} onClick={() => add("google")}>Add to Google Wallet</button>)}
-    {busy && <p role="status">Preparing your Wallet pass…</p>}
-    {error && <><p role="alert">{error}</p><button type="button" onClick={() => setRetry((value) => value + 1)}>Check Wallet availability again</button></>}
+    {providers.apple && <button type="button" className="secondary" disabled={busy} onClick={() => add("apple")}>Add to Apple Wallet</button>}
+    {providers.google && (googleURL ? <a className="secondary" href={googleURL} rel="noreferrer">Save to Google Wallet</a>
+      : <button type="button" className="secondary" disabled={busy} onClick={() => add("google")}>Add to Google Wallet</button>)}
+    <Announcer status={busy ? "Preparing your Wallet pass…" : ""} alert={error} />
+    {error && <button type="button" className="quiet" onClick={() => setRetry((value) => value + 1)}>Check Wallet availability again</button>}
   </div>;
 }

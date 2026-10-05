@@ -8,6 +8,8 @@ FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY apps/web ./
+# Security headers are fixed at build time and depend on whether the origin is HTTPS.
+ARG DONOR_PUBLIC_ORIGIN
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 

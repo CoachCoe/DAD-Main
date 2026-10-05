@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import ClaimPage from "./claim/page";
-import SignInPage from "./sign-in/page";
-import GivingPage from "./giving/page";
+import ClaimPage from "./claim/Claim";
+import SignInPage from "./sign-in/SignIn";
+import GivingPage from "./giving/Giving";
 
 afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState(null, "", "/"); });
 
@@ -24,7 +24,7 @@ it("shows an expired link error and replacement path", async () => {
     json: async () => ({ detail: "Link expired" }) }));
   render(<ClaimPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Confirm and sign in" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Link expired");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Link expired"));
   expect(screen.getByRole("link", { name: "Request a new link" })).toHaveAttribute("href", "/account/sign-in");
 });
 
@@ -34,7 +34,7 @@ it("requests email without granting access", async () => {
   render(<SignInPage />);
   fireEvent.change(screen.getByLabelText("Email"), { target: { value: "donor@example.org" } });
   fireEvent.click(screen.getByRole("button", { name: "Email me a sign-in link" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("If this email matches");
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("If this email matches"));
   expect(screen.queryByText("My giving")).not.toBeInTheDocument();
 });
 

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { api } from "./api";
+import { ApiError, OFFLINE_MESSAGE, RATE_LIMITED_MESSAGE, api, classifyFailure, failureMessage, unconfirmedMessage } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 const response = () => ({ ok: true, json: async () => ({ ok: true }) });
@@ -30,4 +30,32 @@ it("lets the browser provide FormData boundaries and Blob content types", async 
     await api("/example", { method: "POST", body });
   }
   expect(fetch.mock.calls.every(([, request]) => !new Headers(request.headers).has("Content-Type"))).toBe(true);
+});
+
+it.each([
+  [new ApiError("Sign in required", 401), "signedOut"],
+  [new ApiError("Forbidden", 403), "forbidden"],
+  [new ApiError("Slow down", 429), "rateLimited"],
+  [new ApiError("Bad gateway", 502), "unavailable"],
+  [new ApiError("Link expired", 410), "rejected"],
+  [new TypeError("Failed to fetch"), "offline"],
+  [new SyntaxError("Unexpected token <"), "unavailable"],
+])("classifies %s as %s", (cause, failure) => {
+  expect(classifyFailure(cause)).toBe(failure);
+});
+
+it("never shows a transport error to a donor", () => {
+  expect(failureMessage(new TypeError("Failed to fetch"), "Please retry.")).toBe(OFFLINE_MESSAGE);
+  expect(failureMessage(new ApiError("Link expired", 401), "Please retry.")).toBe("Link expired");
+  expect(failureMessage(new SyntaxError("Unexpected token <"), "Please retry.")).toBe("Please retry.");
+  expect(failureMessage(new ApiError("Amount too small", 422), "Please retry.")).toBe("Amount too small");
+  expect(failureMessage(new ApiError("Internal", 500), "Please retry.")).toBe("Please retry.");
+  expect(failureMessage(new ApiError("Slow down", 429), "Please retry.")).toBe(RATE_LIMITED_MESSAGE);
+});
+
+it("keeps an uncertain command's statement while explaining the failure", () => {
+  const statement = "Pause is not confirmed. Retry the same request.";
+  expect(unconfirmedMessage(new TypeError("Failed to fetch"), statement)).toBe(`${statement} ${OFFLINE_MESSAGE}`);
+  expect(unconfirmedMessage(new ApiError("Slow down", 429), statement)).toBe(`${statement} ${RATE_LIMITED_MESSAGE}`);
+  expect(unconfirmedMessage(new ApiError("Internal", 503), statement)).toBe(statement);
 });

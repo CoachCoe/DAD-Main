@@ -1,0 +1,66 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import ReferralLanding from "./ReferralLanding";
+
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+function response(data: unknown, status = 200) { return { ok: status < 400, status, json: async () => data }; }
+
+it("captures the IRL marker before enabling giving and names the code's owner", async () => {
+  const fetch = vi.fn().mockResolvedValue(response({ captured: true, public_name: "Sam" }));
+  vi.stubGlobal("fetch", fetch);
+  render(<ReferralLanding code="code" kind="IRL" referrer={{ state: "found", name: "Sam" }} />);
+  expect(screen.getByRole("heading", { name: "Sam invited you to DAD" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Continue to giving" })).not.toBeInTheDocument();
+  expect(await screen.findByRole("link", { name: "Continue to giving" })).toHaveAttribute("href", "/donate");
+  expect(fetch.mock.calls[0][0]).toBe("/api/donor/referrals/code");
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ kind: "IRL" });
+});
+
+it("never names an earlier first-touch referrer returned by the capture", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ captured: true, public_name: "Earlier Referrer" })));
+  render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
+  await screen.findByRole("link", { name: "Continue to giving" });
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sam invited you to DAD");
+  expect(screen.queryByText(/Earlier Referrer/)).not.toBeInTheDocument();
+});
+
+it("leads with the unavailable message for a replaced code", async () => {
+  const fetch = vi.fn().mockResolvedValue(response({ captured: false, public_name: null }));
+  vi.stubGlobal("fetch", fetch);
+  render(<ReferralLanding code="old" kind="LINK" referrer={{ state: "unavailable" }} />);
+  const heading = screen.getByRole("heading", { level: 1 });
+  expect(heading).toHaveTextContent("This referral link is no longer available");
+  expect(heading.parentElement?.querySelector("p")).toHaveTextContent("give without a referral");
+  expect(screen.getByRole("link", { name: "Continue without a referral" })).toHaveAttribute("href", "/donate");
+  await waitFor(() => expect(fetch).toHaveBeenCalled());
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ kind: "LINK" });
+  expect(screen.queryByRole("link", { name: "Continue to giving" })).not.toBeInTheDocument();
+});
+
+it("falls back to the capture when the server could not look the code up", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ captured: false, public_name: null })));
+  render(<ReferralLanding code="old" kind="LINK" />);
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Join the beginning");
+  expect(await screen.findByRole("heading", { name: "This referral link is no longer available" })).toBeVisible();
+});
+
+it("keeps an offline failure distinct from successful capture", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+  render(<ReferralLanding code="code" kind="LINK" />);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("couldn’t confirm your referral"));
+  expect(screen.getByRole("alert")).toHaveTextContent("offline");
+  expect(screen.queryByRole("link", { name: "Continue to giving" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Retry referral" })).toBeVisible();
+});
+
+it("explains rate limiting separately from being offline, and retries", async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(response({ detail: "Too many requests" }, 429))
+    .mockResolvedValueOnce(response({ captured: true, public_name: "Sam" }));
+  vi.stubGlobal("fetch", fetch);
+  render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Wait a minute"));
+  expect(screen.getByRole("alert")).not.toHaveTextContent("offline");
+  fireEvent.click(screen.getByRole("button", { name: "Retry referral" }));
+  expect(await screen.findByRole("link", { name: "Continue to giving" })).toBeVisible();
+  expect(screen.getByRole("alert")).toBeEmptyDOMElement();
+});

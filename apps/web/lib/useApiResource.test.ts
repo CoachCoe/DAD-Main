@@ -1,0 +1,66 @@
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { OFFLINE_MESSAGE, RATE_LIMITED_MESSAGE } from "./api";
+import { resourceMessages, useApiResource } from "./useApiResource";
+
+afterEach(() => vi.unstubAllGlobals());
+const reply = (status: number, body: unknown = {}) => ({ ok: status < 400, status, json: async () => body });
+
+it("loads data, reports it once to onLoad, and reloads on request", async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(reply(200, { n: 1 })).mockResolvedValueOnce(reply(200, { n: 2 }));
+  vi.stubGlobal("fetch", fetch);
+  const onLoad = vi.fn();
+  const { result } = renderHook(() => useApiResource<{ n: number }>("/donor/me/thing", { onLoad }));
+  expect(result.current.resource).toEqual({ state: "loading" });
+  await waitFor(() => expect(result.current.data).toEqual({ n: 1 }));
+  expect(onLoad).toHaveBeenCalledWith({ n: 1 });
+  expect(fetch.mock.calls[0][0]).toBe("/api/donor/me/thing");
+  expect(fetch.mock.calls[0][1].cache).toBeUndefined();
+  act(() => result.current.reload());
+  await waitFor(() => expect(result.current.data).toEqual({ n: 2 }));
+  expect(onLoad).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  [reply(401), { state: "signedOut" }],
+  [reply(403), { state: "forbidden" }],
+  [reply(429), { state: "error", rateLimited: true }],
+  [reply(503), { state: "error", rateLimited: false }],
+])("maps an HTTP failure to a screen state", async (response, expected) => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+  const { result } = renderHook(() => useApiResource("/donor/me/thing"));
+  await waitFor(() => expect(result.current.resource).toEqual(expected));
+});
+
+it("treats a network failure as offline and never exposes its message", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
+  const { result } = renderHook(() => useApiResource("/donor/me/thing"));
+  await waitFor(() => expect(result.current.resource).toEqual({ state: "offline" }));
+  const messages = resourceMessages(result.current.resource, { loading: "Loading…", failure: "Could not load." });
+  expect(messages.alert).toBe(OFFLINE_MESSAGE);
+  expect(messages.alert).not.toContain("Failed to fetch");
+});
+
+it("does not request anything until a path is known", () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  renderHook(() => useApiResource(null));
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("lets a page update loaded data after a confirmed action", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply(200, { n: 1 })));
+  const { result } = renderHook(() => useApiResource<{ n: number }>("/donor/me/thing"));
+  await waitFor(() => expect(result.current.data).toEqual({ n: 1 }));
+  act(() => result.current.setData((current) => ({ n: current.n + 1 })));
+  expect(result.current.data).toEqual({ n: 2 });
+});
+
+it("gives each non-ready state its own copy", () => {
+  const copy = { loading: "Loading…", failure: "Could not load.", forbidden: "Not permitted." };
+  expect(resourceMessages({ state: "loading" }, copy)).toEqual({ status: "Loading…", alert: "" });
+  expect(resourceMessages({ state: "forbidden" }, copy).alert).toBe("Not permitted.");
+  expect(resourceMessages({ state: "error", rateLimited: true }, copy).alert).toBe(RATE_LIMITED_MESSAGE);
+  expect(resourceMessages({ state: "error", rateLimited: false }, copy).alert).toBe("Could not load.");
+  expect(resourceMessages({ state: "signedOut" }, copy)).toEqual({ status: "", alert: "" });
+});

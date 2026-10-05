@@ -4,10 +4,10 @@ import Link from "next/link";
 
 export default function PageError({
   error,
-  reset,
+  retry,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
+  retry: () => void;
 }) {
   return (
     <div className="workspace">
@@ -24,7 +24,7 @@ export default function PageError({
           </p>
         ) : null}
         <div className="actionRow">
-          <button type="button" className="button" onClick={reset}>
+          <button type="button" className="button" onClick={retry}>
             Try again
           </button>
           <Link className="secondary" href="/">

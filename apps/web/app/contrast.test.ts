@@ -61,4 +61,24 @@ describe("the palette meets accessible text contrast thresholds", () => {
   ])("%s is legible on its own wash", (_label, ink, wash) => {
     expect(contrast(token(ink as string), token(wash as string))).toBeGreaterThanOrEqual(4.5);
   });
+
+  it.each([
+    ["--dkmut, secondary text on the dark header and hero", "dkmut", "ink", 4.5],
+    ["--dkmut, footer text", "dkmut", "ink-deep", 4.5],
+    ["--muted, notes inside cards", "muted", "card", 4.5],
+    ["--ink, label text on a brand-filled primary button", "ink", "brand", 4.5],
+    ["--paper, label text on a selected amount preset", "paper", "ink", 4.5],
+    ["--fail, a destructive secondary action on a card", "fail", "card", 4.5],
+    ["--ink-soft, badge guidance on paper", "ink-soft", "paper", 4.5],
+  ])("%s: --%s on --%s reaches %s:1", (_label, foreground, background, minimum) => {
+    expect(contrast(token(foreground as string), token(background as string))).toBeGreaterThanOrEqual(minimum as number);
+  });
+
+  it.each([
+    ["--brand-ink focus ring on the dark hero", "brand-ink", "ink"],
+    ["--brand-ink focus ring on paper", "brand-ink", "paper"],
+    ["--brand focus ring on the dark header", "brand", "ink"],
+  ])("%s: --%s on --%s reaches the 3:1 non-text minimum", (_label, ring, background) => {
+    expect(contrast(token(ring as string), token(background as string))).toBeGreaterThanOrEqual(3);
+  });
 });

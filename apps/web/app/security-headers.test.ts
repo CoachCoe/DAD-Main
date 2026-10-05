@@ -3,7 +3,7 @@
  * is dropped, the page still renders, and the protection is simply gone. This asserts the
  * ones that were missing entirely until they were added.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import nextConfig from "../next.config";
 
 async function headerMap(): Promise<Map<string, string>> {
@@ -68,5 +68,24 @@ describe("security headers", () => {
     expect(policy).toContain("microphone=()");
     // R1 displays a referral code; scanning is done with the visitor's native camera.
     expect(policy).toContain("camera=()");
+  });
+});
+
+describe("insecure request upgrades", () => {
+  async function policyFor(origin: string) {
+    vi.stubEnv("DONOR_PUBLIC_ORIGIN", origin);
+    vi.resetModules();
+    const { default: config } = await import("../next.config");
+    const groups = await config.headers?.();
+    return groups?.[0].headers.find((header) => header.key === "Content-Security-Policy")?.value;
+  }
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("are requested when the public origin is HTTPS", async () => {
+    expect(await policyFor("https://donors.example.org")).toContain("upgrade-insecure-requests");
+  });
+
+  it("are not requested for plain-HTTP local development", async () => {
+    expect(await policyFor("http://127.0.0.1:3000")).not.toContain("upgrade-insecure-requests");
   });
 });

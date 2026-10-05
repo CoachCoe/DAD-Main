@@ -12,9 +12,14 @@
   --gutter:max(24px,calc((100vw - 1160px)/2));
 }
 *{box-sizing:border-box}
-html{background:var(--paper);color:var(--ink);font-family:var(--font-sans)}
-body{margin:0;line-height:1.6}
+/* Keeps a focused or anchored element clear of the sticky 72px header (WCAG 2.4.11). */
+html{background:var(--paper);color:var(--ink);font-family:var(--font-sans);scroll-padding-top:96px}
+body{margin:0;line-height:1.6;min-height:100dvh;display:flex;flex-direction:column;background:var(--paper)}
+body>main{flex:1 0 auto}
 a{color:inherit;text-decoration:none}
+footer a{text-decoration:underline;text-underline-offset:3px}
+footer a:hover{color:var(--paper)}
+.accountLinks a{display:inline-flex;align-items:center;min-height:44px}
 button,input{font:inherit}
 h1,h2,h3,h4{font-family:var(--font-display);font-weight:700;letter-spacing:var(--track-display);line-height:1.14}
 h1,h2,h3,p{margin-top:0}
@@ -26,8 +31,9 @@ h1,h2,h3,p{margin-top:0}
 .headerMenu{display:contents}
 .burger{display:none}
 .header nav{display:flex;gap:28px;margin-left:auto;margin-right:32px}
-.header nav a{font-family:var(--font-mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dkmut)}
-.header nav a:hover{color:var(--paper)}
+.header nav a{font-family:var(--font-mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--dkmut)}
+.header nav a:hover,.header nav a[aria-current=page]{color:var(--paper)}
+.header nav a[aria-current=page]{text-decoration:underline;text-decoration-color:var(--brand);text-decoration-thickness:2px;text-underline-offset:8px}
 .hero{position:relative;padding:96px var(--gutter) 72px;color:var(--paper);background:radial-gradient(58% 54% at 10% 6%,var(--glow-brand),transparent 60%),radial-gradient(46% 46% at 93% 90%,var(--glow-ok),transparent 62%),var(--ink)}
 .hero::before{content:"";position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(var(--dkgrid) 1px,transparent 1px),linear-gradient(90deg,var(--dkgrid) 1px,transparent 1px);background-size:56px 56px;-webkit-mask-image:radial-gradient(80% 72% at 50% 40%,#000 28%,transparent 76%);mask-image:radial-gradient(80% 72% at 50% 40%,#000 28%,transparent 76%)}
 .hero>*{position:relative}
@@ -36,11 +42,19 @@ h1,h2,h3,p{margin-top:0}
 .hero h1 em{color:var(--brand);font-style:normal;font-weight:500}
 .hero p{font-size:18px;color:var(--dkmut);max-width:600px}
 .workspace{max-width:1160px;margin:0 auto;padding:64px 24px}
-.button{font-family:var(--font-display);font-weight:700;font-size:15px;letter-spacing:.01em;background:var(--brand);color:var(--ink);border:1.5px solid transparent;border-radius:var(--radius-pill);padding:14px 26px;display:inline-flex;align-items:center;justify-content:center;gap:24px;cursor:pointer}
+/* Three tiers: .button is the one primary action, .secondary (and any unclassed donor
+   button) is outlined, .quiet is a text-weight action, and .danger marks a secondary
+   action that cannot be undone. */
+.button{font-family:var(--font-display);font-weight:700;font-size:15px;letter-spacing:.01em;background:var(--brand);color:var(--ink);border:1.5px solid transparent;border-radius:var(--radius-pill);min-height:44px;padding:12px 26px;display:inline-flex;align-items:center;justify-content:center;gap:24px;cursor:pointer}
 .button:hover{background:var(--ink);color:var(--paper)}
-.button:disabled{opacity:.65;cursor:default}
-.secondary{font-family:var(--font-display);font-weight:700;font-size:15px;border:1.5px solid var(--ghost-line);background:transparent;color:var(--ink);border-radius:var(--radius-pill);padding:12px 24px;cursor:pointer}
+.button:disabled,.secondary:disabled,.quiet:disabled{opacity:.6;cursor:default}
+.button:disabled:hover{background:var(--brand);color:var(--ink)}
+.secondary{font-family:var(--font-display);font-weight:700;font-size:15px;border:1.5px solid var(--ghost-line);background:transparent;color:var(--ink);border-radius:var(--radius-pill);min-height:44px;padding:10px 22px;cursor:pointer}
 .secondary:hover{border-color:var(--ink)}
+.secondary.danger{color:var(--fail);border-color:var(--fail-line)}
+.secondary.danger:hover{border-color:var(--fail)}
+.quiet{font-family:var(--font-sans);font-weight:600;font-size:15px;border:0;background:transparent;color:var(--ink);text-decoration:underline;text-underline-offset:3px;min-height:44px;padding:10px 4px;cursor:pointer}
+.quiet:hover{color:var(--brand-ink)}
 .hero .secondary{color:var(--paper);border-color:var(--ghost-line-dark)}
 .hero .secondary:hover{border-color:var(--paper)}
 a.secondary{display:inline-block;text-align:center;text-decoration:none}
@@ -59,6 +73,7 @@ summary{font-size:13px;font-weight:700;cursor:pointer}
 .errorMessage span{color:var(--fail-ink)}
 .errorMessage .secondary{align-self:flex-start}
 .authLayout{max-width:460px;margin:0 auto;padding:72px 24px}
+.authLayout.wide{max-width:680px}
 .authPanel h1{font-size:30px;margin:6px 0 10px}
 .field{display:block;margin-top:16px;font-family:var(--font-mono);font-size:10px;letter-spacing:var(--track-label-sm);text-transform:uppercase;color:var(--muted)}
 .field input{width:100%;margin-top:6px;padding:11px 12px;border:1px solid var(--ghost-line);border-radius:8px;background:var(--field);color:var(--ink);font-family:var(--font-sans);font-size:15px;font-weight:400;letter-spacing:normal;text-transform:none}
@@ -68,7 +83,7 @@ summary{font-size:13px;font-weight:700;cursor:pointer}
 .headerRight .secondary:hover{border-color:var(--paper)}
 .hero h1 a{text-decoration:underline;text-decoration-thickness:1.5px;text-underline-offset:8px;text-decoration-color:var(--brand-rule)}
 .hero h1 a:hover{color:var(--brand);text-decoration-color:var(--brand)}
-footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep);font-family:var(--font-mono);font-size:10px;letter-spacing:.04em;color:var(--dkmut);display:flex;justify-content:space-between;gap:24px}
+footer{margin-top:48px;padding:36px var(--gutter) 48px;background:var(--ink-deep);font-family:var(--font-mono);font-size:13px;line-height:1.6;letter-spacing:.02em;color:var(--dkmut);display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px 32px}
 :focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-radius:4px}
 .button:focus-visible{outline-color:var(--card);outline-offset:3px}
 @media(max-width:800px){
@@ -98,7 +113,8 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
   a[href]::after{content:""}
 }
 .actionRow{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
-.actionRow>*{flex:1 1 auto;min-width:150px;text-align:center}
+.actionRow>*{flex:0 1 auto;min-width:150px;text-align:center}
+@media(max-width:600px){.actionRow>*{flex:1 1 auto}}
 .skipLink{position:absolute;left:16px;top:-56px;z-index:20;padding:11px 18px;border-radius:var(--radius-pill);background:var(--brand);color:var(--ink);font-family:var(--font-mono);font-size:11px;letter-spacing:var(--track-label-sm);text-transform:uppercase;text-decoration:none}
 .skipLink:focus{top:12px}
 .donorMetrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:24px 0}
@@ -125,9 +141,22 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
 .donorSurface .choice{display:flex;align-items:center;gap:10px;min-height:44px;margin:4px 0}
 .donorSurface input[type="radio"]{padding:0;margin:0;flex:none}
 .donorSurface input[type="checkbox"],.donorSurface input[type="radio"]{width:24px;height:24px;vertical-align:middle;accent-color:var(--brand-ink);margin-right:8px}
-.donorSurface button{min-height:44px;margin:4px 8px 4px 0;padding:10px 16px;border:1px solid var(--ink);border-radius:8px;background:var(--ink);color:var(--card);font:inherit;cursor:pointer}
-.donorSurface button[aria-pressed="true"]{background:var(--brand-wash);color:var(--ink);border:2px solid var(--brand-ink)}
-.donorSurface button:disabled{opacity:.55;cursor:default}
+/* :where keeps this at element specificity so .button, .secondary and .quiet win. */
+:where(.donorSurface) button{min-height:44px;margin:4px 8px 4px 0;padding:10px 22px;border:1.5px solid var(--ghost-line);border-radius:var(--radius-pill);background:transparent;color:var(--ink);font-family:var(--font-display);font-weight:700;font-size:15px;line-height:1.3;cursor:pointer}
+:where(.donorSurface) button:hover{border-color:var(--ink)}
+:where(.donorSurface) button:disabled{opacity:.6;cursor:default}
+.presets{display:grid;gap:10px;margin:8px 0 4px}
+.presets button{margin:0;width:100%;display:flex;flex-wrap:wrap;justify-content:center;column-gap:.4em}
+.presets button[aria-pressed=true]{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+.liveStatus:empty,.errorMessage:empty{margin:0;padding:0;border:0}
+.metricPair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:24px 0 16px}
+.metricRow{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px;margin-bottom:16px}
+.metricCard{padding:20px;border:1px solid var(--line);border-radius:var(--radius-card);background:var(--card-quiet)}
+.metricCard h2{font-size:18px;margin:0 0 10px}
+.metricCard p:last-child{margin-bottom:0}
+.donorSurface .metricCard+.metricCard{margin-top:0}
+.badgeNote{margin:0 0 16px;padding:14px 16px;border:1px dashed var(--line);border-radius:12px;color:var(--ink-soft)}
+@media(max-width:600px){.metricPair{gap:10px}.metricPair .metricCard{padding:16px 14px}.metricPair .metricCard h2{font-size:16px}}
 .donorSurface a:not(.button):not(.secondary){text-decoration:underline;text-underline-offset:3px}
 .donorSurface :is(button,input,select,textarea,a,summary):focus-visible{outline:3px solid var(--brand-ink);outline-offset:3px}
 .donorSurface summary{cursor:pointer;padding:10px 0;min-height:44px}
@@ -137,3 +166,22 @@ footer{margin-top:24px;padding:36px var(--gutter) 56px;background:var(--ink-deep
 .donorSurface .donorMetrics article{margin-top:0}
 @media (max-width:800px){.dadHeader .brand{max-width:210px;font-size:16px;line-height:1.2}.dadHeader nav{margin-right:0}.donorSurface>.panel{padding:20px 16px}}
 @media print{.donorSurface button,.donorSurface form{display:none}}
+.giftSummary{font-size:18px}
+.giftSummary strong{font-family:var(--font-display);font-size:22px}
+.claimCallout{margin:24px 0;padding:20px;border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px;background:var(--brand-wash)}
+.claimCallout h2{margin-top:0}
+.warning{padding:10px 12px;border-radius:8px;background:var(--warn-wash);color:var(--ink)}
+.accountLinks{display:flex;flex-wrap:wrap;gap:8px 24px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+.confirmStep{margin:20px 0;padding:20px;border:1px solid var(--line);border-left:4px solid var(--ink);border-radius:12px;background:var(--card-quiet)}
+.confirmStep h2{margin-top:0}
+.confirmStep h2:focus{outline:none}
+.heroCopy>p:last-of-type{margin-bottom:0}
+.heroFacts{margin:40px 0 0;padding:8px 24px;border:1px solid var(--dkline);border-radius:var(--radius-card);background:rgba(10,22,22,.55)}
+.heroFacts dl{margin:0}
+.heroFacts dl>div{padding:18px 0;border-bottom:1px solid var(--dkline)}
+.heroFacts dl>div:last-child{border-bottom:0}
+.heroFacts dt{font-family:var(--font-mono);font-size:12px;letter-spacing:var(--track-label-sm);text-transform:uppercase;color:var(--dkmut)}
+.heroFacts dd{margin:6px 0 0;font-family:var(--font-display);font-weight:700;font-size:22px;line-height:1.25;color:var(--paper)}
+.heroFacts dd span{display:block}
+.heroFacts dd small{display:block;margin-top:4px;font-family:var(--font-sans);font-weight:400;font-size:15px;color:var(--dkmut)}
+@media(min-width:960px){.hero{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,1fr);gap:64px;align-items:center}.heroFacts{margin:0}}

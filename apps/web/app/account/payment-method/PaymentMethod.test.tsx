@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import PaymentMethodPage from "./page";
+import PaymentMethodPage from "./PaymentMethod";
 
 const response = (value: unknown) => ({ ok: true, json: async () => value });
 afterEach(() => vi.unstubAllGlobals());
@@ -26,7 +26,7 @@ it("retries a failed setup with the same request key", async () => {
   vi.stubGlobal("fetch", fetch);
   render(<PaymentMethodPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Continue to Stripe" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("We could not open Stripe");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("We could not open Stripe"));
   fireEvent.click(screen.getByRole("button", { name: "Continue to Stripe" }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
   expect(fetch.mock.calls[1][1].headers["Idempotency-Key"]).toBe(fetch.mock.calls[2][1].headers["Idempotency-Key"]);
@@ -46,5 +46,5 @@ it("rejects an unexpected redirect address", async () => {
     .mockResolvedValueOnce(response({ url: "https://checkout.stripe.com.attacker.example/" })));
   render(<PaymentMethodPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Continue to Stripe" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("We could not open Stripe");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("We could not open Stripe"));
 });

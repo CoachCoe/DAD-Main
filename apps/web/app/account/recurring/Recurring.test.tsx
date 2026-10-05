@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import RecurringPage from "./page";
+import RecurringPage from "./Recurring";
 
 const subscription = { id: "owned-id", amount_minor: 3000, currency: "USD", status: "active",
   period_end: "2026-11-01T12:00:00Z", stops_at: null };
@@ -15,6 +15,7 @@ it("requires explicit confirmation and sends the displayed billing boundary", as
   fireEvent.click(await screen.findByRole("button", { name: "Cancel monthly giving" }));
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(screen.getByText(/does not refund past gifts/)).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Confirm cancellation" })).toHaveFocus();
   fireEvent.click(screen.getByRole("button", { name: "Confirm cancel renewals" }));
   expect(await screen.findByText(/Renewals cancelled/)).toBeVisible();
   expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ subscription_id: "owned-id", period_end: subscription.period_end });
@@ -28,7 +29,7 @@ it("retries an uncertain cancellation with the same key and never claims success
   render(<RecurringPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Cancel monthly giving" }));
   fireEvent.click(screen.getByRole("button", { name: "Confirm cancel renewals" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Cancellation is not confirmed");
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Cancellation is not confirmed"));
   expect(screen.queryByText(/Renewals cancelled/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Confirm cancel renewals" }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
@@ -47,4 +48,12 @@ it("distinguishes unconfirmed checkout from having no monthly gift", async () =>
   render(<RecurringPage />);
   expect(await screen.findByText(/checkout is still being confirmed/)).toBeVisible();
   expect(screen.queryByText("You have no monthly gift to manage.")).not.toBeInTheDocument();
+});
+
+it("returns focus to the cancel control when backing out", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", subscription })));
+  render(<RecurringPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Cancel monthly giving" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back" }));
+  expect(screen.getByRole("button", { name: "Cancel monthly giving" })).toHaveFocus();
 });
