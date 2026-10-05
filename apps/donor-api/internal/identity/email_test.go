@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestPythonEmailCompatibility(t *testing.T) {
+func TestLegacyEmailCompatibility(t *testing.T) {
 	var fixture struct {
 		Digest string `json:"scalar_digest"`
 		Cases  []struct {
@@ -27,14 +27,14 @@ func TestPythonEmailCompatibility(t *testing.T) {
 		got, err := NormalizeEmail(tc.Input)
 		if tc.Expected == nil {
 			if err == nil {
-				t.Fatalf("Python rejected %q, Go returned %q", tc.Input, got)
+				t.Fatalf("legacy contract rejected %q, got %q", tc.Input, got)
 			}
 		} else if err != nil || got != *tc.Expected {
 			t.Fatalf("%q: got %q (%v), want %q", tc.Input, got, err, *tc.Expected)
 		}
 	}
-	// This digest was produced by Python's actual normalize_email, independently
-	// of the exported tables, for every Unicode scalar as a single-label domain.
+	// This digest was produced by the legacy identity contract's normalize_email,
+	// independently of the exported tables, for every Unicode scalar as a single-label domain.
 	digest := sha256.New()
 	for r := rune(0); r < 0x110000; r++ {
 		if r >= 0xd800 && r <= 0xdfff {

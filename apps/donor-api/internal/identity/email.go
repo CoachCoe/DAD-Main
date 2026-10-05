@@ -87,7 +87,7 @@ func NormalizeEmail(value string) (string, error) {
 	return strings.ToLower(local) + "@" + domain, nil
 }
 
-// TrimSpace retains Python's whitespace contract for donor-controlled names too.
+// TrimSpace retains the legacy identity contract's whitespace set for donor-controlled names too.
 func TrimSpace(value string) string {
 	return strings.TrimFunc(value, func(r rune) bool { return contains(tables.Whitespace, r) })
 }
@@ -134,7 +134,8 @@ func nameprep(label string) (string, error) {
 		}
 	}
 	// Canonical ordering is stable for equal combining classes. Unlike Go's
-	// stream-safe normalizer, Python does not insert a CGJ after 30 non-starters.
+	// stream-safe normalizer, the legacy identity contract does not insert a CGJ
+	// after 30 non-starters.
 	for i := 1; i < len(decomposed); i++ {
 		class := tables.Classes[decomposed[i]]
 		if class == 0 {

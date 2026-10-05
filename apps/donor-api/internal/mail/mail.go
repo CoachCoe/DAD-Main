@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"mime"
@@ -44,6 +45,9 @@ func (s Settings) Validate() error {
 	if s.Host == "" || strings.ContainsAny(s.Host, "\r\n") || s.Port < 1 || s.Port > 65535 || s.EncryptionKey == "" {
 		return ErrConfiguration
 	}
+	if s.Port == 465 {
+		return fmt.Errorf("%w: port 465 requires implicit TLS, which is unsupported; use STARTTLS on 587", ErrConfiguration)
+	}
 	_, err := address(s.Sender)
 	return err
 }
@@ -71,7 +75,7 @@ func (m Message) wire() ([]byte, string, string, error) {
 		return nil, "", "", ErrConfiguration
 	}
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "From: %s\r\nTo: %s\r\nSubject: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n", from.String(), to.String(), mime.QEncoding.Encode("utf-8", m.Subject), m.ID)
+	fmt.Fprintf(&b, "Date: %s\r\nFrom: %s\r\nTo: %s\r\nSubject: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n", time.Now().Format(time.RFC1123Z), from.String(), to.String(), mime.QEncoding.Encode("utf-8", m.Subject), m.ID)
 	writer := quotedprintable.NewWriter(&b)
 	if _, err = writer.Write([]byte(m.Body)); err != nil {
 		return nil, "", "", err
@@ -82,7 +86,11 @@ func (m Message) wire() ([]byte, string, string, error) {
 	return b.Bytes(), from.Address, to.Address, nil
 }
 
-type SMTPTransport struct{ Settings Settings }
+type SMTPTransport struct {
+	Settings Settings
+	// RootCAs overrides the system trust store; nil verifies against system roots.
+	RootCAs *x509.CertPool
+}
 
 func (s SMTPTransport) Send(ctx context.Context, message Message) error {
 	if err := s.Settings.Validate(); err != nil {
@@ -112,7 +120,7 @@ func (s SMTPTransport) Send(ctx context.Context, message Message) error {
 	}
 	defer client.Close()
 	// STARTTLS is mandatory; never fall back to cleartext credentials or content.
-	if err = client.StartTLS(&tls.Config{ServerName: s.Settings.Host, MinVersion: tls.VersionTLS12}); err != nil {
+	if err = client.StartTLS(&tls.Config{ServerName: s.Settings.Host, RootCAs: s.RootCAs, MinVersion: tls.VersionTLS12}); err != nil {
 		return ErrDelivery
 	}
 	if s.Settings.Username != "" {

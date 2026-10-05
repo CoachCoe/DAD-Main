@@ -7,10 +7,12 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/db"
 )
 
 func isolatedDatabase(t *testing.T) (*pgxpool.Pool, context.Context) {
@@ -52,6 +54,18 @@ func isolatedDatabase(t *testing.T) (*pgxpool.Pool, context.Context) {
 	return pool, ctx
 }
 
+func TestManifestRejectsMisnamedMigrations(t *testing.T) {
+	if _, err := manifest(db.Migrations); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"1_r1.sql", "0003_Mixed.sql", "0003-dash.sql", "0003_.sql", "00003_r1.sql", "0003 r1.sql"} {
+		fsys := fstest.MapFS{"migrations/0001_r1.sql": {}, "migrations/" + name: {}}
+		if _, err := manifest(fsys); err == nil {
+			t.Fatalf("accepted %q", name)
+		}
+	}
+}
+
 func TestFreshMigrationIdempotenceAndHistoryIntegrity(t *testing.T) {
 	pool, ctx := isolatedDatabase(t)
 	if err := Verify(ctx, pool); err == nil {
@@ -80,7 +94,7 @@ func TestAdoptionPreservesExistingRecordsAndRejectsDrift(t *testing.T) {
 	for _, drift := range []bool{false, true} {
 		t.Run(map[bool]string{false: "matching", true: "drifted"}[drift], func(t *testing.T) {
 			pool, ctx := isolatedDatabase(t)
-			files, err := manifest()
+			files, err := manifest(db.Migrations)
 			if err != nil {
 				t.Fatal(err)
 			}

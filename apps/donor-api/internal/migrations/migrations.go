@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -20,20 +21,26 @@ var ErrSchemaMismatch = errors.New("existing donor schema does not match the R1 
 
 type migration struct{ name, sql, checksum string }
 
-func manifest() ([]migration, error) {
-	paths, err := fs.Glob(db.Migrations, "migrations/*.sql")
+var migrationName = regexp.MustCompile(`^\d{4}_[a-z0-9_]+\.sql$`)
+
+func manifest(fsys fs.FS) ([]migration, error) {
+	paths, err := fs.Glob(fsys, "migrations/*.sql")
 	if err != nil {
 		return nil, err
 	}
 	slices.Sort(paths)
 	result := make([]migration, 0, len(paths))
 	for _, path := range paths {
-		data, err := db.Migrations.ReadFile(path)
+		name := strings.TrimPrefix(path, "migrations/")
+		if !migrationName.MatchString(name) {
+			return nil, fmt.Errorf("invalid migration file name: %s", name)
+		}
+		data, err := fs.ReadFile(fsys, path)
 		if err != nil {
 			return nil, err
 		}
 		digest := sha256.Sum256(data)
-		result = append(result, migration{name: strings.TrimPrefix(path, "migrations/"), sql: string(data), checksum: hex.EncodeToString(digest[:])})
+		result = append(result, migration{name: name, sql: string(data), checksum: hex.EncodeToString(digest[:])})
 	}
 	if len(result) == 0 {
 		return nil, errors.New("no embedded migrations")
@@ -42,7 +49,7 @@ func manifest() ([]migration, error) {
 }
 
 func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
-	files, err := manifest()
+	files, err := manifest(db.Migrations)
 	if err != nil {
 		return err
 	}
@@ -54,13 +61,16 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
 	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(714728310)"); err != nil {
 		return err
 	}
+	if _, err = tx.Exec(ctx, "SET LOCAL lock_timeout = '5s'"); err != nil {
+		return err
+	}
 	if _, err = tx.Exec(ctx, "SET LOCAL search_path TO public"); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS donor_schema_migrations(version text PRIMARY KEY,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	rows, err := tx.Query(ctx, "SELECT version,checksum FROM donor_schema_migrations ORDER BY version")
+	rows, err := tx.Query(ctx, `SELECT version,checksum FROM donor_schema_migrations ORDER BY version COLLATE "C"`)
 	if err != nil {
 		return err
 	}
@@ -122,11 +132,11 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
 }
 
 func Verify(ctx context.Context, pool *pgxpool.Pool) error {
-	files, err := manifest()
+	files, err := manifest(db.Migrations)
 	if err != nil {
 		return err
 	}
-	rows, err := pool.Query(ctx, "SELECT version,checksum FROM donor_schema_migrations ORDER BY version")
+	rows, err := pool.Query(ctx, `SELECT version,checksum FROM donor_schema_migrations ORDER BY version COLLATE "C"`)
 	if err != nil {
 		return err
 	}

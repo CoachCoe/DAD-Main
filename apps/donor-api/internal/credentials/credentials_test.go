@@ -14,13 +14,13 @@ import (
 	"time"
 )
 
-func TestPythonCredentials(t *testing.T) {
+func TestLegacyCredentials(t *testing.T) {
 	var fixture struct {
 		Key       string `json:"fernet_key"`
 		Plaintext string `json:"fernet_plaintext"`
-		Token     string `json:"python_fernet_token"`
+		Token     string `json:"legacy_fernet_token"`
 		Password  string `json:"password"`
-		Hash      string `json:"python_argon2id"`
+		Hash      string `json:"legacy_argon2id"`
 		Secret    string `json:"otp_secret"`
 		Time      int64  `json:"otp_time"`
 		Code      string `json:"otp_code"`
@@ -39,7 +39,7 @@ func TestPythonCredentials(t *testing.T) {
 	}
 	ok, err := VerifyPassword(fixture.Password, fixture.Hash)
 	if err != nil || !ok {
-		t.Fatalf("Python password rejected: %v", err)
+		t.Fatalf("legacy password rejected: %v", err)
 	}
 	ok, err = VerifyPassword("wrong", fixture.Hash)
 	if err != nil || ok {
@@ -47,7 +47,7 @@ func TestPythonCredentials(t *testing.T) {
 	}
 	plaintext, err := Decrypt([]byte(fixture.Token), fixture.Key)
 	if err != nil || string(plaintext) != fixture.Plaintext {
-		t.Fatalf("Python Fernet rejected: %v", err)
+		t.Fatalf("legacy Fernet token rejected: %v", err)
 	}
 	raw, err := base64.URLEncoding.DecodeString(fixture.Token)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestPythonCredentials(t *testing.T) {
 	for _, offset := range []int64{-30, 0, 30} {
 		counter, err := VerifyOTP(secret, fixture.Code, time.Unix(fixture.Time+offset, 0), -1)
 		if err != nil || counter != fixture.Time/30 {
-			t.Fatalf("Python OTP window failed: %d %v", offset, err)
+			t.Fatalf("legacy OTP window failed: %d %v", offset, err)
 		}
 	}
 	for _, tc := range []struct {
@@ -99,7 +99,7 @@ func TestPythonCredentials(t *testing.T) {
 		got, err := CheckoutPreimage("donor@example.org", 3000, "MONTHLY", tc.Visitor)
 		digest := sha256.Sum256([]byte(got))
 		if err != nil || got != tc.Preimage || hex.EncodeToString(digest[:]) != tc.Hash {
-			t.Fatalf("Python checkout hash mismatch: %v", err)
+			t.Fatalf("legacy checkout hash mismatch: %v", err)
 		}
 	}
 }

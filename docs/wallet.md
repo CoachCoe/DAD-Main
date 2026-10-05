@@ -42,6 +42,9 @@ accounts/certificates, approved visual assets/button treatment, installation on 
 iOS/Android devices, lock-screen access, and native-camera scans under glare, low
 brightness, and at angles. A website cannot reliably change system screen brightness;
 the web code page provides a high-contrast full-screen code and brightness instructions.
+Apple and Google render the pass barcode themselves, so its error-correction level is
+provider-controlled; the level-H guarantee that a cracked or partly obscured screen still
+scans applies only to the web code screen.
 
 Provider references:
 
