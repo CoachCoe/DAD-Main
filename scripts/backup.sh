@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Single-quoted variables expand inside the postgres container.
 set -euo pipefail
 umask 077
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-export ENV_FILE="${ENV_FILE:-.env.production}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${ENV_FILE:-$root/.env.production}"
+[[ "$ENV_FILE" == /* ]] || ENV_FILE="$PWD/$ENV_FILE"
+export ENV_FILE
+cd "$root"
 compose() { docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml "$@"; }
-if [[ $# != 1 || -e "$1" ]]; then
+if [[ $# != 1 || "$1" != /* || -e "$1" ]]; then
   printf '%s\n' 'Usage: scripts/backup.sh /absolute/path/to/new-backup.dump (must not exist)' >&2
   exit 2
 fi
-case "$1" in /*) ;; *) printf '%s\n' 'Use an absolute backup path.' >&2; exit 2 ;; esac
 backup="$1"
 # Noclobber prevents concurrent invocations from replacing an existing backup.
 set -C

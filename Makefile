@@ -1,4 +1,7 @@
-.PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e generate deploy-build deploy-up deploy-smoke deploy-down deploy-logs
+STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
+GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
+
+.PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts generate check-generated deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 
 install:
 	cd apps/donor-api && go mod download
@@ -25,6 +28,10 @@ worker:
 generate:
 	docker run --rm -v "$(CURDIR)/apps/donor-api:/src" -w /src sqlc/sqlc:1.31.1 generate
 
+check-generated: generate
+	@test -z "$$(git status --porcelain -- apps/donor-api/internal/store/queries)" || \
+		{ git status --porcelain -- apps/donor-api/internal/store/queries; echo "Generated queries differ from SQL sources; run make generate and commit the result." >&2; exit 1; }
+
 test: test-donor-go test-web
 
 test-api test-donor-go:
@@ -35,6 +42,17 @@ test-web:
 
 test-browser-e2e:
 	cd apps/web && npm run test:e2e
+
+lint: lint-go lint-web lint-scripts
+
+lint-go:
+	cd apps/donor-api && go run $(STATICCHECK) ./... && go run $(GOVULNCHECK) ./...
+
+lint-web:
+	cd apps/web && npm audit --omit=dev --audit-level=high
+
+lint-scripts:
+	@if command -v shellcheck >/dev/null; then shellcheck scripts/*.sh; else echo "shellcheck not installed; skipping script lint" >&2; fi
 
 deploy-build:
 	./scripts/deploy.sh build

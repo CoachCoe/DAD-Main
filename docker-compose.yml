@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: impactgraph
       POSTGRES_PASSWORD: impactgraph
     ports:
-      - "55432:5432"
+      - "127.0.0.1:55432:5432"
     volumes:
       - impactgraph_postgres:/var/lib/postgresql/data
     healthcheck:

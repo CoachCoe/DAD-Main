@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # Single-quoted variables expand inside the postgres container.
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
-export ENV_FILE="${ENV_FILE:-.env.production}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ENV_FILE="${ENV_FILE:-$root/.env.production}"
+[[ "$ENV_FILE" == /* ]] || ENV_FILE="$PWD/$ENV_FILE"
+export ENV_FILE
+cd "$root"
 compose() { docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml "$@"; }
-if [[ $# != 1 || ! -f "$1" ]]; then
- printf '%s\n' 'Usage: scripts/verify-restore.sh /absolute/path/to/backup.dump' >&2
- exit 2
+if [[ $# != 1 || "$1" != /* || ! -f "$1" ]]; then
+  printf '%s\n' 'Usage: scripts/verify-restore.sh /absolute/path/to/backup.dump' >&2
+  exit 2
 fi
 # A fresh, server-generated name prevents restoring over an application database.
 name="restore_check_$(compose exec -T postgres sh -c 'psql -X -At -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT replace(gen_random_uuid()::text,chr(45),chr(95))"')"
