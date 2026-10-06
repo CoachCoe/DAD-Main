@@ -61,3 +61,10 @@ it("returns focus to the chosen option when backing out", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Back" }));
   expect(screen.getByRole("button", { name: "Skip 2 renewals" })).toHaveFocus();
 });
+
+it("does not offer a pause from stale billing details", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ ...options, stale: true })));
+  render(<PausePage />);
+  expect(await screen.findByRole("note")).toHaveTextContent("Showing the last known details");
+  expect(screen.getByRole("button", { name: "Skip 2 renewals" })).toBeDisabled();
+});

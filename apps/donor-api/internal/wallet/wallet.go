@@ -70,6 +70,10 @@ func privateKey(data []byte) (*rsa.PrivateKey, error) {
 	}
 	return key, nil
 }
+
+// FromEnvironment loads the Apple and Google issuers whose settings are
+// present. It returns nil when neither is configured, and an error when one
+// is configured incompletely or the origin is not HTTPS.
 func FromEnvironment(getenv func(string) string, origin string) (*Issuer, error) {
 	result := &Issuer{Origin: origin}
 	applePaths := []string{getenv("DONOR_WALLET_APPLE_CERT_FILE"), getenv("DONOR_WALLET_APPLE_KEY_FILE"), getenv("DONOR_WALLET_APPLE_WWDR_FILE")}
@@ -86,7 +90,7 @@ func FromEnvironment(getenv func(string) string, origin string) (*Issuer, error)
 				return nil, err
 			}
 		}
-		apple, err := NewApple(data[0], data[1], data[2], time.Now())
+		apple, err := newApple(data[0], data[1], data[2], time.Now())
 		if err != nil {
 			return nil, err
 		}
@@ -135,6 +139,9 @@ func passID(link string) string {
 func localized(value string) map[string]any {
 	return map[string]any{"defaultValue": map[string]string{"language": "en-US", "value": value}}
 }
+
+// GoogleURL returns a signed Save to Google Wallet link for a pass whose QR
+// code is link, the donor's IRL referral URL.
 func (i *Issuer) GoogleURL(link string, now time.Time) (string, error) {
 	if i == nil || i.Google == nil {
 		return "", ErrUnavailable

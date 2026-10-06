@@ -48,44 +48,56 @@ func manifest(fsys fs.FS) ([]migration, error) {
 	return result, nil
 }
 
+// Apply runs every embedded migration the database lacks, in one transaction
+// under an advisory lock. A database that already holds the donor tables but
+// no history is adopted only when adopt is set and its schema matches the
+// baseline exactly.
 func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
 	files, err := manifest(db.Migrations)
 	if err != nil {
 		return err
 	}
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, "SELECT pg_advisory_xact_lock(714728310)"); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, "SET LOCAL lock_timeout = '5s'"); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, "SET LOCAL search_path TO public"); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS donor_schema_migrations(version text PRIMARY KEY,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
-		return err
-	}
-	rows, err := tx.Query(ctx, `SELECT version,checksum FROM donor_schema_migrations ORDER BY version COLLATE "C"`)
-	if err != nil {
-		return err
-	}
-	applied := map[string]string{}
-	for rows.Next() {
-		var version, checksum string
-		if err = rows.Scan(&version, &checksum); err != nil {
-			rows.Close()
+	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		for _, statement := range []string{
+			"SELECT pg_advisory_xact_lock(714728310)",
+			"SET LOCAL lock_timeout = '5s'",
+			"SET LOCAL search_path TO public",
+			`CREATE TABLE IF NOT EXISTS donor_schema_migrations(version text PRIMARY KEY,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT now())`,
+		} {
+			if _, err := tx.Exec(ctx, statement); err != nil {
+				return err
+			}
+		}
+		applied, err := appliedMigrations(ctx, tx, files)
+		if err != nil {
 			return err
 		}
-		applied[version] = checksum
+		for index, file := range files {
+			if _, ok := applied[file.name]; ok {
+				continue
+			}
+			if err = apply(ctx, tx, file, index == 0, adopt); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// appliedMigrations returns the recorded history, which must be a prefix of
+// files with matching checksums.
+func appliedMigrations(ctx context.Context, tx pgx.Tx, files []migration) (map[string]string, error) {
+	rows, err := tx.Query(ctx, `SELECT version,checksum FROM donor_schema_migrations ORDER BY version COLLATE "C"`)
+	if err != nil {
+		return nil, err
 	}
-	rows.Close()
-	if err = rows.Err(); err != nil {
-		return err
+	applied := map[string]string{}
+	var version, checksum string
+	if _, err = pgx.ForEachRow(rows, []any{&version, &checksum}, func() error {
+		applied[version] = checksum
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	known := map[string]bool{}
 	missing := false
@@ -93,7 +105,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
 		known[file.name] = true
 		if checksum, ok := applied[file.name]; ok {
 			if missing || checksum != file.checksum {
-				return fmt.Errorf("migration history mismatch: %s", file.name)
+				return nil, fmt.Errorf("migration history mismatch: %s", file.name)
 			}
 		} else {
 			missing = true
@@ -101,36 +113,37 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
 	}
 	for version := range applied {
 		if !known[version] {
-			return fmt.Errorf("database has unknown migration: %s", version)
+			return nil, fmt.Errorf("database has unknown migration: %s", version)
 		}
 	}
-	for index, file := range files {
-		if _, ok := applied[file.name]; ok {
-			continue
-		}
-		existing := false
-		if index == 0 {
-			if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_tables WHERE schemaname='public' AND (tablename='donors' OR tablename LIKE 'donor\_%' ESCAPE '\') AND tablename<>'donor_schema_migrations')`).Scan(&existing); err != nil {
-				return err
-			}
-		}
-		if existing {
-			if !adopt {
-				return ErrAdoptionRequired
-			}
-			if err = validateBaseline(ctx, tx, file.sql); err != nil {
-				return err
-			}
-		} else if _, err = tx.Exec(ctx, file.sql); err != nil {
-			return fmt.Errorf("apply %s: %w", file.name, err)
-		}
-		if _, err = tx.Exec(ctx, "INSERT INTO donor_schema_migrations(version,checksum) VALUES($1,$2)", file.name, file.checksum); err != nil {
+	return applied, nil
+}
+
+// apply runs file and records it. The baseline instead adopts an existing
+// donor schema, which it only validates.
+func apply(ctx context.Context, tx pgx.Tx, file migration, baseline, adopt bool) error {
+	existing := false
+	if baseline {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_tables WHERE schemaname='public' AND (tablename='donors' OR tablename LIKE 'donor\_%' ESCAPE '\') AND tablename<>'donor_schema_migrations')`).Scan(&existing); err != nil {
 			return err
 		}
 	}
-	return tx.Commit(ctx)
+	if existing {
+		if !adopt {
+			return ErrAdoptionRequired
+		}
+		if err := validateBaseline(ctx, tx, file.sql); err != nil {
+			return err
+		}
+	} else if _, err := tx.Exec(ctx, file.sql); err != nil {
+		return fmt.Errorf("apply %s: %w", file.name, err)
+	}
+	_, err := tx.Exec(ctx, "INSERT INTO donor_schema_migrations(version,checksum) VALUES($1,$2)", file.name, file.checksum)
+	return err
 }
 
+// Verify reports whether the database has applied exactly the embedded
+// migrations, which every service requires before it starts.
 func Verify(ctx context.Context, pool *pgxpool.Pool) error {
 	files, err := manifest(db.Migrations)
 	if err != nil {

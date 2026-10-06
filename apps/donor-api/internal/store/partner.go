@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"impactgraph/donor-api/internal/credentials"
@@ -25,15 +26,18 @@ type PartnerRequest struct {
 }
 type PartnerService struct{ DB *pgxpool.Pool }
 
+// Signup records a partner inquiry. id makes it idempotent: a retry with the
+// same fields succeeds, and different fields under the same id conflict.
 func (s PartnerService) Signup(ctx context.Context, id pgtype.UUID, r PartnerRequest) error {
 	if !ValidRequestID(id) || !r.Consent {
 		return ErrStaffInput
 	}
 	for _, field := range []struct {
-		value   string
-		maximum int
-	}{{r.Organization, 200}, {r.Name, 100}, {r.Email, 320}, {r.Website, 500}, {r.Message, 2000}} {
-		if !utf8.ValidString(field.value) || utf8.RuneCountInString(field.value) > field.maximum {
+		value     string
+		maximum   int
+		multiline bool
+	}{{r.Organization, 200, false}, {r.Name, 100, false}, {r.Email, 320, false}, {r.Website, 500, false}, {r.Message, 2000, true}} {
+		if !plainText(field.value, field.multiline) || utf8.RuneCountInString(field.value) > field.maximum {
 			return ErrStaffInput
 		}
 	}
@@ -60,21 +64,18 @@ func (s PartnerService) Signup(ctx context.Context, id pgtype.UUID, r PartnerReq
 	}
 	digest := sha256.Sum256([]byte("{" + strings.Join(parts, ",") + "}"))
 	hash := hex.EncodeToString(digest[:])
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	q := queries.New(tx)
-	if err = q.InsertPartnerSignup(ctx, queries.InsertPartnerSignupParams{ID: id, Organization: r.Organization, Name: r.Name, Email: r.Email, Website: r.Website, Message: r.Message, RequestHash: hash}); err != nil {
-		return err
-	}
-	row, err := q.PartnerSignupByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if row.RequestHash != hash {
-		return ErrStaffConflict
-	}
-	return tx.Commit(ctx)
+	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		if err := q.InsertPartnerSignup(ctx, queries.InsertPartnerSignupParams{ID: id, Organization: r.Organization, Name: r.Name, Email: r.Email, Website: r.Website, Message: r.Message, RequestHash: hash}); err != nil {
+			return err
+		}
+		row, err := q.PartnerSignupByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if row.RequestHash != hash {
+			return ErrStaffConflict
+		}
+		return nil
+	})
 }

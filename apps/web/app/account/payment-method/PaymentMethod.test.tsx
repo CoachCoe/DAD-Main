@@ -13,11 +13,17 @@ it("does not treat returning from Stripe as payment-update confirmation", async 
   expect(screen.getByText(/does not confirm payment of an overdue gift/)).toBeVisible();
 });
 
-it("offers email sign-in for a cold recovery link", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }));
+it("requests a sign-in link in place for a cold recovery visit, without exposing billing controls", async () => {
+  const fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) })
+    .mockResolvedValueOnce(response({ message: "If this email matches a donor account, a link will arrive." }));
+  vi.stubGlobal("fetch", fetch);
   render(<PaymentMethodPage />);
-  expect(await screen.findByRole("link", { name: "Email me a sign-in link" })).toHaveAttribute("href", "/account/sign-in");
+  fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "donor@example.org" } });
   expect(screen.queryByRole("button", { name: "Continue to Stripe" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Email me a sign-in link" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("If this email matches"));
+  expect(fetch.mock.calls[1][0]).toBe("/api/donor/login");
+  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ email: "donor@example.org", next: "/account/payment-method" });
 });
 
 it("retries a failed setup with the same request key", async () => {

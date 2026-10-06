@@ -9,10 +9,13 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
 )
 
@@ -33,12 +36,82 @@ const (
 // classifier maps a service error to a public status and message.
 type classifier func(error) (int, string)
 
+// featureOff is the answer for a feature this deployment deliberately leaves
+// unconfigured. Startup logs it once, so requests do not log it again, and
+// clients get a stable code instead of advice to retry.
+type featureOff struct{ code, detail string }
+
+var (
+	paymentsOff      = featureOff{"PAYMENTS_UNCONFIGURED", "Payments are not set up in this environment"}
+	emailOff         = featureOff{"EMAIL_UNCONFIGURED", "Account email is not set up in this environment"}
+	sourceStorageOff = featureOff{"SOURCE_STORAGE_UNCONFIGURED", "Source document storage is not set up in this environment"}
+)
+
+func (f featureOff) write(w http.ResponseWriter) {
+	writeJSON(w, http.StatusServiceUnavailable, problem{Detail: f.detail, Code: f.code})
+}
+
+// unconfigured recognizes a service error that reports a feature left off.
+func unconfigured(err error) (featureOff, bool) {
+	switch {
+	case errors.Is(err, payments.ErrUnconfigured):
+		return paymentsOff, true
+	case errors.Is(err, store.ErrSourceStorageUnconfigured):
+		return sourceStorageOff, true
+	}
+	return featureOff{}, false
+}
+
+// service describes the routes backed by one optional dependency: what they
+// answer while it is unconfigured, their time budget, and their error mapping.
+type service struct {
+	configured  bool
+	unavailable string
+	timeout     time.Duration
+	classify    classifier
+}
+
+func (s service) within(timeout time.Duration) service {
+	s.timeout = timeout
+	return s
+}
+
+// missing names what a lookup that found no row could not find.
+func (s service) missing(detail string) service {
+	classify := s.classify
+	s.classify = func(err error) (int, string) {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return http.StatusNotFound, detail
+		}
+		return classify(err)
+	}
+	return s
+}
+
+func (s service) available(w http.ResponseWriter, r *http.Request) bool {
+	if !s.configured {
+		writeError(w, r, http.StatusServiceUnavailable, s.unavailable, nil)
+	}
+	return s.configured
+}
+
+// serve answers with one bounded call to the service.
+func (s service) serve(w http.ResponseWriter, r *http.Request, call func(context.Context) (any, error)) {
+	if !s.available(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, s.timeout)
+	defer cancel()
+	body, err := call(ctx)
+	respond(w, r, body, err, s.classify)
+}
+
 func writeError(w http.ResponseWriter, r *http.Request, status int, detail string, cause error) {
 	if status >= http.StatusInternalServerError && cause != nil {
 		slog.LogAttrs(r.Context(), slog.LevelError, "request failed",
 			slog.String("route", r.Pattern), slog.Int("status", status), slog.String("cause", errorClass(cause)))
 	}
-	writeJSON(w, status, problem{detail})
+	writeJSON(w, status, problem{Detail: detail})
 }
 
 func invalidFields(w http.ResponseWriter, r *http.Request) {
@@ -46,6 +119,10 @@ func invalidFields(w http.ResponseWriter, r *http.Request) {
 }
 
 func respond(w http.ResponseWriter, r *http.Request, body any, err error, classify classifier) {
+	if off, ok := unconfigured(err); ok {
+		off.write(w)
+		return
+	}
 	if err != nil {
 		status, detail := classify(err)
 		writeError(w, r, status, detail, err)
@@ -71,14 +148,33 @@ func errorClass(err error) string {
 	return fmt.Sprintf("%T", err)
 }
 
-func pathUUID(r *http.Request, name string) (pgtype.UUID, bool) {
-	var id pgtype.UUID
-	return id, id.Scan(r.PathValue(name)) == nil && id.Valid
+// validToken bounds an opaque secret (an emailed proof or a session token)
+// before it is hashed for lookup.
+func validToken(token string) bool {
+	n := utf8.RuneCountInString(token)
+	return n >= 32 && n <= 128
 }
 
-func idempotencyKey(r *http.Request) (pgtype.UUID, bool) {
+// pathID reads a record ID from the path. A malformed ID names no record, so
+// it answers 404 like any other unknown ID.
+func pathID(w http.ResponseWriter, r *http.Request, name string) (pgtype.UUID, bool) {
+	var id pgtype.UUID
+	if id.Scan(r.PathValue(name)) != nil || !id.Valid {
+		writeError(w, r, http.StatusNotFound, "Record not found", nil)
+		return id, false
+	}
+	return id, true
+}
+
+// idempotencyKey reads the client's version 4 UUID for a retryable command,
+// answering the request itself when it is missing or malformed.
+func idempotencyKey(w http.ResponseWriter, r *http.Request) (pgtype.UUID, bool) {
 	var key pgtype.UUID
-	return key, key.Scan(r.Header.Get("Idempotency-Key")) == nil && store.ValidRequestID(key)
+	if key.Scan(r.Header.Get("Idempotency-Key")) != nil || !store.ValidRequestID(key) {
+		writeError(w, r, http.StatusUnprocessableEntity, "Idempotency-Key must be a version 4 UUID", nil)
+		return key, false
+	}
+	return key, true
 }
 
 func offsetParam(r *http.Request, name string) (int64, bool) {

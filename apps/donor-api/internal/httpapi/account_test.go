@@ -12,8 +12,8 @@ import (
 )
 
 type accountStub struct {
-	err               error
-	proof, old, email string
+	err                     error
+	proof, old, email, next string
 }
 
 func (s *accountStub) ClaimAccount(_ context.Context, proof, old string) (string, error) {
@@ -21,8 +21,8 @@ func (s *accountStub) ClaimAccount(_ context.Context, proof, old string) (string
 	return "new-secret-session", s.err
 }
 func (s *accountStub) SignOut(_ context.Context, token string) error { s.old = token; return s.err }
-func (s *accountStub) QueueLogin(_ context.Context, email string) error {
-	s.email = email
+func (s *accountStub) QueueLogin(_ context.Context, email, next string) error {
+	s.email, s.next = email, next
 	return s.err
 }
 func TestClaimSetsCookieOnlyAfterSuccess(t *testing.T) {
@@ -39,23 +39,24 @@ func TestClaimSetsCookieOnlyAfterSuccess(t *testing.T) {
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, req)
 		if response.Code != tc.status || stub.proof != proof || stub.old != "old-session" {
-			t.Fatal("claim contract changed")
+			t.Fatalf("%v: got %d with proof %q revoking %q, want %d with the proof revoking old-session", tc.err, response.Code, stub.proof, stub.old, tc.status)
 		}
-		if strings.Contains(response.Body.String(), proof) || strings.Contains(response.Body.String(), "private") {
-			t.Fatal("claim leaked credentials")
+		if body := response.Body.String(); strings.Contains(body, proof) || strings.Contains(body, "private") || strings.Contains(body, "new-secret-session") {
+			t.Fatalf("%v: claim body leaked a credential or cause: %s", tc.err, body)
 		}
 		cookies := response.Result().Cookies()
 		if tc.err != nil {
 			if len(cookies) > 0 {
-				t.Fatal("failed claim set a session")
+				t.Fatalf("%v: failed claim set %v", tc.err, cookies)
 			}
 			continue
 		}
-		if len(cookies) != 1 || cookies[0].Name != "dad_donor_session" || !cookies[0].HttpOnly || !cookies[0].Secure || cookies[0].SameSite != http.SameSiteLaxMode || cookies[0].MaxAge != 30*86400 || cookies[0].Path != "/" {
-			t.Fatal("unsafe session cookie")
+		if len(cookies) != 1 || cookies[0].Name != "dad_donor_session" || cookies[0].Value != "new-secret-session" || !cookies[0].HttpOnly || !cookies[0].Secure || cookies[0].SameSite != http.SameSiteLaxMode || cookies[0].MaxAge != 30*86400 || cookies[0].Path != "/" {
+			t.Fatalf("got cookies %+v, want one HttpOnly, Secure, Lax, 30-day session cookie", cookies)
 		}
 	}
 }
+
 func TestLoginIsNonEnumeratingAndConfigurationGated(t *testing.T) {
 	for _, configured := range []bool{false, true} {
 		stub := &accountStub{}
@@ -64,12 +65,52 @@ func TestLoginIsNonEnumeratingAndConfigurationGated(t *testing.T) {
 		req.Header.Set("Origin", "http://localhost:3000")
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, req)
+		want := 503
 		if configured {
-			if response.Code != 202 || strings.Contains(response.Body.String(), "donor@example.org") {
-				t.Fatal("login enumerates account")
-			}
-		} else if response.Code != 503 || stub.email != "" {
-			t.Fatal("unconfigured login queued")
+			want = 202
+		}
+		if response.Code != want || strings.Contains(response.Body.String(), "donor@example.org") {
+			t.Errorf("configured=%v: got %d %s, want %d without echoing the address", configured, response.Code, response.Body, want)
+		}
+		if !configured && stub.email != "" {
+			t.Error("unconfigured email still queued a sign-in link")
+		}
+	}
+}
+
+func TestLogoutClearsCookieAndToleratesMissingSession(t *testing.T) {
+	stub := &accountStub{}
+	req := httptest.NewRequest("POST", "/donor/logout", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	response := httptest.NewRecorder()
+	NewServer("", Services{Account: stub}).Handler.ServeHTTP(response, req)
+	cookies := response.Result().Cookies()
+	if response.Code != 200 || len(cookies) != 1 || cookies[0].Name != donorCookie || cookies[0].MaxAge >= 0 {
+		t.Fatalf("got %d with cookies %+v, want 200 expiring the session cookie", response.Code, cookies)
+	}
+}
+
+func TestLoginReturnPathIsAllowlisted(t *testing.T) {
+	for _, tc := range []struct {
+		next   string
+		status int
+		want   string
+	}{
+		{``, 202, ""},
+		{`,"next":"/account/payment-method"`, 202, "/account/payment-method"},
+		{`,"next":"/account/dashboard"`, 202, "/account/dashboard"},
+		{`,"next":"https://evil.example.org"`, 422, ""},
+		{`,"next":"//evil.example.org"`, 422, ""},
+		{`,"next":"/account/payment-method?x=1"`, 422, ""},
+		{`,"next":null`, 422, ""},
+	} {
+		stub := &accountStub{}
+		req := httptest.NewRequest("POST", "/donor/login", strings.NewReader(`{"email":"donor@example.org"`+tc.next+`}`))
+		req.Header.Set("Origin", "http://localhost:3000")
+		response := httptest.NewRecorder()
+		NewServer("", Services{Account: stub, EmailConfigured: true}).Handler.ServeHTTP(response, req)
+		if response.Code != tc.status || stub.next != tc.want {
+			t.Errorf("next %s: got %d passing %q, want %d passing %q", tc.next, response.Code, stub.next, tc.status, tc.want)
 		}
 	}
 }

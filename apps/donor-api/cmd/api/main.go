@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -47,112 +48,108 @@ func trustedProxies(value string) ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
-func run() error {
-	address := os.Getenv("DONOR_GO_LISTEN")
-	if address == "" {
-		address = "127.0.0.1:8002"
-	}
+// configure validates the environment and connects the services it enables.
+// Every configuration error is reported before the database is contacted.
+// The returned function releases the database pool.
+func configure(ctx context.Context, getenv func(string) string) (httpapi.Services, func(), error) {
 	var services httpapi.Services
+	release := func() {}
 	var err error
-	if services.TrustedProxies, err = trustedProxies(os.Getenv("DONOR_TRUSTED_PROXY_CIDRS")); err != nil {
-		return err
+	if services.TrustedProxies, err = trustedProxies(getenv("DONOR_TRUSTED_PROXY_CIDRS")); err != nil {
+		return services, release, err
 	}
-	email, err := mail.FromEnvironment(os.Getenv)
+	email, err := mail.FromEnvironment(getenv)
 	if err != nil {
-		return err
+		return services, release, err
 	}
 	services.EmailConfigured = email != nil
-	services.Origin = os.Getenv("DONOR_PUBLIC_ORIGIN")
-	if services.Origin == "" {
-		services.Origin = "http://localhost:3000"
+	services.Origin = cmp.Or(getenv("DONOR_PUBLIC_ORIGIN"), "http://localhost:3000")
+	if err = payments.ValidateOrigin(services.Origin); err != nil {
+		return services, release, err
 	}
-	if err := payments.ValidateOrigin(services.Origin); err != nil {
-		return err
+	if services.Wallet, err = wallet.FromEnvironment(getenv, services.Origin); err != nil {
+		return services, release, err
 	}
-	if services.Wallet, err = wallet.FromEnvironment(os.Getenv, services.Origin); err != nil {
-		return err
-	}
-	stripeKey, webhookSecret := os.Getenv("STRIPE_SECRET_KEY"), os.Getenv("STRIPE_WEBHOOK_SECRET")
+	stripeKey, webhookSecret := getenv("STRIPE_SECRET_KEY"), getenv("STRIPE_WEBHOOK_SECRET")
 	if (stripeKey == "") != (webhookSecret == "") {
-		return errors.New("set both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or neither")
+		return services, release, errors.New("set both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or neither")
 	}
 	var gateway payments.StaffFinanceGateway
 	if stripeKey != "" {
 		if gateway, err = payments.NewStripeGateway(stripeKey); err != nil {
-			return err
+			return services, release, err
 		}
 	}
-	staffKey, contentKey := os.Getenv("DONOR_STAFF_ENCRYPTION_KEY"), os.Getenv("DONOR_CONTENT_ENCRYPTION_KEY")
+	staffKey, contentKey := getenv("DONOR_STAFF_ENCRYPTION_KEY"), getenv("DONOR_CONTENT_ENCRYPTION_KEY")
 	if staffKey != "" && credentials.ValidateKey(staffKey) != nil {
-		return errors.New("DONOR_STAFF_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
+		return services, release, errors.New("DONOR_STAFF_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
 	}
 	if contentKey != "" && credentials.ValidateKey(contentKey) != nil {
-		return errors.New("DONOR_CONTENT_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
+		return services, release, errors.New("DONOR_CONTENT_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
+	}
+	for _, feature := range []struct {
+		name    string
+		enabled bool
+	}{
+		{"payments (STRIPE_SECRET_KEY)", gateway != nil},
+		{"account email (SMTP settings)", email != nil},
+		{"staff back office (DONOR_STAFF_ENCRYPTION_KEY)", staffKey != ""},
+		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKey != ""},
+	} {
+		if !feature.enabled {
+			slog.Info("feature disabled until configured", "feature", feature.name)
+		}
 	}
 
-	dsn := os.Getenv("DONOR_GO_DATABASE_URL")
+	dsn := getenv("DONOR_GO_DATABASE_URL")
 	if dsn == "" {
 		slog.Warn("DONOR_GO_DATABASE_URL is unset; only health and static responses are available")
-	} else {
-		startup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		pool, err := store.Open(startup, dsn)
-		cancel()
-		if err != nil {
-			return errors.New("donor database startup failed")
-		}
-		defer pool.Close()
-		services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
-		check, finish := context.WithTimeout(context.Background(), 10*time.Second)
-		err = services.Ready(check)
-		finish()
-		if err != nil {
-			return errors.New("donor schema is not current; run migrations before starting the API")
-		}
-		services.Content = store.ContentReader{DB: pool}
-		services.Partner = store.PartnerService{DB: pool}
-		services.Dashboard = store.DashboardReader{DB: pool}
-		services.Account = store.AccountService{DB: pool}
-		services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
-		services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
-		services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
-		if webhookSecret != "" {
-			services.Webhook = payments.Receiver{Secret: webhookSecret, Inbox: store.StripeInbox{DB: pool}}
-		}
-		if email != nil {
-			services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKey: email.EncryptionKey}
-		}
-		if staffKey != "" {
-			staff, err := store.NewStaffService(pool, staffKey)
-			if err != nil {
-				return errors.New("staff configuration is invalid")
-			}
-			services.Staff, services.Admin, services.Exports = staff, staff, staff
-			services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
-			services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKey: contentKey}
-		}
+		return services, release, nil
 	}
-	for feature, enabled := range map[string]bool{
-		"payments (STRIPE_SECRET_KEY)":                    gateway != nil,
-		"account email (SMTP settings)":                   email != nil,
-		"staff back office (DONOR_STAFF_ENCRYPTION_KEY)":  services.Staff != nil,
-		"source documents (DONOR_CONTENT_ENCRYPTION_KEY)": contentKey != "",
-	} {
-		if !enabled {
-			slog.Info("feature disabled until configured", "feature", feature)
-		}
+	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	pool, err := store.Open(startup, dsn)
+	if err != nil {
+		return services, release, errors.New("donor database startup failed")
 	}
+	if err = migrations.Verify(startup, pool); err != nil {
+		pool.Close()
+		return services, release, errors.New("donor schema is not current; run migrations before starting the API")
+	}
+	services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
+	services.Content = store.ContentReader{DB: pool}
+	services.Partner = store.PartnerService{DB: pool}
+	services.Dashboard = store.DashboardReader{DB: pool}
+	services.Account = store.AccountService{DB: pool}
+	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
+	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
+	services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
+	if webhookSecret != "" {
+		services.Webhook = payments.Receiver{Secret: webhookSecret, Inbox: store.StripeInbox{DB: pool}}
+	}
+	if email != nil {
+		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKey: email.EncryptionKey}
+	}
+	if staffKey != "" {
+		staff, err := store.NewStaffService(pool, staffKey)
+		if err != nil {
+			pool.Close()
+			return services, release, errors.New("staff configuration is invalid")
+		}
+		services.Staff, services.Admin, services.Exports = staff, staff, staff
+		services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
+		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKey: contentKey}
+	}
+	return services, pool.Close, nil
+}
 
-	server := httpapi.NewServer(address, services)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+// serve runs the server until it fails or ctx ends, then drains in-flight requests.
+func serve(ctx context.Context, server *http.Server) error {
 	failures := make(chan error, 1)
 	go func() { failures <- server.ListenAndServe() }()
-	slog.Info("donor API listening", "address", address)
+	slog.Info("donor API listening", "address", server.Addr)
 	select {
 	case err := <-failures:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
 		return err
 	case <-ctx.Done():
 		shutdown, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
@@ -165,9 +162,20 @@ func run() error {
 	}
 }
 
+func run(getenv func(string) string) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	services, release, err := configure(ctx, getenv)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return serve(ctx, httpapi.NewServer(cmp.Or(getenv("DONOR_GO_LISTEN"), "127.0.0.1:8002"), services))
+}
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
-	if err := run(); err != nil {
+	if err := run(os.Getenv); err != nil {
 		slog.Error("donor service stopped", "error", err)
 		os.Exit(1)
 	}

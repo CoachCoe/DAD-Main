@@ -40,7 +40,7 @@ func TestFinancialOutboxDeduplicationYearBoundaryAndRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		if err = QueueFinancialMessages(ctx, q, id, now); err != nil {
+		if err = q.QueueFinancialIntents(ctx, queries.QueueFinancialIntentsParams{DonorID: id, AsOf: timestamp(now)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -98,7 +98,7 @@ func TestFinancialOutboxBatchesLongHistoryAndExcludesFutureGifts(t *testing.T) {
  SELECT gen_random_uuid(),$1,$2,'pi_'||($1::uuid)::text||'_'||n,3000,'USD','ONE_TIME',$3::timestamptz+n*interval '1 minute' FROM generate_series(-999,1) n`, id, checkout, now)
 	db := &countedOutbox{DBTX: tx}
 	for i := range 2 {
-		if err = QueueFinancialMessages(ctx, queries.New(db), id, now); err != nil {
+		if err = queries.New(db).QueueFinancialIntents(ctx, queries.QueueFinancialIntentsParams{DonorID: id, AsOf: timestamp(now)}); err != nil {
 			t.Fatal(err)
 		}
 		var count int

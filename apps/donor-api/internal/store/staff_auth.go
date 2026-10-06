@@ -20,6 +20,15 @@ func saveStaffCredentials(ctx context.Context, q *queries.Queries, s queries.Don
 	return q.SaveStaffCredentials(ctx, queries.SaveStaffCredentialsParams{ID: s.ID, PasswordHash: s.PasswordHash, TotpSecret: s.TotpSecret, TotpCounter: s.TotpCounter, Failures: s.Failures, LockedUntil: s.LockedUntil})
 }
 
+const (
+	staffSessionLifetime = 8 * time.Hour
+	staffLockout         = 15 * time.Minute
+	maxSignInFailures    = 5
+)
+
+// SignIn verifies a staff password and TOTP code and returns a new session
+// token. Unknown addresses verify against a dummy hash so timing does not
+// reveal which accounts exist; five failures lock an account for 15 minutes.
 func (s *StaffService) SignIn(ctx context.Context, email, password, code string) (string, error) {
 	canonical, err := identity.NormalizeEmail(email)
 	if err != nil {
@@ -30,80 +39,91 @@ func (s *StaffService) SignIn(ctx context.Context, email, password, code string)
 		return "", err
 	}
 	defer release()
-	tx, err := s.DB.Begin(ctx)
+	var token string
+	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		staff, err := q.StaffByEmail(ctx, canonical)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		found := err == nil
+		now := time.Now().UTC()
+		counter, err := s.verifySignIn(staff, found, password, code, now)
+		if err != nil {
+			return err
+		}
+		if counter < 0 {
+			// The failure is committed, then reported.
+			if found {
+				return recordFailedSignIn(ctx, q, staff, now)
+			}
+			return nil
+		}
+		staff.TotpCounter, staff.Failures, staff.LockedUntil = counter, 0, pgtype.Timestamptz{}
+		if err = saveStaffCredentials(ctx, q, staff); err != nil {
+			return err
+		}
+		if token, err = randomToken(48); err != nil {
+			return err
+		}
+		id, err := NewID()
+		if err != nil {
+			return err
+		}
+		if err = q.InsertStaffSession(ctx, queries.InsertStaffSessionParams{ID: id, StaffID: staff.ID, TokenHash: HashToken(token), ExpiresAt: timestamp(now.Add(staffSessionLifetime))}); err != nil {
+			return err
+		}
+		return auditStaff(ctx, q, staff.ID, "staff.signed_in", staff.ID.String(), nil, now)
+	})
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback(ctx)
-	q := queries.New(tx)
-	staff, err := q.StaffByEmail(ctx, canonical)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", err
+	if token == "" {
+		return "", ErrStaffDenied
 	}
-	found := err == nil
-	now := time.Now().UTC()
+	return token, nil
+}
+
+// verifySignIn returns the TOTP counter a successful sign-in consumes, or -1.
+// The password is always verified, so every attempt costs the same.
+func (s *StaffService) verifySignIn(staff queries.DonorStaff, found bool, password, code string, now time.Time) (int64, error) {
 	hash := s.dummyHash
 	if found && staff.PasswordHash.Valid {
 		hash = staff.PasswordHash.String
 	}
-	verified, verifyErr := credentials.VerifyPassword(password, hash)
-	locked := found && staff.LockedUntil.Valid && staff.LockedUntil.Time.After(now)
-	counter := int64(-1)
-	if verifyErr == nil && verified && found && len(staff.TotpSecret) > 0 && !staff.Disabled && !locked {
-		secret, err := credentials.Decrypt(staff.TotpSecret, s.EncryptionKey)
-		if err != nil {
-			return "", err
-		}
-		if value, err := credentials.VerifyOTP(secret, code, now, staff.TotpCounter); err == nil {
-			counter = value
-		}
+	verified, err := credentials.VerifyPassword(password, hash)
+	locked := staff.LockedUntil.Valid && staff.LockedUntil.Time.After(now)
+	if err != nil || !verified || !found || len(staff.TotpSecret) == 0 || staff.Disabled || locked {
+		return -1, nil
 	}
-	if counter < 0 {
-		if found {
-			if !locked {
-				if staff.LockedUntil.Valid {
-					staff.Failures = 0
-					staff.LockedUntil = pgtype.Timestamptz{}
-				}
-				staff.Failures++
-				if staff.Failures >= 5 {
-					staff.LockedUntil = timestamp(now.Add(15 * time.Minute))
-				}
-				if err = saveStaffCredentials(ctx, q, staff); err != nil {
-					return "", err
-				}
-			}
-			if err = auditStaff(ctx, q, pgtype.UUID{}, "staff.sign_in_failed", staff.ID.String(), nil, now); err != nil {
-				return "", err
-			}
-		}
-		if err = tx.Commit(ctx); err != nil {
-			return "", err
-		}
-		return "", ErrStaffDenied
-	}
-	staff.TotpCounter, staff.Failures, staff.LockedUntil = counter, 0, pgtype.Timestamptz{}
-	if err = saveStaffCredentials(ctx, q, staff); err != nil {
-		return "", err
-	}
-	token, err := randomToken(48)
+	secret, err := credentials.Decrypt(staff.TotpSecret, s.EncryptionKey)
 	if err != nil {
-		return "", err
+		return -1, err
 	}
-	id, err := NewID()
+	counter, err := credentials.VerifyOTP(secret, code, now, staff.TotpCounter)
 	if err != nil {
-		return "", err
+		return -1, nil
 	}
-	if err = q.InsertStaffSession(ctx, queries.InsertStaffSessionParams{ID: id, StaffID: staff.ID, TokenHash: HashToken(token), ExpiresAt: timestamp(now.Add(8 * time.Hour))}); err != nil {
-		return "", err
+	return counter, nil
+}
+
+// recordFailedSignIn counts a failure against an account that is not locked,
+// starting a fresh count once an earlier lock has expired, and audits it.
+func recordFailedSignIn(ctx context.Context, q *queries.Queries, staff queries.DonorStaff, now time.Time) error {
+	if !staff.LockedUntil.Valid || !staff.LockedUntil.Time.After(now) {
+		if staff.LockedUntil.Valid {
+			staff.Failures = 0
+			staff.LockedUntil = pgtype.Timestamptz{}
+		}
+		staff.Failures++
+		if staff.Failures >= maxSignInFailures {
+			staff.LockedUntil = timestamp(now.Add(staffLockout))
+		}
+		if err := saveStaffCredentials(ctx, q, staff); err != nil {
+			return err
+		}
 	}
-	if err = auditStaff(ctx, q, staff.ID, "staff.signed_in", staff.ID.String(), nil, now); err != nil {
-		return "", err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return "", err
-	}
-	return token, nil
+	return auditStaff(ctx, q, pgtype.UUID{}, "staff.sign_in_failed", staff.ID.String(), nil, now)
 }
 
 func staffInvitation(ctx context.Context, q *queries.Queries, token string) (queries.DonorStaffInvite, queries.DonorStaff, error) {
@@ -133,42 +153,45 @@ func staffInvitation(ctx context.Context, q *queries.Queries, token string) (que
 	return invite, staff, nil
 }
 
+// Provision returns the TOTP enrolment for an invitation, generating its
+// secret on first use so reloading the page shows the same one.
 func (s *StaffService) Provision(ctx context.Context, token string) (map[string]string, error) {
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	q := queries.New(tx)
-	invite, staff, err := staffInvitation(ctx, q, token)
-	if err != nil {
-		return nil, err
-	}
-	if len(invite.PendingSecret) == 0 {
-		secret := make([]byte, 20)
-		if _, err = rand.Read(secret); err != nil {
-			return nil, err
-		}
-		invite.PendingSecret, err = credentials.Encrypt(secret, s.EncryptionKey)
+	var enrolment map[string]string
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		invite, staff, err := staffInvitation(ctx, q, token)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		if err = q.SaveStaffInvite(ctx, queries.SaveStaffInviteParams{ID: invite.ID, Attempts: invite.Attempts, PendingSecret: invite.PendingSecret, ConsumedAt: invite.ConsumedAt}); err != nil {
-			return nil, err
+		if len(invite.PendingSecret) == 0 {
+			secret := make([]byte, 20)
+			if _, err = rand.Read(secret); err != nil {
+				return err
+			}
+			if invite.PendingSecret, err = credentials.Encrypt(secret, s.EncryptionKey); err != nil {
+				return err
+			}
+			if err = saveStaffInvite(ctx, q, invite); err != nil {
+				return err
+			}
 		}
-	}
-	secret, err := credentials.Decrypt(invite.PendingSecret, s.EncryptionKey)
+		secret, err := credentials.Decrypt(invite.PendingSecret, s.EncryptionKey)
+		if err != nil {
+			return err
+		}
+		encoded := base32.StdEncoding.EncodeToString(secret)
+		uri := "otpauth://totp/" + url.PathEscape("DAD Staff:"+staff.Email) + "?" + url.Values{"secret": {encoded}, "issuer": {"DAD Staff"}, "algorithm": {"SHA1"}, "digits": {"6"}, "period": {"30"}}.Encode()
+		enrolment = map[string]string{"email": staff.Email, "secret": encoded, "uri": uri}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	encoded := base32.StdEncoding.EncodeToString(secret)
-	uri := "otpauth://totp/" + url.PathEscape("DAD Staff:"+staff.Email) + "?" + url.Values{"secret": {encoded}, "issuer": {"DAD Staff"}, "algorithm": {"SHA1"}, "digits": {"6"}, "period": {"30"}}.Encode()
-	if err = tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return map[string]string{"email": staff.Email, "secret": encoded, "uri": uri}, nil
+	return enrolment, nil
 }
 
+// Activate sets the invited account's password once code proves its TOTP
+// enrolment. Every attempt counts against the invitation, failed ones too.
 func (s *StaffService) Activate(ctx context.Context, token, password, code string) error {
 	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 12 || utf8.RuneCountInString(password) > 128 {
 		return ErrStaffInput
@@ -178,50 +201,47 @@ func (s *StaffService) Activate(ctx context.Context, token, password, code strin
 		return err
 	}
 	defer release()
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	q := queries.New(tx)
-	invite, staff, err := staffInvitation(ctx, q, token)
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	invite.Attempts++
-	counter := int64(-1)
-	if len(invite.PendingSecret) > 0 {
-		secret, err := credentials.Decrypt(invite.PendingSecret, s.EncryptionKey)
+	activated := false
+	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		invite, staff, err := staffInvitation(ctx, q, token)
 		if err != nil {
 			return err
 		}
-		if value, err := credentials.VerifyOTP(secret, code, now, -1); err == nil {
-			counter = value
+		now := time.Now().UTC()
+		invite.Attempts++
+		if len(invite.PendingSecret) > 0 {
+			secret, err := credentials.Decrypt(invite.PendingSecret, s.EncryptionKey)
+			if err != nil {
+				return err
+			}
+			if counter, err := credentials.VerifyOTP(secret, code, now, -1); err == nil {
+				hash, err := credentials.HashPassword(password)
+				if err != nil {
+					return err
+				}
+				staff.PasswordHash, staff.TotpSecret, staff.TotpCounter = text(hash), invite.PendingSecret, counter
+				if err = saveStaffCredentials(ctx, q, staff); err != nil {
+					return err
+				}
+				invite.ConsumedAt, invite.PendingSecret = timestamp(now), nil
+				if err = auditStaff(ctx, q, staff.ID, "staff.activated", staff.ID.String(), nil, now); err != nil {
+					return err
+				}
+				activated = true
+			}
 		}
-	}
-	if counter >= 0 {
-		hash, err := credentials.HashPassword(password)
-		if err != nil {
-			return err
-		}
-		staff.PasswordHash, staff.TotpSecret, staff.TotpCounter = pgtype.Text{String: hash, Valid: true}, invite.PendingSecret, counter
-		if err = saveStaffCredentials(ctx, q, staff); err != nil {
-			return err
-		}
-		invite.ConsumedAt, invite.PendingSecret = timestamp(now), nil
-		if err = auditStaff(ctx, q, staff.ID, "staff.activated", staff.ID.String(), nil, now); err != nil {
-			return err
-		}
-	}
-	if err = q.SaveStaffInvite(ctx, queries.SaveStaffInviteParams{ID: invite.ID, Attempts: invite.Attempts, PendingSecret: invite.PendingSecret, ConsumedAt: invite.ConsumedAt}); err != nil {
+		return saveStaffInvite(ctx, q, invite)
+	})
+	if err != nil {
 		return err
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return err
-	}
-	if counter < 0 {
+	if !activated {
 		return ErrStaffDenied
 	}
 	return nil
+}
+
+func saveStaffInvite(ctx context.Context, q *queries.Queries, invite queries.DonorStaffInvite) error {
+	return q.SaveStaffInvite(ctx, queries.SaveStaffInviteParams{ID: invite.ID, Attempts: invite.Attempts, PendingSecret: invite.PendingSecret, ConsumedAt: invite.ConsumedAt})
 }

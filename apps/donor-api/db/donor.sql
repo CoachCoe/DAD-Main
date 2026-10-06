@@ -27,5 +27,11 @@ SELECT d.public_name FROM donors d JOIN donor_referral_touches t ON t.referrer_i
 WHERE t.token_hash=$1 AND d.disabled=false;
 
 -- name: DonorGiftsPage :many
-SELECT id,amount_minor,currency,frequency,paid_at FROM donor_gifts WHERE donor_id=$1
-ORDER BY paid_at DESC,id DESC LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+SELECT g.id,g.amount_minor,g.currency,g.frequency,g.paid_at,r.refunded_minor,
+(g.amount_minor-r.refunded_minor)::bigint AS net_minor
+FROM donor_gifts g CROSS JOIN LATERAL (
+ SELECT coalesce(sum(amount_minor),0)::bigint AS refunded_minor FROM donor_refunds
+ WHERE gift_id=g.id AND status='SUCCEEDED'
+) r
+WHERE g.donor_id=$1
+ORDER BY g.paid_at DESC,g.id DESC LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;

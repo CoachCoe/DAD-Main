@@ -108,3 +108,21 @@ func TestStaffActionHistoryIsPaged(t *testing.T) {
 		t.Fatal("invalid offset reached the store")
 	}
 }
+
+func TestStaffErrorsMapToStatuses(t *testing.T) {
+	for _, tc := range []struct {
+		err    error
+		status int
+		detail string
+	}{
+		{store.ErrStaffDenied, 401, "Credentials invalid, expired, or temporarily locked"},
+		{store.ErrStaffForbidden, 403, "Permission denied"},
+		{store.ErrStaffInput, 422, "Invalid request fields"},
+		{store.ErrStaffExists, 409, "A staff account with this email already exists"},
+		{store.ErrStaffConflict, 409, "Staff access changed or conflicts with this request"},
+	} {
+		if status, detail := staffStatus(tc.err); status != tc.status || detail != tc.detail {
+			t.Errorf("%v: got %d %q, want %d %q", tc.err, status, detail, tc.status, tc.detail)
+		}
+	}
+}

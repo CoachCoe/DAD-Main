@@ -107,8 +107,8 @@ func (q *Queries) QueueFinancialIntents(ctx context.Context, arg QueueFinancialI
 }
 
 const queueLoginEmail = `-- name: QueueLoginEmail :exec
-INSERT INTO donor_login_emails (id,donor_id,available_at,created_at)
-SELECT $1,$2,$3,$3 WHERE NOT EXISTS
+INSERT INTO donor_login_emails (id,donor_id,available_at,created_at,return_path)
+SELECT $1,$2,$3,$3,$4 WHERE NOT EXISTS
 (SELECT 1 FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 minute')
 `
 
@@ -116,10 +116,16 @@ type QueueLoginEmailParams struct {
 	ID          pgtype.UUID        `json:"id"`
 	DonorID     pgtype.UUID        `json:"donor_id"`
 	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	ReturnPath  pgtype.Text        `json:"return_path"`
 }
 
 func (q *Queries) QueueLoginEmail(ctx context.Context, arg QueueLoginEmailParams) error {
-	_, err := q.db.Exec(ctx, queueLoginEmail, arg.ID, arg.DonorID, arg.AvailableAt)
+	_, err := q.db.Exec(ctx, queueLoginEmail,
+		arg.ID,
+		arg.DonorID,
+		arg.AvailableAt,
+		arg.ReturnPath,
+	)
 	return err
 }
 

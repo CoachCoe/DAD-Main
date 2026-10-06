@@ -25,31 +25,34 @@ type WebhookReceiver interface {
 // Services are the optional dependencies behind each route group; a nil
 // service makes its routes answer 503 rather than fail at startup.
 type Services struct {
-	Wallet          *wallet.Issuer
-	Ready           func(context.Context) error
-	Content         ContentSource
-	Dashboard       DashboardSource
-	Webhook         WebhookReceiver
-	Checkout        CheckoutSource
-	Origin          string
-	TrustedProxies  []netip.Prefix
+	Origin         string // the exact browser Origin admitted on mutations
+	TrustedProxies []netip.Prefix
+	Ready          func(context.Context) error
+
+	Content  ContentSource
+	Checkout CheckoutSource
+	Webhook  WebhookReceiver
+	Partner  PartnerSource
+
 	Account         AccountSource
-	Donor           DonorSource
-	Recurring       RecurringSource
-	Staff           StaffSource
-	Admin           AdminSource
-	StaffFinance    StaffFinanceSource
-	Exports         ExportSource
-	ContentAdmin    ContentAdminSource
-	Partner         PartnerSource
 	EmailConfigured bool
 	EmailChange     EmailChangeSource
+	Donor           DonorSource
+	Dashboard       DashboardSource
+	Recurring       RecurringSource
+	Wallet          *wallet.Issuer
+
+	Staff        StaffSource
+	Admin        AdminSource
+	StaffFinance StaffFinanceSource
+	Exports      ExportSource
+	ContentAdmin ContentAdminSource
 }
 
 type api struct {
 	Services
-	guard  *browserGuard
-	secure bool
+	limiter *rateLimiter
+	secure  bool
 }
 
 // WriteTimeout exceeds providerTimeout so a slow processor call can still answer.
@@ -61,11 +64,13 @@ func NewServer(address string, services Services) *http.Server {
 	}
 	a := &api{
 		Services: services,
-		guard:    newBrowserGuard(services.Origin, services.TrustedProxies),
+		limiter:  newRateLimiter(services.TrustedProxies),
 		secure:   strings.HasPrefix(services.Origin, "https:"),
 	}
 	mux := http.NewServeMux()
-	a.routes(mux)
+	for _, route := range a.routes() {
+		mux.HandleFunc(route.pattern, route.handler)
+	}
 	return &http.Server{
 		Addr:              address,
 		Handler:           secureHeaders(jsonFallback(mux)),
@@ -75,83 +80,6 @@ func NewServer(address string, services Services) *http.Server {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    32 << 10,
 	}
-}
-
-func (a *api) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /health/live", a.live)
-	mux.HandleFunc("GET /health/ready", a.ready)
-	mux.HandleFunc("GET /donor/public/content", a.publicContent)
-	mux.HandleFunc("POST /donor/stripe/webhook", a.stripeWebhook)
-	mux.HandleFunc("POST /donor/checkouts", a.browser(visitorLimit, a.beginCheckout))
-	mux.HandleFunc("GET /donor/referrals/{code}", a.referrer)
-	mux.HandleFunc("POST /donor/referrals/{code}", a.browser(visitorLimit, a.captureReferral))
-	mux.HandleFunc("POST /donor/public/partner-signup", a.browser(visitorLimit, a.partnerSignup))
-
-	mux.HandleFunc("POST /donor/login", a.browser(authLimit, a.login))
-	mux.HandleFunc("POST /donor/claim", a.browser(authLimit, a.claim))
-	mux.HandleFunc("POST /donor/logout", a.browser(accountLimit, a.logout))
-	mux.HandleFunc("POST /donor/logout-all", a.browser(accountLimit, a.signedIn(a.logoutAll)))
-	mux.HandleFunc("POST /donor/me/email-change", a.browser(accountLimit, a.signedIn(a.requestEmailChange)))
-	mux.HandleFunc("POST /donor/email-change/confirm", a.browser(authLimit, a.confirmEmailChange))
-
-	mux.HandleFunc("GET /donor/me/dashboard", a.signedIn(a.dashboard))
-	mux.HandleFunc("GET /donor/me/profile", a.signedIn(a.profile))
-	mux.HandleFunc("POST /donor/me/preferences", a.browser(accountLimit, a.signedIn(a.savePreferences)))
-	mux.HandleFunc("GET /donor/me/sharing", a.signedIn(a.sharing))
-	mux.HandleFunc("POST /donor/me/sharing", a.browser(accountLimit, a.signedIn(a.saveSharing)))
-	mux.HandleFunc("GET /donor/me/referral-code.svg", a.signedIn(a.referralCode))
-	mux.HandleFunc("GET /donor/me/gifts", a.signedIn(a.gifts))
-	mux.HandleFunc("GET /donor/me/receipts/{gift_id}", a.signedIn(a.receipt))
-	mux.HandleFunc("GET /donor/me/annual-summary/{year}", a.signedIn(a.annualSummary))
-	mux.HandleFunc("GET /donor/me/wallet", a.signedIn(a.walletProviders))
-	mux.HandleFunc("POST /donor/me/wallet/apple", a.browser(accountLimit, a.signedIn(a.applePass)))
-	mux.HandleFunc("POST /donor/me/wallet/google", a.browser(accountLimit, a.signedIn(a.googlePass)))
-
-	mux.HandleFunc("GET /donor/me/recurring", a.signedIn(recurringRead(a, RecurringSource.Details)))
-	mux.HandleFunc("GET /donor/me/recurring/amount", a.signedIn(recurringRead(a, RecurringSource.AmountOptions)))
-	mux.HandleFunc("GET /donor/me/recurring/pause", a.signedIn(recurringRead(a, RecurringSource.PauseOptions)))
-	mux.HandleFunc("GET /donor/me/recurring/resume", a.signedIn(recurringRead(a, RecurringSource.ResumeOptions)))
-	mux.HandleFunc("GET /donor/me/payment-method", a.signedIn(recurringRead(a, RecurringSource.PaymentMethodStatus)))
-	mux.HandleFunc("POST /donor/me/recurring/cancel", a.browser(accountLimit, a.signedIn(recurringCommand(a, cancelRecurring))))
-	mux.HandleFunc("POST /donor/me/recurring/pause", a.browser(accountLimit, a.signedIn(recurringCommand(a, pauseRecurring))))
-	mux.HandleFunc("POST /donor/me/recurring/resume", a.browser(accountLimit, a.signedIn(recurringCommand(a, resumeRecurring))))
-	mux.HandleFunc("POST /donor/me/recurring/amount", a.browser(accountLimit, a.signedIn(recurringCommand(a, changeAmount))))
-	mux.HandleFunc("POST /donor/me/payment-method/setup", a.browser(accountLimit, a.signedIn(a.beginPaymentUpdate)))
-
-	mux.HandleFunc("POST /donor/staff/sign-in", a.browser(authLimit, a.staffSignIn))
-	mux.HandleFunc("POST /donor/staff/provision", a.browser(authLimit, a.staffProvision))
-	mux.HandleFunc("POST /donor/staff/activate", a.browser(authLimit, a.staffActivate))
-	mux.HandleFunc("POST /donor/staff/sign-out", a.browser(staffLimit, a.staffSignOut))
-	mux.HandleFunc("GET /donor/staff/me", a.staffMe)
-	mux.HandleFunc("GET /donor/staff/accounts", a.staffAccounts)
-	mux.HandleFunc("POST /donor/staff/accounts", a.browser(staffLimit, a.inviteStaff))
-	mux.HandleFunc("POST /donor/staff/accounts/{staff_id}/disable", a.browser(staffLimit, a.changeStaffAccess("disable")))
-	mux.HandleFunc("POST /donor/staff/accounts/{staff_id}/recovery", a.browser(staffLimit, a.changeStaffAccess("recovery")))
-	mux.HandleFunc("POST /donor/staff/accounts/{staff_id}/role", a.browser(staffLimit, a.changeStaffAccess("role")))
-
-	mux.HandleFunc("GET /donor/staff/donors", a.searchDonors)
-	mux.HandleFunc("GET /donor/staff/donors/{donor_id}", a.donorDetail)
-	mux.HandleFunc("GET /donor/staff/donors/{donor_id}/messages", a.donorMessages)
-	mux.HandleFunc("GET /donor/staff/donors/{donor_id}/actions", a.donorActions)
-	mux.HandleFunc("GET /donor/staff/donors/{donor_id}/actions/pending", a.pendingAction)
-	mux.HandleFunc("GET /donor/staff/audit", a.auditEvents)
-	mux.HandleFunc("GET /donor/staff/enrolments", a.enrolments)
-	mux.HandleFunc("POST /donor/staff/donors/{donor_id}/claim-email", a.browser(staffLimit, a.requestClaim))
-	mux.HandleFunc("POST /donor/staff/messages/{message_id}/resend", a.browser(staffLimit, a.resendMessage))
-
-	mux.HandleFunc("GET /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund", a.refundQuote)
-	mux.HandleFunc("POST /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund", a.browser(staffLimit, a.refund))
-	mux.HandleFunc("GET /donor/staff/donors/{donor_id}/cancellation", a.cancellationQuote)
-	mux.HandleFunc("POST /donor/staff/donors/{donor_id}/cancellation", a.browser(staffLimit, a.cancel))
-
-	mux.HandleFunc("GET /donor/staff/exports", a.exportDatasets)
-	mux.HandleFunc("GET /donor/staff/exports/{file}", a.export)
-
-	mux.HandleFunc("GET /donor/staff/content", a.contentInventory)
-	mux.HandleFunc("GET /donor/staff/partners", a.partnerInquiries)
-	mux.HandleFunc("POST /donor/staff/content/sources", a.browser(staffLimit, a.uploadSource))
-	mux.HandleFunc("GET /donor/staff/content/sources/{source_id}", a.downloadSource)
-	mux.HandleFunc("POST /donor/staff/content/publish", a.browser(staffLimit, a.publish))
 }
 
 // secureHeaders applies the API's response defaults; individual handlers may
@@ -167,8 +95,8 @@ func secureHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// jsonFallback keeps ServeMux's 404 and 405 semantics, including Allow, while
-// answering in the API's JSON error shape.
+// jsonFallback keeps ServeMux's answers for unmatched requests, including
+// Allow on 405 and Location on path-cleaning redirects, in the JSON error shape.
 func jsonFallback(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, pattern := mux.Handler(r); pattern != "" {
@@ -177,10 +105,12 @@ func jsonFallback(mux *http.ServeMux) http.Handler {
 		}
 		capture := &statusCapture{header: http.Header{}}
 		mux.ServeHTTP(capture, r)
-		if allow := capture.header.Get("Allow"); allow != "" {
-			w.Header().Set("Allow", allow)
+		for _, name := range []string{"Allow", "Location"} {
+			if value := capture.header.Get(name); value != "" {
+				w.Header().Set(name, value)
+			}
 		}
-		writeJSON(w, capture.status, problem{http.StatusText(capture.status)})
+		writeJSON(w, capture.status, problem{Detail: http.StatusText(capture.status)})
 	})
 }
 
@@ -198,14 +128,15 @@ func (a *api) live(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) ready(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := withTimeout(r, 3*time.Second)
-	defer cancel()
+	const unavailable = "Donor database unavailable or migrations pending"
 	if a.Ready == nil {
-		writeError(w, r, http.StatusServiceUnavailable, "Donor database unavailable or migrations pending", nil)
+		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
 		return
 	}
+	ctx, cancel := withTimeout(r, 3*time.Second)
+	defer cancel()
 	if err := a.Ready(ctx); err != nil {
-		writeError(w, r, http.StatusServiceUnavailable, "Donor database unavailable or migrations pending", err)
+		writeError(w, r, http.StatusServiceUnavailable, unavailable, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "payments": "test_mode_only"})
@@ -230,6 +161,10 @@ func (a *api) publicContent(w http.ResponseWriter, r *http.Request) {
 
 func (a *api) stripeWebhook(w http.ResponseWriter, r *http.Request) {
 	const unavailable = "Webhook verification unavailable"
+	if a.Webhook == nil {
+		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
+		return
+	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, payments.MaxWebhookBytes))
 	if _, tooLarge := errors.AsType[*http.MaxBytesError](err); tooLarge {
 		writeError(w, r, http.StatusRequestEntityTooLarge, "Webhook payload is too large", nil)
@@ -237,10 +172,6 @@ func (a *api) stripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, "Invalid Stripe event", nil)
-		return
-	}
-	if a.Webhook == nil {
-		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
 		return
 	}
 	ctx, cancel := withTimeout(r, readTimeout)

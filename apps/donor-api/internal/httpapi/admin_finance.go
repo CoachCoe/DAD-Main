@@ -32,73 +32,86 @@ func validReason(reason string) bool {
 	return n >= 5 && n <= 500
 }
 
-// finance runs a staff financial request with the processor time budget.
-func (a *api) finance(w http.ResponseWriter, r *http.Request, run func(context.Context, string) (any, error)) {
-	if a.StaffFinance == nil {
-		writeError(w, r, http.StatusServiceUnavailable, "Financial actions are temporarily unavailable", nil)
-		return
-	}
-	ctx, cancel := withTimeout(r, providerTimeout)
-	defer cancel()
-	body, err := run(ctx, cookieValue(r, staffCookie))
-	respond(w, r, body, err, financeStatus)
+// finance requests call the processor, so they get the provider budget.
+func (a *api) finance() service {
+	return service{a.StaffFinance != nil, "Financial actions are temporarily unavailable", providerTimeout, financeStatus}
 }
 
-func (a *api) refundQuote(w http.ResponseWriter, r *http.Request) {
-	donorID, okDonor := pathUUID(r, "donor_id")
-	giftID, okGift := pathUUID(r, "gift_id")
-	if !okDonor || !okGift {
-		staffInvalid(w, r)
+func (a *api) refundQuote(w http.ResponseWriter, r *http.Request, session string) {
+	donorID, ok := pathID(w, r, "donor_id")
+	if !ok {
 		return
 	}
-	a.finance(w, r, func(ctx context.Context, session string) (any, error) {
+	giftID, ok := pathID(w, r, "gift_id")
+	if !ok {
+		return
+	}
+	a.finance().serve(w, r, func(ctx context.Context) (any, error) {
 		return a.StaffFinance.RefundQuote(ctx, session, donorID, giftID)
 	})
 }
 
-func (a *api) cancellationQuote(w http.ResponseWriter, r *http.Request) {
-	donorID, ok := pathUUID(r, "donor_id")
+func (a *api) cancellationQuote(w http.ResponseWriter, r *http.Request, session string) {
+	donorID, ok := pathID(w, r, "donor_id")
 	if !ok {
-		staffInvalid(w, r)
 		return
 	}
-	a.finance(w, r, func(ctx context.Context, session string) (any, error) {
+	a.finance().serve(w, r, func(ctx context.Context) (any, error) {
 		return a.StaffFinance.CancellationQuote(ctx, session, donorID)
 	})
 }
 
-func (a *api) refund(w http.ResponseWriter, r *http.Request) {
-	donorID, okDonor := pathUUID(r, "donor_id")
-	giftID, okGift := pathUUID(r, "gift_id")
-	key, okKey := idempotencyKey(r)
-	var body struct {
-		Amount int64  `json:"amount_minor"`
-		Reason string `json:"reason"`
+type refundBody struct {
+	Amount int64  `json:"amount_minor"`
+	Reason string `json:"reason"`
+}
+
+func (b refundBody) valid() bool {
+	return b.Amount >= 1 && b.Amount <= maxAmountMinor && validReason(b.Reason)
+}
+
+func (a *api) refund(w http.ResponseWriter, r *http.Request, session string) {
+	donorID, ok := pathID(w, r, "donor_id")
+	if !ok {
+		return
 	}
-	if !okDonor || !okGift || !okKey || !decodeJSON(w, r, &body) || body.Amount < 1 || body.Amount > maxAmountMinor || !validReason(body.Reason) {
-		staffInvalid(w, r)
+	giftID, ok := pathID(w, r, "gift_id")
+	if !ok {
+		return
+	}
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	body, ok := decodeValid[refundBody](w, r)
+	if !ok {
 		return
 	}
 	request := store.StaffFinancialRequest{RequestID: key, DonorID: donorID, TargetID: giftID, Amount: body.Amount, Reason: body.Reason}
-	a.finance(w, r, func(ctx context.Context, session string) (any, error) {
-		return a.StaffFinance.Refund(ctx, session, request)
-	})
+	a.finance().serve(w, r, func(ctx context.Context) (any, error) { return a.StaffFinance.Refund(ctx, session, request) })
 }
 
-func (a *api) cancel(w http.ResponseWriter, r *http.Request) {
-	donorID, okDonor := pathUUID(r, "donor_id")
-	key, okKey := idempotencyKey(r)
-	var body struct {
-		ID     pgtype.UUID `json:"subscription_id"`
-		End    time.Time   `json:"period_end"`
-		Reason string      `json:"reason"`
+type staffCancelBody struct {
+	ID     pgtype.UUID `json:"subscription_id"`
+	End    time.Time   `json:"period_end"`
+	Reason string      `json:"reason"`
+}
+
+func (b staffCancelBody) valid() bool { return b.ID.Valid && !b.End.IsZero() && validReason(b.Reason) }
+
+func (a *api) cancelSubscription(w http.ResponseWriter, r *http.Request, session string) {
+	donorID, ok := pathID(w, r, "donor_id")
+	if !ok {
+		return
 	}
-	if !okDonor || !okKey || !decodeJSON(w, r, &body) || !body.ID.Valid || body.End.IsZero() || !validReason(body.Reason) {
-		staffInvalid(w, r)
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	body, ok := decodeValid[staffCancelBody](w, r)
+	if !ok {
 		return
 	}
 	request := store.StaffFinancialRequest{RequestID: key, DonorID: donorID, TargetID: body.ID, PeriodEnd: body.End.Truncate(time.Microsecond), Reason: body.Reason}
-	a.finance(w, r, func(ctx context.Context, session string) (any, error) {
-		return a.StaffFinance.Cancel(ctx, session, request)
-	})
+	a.finance().serve(w, r, func(ctx context.Context) (any, error) { return a.StaffFinance.Cancel(ctx, session, request) })
 }

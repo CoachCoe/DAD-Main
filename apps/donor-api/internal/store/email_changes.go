@@ -16,6 +16,9 @@ import (
 
 var ErrEmailChangeConflict = errors.New("this address cannot replace the account email")
 
+// proofLifetime is how long an emailed sign-in or confirmation link works.
+const proofLifetime = 15 * time.Minute
+
 type EmailChangeService struct {
 	DB            *pgxpool.Pool
 	EncryptionKey string
@@ -38,106 +41,113 @@ func identityEvent(ctx context.Context, q *queries.Queries, donor, change pgtype
 	return q.RecordIdentityEvent(ctx, queries.RecordIdentityEventParams{ID: id, DonorID: donor, EmailChangeID: change, Action: action})
 }
 
+// Request starts changing the signed-in donor's email to email, replacing any
+// change in progress. The current address must confirm first.
 func (s EmailChangeService) Request(ctx context.Context, session, email string) error {
 	email, err := identity.NormalizeEmail(email)
 	if err != nil {
 		return err
 	}
-	tx, err := s.DB.Begin(ctx)
+	_, err = donorWrite(ctx, s.DB, donorOwner(session), func(tx pgx.Tx, donor queries.Donor, now time.Time) (struct{}, error) {
+		if donor.Email == email {
+			return struct{}{}, ErrEmailChangeConflict
+		}
+		hash, encrypted, err := emailChangeProof(s.EncryptionKey)
+		if err != nil {
+			return struct{}{}, err
+		}
+		id, err := NewID()
+		if err != nil {
+			return struct{}{}, err
+		}
+		q := queries.New(tx)
+		if err = q.CancelEmailChanges(ctx, donor.ID); err != nil {
+			return struct{}{}, err
+		}
+		if err = q.InsertEmailChange(ctx, queries.InsertEmailChangeParams{ID: id, DonorID: donor.ID, OldEmail: donor.Email, NewEmail: email, TokenHash: hash, EncryptedToken: encrypted, ExpiresAt: timestamp(now.Add(proofLifetime))}); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, identityEvent(ctx, q, donor.ID, id, "REQUESTED")
+	})
+	return err
+}
+
+// Confirm redeems an email-change proof and returns the stage reached. Proof
+// from the current address issues the new address's confirmation ("NEW");
+// proof from the new address completes the change ("COMPLETED"), revoking
+// every session and sign-in link. The donor ID never changes.
+func (s EmailChangeService) Confirm(ctx context.Context, proof string) (string, error) {
+	var stage string
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		owner, err := q.EmailChangeOwner(ctx, HashToken(proof))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDenied
+		}
+		if err != nil {
+			return err
+		}
+		donor, err := q.LockDonor(ctx, owner)
+		if err != nil {
+			return err
+		}
+		change, err := q.EmailChangeByToken(ctx, HashToken(proof))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrDenied
+		}
+		if err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		if donor.Disabled || donor.Email != change.OldEmail || !change.ExpiresAt.Time.After(now) {
+			return ErrDenied
+		}
+		switch change.Stage {
+		case "CURRENT":
+			stage = "NEW"
+			return s.advanceEmailChange(ctx, q, change, now)
+		case "NEW":
+			stage = "COMPLETED"
+			return completeEmailChange(ctx, q, change, now)
+		}
+		return ErrDenied
+	})
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer tx.Rollback(ctx)
-	donor, err := donorOwner(session)(ctx, tx, time.Now().UTC())
-	if err != nil {
-		return err
-	}
-	if donor.Email == email {
-		return ErrEmailChangeConflict
-	}
+	return stage, nil
+}
+
+// advanceEmailChange replaces the current address's proof with a fresh one
+// for the new address.
+func (s EmailChangeService) advanceEmailChange(ctx context.Context, q *queries.Queries, change queries.DonorEmailChange, now time.Time) error {
 	hash, encrypted, err := emailChangeProof(s.EncryptionKey)
 	if err != nil {
 		return err
 	}
-	id, err := NewID()
-	if err != nil {
+	if err = q.AdvanceEmailChange(ctx, queries.AdvanceEmailChangeParams{ID: change.ID, TokenHash: hash, EncryptedToken: encrypted, ExpiresAt: timestamp(now.Add(proofLifetime))}); err != nil {
 		return err
 	}
-	q := queries.New(tx)
-	if err = q.CancelEmailChanges(ctx, donor.ID); err != nil {
-		return err
-	}
-	if err = q.InsertEmailChange(ctx, queries.InsertEmailChangeParams{ID: id, DonorID: donor.ID, OldEmail: donor.Email, NewEmail: email, TokenHash: hash, EncryptedToken: encrypted, ExpiresAt: timestamp(time.Now().Add(15 * time.Minute))}); err != nil {
-		return err
-	}
-	if err = identityEvent(ctx, q, donor.ID, id, "REQUESTED"); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return identityEvent(ctx, q, change.DonorID, change.ID, "CURRENT_VERIFIED")
 }
 
-func (s EmailChangeService) Confirm(ctx context.Context, proof string) (string, error) {
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback(ctx)
-	q := queries.New(tx)
-	owner, err := q.EmailChangeOwner(ctx, HashToken(proof))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrDenied
-	}
-	if err != nil {
-		return "", err
-	}
-	donor, err := q.LockDonor(ctx, owner)
-	if err != nil {
-		return "", err
-	}
-	change, err := q.EmailChangeByToken(ctx, HashToken(proof))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrDenied
-	}
-	if err != nil {
-		return "", err
-	}
-	now := time.Now().UTC()
-	if donor.Disabled || donor.Email != change.OldEmail || !change.ExpiresAt.Time.After(now) || (change.Stage != "CURRENT" && change.Stage != "NEW") {
-		return "", ErrDenied
-	}
-	stage := "NEW"
-	if change.Stage == "CURRENT" {
-		hash, encrypted, err := emailChangeProof(s.EncryptionKey)
-		if err != nil {
-			return "", err
+// completeEmailChange moves the account to the new address, which must not
+// belong to another donor: accounts are never merged.
+func completeEmailChange(ctx context.Context, q *queries.Queries, change queries.DonorEmailChange, now time.Time) error {
+	if err := q.SetDonorEmail(ctx, queries.SetDonorEmailParams{ID: change.DonorID, Email: change.NewEmail}); err != nil {
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
+			return ErrEmailChangeConflict
 		}
-		if err = q.AdvanceEmailChange(ctx, queries.AdvanceEmailChangeParams{ID: change.ID, TokenHash: hash, EncryptedToken: encrypted, ExpiresAt: timestamp(now.Add(15 * time.Minute))}); err != nil {
-			return "", err
-		}
-		if err = identityEvent(ctx, q, owner, change.ID, "CURRENT_VERIFIED"); err != nil {
-			return "", err
-		}
-	} else {
-		if err = q.SetDonorEmail(ctx, queries.SetDonorEmailParams{ID: owner, Email: change.NewEmail}); err != nil {
-			var constraint *pgconn.PgError
-			if errors.As(err, &constraint) && constraint.Code == "23505" {
-				return "", ErrEmailChangeConflict
-			}
-			return "", err
-		}
-		if err = q.RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: owner, RevokedAt: timestamp(now)}); err != nil {
-			return "", err
-		}
-		if err = q.ConsumeDonorLinks(ctx, queries.ConsumeDonorLinksParams{DonorID: owner, ConsumedAt: timestamp(now)}); err != nil {
-			return "", err
-		}
-		if err = q.CompleteEmailChange(ctx, queries.CompleteEmailChangeParams{ID: change.ID, CompletedAt: timestamp(now)}); err != nil {
-			return "", err
-		}
-		if err = identityEvent(ctx, q, owner, change.ID, "CHANGED"); err != nil {
-			return "", err
-		}
-		stage = "COMPLETED"
+		return err
 	}
-	return stage, tx.Commit(ctx)
+	if err := q.RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: change.DonorID, RevokedAt: timestamp(now)}); err != nil {
+		return err
+	}
+	if err := q.ConsumeDonorLinks(ctx, queries.ConsumeDonorLinksParams{DonorID: change.DonorID, ConsumedAt: timestamp(now)}); err != nil {
+		return err
+	}
+	if err := q.CompleteEmailChange(ctx, queries.CompleteEmailChangeParams{ID: change.ID, CompletedAt: timestamp(now)}); err != nil {
+		return err
+	}
+	return identityEvent(ctx, q, change.DonorID, change.ID, "CHANGED")
 }

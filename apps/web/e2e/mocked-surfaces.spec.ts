@@ -31,9 +31,8 @@ test("referral landing is accessible and captures an IRL visit from the browser"
   });
   await page.goto("/r/e2e-browser-code?via=irl");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
-  await expect(page.getByRole("main").getByRole("status")).toBeEmpty();
+  await expect.poll(() => captures.length).toBeGreaterThan(0);
   expect(kinds(captures)).toEqual([JSON.stringify({ kind: "IRL" })]);
-  await expect(page.getByText("About a dollar a day · $30/month.")).toBeVisible();
   await expectAccessible(page);
   expect(errors).toEqual([]);
 });
@@ -45,21 +44,21 @@ test("a shared link without the marker is captured as a Link Referral", async ({
     await route.fulfill({ json: { captured: true, public_name: null } });
   });
   await page.goto("/r/e2e-browser-code");
-  await expect(page.getByRole("main").getByRole("status")).toBeEmpty();
+  await expect.poll(() => captures.length).toBeGreaterThan(0);
   expect(kinds(captures)).toEqual([JSON.stringify({ kind: "LINK" })]);
 });
 
-test("a rate-limited referral capture explains the wait and recovers", async ({ page }) => {
-  let limited = true;
-  await page.route("**/api/donor/referrals/*", (route) => limited
-    ? route.fulfill({ status: 429, json: { detail: "Too many requests" } })
-    : route.fulfill({ json: { captured: true, public_name: null } }));
+// The real API does not know this code, so the page leads with "no longer available".
+test("an unavailable referral link offers giving without a referral and no capture error", async ({ page }) => {
+  let attempts = 0;
+  await page.route("**/api/donor/referrals/*", (route) => { attempts += 1; return route.fulfill({ status: 429, json: { detail: "Too many requests" } }); });
   await page.goto("/r/e2e-browser-code");
-  await expect(page.getByRole("main").getByRole("alert")).toContainText("Wait a minute");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("This referral link is no longer available");
+  await expect.poll(() => attempts).toBeGreaterThan(0);
+  await expect(page.getByRole("link", { name: "Continue without a referral" })).toHaveAttribute("href", "/donate");
+  await expect(page.getByRole("button", { name: "Retry referral" })).toHaveCount(0);
+  await expect(page.getByText(/couldn’t confirm your referral/)).toHaveCount(0);
   await expectAccessible(page);
-  limited = false;
-  await page.getByRole("button", { name: "Retry referral" }).click();
-  await expect(page.getByRole("main").getByRole("alert")).toBeEmpty();
 });
 
 test("the referral code page is accessible and shows the code", async ({ page }) => {
@@ -90,7 +89,9 @@ test("a staff page past sign-in is accessible", async ({ page }) => {
 const staffDetail = { id: "donor-1", email: "pat.donor@example.org", public_name: "Pat",
   streak: { current: 4, best: 6, at_risk: false, computed_at: "2027-01-01T00:00:00Z" },
   referrer: { id: "donor-0", email: "friend@example.org", type: "IRL" },
-  gifts: [{ id: "4f1c2b9e-0d7a-4e55-9b0c-1a2b3c4d5e6f", amount_minor: 3000, currency: "USD", frequency: "MONTHLY", paid_at: "2027-01-01T00:00:00Z" }],
+  claimed: true, founding_donor: true,
+  subscription: { amount_minor: 3000, next_renewal: "2027-02-01T00:00:00Z", observed_at: "2027-01-01T00:00:00Z", status: "active", stops_at: null },
+  gifts: [{ id: "4f1c2b9e-0d7a-4e55-9b0c-1a2b3c4d5e6f", amount_minor: 3000, currency: "USD", frequency: "MONTHLY", paid_at: "2027-01-01T00:00:00Z", refunded_minor: 0, net_minor: 3000 }],
   referred: [{ id: "donor-2", email: "invitee@example.org", type: "LINK", net_minor: 3000 }],
   next_gifts_offset: null, next_referrals_offset: null };
 

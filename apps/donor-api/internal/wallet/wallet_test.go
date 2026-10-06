@@ -47,7 +47,7 @@ func testIssuer(t *testing.T) (*Issuer, time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	apple, err := NewApple(der, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), caDER, now)
+	apple, err := newApple(der, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), caDER, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestWalletConfigurationLoadsPrivateFilesAndRejectsInsecureOrigin(t *testing
 	if _, err = FromEnvironment(getenv, "http://dad.example"); err == nil {
 		t.Fatal("insecure issuance origin accepted")
 	}
-	if _, err = NewApple(issuer.Apple.Certificate.Raw, files["DONOR_WALLET_APPLE_KEY_FILE"], issuer.Apple.Certificate.Raw, now); err == nil {
+	if _, err = newApple(issuer.Apple.Certificate.Raw, files["DONOR_WALLET_APPLE_KEY_FILE"], issuer.Apple.Certificate.Raw, now); err == nil {
 		t.Fatal("invalid certificate chain accepted")
 	}
 }

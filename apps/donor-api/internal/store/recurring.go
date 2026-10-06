@@ -46,7 +46,11 @@ type AmountRequest struct {
 // RecurringDetails describes the donor's monthly gift. State is omitted only by
 // a staff quote for a donor without one.
 type RecurringDetails struct {
-	Mode         string        `json:"mode"`
+	Mode string `json:"mode"`
+	// ObservedAt and Stale mark details shown from stored state because the
+	// processor could not be read.
+	ObservedAt   *time.Time    `json:"observed_at,omitempty"`
+	Stale        bool          `json:"stale,omitempty"`
 	State        string        `json:"state,omitempty"`
 	Subscription *Subscription `json:"subscription"`
 }
@@ -82,46 +86,6 @@ type Resumption struct {
 	RequestID   string    `json:"request_id"`
 }
 
-type ownerResolver func(context.Context, pgx.Tx, time.Time) (queries.Donor, error)
-
-func donorOwner(token string) ownerResolver {
-	return func(ctx context.Context, tx pgx.Tx, now time.Time) (queries.Donor, error) {
-		q := queries.New(tx)
-		d, err := Authenticated(ctx, q, token, now)
-		if err != nil {
-			return d, err
-		}
-		if _, err = q.LockDonor(ctx, d.ID); err != nil {
-			return d, err
-		}
-		return Authenticated(ctx, q, token, time.Now().UTC())
-	}
-}
-func ownerTransaction[T any](ctx context.Context, db *pgxpool.Pool, owner ownerResolver, operation func(pgx.Tx, queries.Donor, time.Time) (T, error)) (T, error) {
-	var empty T
-	tx, err := db.Begin(ctx)
-	if err != nil {
-		return empty, err
-	}
-	defer tx.Rollback(ctx)
-	d, err := owner(ctx, tx, time.Now().UTC())
-	if err != nil {
-		return empty, err
-	}
-	result, err := operation(tx, d, time.Now().UTC())
-	if err != nil {
-		return empty, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return empty, err
-	}
-	return result, nil
-}
-
-// ValidRequestID reports whether id is a version-4 UUID, the only form accepted as an idempotency key.
-func ValidRequestID(id pgtype.UUID) bool {
-	return id.Valid && id.Bytes[6]>>4 == 4 && id.Bytes[8]&0xc0 == 0x80
-}
 func ownedAttempt(ctx context.Context, q *queries.Queries, donor, id pgtype.UUID) (queries.DonorStripeCheckout, error) {
 	row, err := q.OwnedMonthlyAttempt(ctx, queries.OwnedMonthlyAttemptParams{DonorID: donor, ID: id})
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !row.StripeSubscriptionID.Valid) {
@@ -165,8 +129,16 @@ func (s RecurringService) prefetchSubscription(ctx context.Context, donor pgtype
 	}
 	return fetchSubscription(ctx, q, s.Gateway, attempt.ID, attempt.StripeSubscriptionID.String)
 }
+
+// viewSnapshot is donorSnapshot for a view, which falls back to stored state
+// when live is false.
+func (s RecurringService) viewSnapshot(ctx context.Context, token string) (*subscriptionSnapshot, bool, error) {
+	return liveRead(ctx, func(ctx context.Context) (*subscriptionSnapshot, error) { return s.donorSnapshot(ctx, token) })
+}
+
+// donorSnapshot is prefetchSubscription for the donor signed in with token.
 func (s RecurringService) donorSnapshot(ctx context.Context, token string) (*subscriptionSnapshot, error) {
-	d, err := Authenticated(ctx, queries.New(s.DB), token, time.Now().UTC())
+	d, err := authenticate(ctx, queries.New(s.DB), token, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -203,19 +175,47 @@ func releaseLease(ctx context.Context, q *queries.Queries, attempt, command pgty
 	return q.ReleaseSubscriptionLease(ctx, queries.ReleaseSubscriptionLeaseParams{AttemptID: attempt, CommandID: command})
 }
 
-// submit sends a leased command's processor mutation with no lock held, then
-// reads the resulting subscription for the transaction that completes it.
-func (s RecurringService) submit(ctx context.Context, lease *subscriptionLease, mutate func(context.Context) error) (*subscriptionSnapshot, error) {
-	request, cancel := context.WithTimeout(ctx, submitWindow)
-	defer cancel()
-	if err := mutate(request); err != nil {
-		return nil, err
+// leasedCommand runs a recurring command in the three steps every processor
+// mutation takes. prepare validates and records the command under the donor
+// lock, returning either the command's settled result or a lease on its
+// subscription. mutate then calls the processor with no lock held, bounded
+// well inside the lease, and complete applies the subscription it produced
+// under the lock again. The lease is released however the command ends; one
+// that cannot be released expires on its own.
+func leasedCommand[T any](ctx context.Context, s RecurringService, owner ownerResolver,
+	prepare func(pgx.Tx, queries.Donor, time.Time) (*T, *subscriptionLease, error),
+	mutate func(context.Context, *subscriptionLease) error,
+	complete func(pgx.Tx, queries.Donor, time.Time, *subscriptionSnapshot) (T, error),
+) (T, error) {
+	var zero T
+	var lease *subscriptionLease
+	settled, err := donorWrite(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*T, error) {
+		result, acquired, err := prepare(tx, d, now)
+		lease = acquired
+		return result, err
+	})
+	if err != nil {
+		return zero, err
 	}
-	return fetchSubscription(ctx, queries.New(s.DB), s.Gateway, lease.attempt, lease.subscription)
+	if settled != nil {
+		return *settled, nil
+	}
+	defer s.release(ctx, lease)
+	request, cancel := context.WithTimeout(ctx, submitWindow)
+	err = mutate(request, lease)
+	cancel()
+	if err != nil {
+		return zero, err
+	}
+	snapshot, err := fetchSubscription(ctx, queries.New(s.DB), s.Gateway, lease.attempt, lease.subscription)
+	if err != nil {
+		return zero, err
+	}
+	return donorWrite(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (T, error) {
+		return complete(tx, d, now, snapshot)
+	})
 }
 
-// release ends a lease once its command has finished, successfully or not. A
-// lease that cannot be released expires on its own.
 func (s RecurringService) release(ctx context.Context, lease *subscriptionLease) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
@@ -223,47 +223,63 @@ func (s RecurringService) release(ctx context.Context, lease *subscriptionLease)
 		slog.Warn("subscription lease release failed; waiting for expiry", "cause", fmt.Sprintf("%T", err))
 	}
 }
-func (s RecurringService) read(ctx context.Context, tx pgx.Tx, attempt queries.DonorStripeCheckout, now time.Time, policy string, snapshot *subscriptionSnapshot) (queries.DonorSubscription, payments.Object, error) {
-	empty := queries.DonorSubscription{}
+
+// subscriptionUse is what a command needs of the subscription it reads.
+type subscriptionUse int
+
+const (
+	viewOnly subscriptionUse = iota
+	// forAmount requires no schedule, pending update or pause, which a new
+	// amount could conflict with.
+	forAmount
+	// forPause requires no schedule or pending update, and a billing anchor to
+	// date renewals from.
+	forPause
+)
+
+// read reconciles the locked attempt's subscription with the processor's
+// current state and checks it suits use.
+func (s RecurringService) read(ctx context.Context, tx pgx.Tx, attempt queries.DonorStripeCheckout, now time.Time, use subscriptionUse, snapshot *subscriptionSnapshot) (queries.DonorSubscription, payments.Object, error) {
 	q := queries.New(tx)
 	remote, err := currentSubscription(ctx, q, s.Gateway, attempt, snapshot)
 	if err != nil {
-		return empty, nil, err
+		return queries.DonorSubscription{}, nil, err
 	}
 	draft, err := q.CheckoutDraft(ctx, attempt.CheckoutID)
 	if err != nil {
-		return empty, nil, err
+		return queries.DonorSubscription{}, nil, err
 	}
-	row, err := reconcileRemoteSubscription(ctx, tx, draft, attempt, remote, now)
+	row, err := reconcileRemoteSubscription(ctx, q, draft, attempt, remote, now)
 	if err != nil {
-		return empty, nil, err
+		return queries.DonorSubscription{}, nil, err
 	}
-	if policy != "" && (!absent(remote, "schedule") || !absent(remote, "pending_update")) {
-		return empty, nil, ErrSubscriptionConflict
+	if use != viewOnly && (!remote.Absent("schedule") || !remote.Absent("pending_update")) {
+		return queries.DonorSubscription{}, nil, ErrSubscriptionConflict
 	}
-	if policy == "amount" && !absent(remote, "pause_collection") {
-		return empty, nil, ErrSubscriptionConflict
+	if use == forAmount && !remote.Absent("pause_collection") {
+		return queries.DonorSubscription{}, nil, ErrSubscriptionConflict
 	}
-	if policy == "pause" {
-		if _, err = billingAnchor(remote); err != nil {
-			return empty, nil, err
+	if use == forPause {
+		if _, err = remote.Unix("billing_cycle_anchor"); err != nil {
+			return queries.DonorSubscription{}, nil, err
 		}
 	}
 	return row, remote, nil
 }
-func billingAnchor(remote payments.Object) (time.Time, error) {
-	anchor, err := remote.Int("billing_cycle_anchor")
-	if err != nil || anchor < 0 || anchor > 253402300799 {
-		return time.Time{}, payments.ErrFacts
-	}
-	return time.Unix(anchor, 0).UTC(), nil
-}
+
+// Details describes the donor's monthly gift as the processor reports it now,
+// or as last observed if the processor cannot be read.
 func (s RecurringService) Details(ctx context.Context, token string) (RecurringDetails, error) {
-	snapshot, err := s.donorSnapshot(ctx, token)
+	snapshot, live, err := s.viewSnapshot(ctx, token)
 	if err != nil {
 		return RecurringDetails{}, err
 	}
-	return ownerTransaction(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (RecurringDetails, error) {
+	if !live {
+		return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (RecurringDetails, error) {
+			return storedDetails(ctx, q, d.ID)
+		})
+	}
+	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (RecurringDetails, error) {
 		q := queries.New(tx)
 		attempt, err := q.LatestMonthlyAttempt(ctx, d.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -275,11 +291,11 @@ func (s RecurringService) Details(ctx context.Context, token string) (RecurringD
 		if !attempt.StripeSubscriptionID.Valid {
 			return RecurringDetails{Mode: "test", State: "preparing"}, nil
 		}
-		row, _, err := s.read(ctx, tx, attempt, now, "", snapshot)
+		row, _, err := s.read(ctx, tx, attempt, now, viewOnly, snapshot)
 		if err != nil {
 			return RecurringDetails{}, err
 		}
-		if _, err = RefreshProjectionInTx(ctx, tx, d.ID, now); err != nil {
+		if _, err = refreshProjection(ctx, tx, d.ID, now); err != nil {
 			return RecurringDetails{}, err
 		}
 		return subscriptionView(ctx, q, attempt, row)
@@ -293,18 +309,17 @@ func (s RecurringService) Cancel(ctx context.Context, token string, r Cancellati
 	if err != nil {
 		return RecurringDetails{}, err
 	}
-	return s.cancelAuthorized(ctx, donorOwner(token), snapshot, r)
+	return s.cancel(ctx, donorOwner(token), snapshot, r)
 }
 
-// cancelAuthorized commits the cancellation and its lease under the donor lock,
-// schedules it with the processor without that lock, then records the result.
-func (s RecurringService) cancelAuthorized(ctx context.Context, owner ownerResolver, snapshot *subscriptionSnapshot, r CancellationRequest) (RecurringDetails, error) {
-	var lease *subscriptionLease
-	ready, err := ownerTransaction(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*RecurringDetails, error) {
+// cancel schedules the cancellation for owner's donor, who may be acting
+// themselves or through staff.
+func (s RecurringService) cancel(ctx context.Context, owner ownerResolver, snapshot *subscriptionSnapshot, r CancellationRequest) (RecurringDetails, error) {
+	prepare := func(tx pgx.Tx, d queries.Donor, now time.Time) (*RecurringDetails, *subscriptionLease, error) {
 		q := queries.New(tx)
 		attempt, err := ownedAttempt(ctx, q, d.ID, r.AttemptID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		action, err := q.CancellationByID(ctx, r.RequestID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -314,41 +329,26 @@ func (s RecurringService) cancelAuthorized(ctx context.Context, owner ownerResol
 			err = ErrSubscriptionConflict
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		row, _, err := s.read(ctx, tx, attempt, now, "", snapshot)
+		row, _, err := s.read(ctx, tx, attempt, now, viewOnly, snapshot)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if action.CompletedAt.Valid || row.StopsAt.Valid {
 			view, err := completeCancellation(ctx, tx, d.ID, attempt, action, row, now)
-			return &view, err
+			return &view, nil, err
 		}
-		if !row.PeriodEnd.Time.Equal(r.PeriodEnd) || !now.Before(r.PeriodEnd) || now.Sub(action.CreatedAt.Time) >= 23*time.Hour {
-			return nil, ErrSubscriptionConflict
+		if !row.PeriodEnd.Time.Equal(r.PeriodEnd) || !now.Before(r.PeriodEnd) || now.Sub(action.CreatedAt.Time) >= commandRetryWindow || !renews(row.Status) {
+			return nil, nil, ErrSubscriptionConflict
 		}
-		switch row.Status {
-		case "active", "past_due", "unpaid":
-		default:
-			return nil, ErrSubscriptionConflict
-		}
-		lease, err = leaseSubscription(ctx, q, d.ID, attempt, action.ID, now)
-		return nil, err
-	})
-	if err != nil {
-		return RecurringDetails{}, err
+		lease, err := leaseSubscription(ctx, q, d.ID, attempt, action.ID, now)
+		return nil, lease, err
 	}
-	if ready != nil {
-		return *ready, nil
-	}
-	defer s.release(ctx, lease)
-	snapshot, err = s.submit(ctx, lease, func(ctx context.Context) error {
+	mutate := func(ctx context.Context, lease *subscriptionLease) error {
 		return s.Gateway.ScheduleCancellation(ctx, lease.subscription, r.PeriodEnd.Unix(), "dad-cancel-"+r.RequestID.String())
-	})
-	if err != nil {
-		return RecurringDetails{}, err
 	}
-	return ownerTransaction(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (RecurringDetails, error) {
+	complete := func(tx pgx.Tx, d queries.Donor, now time.Time, snapshot *subscriptionSnapshot) (RecurringDetails, error) {
 		q := queries.New(tx)
 		attempt, err := ownedAttempt(ctx, q, d.ID, r.AttemptID)
 		if err != nil {
@@ -358,7 +358,7 @@ func (s RecurringService) cancelAuthorized(ctx context.Context, owner ownerResol
 		if err != nil {
 			return RecurringDetails{}, err
 		}
-		row, _, err := s.read(ctx, tx, attempt, now, "", snapshot)
+		row, _, err := s.read(ctx, tx, attempt, now, viewOnly, snapshot)
 		if err != nil {
 			return RecurringDetails{}, err
 		}
@@ -366,8 +366,16 @@ func (s RecurringService) cancelAuthorized(ctx context.Context, owner ownerResol
 			return RecurringDetails{}, ErrSubscriptionConflict
 		}
 		return completeCancellation(ctx, tx, d.ID, attempt, action, row, now)
-	})
+	}
+	return leasedCommand(ctx, s, owner, prepare, mutate, complete)
 }
+
+// renews reports whether a subscription in status will renew, which a
+// cancellation stops and a card update pays for.
+func renews(status string) bool {
+	return status == "active" || status == "past_due" || status == "unpaid"
+}
+
 func completeCancellation(ctx context.Context, tx pgx.Tx, donor pgtype.UUID, attempt queries.DonorStripeCheckout, action queries.DonorCancellation, row queries.DonorSubscription, now time.Time) (RecurringDetails, error) {
 	q := queries.New(tx)
 	if !action.CompletedAt.Valid {
@@ -378,7 +386,7 @@ func completeCancellation(ctx context.Context, tx pgx.Tx, donor pgtype.UUID, att
 	if err := releaseLease(ctx, q, attempt.ID, action.ID); err != nil {
 		return RecurringDetails{}, err
 	}
-	if _, err := RefreshProjectionInTx(ctx, tx, donor, now); err != nil {
+	if _, err := refreshProjection(ctx, tx, donor, now); err != nil {
 		return RecurringDetails{}, err
 	}
 	return subscriptionView(ctx, q, attempt, row)
@@ -417,6 +425,6 @@ func pauseView(ctx context.Context, q *queries.Queries, p queries.DonorPause) (P
 func amountView(c queries.DonorAmountChange) *AmountChange {
 	return &AmountChange{RequestID: c.ID.String(), AmountMinor: c.AmountMinor, PreviousMinor: c.PreviousMinor, EffectiveAt: c.EffectiveAt.Time, Confirmed: c.ConfirmedAt.Valid}
 }
-func resumptionView(c queries.DonorResumption) *Resumption {
-	return &Resumption{RequestID: c.ID.String(), PauseID: c.PauseID.String(), NextRenewal: c.NextRenewal.Time, Confirmed: c.ConfirmedAt.Valid}
+func resumptionView(c queries.DonorResumption) Resumption {
+	return Resumption{RequestID: c.ID.String(), PauseID: c.PauseID.String(), NextRenewal: c.NextRenewal.Time, Confirmed: c.ConfirmedAt.Valid}
 }

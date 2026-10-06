@@ -1,14 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
+import { Page } from "@/components/donor/Page";
+import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, failureMessage } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { formatDate } from "@/lib/dates";
 
 type Gifts = { email: string; next_offset: number | null; gifts: {
-  id: string; amount_minor: number; currency: string; frequency: string; paid_at: string;
+  id: string; amount_minor: number; currency: string; frequency: string; paid_at: string; refunded_minor?: number;
 }[] };
 
 export default function Giving() {
@@ -16,7 +19,14 @@ export default function Giving() {
   const [signedOut, setSignedOut] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const { resource, data, reload } = useApiResource<Gifts>(signedOut ? null : `/donor/me/gifts?offset=${offset}`);
+  const { resource, data, failed, reload } = useApiResource<Gifts>(signedOut ? null : `/donor/me/gifts?offset=${offset}`);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const paged = useRef(false);
+  // Paging replaces the list the donor was reading; land them at the top of the new page.
+  useEffect(() => {
+    if (data && paged.current) { paged.current = false; heading.current?.focus(); }
+  }, [data]);
+  const page = (next: number) => { paged.current = true; setOffset(next); };
   const messages = resourceMessages(resource, { loading: "Loading your giving…",
     failure: "Giving history could not be loaded right now. Please retry in a moment." });
   async function logout() {
@@ -25,33 +35,33 @@ export default function Giving() {
     catch (cause) { setError(failureMessage(cause, "Sign-out was not confirmed. Please retry.")); }
     finally { setBusy(false); }
   }
-  return <section className="panel">
-    <h1>My giving</h1>
-    <p><Link href="/account/dashboard">My dashboard</Link></p>
-    <p>Sandbox history only. These are simulated payments, not tax receipts. Records show verified refund adjustments. Legal tax receipts await activation.</p>
-    {signedOut || resource.state === "signedOut" ? <p><Link href="/account/sign-in">Sign in to view your giving</Link></p> : <>
+  return <Page eyebrow="My account" title="My giving" back={{ href: "/account/dashboard", label: "My dashboard" }}>
+    {signedOut || resource.state === "signedOut" ? <SignInPrompt>Sign in to view your giving</SignInPrompt> : <>
       {data && <>
-        <p>{data.email}</p>
-        <nav aria-label="Manage giving" className="accountLinks">
+        <p>Signed in as <strong>{data.email}</strong></p>
+        <nav aria-label="Manage giving" className="links">
           <Link href="/account/recurring">Manage monthly giving</Link>
           <Link href="/account/payment-method">Update payment method</Link>
           <Link href="/account/receipts">Annual summaries</Link>
         </nav>
-        <h2>Gifts</h2>
+        <h2 ref={heading} tabIndex={-1}>Gifts</h2>
         {data.gifts.length === 0 ? <p>No confirmed test gifts yet. Payment confirmation may take a moment.</p> :
-          <ul>{data.gifts.map((gift) => <li key={gift.id}>
-            {formatMoney(gift.amount_minor, gift.currency)}
-            {" · "}{gift.frequency === "MONTHLY" ? "Monthly" : "One time"}{" · "}
-            <time dateTime={gift.paid_at}>{new Date(gift.paid_at).toLocaleDateString()}</time>{" · "}<Link href={`/account/receipts?gift=${gift.id}`}>Gift record</Link>
+          <ul className="rows">{data.gifts.map((gift) => <li key={gift.id}>
+            <span><strong>{formatMoney(gift.amount_minor, gift.currency)}</strong>
+              {" · "}{gift.frequency === "MONTHLY" ? "Monthly" : "One time"}{" · "}
+              <time dateTime={gift.paid_at}>{formatDate(gift.paid_at)}</time>
+              {gift.refunded_minor ? <>{" · "}Refunded {formatMoney(gift.refunded_minor, gift.currency)}</> : null}</span>
+            <Link href={`/account/receipts?gift=${gift.id}`}>Gift record</Link>
           </li>)}</ul>}
-        {offset > 0 && <button type="button" className="secondary" onClick={() => setOffset(Math.max(0, offset - 50))}>Newer gifts</button>}
-        {data.next_offset !== null && <button type="button" className="secondary" onClick={() => setOffset(data.next_offset ?? 0)}>Older gifts</button>}
+        {(offset > 0 || data.next_offset !== null) && <div className="actions">
+          {offset > 0 && <button type="button" className="secondary" onClick={() => page(Math.max(0, offset - 50))}>Newer gifts</button>}
+          {data.next_offset !== null && <button type="button" className="secondary" onClick={() => page(data.next_offset ?? 0)}>Older gifts</button>}
+        </div>}
+        <p className="note">Sandbox history only: simulated payments, not tax receipts. Refunds are shown once Stripe confirms them.</p>
       </>}
       <Announcer status={messages.status} alert={error || messages.alert} />
-      <div className="actionRow">
-        <button type="button" className="secondary" onClick={reload}>Refresh history</button>
-        {data && <button type="button" className="quiet" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out"}</button>}
-      </div>
+      {failed && <button type="button" className="secondary" onClick={reload}>Refresh history</button>}
+      {data && <button type="button" className="quiet" disabled={busy} onClick={logout}>{busy ? "Signing out…" : "Sign out"}</button>}
     </>}
-  </section>;
+  </Page>;
 }

@@ -29,7 +29,7 @@ func (e configError) Error() string { return string(e) }
 
 var kinds = []string{"stripe", "projections", "login-email", "email-changes", "messages"}
 
-func run(ctx context.Context, args []string) error {
+func run(ctx context.Context, args []string, getenv func(string) string) error {
 	flags := flag.NewFlagSet("donor-worker", flag.ContinueOnError)
 	kind := flags.String("kind", "", strings.Join(kinds, ", "))
 	once := flags.Bool("once", false, "process at most one item")
@@ -43,10 +43,10 @@ func run(ctx context.Context, args []string) error {
 	if *retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_")) {
 		return configError("--retry-event requires --kind stripe and an evt_ identifier")
 	}
-	if os.Getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
+	if getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
 		return configError("workers require DONOR_GO_WORKERS_ENABLED=true")
 	}
-	dsn := os.Getenv("DONOR_GO_DATABASE_URL")
+	dsn := getenv("DONOR_GO_DATABASE_URL")
 	if dsn == "" {
 		return configError("DONOR_GO_DATABASE_URL is required")
 	}
@@ -71,7 +71,7 @@ func run(ctx context.Context, args []string) error {
 			return configError("expected an unprocessed Stripe event")
 		}
 	}
-	step, err := stepFor(*kind, pool)
+	step, err := stepFor(*kind, pool, getenv)
 	if err != nil {
 		return err
 	}
@@ -82,10 +82,10 @@ type deliverer interface {
 	DeliverNext(context.Context, time.Time) (bool, error)
 }
 
-func stepFor(kind string, pool *pgxpool.Pool) (func(context.Context) (bool, error), error) {
+func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(context.Context) (bool, error), error) {
 	switch kind {
 	case "stripe":
-		gateway, err := payments.NewStripeGateway(os.Getenv("STRIPE_SECRET_KEY"))
+		gateway, err := payments.NewStripeGateway(getenv("STRIPE_SECRET_KEY"))
 		if err != nil {
 			return nil, configError("STRIPE_SECRET_KEY must be a Stripe test-mode secret key")
 		}
@@ -95,11 +95,11 @@ func stepFor(kind string, pool *pgxpool.Pool) (func(context.Context) (bool, erro
 			return store.RefreshNextProjection(ctx, pool, time.Now().UTC())
 		}, nil
 	}
-	settings, err := mail.FromEnvironment(os.Getenv)
+	settings, err := mail.FromEnvironment(getenv)
 	if err != nil || settings == nil {
 		return nil, configError("SMTP settings are missing or invalid")
 	}
-	origin := os.Getenv("DONOR_PUBLIC_ORIGIN")
+	origin := getenv("DONOR_PUBLIC_ORIGIN")
 	if payments.ValidateOrigin(origin) != nil {
 		return nil, configError("DONOR_PUBLIC_ORIGIN must be the public HTTPS origin used in email links")
 	}
@@ -120,7 +120,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err := run(ctx, os.Args[1:])
+	err := run(ctx, os.Args[1:], os.Getenv)
 	if err == nil || errors.Is(err, context.Canceled) {
 		return
 	}

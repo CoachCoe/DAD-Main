@@ -41,10 +41,10 @@ func (g journeyCharges) RetrievePaymentIntent(_ context.Context, id string) (pay
 	return payments.DecodeObject(raw)
 }
 func (journeyCharges) RetrieveRefund(context.Context, string) (payments.Object, error) {
-	return nil, payments.ErrCheckoutUnavailable
+	return nil, payments.ErrProcessorUnavailable
 }
 func (journeyCharges) RetrieveSubscription(context.Context, string) (payments.Object, error) {
-	return nil, payments.ErrCheckoutUnavailable
+	return nil, payments.ErrProcessorUnavailable
 }
 
 type journeyMail struct{ message mail.Message }
@@ -58,7 +58,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	ctx := context.Background()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil || dsn == "" || config.ConnConfig.Database != "donor_go" {
+	if err != nil || dsn == "" || (config.ConnConfig.Database != "donor_go" && !strings.HasPrefix(config.ConnConfig.Database, "donor_go_")) {
 		t.Fatal("dedicated migrated donor_go database required")
 	}
 	pool, err := store.Open(ctx, dsn)

@@ -27,7 +27,8 @@ it("labels illustrative figures alongside real figures and their as-of date", as
   expect(screen.getByRole("heading", { level: 1, name: "Impact ledger" })).toBeVisible();
   expect(screen.getByText("$30.00")).toBeInTheDocument();
   expect(screen.getByText("Illustrative figure — not a reported outcome")).toBeInTheDocument();
-  expect(screen.getByText("2026-09-01")).toHaveAttribute("dateTime", "2026-09-01");
+  expect(screen.getByText("Sep 1, 2026")).toHaveAttribute("dateTime", "2026-09-01");
+  expect(screen.getByText("100 people").closest("p")).toHaveTextContent("Illustrative");
   expect(screen.getByText("Source document retained by DAD and available on request.")).toBeInTheDocument();
 });
 

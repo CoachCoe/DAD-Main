@@ -13,7 +13,7 @@ import (
 // The caller holds the donor then gift lock, and current was read from the
 // processor after the gift's latest recorded refund state; webhook timestamps
 // cannot order competing refund states reliably.
-func RecordRefundInTx(ctx context.Context, q *queries.Queries, gift queries.DonorGift, current payments.Object, eventID, actionID pgtype.UUID, now time.Time) error {
+func recordRefund(ctx context.Context, q *queries.Queries, gift queries.DonorGift, current payments.Object, eventID, actionID pgtype.UUID, now time.Time) error {
 	amount, err := current.Int("amount")
 	status := strings.ToUpper(current.Text("status"))
 	remoteID := current.Text("id")

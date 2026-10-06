@@ -145,6 +145,7 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 - `apps/donor-api/cmd`: API, workers, migrations, administrator bootstrap.
 - `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, credentials.
 - `apps/donor-api/db`: versioned SQL migrations and sqlc queries.
+- `apps/donor-api/api`: the OpenAPI contract for web and native clients, checked by tests.
 - `apps/web`: public website, donor account, staff interface, browser and unit tests.
 - `docs`: product rules, architecture, operations, and security guidance.
 

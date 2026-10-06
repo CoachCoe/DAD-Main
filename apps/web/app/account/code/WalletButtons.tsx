@@ -1,23 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { api } from "@/lib/api";
+import { useApiResource } from "@/lib/useApiResource";
 
 export default function WalletButtons() {
-  const [providers, setProviders] = useState({ apple: false, google: false });
+  const { data: providers, resource, reload } = useApiResource<{ apple: boolean; google: boolean }>("/donor/me/wallet");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [retry, setRetry] = useState(0);
   const [googleURL, setGoogleURL] = useState("");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: retry is the retry trigger, deliberately unread
-  useEffect(() => {
-    const controller = new AbortController();
-    api<typeof providers>("/donor/me/wallet", { signal: controller.signal }).then((value) => {
-      if (!controller.signal.aborted) { setProviders(value); setError(""); }
-    }).catch(() => { if (!controller.signal.aborted) setError("Wallet availability could not be checked. Your on-screen code still works."); });
-    return () => controller.abort();
-  }, [retry]);
   async function add(provider: "apple" | "google") {
     if (busy) return;
     setBusy(true); setError("");
@@ -38,11 +30,15 @@ export default function WalletButtons() {
     } catch { setError("The Wallet pass could not be prepared. Please retry. Your on-screen code still works."); }
     finally { setBusy(false); }
   }
-  return <div>
-    {providers.apple && <button type="button" className="secondary" disabled={busy} onClick={() => add("apple")}>Add to Apple Wallet</button>}
-    {providers.google && (googleURL ? <a className="secondary" href={googleURL} rel="noreferrer">Save to Google Wallet</a>
-      : <button type="button" className="secondary" disabled={busy} onClick={() => add("google")}>Add to Google Wallet</button>)}
-    <Announcer status={busy ? "Preparing your Wallet pass…" : ""} alert={error} />
-    {error && <button type="button" className="quiet" onClick={() => setRetry((value) => value + 1)}>Check Wallet availability again</button>}
-  </div>;
+  const unchecked = resource.state !== "ready" && resource.state !== "loading";
+  return <>
+    {(providers?.apple || providers?.google) && <div className="actions">
+      {providers.apple && <button type="button" className="secondary" disabled={busy} onClick={() => add("apple")}>Add to Apple Wallet</button>}
+      {providers.google && (googleURL ? <a className="secondary" href={googleURL} rel="noreferrer">Save to Google Wallet</a>
+        : <button type="button" className="secondary" disabled={busy} onClick={() => add("google")}>Add to Google Wallet</button>)}
+    </div>}
+    <Announcer status={busy ? "Preparing your Wallet pass…" : ""}
+      alert={error || (unchecked ? "Wallet availability could not be checked. Your on-screen code still works." : "")} />
+    {unchecked && <button type="button" className="quiet" onClick={reload}>Check Wallet availability again</button>}
+  </>;
 }

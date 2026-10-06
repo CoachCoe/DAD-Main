@@ -31,41 +31,32 @@ func (w *exportWriter) Write(data []byte) (int, error) {
 	return w.response.Write(data)
 }
 
-func (a *api) exportsAvailable(w http.ResponseWriter, r *http.Request) bool {
-	if a.Exports == nil {
-		writeError(w, r, http.StatusServiceUnavailable, "Exports are temporarily unavailable", nil)
-		return false
-	}
-	return true
+func (a *api) exports() service {
+	return service{a.Exports != nil, "Exports are temporarily unavailable", readTimeout, staffStatus}
 }
 
-func (a *api) exportDatasets(w http.ResponseWriter, r *http.Request) {
-	if !a.exportsAvailable(w, r) {
-		return
-	}
-	ctx, cancel := withTimeout(r, readTimeout)
-	defer cancel()
-	body, err := a.Exports.ExportDatasets(ctx, cookieValue(r, staffCookie))
-	respond(w, r, body, err, staffStatus)
+func (a *api) exportDatasets(w http.ResponseWriter, r *http.Request, session string) {
+	a.exports().serve(w, r, func(ctx context.Context) (any, error) { return a.Exports.ExportDatasets(ctx, session) })
 }
 
 func validDatasetName(name string) bool {
 	return name != "" && strings.Trim(name, "abcdefghijklmnopqrstuvwxyz-") == ""
 }
 
-func (a *api) export(w http.ResponseWriter, r *http.Request) {
-	if !a.exportsAvailable(w, r) {
-		return
-	}
+// export streams up to the provider budget: large datasets take longer than a read.
+func (a *api) export(w http.ResponseWriter, r *http.Request, session string) {
 	name, ok := strings.CutSuffix(r.PathValue("file"), ".csv")
 	if !ok || !validDatasetName(name) {
 		writeError(w, r, http.StatusNotFound, "Dataset not found", nil)
 		return
 	}
+	if !a.exports().available(w, r) {
+		return
+	}
 	ctx, cancel := withTimeout(r, providerTimeout)
 	defer cancel()
 	writer := &exportWriter{response: w, name: name}
-	if err := a.Exports.Export(ctx, cookieValue(r, staffCookie), name, writer); err != nil {
+	if err := a.Exports.Export(ctx, session, name, writer); err != nil {
 		if writer.started {
 			// Abort a partial download; a truncated CSV must not look successful.
 			panic(http.ErrAbortHandler)

@@ -57,3 +57,11 @@ it("returns focus to the cancel control when backing out", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Back" }));
   expect(screen.getByRole("button", { name: "Cancel monthly giving" })).toHaveFocus();
 });
+
+it("shows stale billing details as last known and offers no changes from them", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", stale: true, observed_at: "2026-10-30T12:00:00Z", subscription })));
+  render(<RecurringPage />);
+  expect(await screen.findByRole("note")).toHaveTextContent("changes are unavailable until Stripe responds");
+  expect(screen.getByRole("button", { name: "Cancel monthly giving" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Refresh billing details" })).toBeEnabled();
+});

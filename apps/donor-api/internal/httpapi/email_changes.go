@@ -15,46 +15,51 @@ type EmailChangeSource interface {
 	Confirm(context.Context, string) (string, error)
 }
 
-func (a *api) emailChangeAvailable(w http.ResponseWriter, r *http.Request) bool {
-	if a.EmailChange == nil || !a.EmailConfigured {
-		writeError(w, r, http.StatusServiceUnavailable, "Email changes are temporarily unavailable", nil)
-		return false
-	}
-	return true
+func (a *api) emailChange() service {
+	return service{a.EmailChange != nil, "Email changes are temporarily unavailable", readTimeout, emailChangeStatus}
 }
 
 func (a *api) requestEmailChange(w http.ResponseWriter, r *http.Request, session string) {
-	if !a.emailChangeAvailable(w, r) {
-		return
-	}
 	var body struct {
 		Email string `json:"email"`
 	}
-	if !decodeJSON(w, r, &body) || utf8.RuneCountInString(body.Email) > maxEmailRunes {
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if utf8.RuneCountInString(body.Email) > maxEmailRunes {
 		writeError(w, r, http.StatusUnprocessableEntity, "Enter a valid email address", nil)
 		return
 	}
-	ctx, cancel := withTimeout(r, readTimeout)
-	defer cancel()
-	err := a.EmailChange.Request(ctx, session, body.Email)
-	respond(w, r, map[string]string{"stage": "CURRENT"}, err, emailChangeStatus)
-}
-
-func (a *api) confirmEmailChange(w http.ResponseWriter, r *http.Request) {
-	if !a.emailChangeAvailable(w, r) {
+	if !a.EmailConfigured {
+		emailOff.write(w)
 		return
 	}
+	a.emailChange().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]string{"stage": "CURRENT"}, a.EmailChange.Request(ctx, session, body.Email)
+	})
+}
+
+// confirmEmailChange needs only the emailed proof. Completing a change revokes
+// every session, so it never issues one.
+func (a *api) confirmEmailChange(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Token string `json:"token"`
 	}
-	if !decodeJSON(w, r, &body) || !validProof(body.Token) {
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if !validToken(body.Token) {
 		writeError(w, r, http.StatusUnprocessableEntity, "Invalid confirmation link", nil)
 		return
 	}
-	ctx, cancel := withTimeout(r, readTimeout)
-	defer cancel()
-	stage, err := a.EmailChange.Confirm(ctx, body.Token)
-	respond(w, r, map[string]string{"stage": stage}, err, emailChangeStatus)
+	if !a.EmailConfigured {
+		emailOff.write(w)
+		return
+	}
+	a.emailChange().serve(w, r, func(ctx context.Context) (any, error) {
+		stage, err := a.EmailChange.Confirm(ctx, body.Token)
+		return map[string]string{"stage": stage}, err
+	})
 }
 
 func emailChangeStatus(err error) (int, string) {

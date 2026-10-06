@@ -27,6 +27,8 @@ type subscriptionGateway struct {
 	refundLists    int
 	beforeList     func()
 	beforeMutate   func()
+	// unavailable makes every processor read fail.
+	unavailable bool
 	// loseAcknowledgement applies the next mutation but reports a failure.
 	loseAcknowledgement bool
 }
@@ -34,9 +36,12 @@ type subscriptionGateway struct {
 func (g *subscriptionGateway) RetrieveSubscription(ctx context.Context, id string) (payments.Object, error) {
 	g.mu.Lock()
 	g.retrievals++
-	hook := g.beforeRetrieve
+	hook, unavailable := g.beforeRetrieve, g.unavailable
 	g.beforeRetrieve = nil
 	g.mu.Unlock()
+	if unavailable {
+		return nil, payments.ErrProcessorUnavailable
+	}
 	if hook != nil {
 		hook()
 	}
@@ -90,7 +95,7 @@ func (g *subscriptionGateway) mutate(id, key string, edit func(map[string]any)) 
 	g.subscriptions[id] = paymentObject(g.t, remote)
 	if g.loseAcknowledgement {
 		g.loseAcknowledgement = false
-		return payments.ErrCheckoutUnavailable
+		return payments.ErrProcessorUnavailable
 	}
 	return nil
 }
@@ -112,6 +117,9 @@ func (g *subscriptionGateway) ChangeMonthlyAmount(_ context.Context, id, item, p
 }
 func (g *subscriptionGateway) ListPaymentRefunds(context.Context, string) ([]payments.Object, error) {
 	g.refundLists++
+	if g.unavailable {
+		return nil, payments.ErrProcessorUnavailable
+	}
 	if hook := g.beforeList; hook != nil {
 		g.beforeList = nil
 		hook()
@@ -119,7 +127,7 @@ func (g *subscriptionGateway) ListPaymentRefunds(context.Context, string) ([]pay
 	return g.refundRows, nil
 }
 func (g *subscriptionGateway) CreateRefund(context.Context, string, int64, string) (payments.Object, error) {
-	return nil, payments.ErrCheckoutUnavailable
+	return nil, payments.ErrProcessorUnavailable
 }
 
 type recurringFixture struct {
@@ -513,8 +521,8 @@ func TestStaffCancellationIsAuditedWithReasonAndOutcome(t *testing.T) {
 	if err != nil || !jsonTime(t, jsonView(t, quote)["subscription"].(map[string]any)["period_end"]).Equal(r.end) {
 		t.Fatal("cancellation quote", quote, err)
 	}
-	r.sub.fail = payments.ErrCheckoutUnavailable
-	if _, err = s.Cancel(ctx, finance, request); !errors.Is(err, payments.ErrCheckoutUnavailable) {
+	r.sub.fail = payments.ErrProcessorUnavailable
+	if _, err = s.Cancel(ctx, finance, request); !errors.Is(err, payments.ErrProcessorUnavailable) {
 		t.Fatal("processor failure hidden", err)
 	}
 	result, err := s.Cancel(ctx, finance, request)
@@ -623,5 +631,116 @@ func TestRefundQuoteReconcilesStaffRefunds(t *testing.T) {
 				t.Fatal("reconciled refund not projected", err)
 			}
 		})
+	}
+}
+
+func TestViewsFallBackToStoredStateWhileProcessorIsDown(t *testing.T) {
+	pool := database(t)
+	_, finance := staffFixture(t, pool, "FINANCE")
+	r := newRecurringFixture(t)
+	ctx := context.Background()
+	r.receive(t, "invoice.payment_succeeded", invoice(r.checkout, "in_stale_"+r.donorID.String(), r.start, true))
+	r.process(t)
+	var gift pgtype.UUID
+	if err := pool.QueryRow(ctx, "SELECT id FROM donor_gifts WHERE donor_id=$1", r.donorID).Scan(&gift); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,500,'USD','PENDING',now())", testID(t), gift, "re_stale_"+gift.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM donor_refunds WHERE gift_id=$1", gift); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := r.service.Details(ctx, r.token); err != nil {
+		t.Fatal(err)
+	}
+	r.sub.unavailable = true
+
+	details, err := r.service.Details(ctx, r.token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := jsonView(t, details)
+	assertKeys(t, view, "mode", "observed_at", "stale", "state", "subscription")
+	if view["stale"] != true || view["state"] != "ready" || !jsonTime(t, view["subscription"].(map[string]any)["period_end"]).Equal(r.end) {
+		t.Fatalf("stale details: %v", view)
+	}
+	for name, read := range map[string]func() (any, error){
+		"amount": func() (any, error) { return r.service.AmountOptions(ctx, r.token) },
+		"pause":  func() (any, error) { return r.service.PauseOptions(ctx, r.token) },
+		"resume": func() (any, error) { return r.service.ResumeOptions(ctx, r.token) },
+	} {
+		options, err := read()
+		if err != nil {
+			t.Fatalf("%s options: %v", name, err)
+		}
+		if view := jsonView(t, options); view["stale"] != true || view["state"] != "unavailable" {
+			t.Fatalf("%s options offered while stale: %v", name, view)
+		}
+	}
+	if _, err = r.service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end}); !errors.Is(err, payments.ErrProcessorUnavailable) {
+		t.Fatalf("cancellation without the processor: got %v, want ErrProcessorUnavailable", err)
+	}
+
+	s := StaffFinanceService{Staff: &StaffService{DB: pool}, Gateway: r.sub}
+	quote, err := s.CancellationQuote(ctx, finance, r.donorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view := jsonView(t, quote); view["stale"] != true || view["subscription"] == nil {
+		t.Fatalf("stale cancellation quote: %v", view)
+	}
+	refund, err := s.RefundQuote(ctx, finance, r.donorID, gift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view := jsonView(t, refund); view["stale"] != true || view["available_minor"] != float64(2500) || view["observed_at"] == nil {
+		t.Fatalf("stale refund quote: got %v, want 2500 available", view)
+	}
+}
+
+func TestGiftListsAndStaffDetailShowRefundsAndSubscription(t *testing.T) {
+	pool := database(t)
+	_, support := staffFixture(t, pool, "SUPPORT")
+	r := newRecurringFixture(t)
+	ctx := context.Background()
+	r.receive(t, "invoice.payment_succeeded", invoice(r.checkout, "in_detail_"+r.donorID.String(), r.start, true))
+	r.process(t)
+	var gift pgtype.UUID
+	if err := pool.QueryRow(ctx, "SELECT id FROM donor_gifts WHERE donor_id=$1", r.donorID).Scan(&gift); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{"SUCCEEDED", "FAILED"} {
+		if _, err := pool.Exec(ctx, "INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,1000,'USD',$4,now())", testID(t), gift, "re_"+status+gift.String(), status); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), "DELETE FROM donor_refunds WHERE gift_id=$1", gift); err != nil {
+			t.Error(err)
+		}
+	})
+	if _, err := r.service.Details(ctx, r.token); err != nil {
+		t.Fatal(err)
+	}
+	donorPage, err := DonorService{DB: pool, Origin: "https://donor.example.org"}.Gifts(ctx, r.token, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail, err := (&StaffService{DB: pool}).DonorDetail(ctx, support, r.donorID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, gifts := range map[string][]queries.DonorGiftsPageRow{"donor": donorPage.Gifts, "staff": detail.Gifts} {
+		if len(gifts) != 1 || gifts[0].RefundedMinor != 1000 || gifts[0].NetMinor != 2000 {
+			t.Fatalf("%s gifts: got %+v, want 1000 refunded and 2000 net", name, gifts)
+		}
+	}
+	view := jsonView(t, detail)
+	sub, _ := view["subscription"].(map[string]any)
+	if view["claimed"] != true || view["founding_donor"] == nil || sub == nil || sub["status"] != "active" || sub["amount_minor"] != float64(3000) || !jsonTime(t, sub["next_renewal"]).Equal(r.end) {
+		t.Fatalf("staff detail: %v", view)
 	}
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Page } from "@/components/donor/Page";
 
 export const metadata: Metadata = {
   title: "About DAD and how it works",
@@ -7,10 +8,8 @@ export const metadata: Metadata = {
 };
 
 export default function HowItWorks() {
-  return <section className="panel">
-    <span className="eyebrow">DYNAMIC AID DELIVERY</span>
-    <h1>A small gift. A growing circle.</h1>
-    <p>DAD brings donors and partner organizations together to support practical aid work. Each initiative is assembled with a partner and approved by the board. Programs invite people to enrol in that work.</p>
+  return <Page eyebrow="How it works" title="A small gift. A growing circle.">
+    <p className="lead">DAD brings donors and partner organizations together to support practical aid work. Each initiative is assembled with a partner and approved by the board. Programs invite people to enrol in that work.</p>
     <h2>Giving</h2>
     <p>Choose recurring or one-time giving on the web, without creating an account first. Recurring giving starts at about a dollar a day, billed as $30/month: the monthly amount is what your card is charged. One-time gifts are welcome too.</p>
     <h2>Your circle</h2>
@@ -23,8 +22,8 @@ export default function HowItWorks() {
     <p>The impact ledger is updated by staff on a stated cadence. Figures carry an as-of date, illustrative figures are labeled, and reported figures cite a source document.</p>
     <h2>Programs start at launch</h2>
     <p>This donor release does not enrol recipients or send money to them. Aid programs begin at launch. With R2, recipients and partners get their own accounts, and the DAD donor app arrives for iOS and Android. Until then, partners can register interest with the website form.</p>
-    <p>This environment is a sandbox preview using Stripe test payments. No real donation is collected.</p>
-    <div className="uploadActions"><Link className="button" href="/donate">Try giving</Link><Link className="secondary" href="/ledger">Read the impact ledger</Link></div>
+    <p className="note">This environment is a sandbox preview using Stripe test payments. No real donation is collected.</p>
+    <div className="actions"><Link className="button" href="/donate">Try giving</Link><Link className="secondary" href="/ledger">Read the impact ledger</Link></div>
     <p><Link href="/partners">Partner interest form</Link></p>
-  </section>;
+  </Page>;
 }

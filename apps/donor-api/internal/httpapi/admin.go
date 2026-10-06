@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -21,115 +23,119 @@ type AdminSource interface {
 	ResendMessage(context.Context, string, pgtype.UUID, pgtype.UUID) (store.QueuedMessage, error)
 }
 
-// adminCall runs a staff request; the store authorizes the session and permission.
-func (a *api) adminCall(w http.ResponseWriter, r *http.Request, read func(context.Context, string) (any, error)) {
-	if a.Admin == nil {
-		writeError(w, r, http.StatusServiceUnavailable, staffUnavailable, nil)
-		return
-	}
-	ctx, cancel := withTimeout(r, readTimeout)
-	defer cancel()
-	body, err := read(ctx, cookieValue(r, staffCookie))
-	respond(w, r, body, err, staffStatus)
+func (a *api) admin() service {
+	return service{a.Admin != nil, staffUnavailable, readTimeout, staffStatus}
 }
 
-func (a *api) searchDonors(w http.ResponseWriter, r *http.Request) {
+func (a *api) searchDonors(w http.ResponseWriter, r *http.Request, session string) {
 	offset, ok := offsetParam(r, "offset")
 	if !ok {
-		staffInvalid(w, r)
+		invalidFields(w, r)
 		return
 	}
-	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
-		return a.Admin.SearchDonors(ctx, session, r.URL.Query().Get("q"), offset)
+	term := r.URL.Query().Get("q")
+	if utf8.RuneCountInString(term) > maxEmailRunes || strings.ContainsRune(term, 0) {
+		writeError(w, r, http.StatusUnprocessableEntity, "Search for at most 320 characters", nil)
+		return
+	}
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
+		return a.Admin.SearchDonors(ctx, session, term, offset)
 	})
 }
 
-func (a *api) donorDetail(w http.ResponseWriter, r *http.Request) {
-	id, okID := pathUUID(r, "donor_id")
-	gifts, okGifts := offsetParam(r, "gifts_offset")
-	referrals, okReferrals := offsetParam(r, "referrals_offset")
-	if !okID || !okGifts || !okReferrals {
-		staffInvalid(w, r)
+func (a *api) donorDetail(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "donor_id")
+	if !ok {
 		return
 	}
-	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
+	gifts, okGifts := offsetParam(r, "gifts_offset")
+	referrals, okReferrals := offsetParam(r, "referrals_offset")
+	if !okGifts || !okReferrals {
+		invalidFields(w, r)
+		return
+	}
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
 		return a.Admin.DonorDetail(ctx, session, id, gifts, referrals)
 	})
 }
 
-func (a *api) donorMessages(w http.ResponseWriter, r *http.Request) {
-	id, okID := pathUUID(r, "donor_id")
-	offset, okOffset := offsetParam(r, "offset")
-	if !okID || !okOffset {
-		staffInvalid(w, r)
+func (a *api) donorMessages(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "donor_id")
+	if !ok {
 		return
 	}
-	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
+	offset, ok := offsetParam(r, "offset")
+	if !ok {
+		invalidFields(w, r)
+		return
+	}
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
 		return a.Admin.DonorMessages(ctx, session, id, offset)
 	})
 }
 
-func (a *api) donorActions(w http.ResponseWriter, r *http.Request) {
-	id, okID := pathUUID(r, "donor_id")
-	offset, okOffset := offsetParam(r, "offset")
-	if !okID || !okOffset {
-		staffInvalid(w, r)
+func (a *api) donorActions(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "donor_id")
+	if !ok {
 		return
 	}
-	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
+	offset, ok := offsetParam(r, "offset")
+	if !ok {
+		invalidFields(w, r)
+		return
+	}
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
 		return a.Admin.DonorActions(ctx, session, id, offset)
 	})
 }
 
-func (a *api) pendingAction(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathUUID(r, "donor_id")
-	var target pgtype.UUID
-	kind := r.URL.Query().Get("kind")
-	if !ok || target.Scan(r.URL.Query().Get("target_id")) != nil || !target.Valid || (kind != "REFUND" && kind != "CANCEL") {
-		staffInvalid(w, r)
+func (a *api) pendingAction(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "donor_id")
+	if !ok {
 		return
 	}
-	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
+	var target pgtype.UUID
+	kind := r.URL.Query().Get("kind")
+	if target.Scan(r.URL.Query().Get("target_id")) != nil || !target.Valid || (kind != "REFUND" && kind != "CANCEL") {
+		invalidFields(w, r)
+		return
+	}
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
 		return a.Admin.PendingAction(ctx, session, id, target, kind)
 	})
 }
 
-func (a *api) auditEvents(w http.ResponseWriter, r *http.Request) {
+func (a *api) auditEvents(w http.ResponseWriter, r *http.Request, session string) {
 	offset, ok := offsetParam(r, "offset")
 	if !ok {
-		staffInvalid(w, r)
+		invalidFields(w, r)
 		return
 	}
-	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
-		return a.Admin.AuditEvents(ctx, session, offset)
-	})
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.AuditEvents(ctx, session, offset) })
 }
 
-func (a *api) enrolments(w http.ResponseWriter, r *http.Request) {
-	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
-		return a.Admin.Enrolments(ctx, session)
-	})
+func (a *api) enrolments(w http.ResponseWriter, r *http.Request, session string) {
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.Enrolments(ctx, session) })
 }
 
-func (a *api) requestClaim(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathUUID(r, "donor_id")
+func (a *api) requestClaim(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "donor_id")
 	if !ok {
-		staffInvalid(w, r)
 		return
 	}
-	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
 		return map[string]bool{"queued": true}, a.Admin.RequestClaim(ctx, session, id)
 	})
 }
 
-func (a *api) resendMessage(w http.ResponseWriter, r *http.Request) {
-	id, okID := pathUUID(r, "message_id")
-	key, okKey := idempotencyKey(r)
-	if !okID || !okKey {
-		staffInvalid(w, r)
+func (a *api) resendMessage(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "message_id")
+	if !ok {
 		return
 	}
-	a.adminCall(w, r, func(ctx context.Context, session string) (any, error) {
-		return a.Admin.ResendMessage(ctx, session, id, key)
-	})
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.ResendMessage(ctx, session, id, key) })
 }

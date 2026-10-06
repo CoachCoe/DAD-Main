@@ -29,10 +29,13 @@ export function monthlyFraming(minor: number): { monthly: string; daily: string 
 export const MIN_GIFT_MINOR = 100;
 export const MAX_GIFT_MINOR = 99_999_999;
 
-/** Parses a dollar amount with at most two decimal places into exact integer cents. */
+/**
+ * Parses a typed dollar amount into exact integer cents. Accepts what people naturally type
+ * ("$30", "1,000", "30.", "30.5") but never more than two decimal places.
+ */
 export function parseDollars(input: string): number | null {
-  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(input.trim());
+  const match = /^\$?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{0,2}))?$/.exec(input.trim());
   if (!match) return null;
-  const minor = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
+  const minor = Number(match[1].replaceAll(",", "")) * 100 + Number((match[2] ?? "").padEnd(2, "0"));
   return Number.isSafeInteger(minor) ? minor : null;
 }

@@ -68,6 +68,12 @@ agreed launch spike.
 through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is intentionally
 unconfigured. Readiness is not payment-provider acceptance or live-release authorization.
 
+Deploy migrations before new API or worker processes start; through `0006` they only
+add tables, columns, constraints, and indexes. Features that are not configured answer
+503 with a `code` (`PAYMENTS_UNCONFIGURED`, `EMAIL_UNCONFIGURED`, or
+`SOURCE_STORAGE_UNCONFIGURED`) and are not logged as errors; a 503 without a code is a
+transient failure and is logged.
+
 ## Stripe
 
 Use the organization's verified Stripe **test** account and snapshot webhook events at
@@ -108,6 +114,9 @@ Financial commands retain immutable inputs and processor idempotency keys. Unkno
 requests older than 23 hours require reconciliation. Hosted card-setup retries stop
 before their fixed expiry; an old unknown request is not permission to create a new one.
 Staff refund previews reconcile current provider state and reserve pending refunds.
+If Stripe does not answer within five seconds, recurring details and staff previews show
+the last recorded state with `stale: true` and `observed_at`, and no changes are offered
+until Stripe responds; confirming any change always reads Stripe live.
 A second recurring change submitted while another is still with Stripe receives 409; the
 subscription lease expires after two minutes if a writer stops mid-command, and the same
 request ID can then resume it. One-time gifts take their paid time from the successful

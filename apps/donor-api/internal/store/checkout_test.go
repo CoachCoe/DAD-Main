@@ -70,7 +70,7 @@ func TestCheckoutRetriesAndReservations(t *testing.T) {
 	service, request, _, gateway := checkoutFixture(t)
 	ctx := context.Background()
 	gateway.fail = true
-	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrCheckoutUnavailable) {
+	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrProcessorUnavailable) {
 		t.Fatal("lost response not retryable")
 	}
 	service.Origin = "https://changed.example.org"
@@ -220,7 +220,7 @@ func TestUnexpectedProviderCheckoutIsNotAcknowledged(t *testing.T) {
 	ctx := context.Background()
 	live := true
 	gateway.remote = &payments.RemoteCheckout{ID: "cs_live_invalid", URL: "https://checkout.stripe.com/c/test", Livemode: &live}
-	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrCheckoutUnavailable) {
+	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrProcessorUnavailable) {
 		t.Fatal("live response accepted")
 	}
 	attempt, err := queries.New(service.DB).StripeCheckout(ctx, request.RequestID)

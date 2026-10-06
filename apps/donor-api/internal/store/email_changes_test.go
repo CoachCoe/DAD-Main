@@ -51,7 +51,7 @@ func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {
 	if _, err := s.Confirm(ctx, first); !errors.Is(err, ErrDenied) {
 		t.Fatal("current proof replay accepted", err)
 	}
-	donor, err := Authenticated(ctx, queries.New(s.DB), session, time.Now())
+	donor, err := authenticate(ctx, queries.New(s.DB), session, time.Now())
 	if err != nil || donor.Email != old {
 		t.Fatal("identity changed before second confirmation", err)
 	}
@@ -82,7 +82,7 @@ func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {
 	if succeeded != 1 || denied != 1 {
 		t.Fatal("confirmation was not single use")
 	}
-	if _, err = Authenticated(ctx, queries.New(s.DB), session, time.Now()); !errors.Is(err, ErrDenied) {
+	if _, err = authenticate(ctx, queries.New(s.DB), session, time.Now()); !errors.Is(err, ErrDenied) {
 		t.Fatal("old session survived", err)
 	}
 	login, err := queries.New(s.DB).LoginLink(ctx, HashToken(unusedLogin))
@@ -130,7 +130,7 @@ func TestEmailChangeConflictsExpiryReplacementAndDeliveryRetry(t *testing.T) {
 	if _, err := s.Confirm(ctx, tokenFromMail(t, transport.messages[2])); !errors.Is(err, ErrEmailChangeConflict) {
 		t.Fatal("existing donor was merged", err)
 	}
-	d, err := Authenticated(ctx, queries.New(s.DB), session, time.Now())
+	d, err := authenticate(ctx, queries.New(s.DB), session, time.Now())
 	if err != nil || d.Email != old {
 		t.Fatal("conflict changed identity", err)
 	}

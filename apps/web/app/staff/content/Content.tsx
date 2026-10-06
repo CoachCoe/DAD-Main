@@ -2,8 +2,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
-import { api, ApiError, failureMessage } from "@/lib/api";
+import { Page } from "@/components/donor/Page";
+import { api, ApiError, type FieldError, failureMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { formatDateTime } from "@/lib/dates";
 
 type Inventory = { sources: { id: string; name: string; sha256: string }[]; publications: { id: string; at: string }[] };
 
@@ -17,6 +19,7 @@ export default function Content() {
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [rowErrors, setRowErrors] = useState<FieldError[]>([]);
   const [message, setMessage] = useState("");
   const messages = resourceMessages(resource, { loading: "Loading content inventory…",
     failure: "The content inventory could not be loaded right now. Please retry in a moment.",
@@ -34,16 +37,19 @@ export default function Content() {
   async function publish(event: React.FormEvent) {
     event.preventDefault(); if (!initiatives || !ledger || !confirmed || busy) return;
     if (initiatives.size > 512 * 1024 || ledger.size > 512 * 1024) { setError("Each CSV must be at most 512 KB."); return; }
-    setBusy(true); setError(""); setMessage("");
+    setBusy(true); setError(""); setMessage(""); setRowErrors([]);
     try {
       const result = await api<{ publication_id: string }>("/donor/staff/content/publish", { method: "POST", body: JSON.stringify({
         initiatives_csv: await initiatives.text(), ledger_csv: await ledger.text(), as_of: asOf, cadence,
       }) });
       setMessage(`Published snapshot ${result.publication_id}. Public caches refresh within one minute.`); reload(); setConfirmed(false);
-    } catch (cause) { setError(rejected(cause, "Publication was not confirmed. Check column headers, uploaded source IDs, dates, units, and illustrative flags; refresh history before retrying.")); }
+    } catch (cause) {
+      if (cause instanceof ApiError) setRowErrors(cause.errors);
+      setError(rejected(cause, "Publication was not confirmed. Check column headers, uploaded source IDs, dates, units, and illustrative flags; refresh history before retrying."));
+    }
     finally { setBusy(false); }
   }
-  return <section className="panel"><h1>Spreadsheet publication</h1><p><Link href="/staff">Staff back office</Link> · <Link href="/staff/exports">Exports</Link></p>
+  return <Page wide eyebrow="Staff" back={{ href: "/staff", label: "Staff back office" }} title="Spreadsheet publication"><p><Link href="/staff/exports">Exports</Link></p>
     <p>Edit approved content in the source spreadsheet, then import its CSV export. This publishes one complete snapshot of planned initiatives and the static ledger.</p>
     {resource.state === "signedOut" && <p><Link className="button" href="/staff/sign-in">Staff sign-in</Link></p>}
     {data && <>
@@ -57,12 +63,14 @@ export default function Content() {
         <label>Ledger CSV<input type="file" accept=".csv,text/csv" onChange={(event) => setLedger(event.target.files?.[0] || null)} required /></label>
         <label>Ledger as-of date<input type="date" value={asOf} onChange={(event) => setAsOf(event.target.value)} required /></label>
         <label>Update cadence<input maxLength={100} placeholder="For example: monthly" value={cadence} onChange={(event) => setCadence(event.target.value)} required /></label>
-        <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} required /> I checked board approvals, source documents, illustrative labels, and the as-of date. Publish this snapshot publicly.</label>
+        <label className="choice"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} required /> I checked board approvals, source documents, illustrative labels, and the as-of date. Publish this snapshot publicly.</label>
         <button type="submit" className="button">Confirm publication</button>
       </fieldset></form>
-      <h2>Publication history</h2><ul>{data.publications.map((item) => <li key={item.id}>{new Date(item.at).toLocaleString()} · <code>{item.id}</code></li>)}</ul>
+      <h2>Publication history</h2><ul>{data.publications.map((item) => <li key={item.id}>{formatDateTime(item.at)} · <code>{item.id}</code></li>)}</ul>
     </>}
     <Announcer status={messages.status || message} alert={error || messages.alert} />
+    {rowErrors.length > 0 && <ul className="rows" aria-label="Spreadsheet problems">{rowErrors.map((item) =>
+      <li key={`${item.sheet}:${item.row}:${item.column}`}><span>{item.sheet && `${item.sheet} sheet, `}Row {item.row}, column <code>{item.column}</code></span><span>{item.reason}</span></li>)}</ul>}
     {resource.state !== "signedOut" && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh content inventory</button>}
-  </section>;
+  </Page>;
 }

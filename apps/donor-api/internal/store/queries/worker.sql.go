@@ -11,27 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const attemptByID = `-- name: AttemptByID :one
-SELECT checkout_id, request_hash, request_params, stripe_session_id, stripe_subscription_id, hosted_url, status, id, created_at FROM donor_stripe_checkouts WHERE id=$1 FOR UPDATE
-`
-
-func (q *Queries) AttemptByID(ctx context.Context, id pgtype.UUID) (DonorStripeCheckout, error) {
-	row := q.db.QueryRow(ctx, attemptByID, id)
-	var i DonorStripeCheckout
-	err := row.Scan(
-		&i.CheckoutID,
-		&i.RequestHash,
-		&i.RequestParams,
-		&i.StripeSessionID,
-		&i.StripeSubscriptionID,
-		&i.HostedUrl,
-		&i.Status,
-		&i.ID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const attemptForCheckout = `-- name: AttemptForCheckout :one
 SELECT checkout_id, request_hash, request_params, stripe_session_id, stripe_subscription_id, hosted_url, status, id, created_at FROM donor_stripe_checkouts WHERE checkout_id=$1 FOR UPDATE
 `

@@ -47,13 +47,26 @@ test("the mobile menu announces its state and restores keyboard focus", async ({
   await expect(menu).toBeFocused();
 });
 
-test("a cold payment-recovery visit offers sign-in without exposing account data", async ({ page }) => {
+test("a cold payment-recovery visit requests a sign-in link in place without exposing account data", async ({ page }) => {
+  let request: unknown;
+  await page.route("**/api/donor/login", async (route) => {
+    request = route.request().postDataJSON();
+    await route.fulfill({ status: 202, json: { message: "If this email matches a donor account, a sign-in link will arrive shortly." } });
+  });
   await page.goto("/account/payment-method");
-  const signIn = page.getByRole("link", { name: "Email me a sign-in link", exact: true });
-  await expect(signIn).toBeVisible();
-  await expect(signIn).toHaveAttribute("href", "/account/sign-in");
   await expect(page.getByRole("button", { name: "Continue to Stripe" })).toHaveCount(0);
+  await page.getByLabel("Email").fill("donor@example.org");
+  await page.getByRole("button", { name: "Email me a sign-in link", exact: true }).click();
+  await expect(page.getByRole("main").getByRole("status")).toContainText("sign-in link will arrive");
+  expect(request).toEqual({ email: "donor@example.org", next: "/account/payment-method" });
   await expectNoHorizontalScroll(page);
+});
+
+test("an expired claim link explains itself instead of reporting an outage", async ({ page }) => {
+  await page.goto(`/account/claim#token=${"e".repeat(43)}`);
+  await page.getByRole("button", { name: "Confirm and sign in" }).click();
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText("This link is invalid or expired. Request a new link.");
+  await expect(page.getByRole("link", { name: "Request a new link" })).toBeVisible();
 });
 
 test("removed legacy surfaces and proxy paths return not found", async ({ page, request }) => {

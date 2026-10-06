@@ -3,8 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"maps"
 	"math"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,14 +14,14 @@ import (
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-type History struct {
+type history struct {
 	Gifts   []recognition.Gift
 	Refunds []recognition.Refund
 	Periods []recognition.Period
 }
 
-func LoadHistory(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (History, error) {
-	var result History
+func loadHistory(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (history, error) {
+	var result history
 	gifts, err := q.GiftHistory(ctx, donorID)
 	if err != nil {
 		return result, err
@@ -61,7 +62,7 @@ func LoadHistory(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (
 
 // historicalBest replays refund observations made by asOf so a full refund
 // cannot erase a best streak the donor had already attained.
-func historicalBest(ctx context.Context, id pgtype.UUID, h History, observations []queries.RefundObservationsRow, now time.Time, previous int64) (int64, error) {
+func historicalBest(ctx context.Context, id pgtype.UUID, h history, observations []queries.RefundObservationsRow, now time.Time, previous int64) (int64, error) {
 	byID := map[string]recognition.Refund{}
 	for _, r := range h.Refunds {
 		byID[r.ID] = r
@@ -110,10 +111,10 @@ func refundsAsOf(current []recognition.Refund, observations []queries.RefundObse
 	return result, later
 }
 
-func replayBest(ctx context.Context, donorID string, h History, history []recognition.Refund, now time.Time, previous int64) (int64, error) {
-	sort.SliceStable(history, func(i, j int) bool { return history[i].UpdatedAt.Before(history[j].UpdatedAt) })
-	gifts := append([]recognition.Gift(nil), h.Gifts...)
-	sort.SliceStable(gifts, func(i, j int) bool { return gifts[i].PaidAt.Before(gifts[j].PaidAt) })
+func replayBest(ctx context.Context, donorID string, h history, history []recognition.Refund, now time.Time, previous int64) (int64, error) {
+	slices.SortStableFunc(history, func(a, b recognition.Refund) int { return a.UpdatedAt.Compare(b.UpdatedAt) })
+	gifts := slices.Clone(h.Gifts)
+	slices.SortStableFunc(gifts, func(a, b recognition.Gift) int { return a.PaidAt.Compare(b.PaidAt) })
 	points := map[time.Time]bool{}
 	for _, g := range h.Gifts {
 		if !g.PaidAt.After(now) {
@@ -123,11 +124,7 @@ func replayBest(ctx context.Context, donorID string, h History, history []recogn
 	for _, r := range history {
 		points[r.UpdatedAt.UTC()] = true
 	}
-	ordered := make([]time.Time, 0, len(points))
-	for point := range points {
-		ordered = append(ordered, point)
-	}
-	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Before(ordered[j]) })
+	ordered := slices.SortedFunc(maps.Keys(points), time.Time.Compare)
 	best := previous
 	latest := map[string]recognition.Refund{}
 	paidPeriods := map[string]bool{}
@@ -152,10 +149,7 @@ func replayBest(ctx context.Context, donorID string, h History, history []recogn
 		if int64(len(paidPeriods)) <= best {
 			continue
 		}
-		refunds := make([]recognition.Refund, 0, len(latest))
-		for _, r := range latest {
-			refunds = append(refunds, r)
-		}
+		refunds := slices.Collect(maps.Values(latest))
 		value, err := recognition.GivingStreak(h.Gifts, refunds, h.Periods, donorID, point, best, nil, nil)
 		if err == nil && value.Best > best {
 			best = value.Best
@@ -164,10 +158,9 @@ func replayBest(ctx context.Context, donorID string, h History, history []recogn
 	return best, nil
 }
 
-// refreshProjectionFactsInTx writes only recognition facts. The orchestration layer
-// queues financial messages in this transaction before it commits.
-func refreshProjectionFactsInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.Time) (queries.SaveProjectionParams, error) {
-	q := queries.New(tx)
+// projectFacts recomputes and saves the donor's recognition projection
+// under the donor lock.
+func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (queries.SaveProjectionParams, error) {
 	out := queries.SaveProjectionParams{DonorID: id, ComputedAt: timestamp(now), NextRefreshAt: timestamp(now.Add(24 * time.Hour))}
 	if _, err := q.LockDonor(ctx, id); err != nil {
 		return out, err
@@ -186,7 +179,7 @@ func refreshProjectionFactsInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, 
 		out.BestStreak = old.BestStreak
 		out.FirstGiftID, out.ReferrerID, out.ReferralKind = old.FirstGiftID, old.ReferrerID, old.ReferralKind
 	}
-	h, err := LoadHistory(ctx, q, id)
+	h, err := loadHistory(ctx, q, id)
 	if err != nil {
 		return out, err
 	}
@@ -230,7 +223,14 @@ func refreshProjectionFactsInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, 
 			out.GraceEndsAt = timestamp(*streak.GraceEndsAt)
 		}
 	}
-	boundaries := append(refundBoundaries, stops...)
+	out.NextRefreshAt = nextRefresh(out, h, refundBoundaries, stops, pauses, now)
+	return out, q.SaveProjection(ctx, out)
+}
+
+// nextRefresh is the earliest moment after now at which the projection can
+// change without new facts arriving, and at most its default refresh time.
+func nextRefresh(out queries.SaveProjectionParams, h history, refundBoundaries, stops []time.Time, pauses []recognition.Pause, now time.Time) pgtype.Timestamptz {
+	boundaries := slices.Concat(refundBoundaries, stops)
 	for _, p := range h.Periods {
 		boundaries = append(boundaries, p.DueAt, p.EndsAt, p.EndsAt.Add(recognition.Grace))
 	}
@@ -243,30 +243,31 @@ func refreshProjectionFactsInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, 
 	if out.GraceEndsAt.Valid {
 		boundaries = append(boundaries, out.GraceEndsAt.Time)
 	}
+	next := out.NextRefreshAt
 	for _, b := range boundaries {
-		if b.After(now) && b.Before(out.NextRefreshAt.Time) {
-			out.NextRefreshAt = timestamp(b)
+		if b.After(now) && b.Before(next.Time) {
+			next = timestamp(b)
 		}
 	}
-	return out, q.SaveProjection(ctx, out)
+	return next
 }
 
 // projectConversion records the donor's first gift, its referral and the
 // Founding Donor award. Both are permanent once set, so a gift processed late
 // cannot move a relationship whose referral notice may already have been sent.
-func projectConversion(out *queries.SaveProjectionParams, h History, id pgtype.UUID, now time.Time) error {
+func projectConversion(out *queries.SaveProjectionParams, h history, id pgtype.UUID, now time.Time) error {
 	if !out.FirstGiftID.Valid {
 		relations, err := recognition.Relationships(h.Gifts, now)
 		if err != nil {
 			return err
 		}
 		if relation, ok := relations[id.String()]; ok {
-			out.FirstGiftID = pgtype.Text{String: relation.FirstGiftID, Valid: true}
+			out.FirstGiftID = text(relation.FirstGiftID)
 			if relation.ReferrerID != nil {
 				if err = out.ReferrerID.Scan(*relation.ReferrerID); err != nil {
 					return err
 				}
-				out.ReferralKind = pgtype.Text{String: *relation.Kind, Valid: true}
+				out.ReferralKind = text(*relation.Kind)
 			}
 		}
 	}

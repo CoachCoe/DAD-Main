@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { ApiError, OFFLINE_MESSAGE, RATE_LIMITED_MESSAGE, api, classifyFailure, failureMessage, unconfirmedMessage } from "./api";
+import { ApiError, OFFLINE_MESSAGE, RATE_LIMITED_MESSAGE, UNCONFIGURED_MESSAGE, api, classifyFailure, failureMessage, unconfirmedMessage } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 const response = () => ({ ok: true, json: async () => ({ ok: true }) });
@@ -38,6 +38,8 @@ it.each([
   [new ApiError("Not found", 404), "notFound"],
   [new ApiError("Slow down", 429), "rateLimited"],
   [new ApiError("Bad gateway", 502), "unavailable"],
+  [new ApiError("Payments are off", 503, "PAYMENTS_UNCONFIGURED"), "unconfigured"],
+  [new ApiError("Overloaded", 503), "unavailable"],
   [new ApiError("Link expired", 410), "rejected"],
   [new TypeError("Failed to fetch"), "offline"],
   [new SyntaxError("Unexpected token <"), "unavailable"],
@@ -59,4 +61,20 @@ it("keeps an uncertain command's statement while explaining the failure", () => 
   expect(unconfirmedMessage(new TypeError("Failed to fetch"), statement)).toBe(`${statement} ${OFFLINE_MESSAGE}`);
   expect(unconfirmedMessage(new ApiError("Slow down", 429), statement)).toBe(`${statement} ${RATE_LIMITED_MESSAGE}`);
   expect(unconfirmedMessage(new ApiError("Internal", 503), statement)).toBe(statement);
+});
+
+it("states definitively that a switched-off capability did nothing, and never invites a retry", () => {
+  const off = new ApiError("Payments are not configured", 503, "PAYMENTS_UNCONFIGURED");
+  expect(failureMessage(off, "Please retry.")).toBe(UNCONFIGURED_MESSAGE);
+  expect(unconfirmedMessage(off, "Refund is not confirmed. Do not issue another refund.")).toBe(UNCONFIGURED_MESSAGE);
+  expect(UNCONFIGURED_MESSAGE).not.toMatch(/retry/i);
+});
+
+it("reads the coded 503 shape and per-row CSV errors from the API", async () => {
+  vi.stubGlobal("fetch", vi.fn()
+    .mockResolvedValueOnce(Response.json({ detail: "Payments are not configured", code: "PAYMENTS_UNCONFIGURED" }, { status: 503 }))
+    .mockResolvedValueOnce(Response.json({ detail: "Invalid spreadsheet", errors: [{ row: 3, column: "unit", reason: "unknown unit" }] }, { status: 422 })));
+  await expect(api("/donor/checkouts", { method: "POST", body: "{}" })).rejects.toMatchObject({ status: 503, code: "PAYMENTS_UNCONFIGURED" });
+  await expect(api("/donor/staff/content/publish", { method: "POST", body: "{}" })).rejects.toMatchObject({
+    status: 422, errors: [{ row: 3, column: "unit", reason: "unknown unit" }] });
 });

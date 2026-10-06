@@ -2,6 +2,7 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
+import { Page } from "@/components/donor/Page";
 import { api, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
@@ -14,6 +15,8 @@ export default function DeliveryHistory({ donor }: { donor: string }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const keys = useRef<Record<string, string>>({});
+  // Only an unclaimed donor needs a claim email; until that is known, the option stays hidden.
+  const { data: record } = useApiResource<{ claimed: boolean }>(donor ? `/donor/staff/donors/${encodeURIComponent(donor)}` : null);
   const messages = resourceMessages(resource, { loading: "Loading delivery history…",
     failure: "Delivery history could not be loaded right now. Please retry in a moment.",
     forbidden: "Your staff role does not permit viewing delivery history." });
@@ -30,10 +33,10 @@ export default function DeliveryHistory({ donor }: { donor: string }) {
     } catch (cause) { setError(unconfirmedMessage(cause, "Resend is not confirmed. Check whether the original is still queued, wait one minute, then retry the same request.")); }
     finally { setBusy(false); }
   }
-  return <section className="panel"><h1>Donor delivery history</h1><p><Link href="/staff">Staff back office</Link></p>
+  return <Page wide eyebrow="Staff" back={{ href: "/staff", label: "Staff back office" }} title="Donor delivery history">
     {!donor && <p>Select a donor in the back office to view their messages.</p>}
     {resource.state === "signedOut" && donor && <p><Link className="button" href="/staff/sign-in">Staff sign-in</Link></p>}
-    {data && <><details><summary>Request account claim email</summary><p>This sends the donor a new account-access link if delivery is available.</p><button type="button" className="secondary" disabled={busy} onClick={() => resend()}>Confirm claim email request</button></details>
+    {data && <>{record?.claimed === false && <details><summary>Request account claim email</summary><p>This sends the donor a new account-access link if delivery is available.</p><button type="button" className="secondary" disabled={busy} onClick={() => resend()}>Confirm claim email request</button></details>}
       {data.messages.length ? <ul>{data.messages.map((item) => <li key={item.id}>
         {item.kind} · {item.suppressed_reason ? `Suppressed: ${item.suppressed_reason}` : item.completed_at ? "Sent" : item.attempts >= 5 ? "Parked for review" : "Queued"} · Attempts {item.attempts}
         {item.last_error && <> · Last failure: {item.last_error}</>}
@@ -44,5 +47,5 @@ export default function DeliveryHistory({ donor }: { donor: string }) {
     </>}
     <Announcer status={donor ? messages.status || message : ""} alert={donor ? error || messages.alert : ""} />
     {donor && resource.state !== "signedOut" && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh delivery history</button>}
-  </section>;
+  </Page>;
 }

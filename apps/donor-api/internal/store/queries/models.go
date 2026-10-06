@@ -115,6 +115,7 @@ type DonorLoginEmail struct {
 	LastError      pgtype.Text        `json:"last_error"`
 	ID             pgtype.UUID        `json:"id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ReturnPath     pgtype.Text        `json:"return_path"`
 }
 
 type DonorLoginLink struct {

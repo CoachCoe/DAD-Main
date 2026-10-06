@@ -37,3 +37,13 @@ it("says when nothing matches", async () => {
   render(<Staff q="nobody" />);
   expect(await screen.findByText("No matching donors.")).toBeVisible();
 });
+
+it("lists staff accounts for an administrator without a manual refresh", async () => {
+  const admin = { ...actor, role: "ADMIN", permissions: ["staff.manage"] };
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url.startsWith("/api/donor/staff/me") ? reply(200, admin)
+    : url.startsWith("/api/donor/staff/accounts") ? reply(200, [{ ...admin, id: "staff-2", name: "Fin Ance", email: "f@example.org", role: "FINANCE" }])
+    : reply(404, {})));
+  render(<Staff q={null} />);
+  expect(await screen.findByText(/Fin Ance · f@example.org · FINANCE · Active/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Refresh staff accounts" })).not.toBeInTheDocument();
+});

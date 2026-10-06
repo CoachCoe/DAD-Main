@@ -11,23 +11,21 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-func run(ctx context.Context, args []string, out io.Writer) error {
+func run(ctx context.Context, args []string, getenv func(string) string, out io.Writer) error {
 	flags := flag.NewFlagSet("monitor", flag.ContinueOnError)
 	maxAge := flags.Duration("max-age", 5*time.Minute, "alert when any due queue item is older than this duration")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-	if flags.NArg() != 0 || *maxAge <= 0 {
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *maxAge <= 0 {
 		return errors.New("invalid monitor arguments")
 	}
-	dsn := os.Getenv("DONOR_GO_DATABASE_URL")
+	dsn := getenv("DONOR_GO_DATABASE_URL")
 	if dsn == "" {
-		return errors.New("database required")
+		return errors.New("DONOR_GO_DATABASE_URL is required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -53,8 +51,9 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	}
 	return nil
 }
+
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
+	if err := run(context.Background(), os.Args[1:], os.Getenv, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

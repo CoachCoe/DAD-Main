@@ -34,7 +34,7 @@ func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	s, token, id := donorServiceFixture(t)
 	ctx := context.Background()
 	profile, err := s.Profile(ctx, token)
-	if err != nil || profile.Version != 0 || profile.ReferralEmails || profile.MarketingEmails || profile.ConsentVersion != ConsentVersion {
+	if err != nil || profile.Version != 0 || profile.ReferralEmails || profile.MarketingEmails || profile.ConsentVersion != consentVersion {
 		t.Fatal(profile, err)
 	}
 	start := make(chan struct{})
@@ -67,7 +67,7 @@ func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	if err := s.DB.QueryRow(ctx, "SELECT count(*) FROM donor_preference_events WHERE donor_id=$1", id).Scan(&count); err != nil || count != 1 {
 		t.Fatal("duplicate/missing consent event", err)
 	}
-	if err := s.DB.QueryRow(ctx, "SELECT version,consent_version,source FROM donor_preference_events WHERE donor_id=$1", id).Scan(&version, &consent, &source); err != nil || version != 1 || consent != ConsentVersion || source != "account" {
+	if err := s.DB.QueryRow(ctx, "SELECT version,consent_version,source FROM donor_preference_events WHERE donor_id=$1", id).Scan(&version, &consent, &source); err != nil || version != 1 || consent != consentVersion || source != "account" {
 		t.Fatal("audit mismatch", err)
 	}
 	if err = s.SignOutEverywhere(ctx, token); err != nil {

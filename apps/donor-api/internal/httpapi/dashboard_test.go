@@ -42,16 +42,16 @@ func TestDashboardAuthenticationAndPrivateErrors(t *testing.T) {
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, req)
 		if response.Code != tc.status || response.Header().Get("Cache-Control") != "no-store" {
-			t.Fatalf("response %d %s", response.Code, response.Body.String())
+			t.Fatalf("session %q error %v: got %d %s, want %d uncached", tc.token, tc.err, response.Code, response.Body, tc.status)
 		}
 		if strings.Contains(response.Body.String(), "private database") {
 			t.Fatal("database error leaked")
 		}
 		if tc.token == "" && stub.calls != 0 {
-			t.Fatal("anonymous request reached database")
+			t.Fatalf("anonymous request reached the database %d times", stub.calls)
 		}
 		if stub.token != tc.token {
-			t.Fatal("session not passed through")
+			t.Fatalf("store saw session %q, want %q", stub.token, tc.token)
 		}
 	}
 }

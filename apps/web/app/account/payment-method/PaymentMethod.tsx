@@ -1,10 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
-import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
+import { Page } from "@/components/donor/Page";
+import { SignInForm } from "@/components/donor/SignInForm";
 import { api, ApiError, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { formatDateTime } from "@/lib/dates";
 
 type Update = { status: "NONE" | "PENDING" | "OPEN" | "APPLIED" | "EXPIRED" | "CANCELLED"; completed_at: string | null };
 
@@ -18,7 +20,7 @@ const states: Partial<Record<Update["status"], string>> = {
 export default function PaymentMethod() {
   const [signedOut, setSignedOut] = useState(false);
   const key = useRef<string | null>(null);
-  const { resource, data, reload, setData } = useApiResource<Update>(signedOut ? null : "/donor/me/payment-method", {
+  const { resource, data, failed, reload, setData } = useApiResource<Update>(signedOut ? null : "/donor/me/payment-method", {
     onLoad: () => { key.current = null; setError(""); },
   });
   const [error, setError] = useState("");
@@ -49,24 +51,24 @@ export default function PaymentMethod() {
       else setError(unconfirmedMessage(cause, "We could not open Stripe. Retry, or refresh to check whether the update has completed."));
     } finally { setBusy(false); }
   }
-  const absent = signedOut || resource.state === "signedOut";
-  return <section className="panel">
-    <h1>Update payment method</h1>
-    <p><Link href="/account/giving">My giving</Link></p>
-    <p>Sandbox only. Stripe securely collects your test card for future monthly gifts.</p>
-    {absent ? <>
-      <p>Sign in with the email used for your gift. After claiming your account, choose Update payment method.</p>
-      <p><Link className="button" href="/account/sign-in">Email me a sign-in link</Link></p>
-    </> : <>
-      {data?.status === "APPLIED" && <p>Your last payment-method update was confirmed
-        {data.completed_at && <> on <time dateTime={data.completed_at}>{new Date(data.completed_at).toLocaleString()}</time></>}.</p>}
-      {data && states[data.status] && <p>{states[data.status]}</p>}
-      {data && <>
-        <p>Updating a card does not confirm payment of an overdue gift or restore your streak. Those change only after a successful charge.</p>
-        <button type="button" className="button" disabled={busy} onClick={begin}>{busy ? "Opening Stripe…" : "Continue to Stripe"}</button>
-      </>}
-      <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh update status</button>
+  if (signedOut || resource.state === "signedOut") return <Page eyebrow="My account" title="Update payment method">
+    <p className="lead">Keep your monthly gift going. To protect your account, we’ll email you a secure sign-in link first.</p>
+    <p>Use the email address you gave with your gift. The link brings you straight back here.</p>
+    <SignInForm next="/account/payment-method" />
+    <p className="note">Sandbox only. Card details are entered on Stripe and never reach DAD.</p>
+  </Page>;
+
+  const pending = data?.status === "PENDING" || data?.status === "OPEN";
+  return <Page eyebrow="My account" title="Update payment method" back={{ href: "/account/giving", label: "My giving" }}>
+    <p className="lead">Stripe securely collects the card for your future monthly gifts. Card details never reach DAD.</p>
+    {data?.status === "APPLIED" && <p className="callout">Your last payment-method update was confirmed
+      {data.completed_at && <> on <time dateTime={data.completed_at}>{formatDateTime(data.completed_at)}</time></>}.</p>}
+    {data && states[data.status] && <p className="callout">{states[data.status]}</p>}
+    {data && <>
+      <button type="button" className="button full" disabled={busy} onClick={begin}>{busy ? "Opening Stripe…" : "Continue to Stripe"}</button>
+      <p className="note">Updating a card does not confirm payment of an overdue gift or restore your streak. Those change only after a successful charge. Sandbox only.</p>
     </>}
-    <Announcer status={absent ? "" : messages.status} alert={absent ? "" : error || messages.alert} />
-  </section>;
+    <Announcer status={messages.status} alert={error || messages.alert} />
+    {(failed || pending || error) && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh update status</button>}
+  </Page>;
 }

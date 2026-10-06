@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { Page } from "@/components/donor/Page";
 import { classifyFailure, OFFLINE_MESSAGE, RATE_LIMITED_MESSAGE, api } from "@/lib/api";
 
 export default function SignIn() {
@@ -20,7 +21,7 @@ export default function SignIn() {
     }
     finally { setBusy(false); setCode(""); setPassword(""); }
   }
-  return <section className="panel"><h1>DAD staff sign-in</h1>
+  return <Page eyebrow="Staff" title="DAD staff sign-in">
     <p>Individual staff access requires a password and an authenticator code. Donor accounts do not grant staff access.</p>
     <form onSubmit={submit}><fieldset disabled={busy}><legend>Staff credentials</legend>
       <label>Email<input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
@@ -29,5 +30,5 @@ export default function SignIn() {
       <button type="submit" className="button">{busy ? "Checking…" : "Sign in"}</button>
     </fieldset></form>
     <Announcer status={busy ? "Checking…" : ""} alert={error} />
-  </section>;
+  </Page>;
 }

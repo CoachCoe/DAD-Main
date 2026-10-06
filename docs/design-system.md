@@ -1,10 +1,10 @@
 # R1 design foundations
 
-The live web palette and corner radii are authored in
-`apps/web/design/tokens.ts`, a framework-independent TypeScript module. The web adapter
-maps those values to CSS custom properties on the server-rendered document; `globals.css`
-consumes them. React Native can consume the same color strings and numeric radii without
-copying CSS. Typography loading, responsive layout, focus treatment, and browser motion
+The live web palette, corner radii, spacing scale (`space`, 4–64 px), and type scale
+(`text`, 12–36 px) are authored in `apps/web/design/tokens.ts`, a framework-independent
+TypeScript module. The web adapter maps those values to CSS custom properties on the
+server-rendered document; `globals.css` consumes them and holds no other colors. React
+Native can consume the same color strings and unitless numbers without copying CSS. Typography loading, responsive layout, focus treatment, and browser motion
 preferences remain web concerns in the stylesheet and root layout.
 
 The donor dashboard keeps Link and IRL counts side by side at equal visual weight, with

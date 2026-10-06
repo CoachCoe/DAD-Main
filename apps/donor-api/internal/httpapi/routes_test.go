@@ -6,73 +6,77 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
 
-var browserMutations = []string{
-	"/donor/checkouts",
-	"/donor/referrals/code",
-	"/donor/public/partner-signup",
-	"/donor/login",
-	"/donor/claim",
-	"/donor/logout",
-	"/donor/logout-all",
-	"/donor/me/email-change",
-	"/donor/email-change/confirm",
-	"/donor/me/preferences",
-	"/donor/me/sharing",
-	"/donor/me/wallet/apple",
-	"/donor/me/wallet/google",
-	"/donor/me/recurring/cancel",
-	"/donor/me/recurring/pause",
-	"/donor/me/recurring/resume",
-	"/donor/me/recurring/amount",
-	"/donor/me/payment-method/setup",
-	"/donor/staff/sign-in",
-	"/donor/staff/provision",
-	"/donor/staff/activate",
-	"/donor/staff/sign-out",
-	"/donor/staff/accounts",
-	"/donor/staff/accounts/7d6f6b1c-6f4e-4c3e-9a51-6f1d9c1e2a3b/disable",
-	"/donor/staff/accounts/7d6f6b1c-6f4e-4c3e-9a51-6f1d9c1e2a3b/recovery",
-	"/donor/staff/accounts/7d6f6b1c-6f4e-4c3e-9a51-6f1d9c1e2a3b/role",
-	"/donor/staff/donors/7d6f6b1c-6f4e-4c3e-9a51-6f1d9c1e2a3b/claim-email",
-	"/donor/staff/messages/7d6f6b1c-6f4e-4c3e-9a51-6f1d9c1e2a3b/resend",
-	"/donor/staff/donors/7d6f6b1c-6f4e-4c3e-9a51-6f1d9c1e2a3b/gifts/7d6f6b1c-6f4e-4c3e-9a51-6f1d9c1e2a3b/refund",
-	"/donor/staff/donors/7d6f6b1c-6f4e-4c3e-9a51-6f1d9c1e2a3b/cancellation",
-	"/donor/staff/content/sources",
-	"/donor/staff/content/publish",
+const testID = "7d6f6b1c-6f4e-4c3e-9a51-6f1d9c1e2a3b"
+
+var wildcard = regexp.MustCompile(`\{[a-z_]+\}`)
+
+// routeRequest builds a request for a route pattern with valid path values.
+func routeRequest(pattern, body string) *http.Request {
+	method, path, _ := strings.Cut(pattern, " ")
+	path = wildcard.ReplaceAllStringFunc(path, func(name string) string {
+		switch name {
+		case "{year}":
+			return "2026"
+		case "{file}":
+			return "gifts.csv"
+		case "{code}":
+			return "code"
+		}
+		return testID
+	})
+	return httptest.NewRequest(method, path, strings.NewReader(body))
 }
 
-// Every browser mutation must reject a foreign or missing Origin before any
-// service runs; a nil service would answer 503 instead of 403.
-func TestEveryBrowserMutationRequiresOrigin(t *testing.T) {
+func allRoutes() []route { return (&api{}).routes() }
+
+// Every mutation must reject a foreign or missing browser Origin before any
+// service runs; a nil service would answer 503 instead of 403. Credentials do
+// not help: cookies make a request a browser request.
+func TestEveryMutationRequiresBrowserOrigin(t *testing.T) {
 	server := NewServer("", Services{Origin: "https://dad.example.org"})
-	for _, path := range browserMutations {
+	for _, route := range allRoutes() {
+		if strings.HasPrefix(route.pattern, "GET ") || route.auth == stripeAuth {
+			continue
+		}
 		for _, origin := range []string{"", "https://evil.example.org"} {
-			r := httptest.NewRequest("POST", path, strings.NewReader("{}"))
+			r := routeRequest(route.pattern, "{}")
 			if origin != "" {
 				r.Header.Set("Origin", origin)
 			}
+			r.Header.Set("X-DAD-Client", "native")
 			r.AddCookie(&http.Cookie{Name: donorCookie, Value: "session"})
 			r.AddCookie(&http.Cookie{Name: staffCookie, Value: "session"})
 			response := httptest.NewRecorder()
 			server.Handler.ServeHTTP(response, r)
 			if response.Code != http.StatusForbidden {
-				t.Errorf("POST %s with origin %q: got %d, want 403", path, origin, response.Code)
+				t.Errorf("%s with origin %q: got %d, want 403", route.pattern, origin, response.Code)
 			}
 		}
 	}
 }
 
-func TestDonorRoutesRejectAnonymousRequestsBeforeStorage(t *testing.T) {
+func TestSignedInRoutesRejectAnonymousRequestsBeforeStorage(t *testing.T) {
 	server := NewServer("", Services{})
-	for _, path := range []string{"/donor/me/dashboard", "/donor/me/profile", "/donor/me/sharing", "/donor/me/gifts", "/donor/me/recurring", "/donor/me/payment-method", "/donor/me/wallet"} {
+	for _, route := range allRoutes() {
+		if route.auth != donorAuth && route.auth != staffAuth {
+			continue
+		}
+		r := routeRequest(route.pattern, "{}")
+		r.Header.Set("Origin", "http://localhost:3000")
 		response := httptest.NewRecorder()
-		server.Handler.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
-		if response.Code != http.StatusUnauthorized {
-			t.Errorf("GET %s anonymously: got %d, want 401", path, response.Code)
+		server.Handler.ServeHTTP(response, r)
+		want := http.StatusUnauthorized
+		if strings.HasSuffix(route.pattern, "/logout") || strings.HasSuffix(route.pattern, "/sign-out") {
+			// Signing out never requires a valid session; with no service it is unavailable.
+			want = http.StatusServiceUnavailable
+		}
+		if response.Code != want {
+			t.Errorf("%s anonymously: got %d, want %d", route.pattern, response.Code, want)
 		}
 	}
 }

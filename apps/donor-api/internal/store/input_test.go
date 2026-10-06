@@ -1,0 +1,74 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"impactgraph/donor-api/internal/payments"
+)
+
+// TestControlCharactersAreRejectedBeforeStorage covers inputs PostgreSQL
+// cannot store, which must be refused as invalid rather than fail as errors.
+func TestControlCharactersAreRejectedBeforeStorage(t *testing.T) {
+	s, token, _ := donorServiceFixture(t)
+	ctx := context.Background()
+	if _, err := s.SaveSharing(ctx, token, "Ann\x00", false); !errors.Is(err, ErrPublicNameCharacters) {
+		t.Fatalf("NUL public name: got %v, want ErrPublicNameCharacters", err)
+	}
+	if _, err := s.SaveSharing(ctx, token, "ann@example.org", false); !errors.Is(err, ErrPublicName) {
+		t.Fatalf("email public name: got %v, want an ErrPublicName", err)
+	}
+	if _, err := s.ReferrerName(ctx, "code\x00"); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("NUL referral code: got %v, want not found", err)
+	}
+	capture, err := s.CaptureReferral(ctx, "code\x00", "LINK", "", time.Now())
+	if err != nil || capture.Token != "" {
+		t.Fatalf("NUL referral capture: got %+v %v, want nothing captured", capture, err)
+	}
+	partner := PartnerRequest{Organization: "Org", Name: "Name", Email: "partner@example.org", Message: "Hello\x00", Consent: true}
+	if err = (PartnerService{DB: s.DB}).Signup(ctx, testID(t), partner); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("NUL partner message: got %v, want ErrStaffInput", err)
+	}
+	_, support := staffFixture(t, s.DB, "SUPPORT")
+	if _, err = (&StaffService{DB: s.DB}).SearchDonors(ctx, support, "a\x00", 0); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("NUL search: got %v, want ErrStaffInput", err)
+	}
+}
+
+func TestDuplicateStaffInviteIsDistinct(t *testing.T) {
+	pool := database(t)
+	_, admin := staffFixture(t, pool, "ADMIN")
+	var email string
+	_, other := staffFixture(t, pool, "SUPPORT")
+	if err := pool.QueryRow(context.Background(), "SELECT s.email FROM donor_staff s JOIN donor_staff_sessions x ON x.staff_id=s.id WHERE x.token_hash=$1", HashToken(other)).Scan(&email); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&StaffService{DB: pool}).Invite(context.Background(), admin, email, "Again", "SUPPORT")
+	if !errors.Is(err, ErrStaffExists) || !errors.Is(err, ErrStaffConflict) {
+		t.Fatalf("got %v, want ErrStaffExists", err)
+	}
+}
+
+// TestStaffAuthorizationPrecedesPaymentConfiguration keeps an unconfigured
+// processor from answering callers who may not act at all.
+func TestStaffAuthorizationPrecedesPaymentConfiguration(t *testing.T) {
+	pool := database(t)
+	_, finance := staffFixture(t, pool, "FINANCE")
+	_, support := staffFixture(t, pool, "SUPPORT")
+	s := StaffFinanceService{Staff: &StaffService{DB: pool}}
+	request := StaffFinancialRequest{RequestID: testID(t), DonorID: testID(t), TargetID: testID(t), Reason: "Donor asked by phone", Amount: 100}
+	for _, c := range []struct {
+		token string
+		want  error
+	}{{"not-a-session", ErrStaffDenied}, {support, ErrStaffForbidden}, {finance, payments.ErrUnconfigured}} {
+		if _, err := s.Refund(context.Background(), c.token, request); !errors.Is(err, c.want) {
+			t.Errorf("refund: got %v, want %v", err, c.want)
+		}
+		if _, err := s.Cancel(context.Background(), c.token, request); !errors.Is(err, c.want) {
+			t.Errorf("cancel: got %v, want %v", err, c.want)
+		}
+	}
+}

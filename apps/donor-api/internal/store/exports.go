@@ -67,6 +67,8 @@ func (s *StaffService) ExportDatasets(ctx context.Context, token string) (Export
 	return ExportDatasets{Datasets: names}, nil
 }
 
+// safeCSVCell formats a column value, quoting text a spreadsheet would
+// otherwise evaluate as a formula.
 func safeCSVCell(value any) (string, error) {
 	var text string
 	switch v := value.(type) {
@@ -77,7 +79,7 @@ func safeCSVCell(value any) (string, error) {
 	case [16]byte:
 		return (pgtype.UUID{Bytes: v, Valid: true}).String(), nil
 	case []byte:
-		return string(v), nil
+		text = string(v)
 	case map[string]any, []any:
 		encoded, err := json.Marshal(v)
 		if err != nil {
@@ -96,31 +98,33 @@ func safeCSVCell(value any) (string, error) {
 	return text, nil
 }
 
+// Export streams dataset name as CSV to destination. Its start and its end,
+// complete or interrupted, are both audited.
 func (s *StaffService) Export(ctx context.Context, token, name string, destination io.Writer) (resultErr error) {
 	dataset, ok := exportDatasets[name]
 	if !ok {
 		return pgx.ErrNoRows
 	}
 	var actorID, exportID pgtype.UUID
-	_, err := staffTransaction(ctx, s, token, dataset.permission, func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (bool, error) {
+	_, err := staffRead(ctx, s, token, dataset.permission, func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 		actorID = actor.ID
 		var err error
-		exportID, err = NewID()
-		if err != nil {
-			return false, err
+		if exportID, err = NewID(); err != nil {
+			return struct{}{}, err
 		}
-		return true, queries.New(tx).InsertStaffAudit(ctx, queries.InsertStaffAuditParams{ID: exportID, ActorID: actor.ID, Action: "data.export_started", Target: name, Details: []byte("{}"), CreatedAt: timestamp(now)})
+		return struct{}{}, queries.New(tx).InsertStaffAudit(ctx, queries.InsertStaffAuditParams{ID: exportID, ActorID: actor.ID, Action: "data.export_started", Target: name, Details: []byte("{}"), CreatedAt: timestamp(now)})
 	})
 	if err != nil {
 		return err
 	}
-	count := int64(0)
+	var count int64
 	completed := false
 	defer func() {
 		// Disconnection must still leave an incomplete-export audit record.
 		auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		err := auditStaff(auditCtx, queries.New(s.DB), actorID, "data.export_finished", name, map[string]any{"export_id": exportID.String(), "completed": completed, "row_count": count, "finished_at": time.Now().UTC()}, time.Now().UTC())
+		now := time.Now().UTC()
+		err := auditStaff(auditCtx, queries.New(s.DB), actorID, "data.export_finished", name, map[string]any{"export_id": exportID.String(), "completed": completed, "row_count": count, "finished_at": now}, now)
 		if resultErr == nil && err != nil {
 			resultErr = err
 		}
@@ -135,21 +139,33 @@ func (s *StaffService) Export(ctx context.Context, token, name string, destinati
 		return err
 	}
 	if dataset.table != "" {
-		// SQL identifiers come only from the fixed business-data allowlist above.
-		columns := make([]string, len(fields))
-		for i, field := range fields {
-			columns[i] = pgx.Identifier{field}.Sanitize()
-		}
-		query := "SELECT " + strings.Join(columns, ",") + " FROM " + pgx.Identifier{dataset.table}.Sanitize()
-		if name == "referrals" {
-			query += " WHERE referrer_id IS NOT NULL"
-		}
-		query += " ORDER BY id"
-		tx, err := s.DB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
-		if err != nil {
+		if count, err = s.writeRows(ctx, writer, name, dataset.table, fields); err != nil {
 			return err
 		}
-		defer tx.Rollback(ctx)
+	}
+	writer.Flush()
+	if err = writer.Error(); err != nil {
+		return err
+	}
+	completed = true
+	return nil
+}
+
+// writeRows writes every row of table from one snapshot, flushing as it goes
+// so a large export streams rather than buffers.
+func (s *StaffService) writeRows(ctx context.Context, writer *csv.Writer, name, table string, fields []string) (int64, error) {
+	// SQL identifiers come only from the fixed business-data allowlist above.
+	columns := make([]string, len(fields))
+	for i, field := range fields {
+		columns[i] = pgx.Identifier{field}.Sanitize()
+	}
+	query := "SELECT " + strings.Join(columns, ",") + " FROM " + pgx.Identifier{table}.Sanitize()
+	if name == "referrals" {
+		query += " WHERE referrer_id IS NOT NULL"
+	}
+	query += " ORDER BY id"
+	var count int64
+	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query)
 		if err != nil {
 			return err
@@ -162,8 +178,7 @@ func (s *StaffService) Export(ctx context.Context, token, name string, destinati
 			}
 			cells := make([]string, len(values))
 			for i, value := range values {
-				cells[i], err = safeCSVCell(value)
-				if err != nil {
+				if cells[i], err = safeCSVCell(value); err != nil {
 					return err
 				}
 			}
@@ -178,14 +193,7 @@ func (s *StaffService) Export(ctx context.Context, token, name string, destinati
 				}
 			}
 		}
-		if err = rows.Err(); err != nil {
-			return err
-		}
-	}
-	writer.Flush()
-	if err = writer.Error(); err != nil {
-		return err
-	}
-	completed = true
-	return nil
+		return rows.Err()
+	})
+	return count, err
 }

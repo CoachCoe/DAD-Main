@@ -3,6 +3,7 @@ package mail
 import (
 	"encoding/base64"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -18,7 +19,7 @@ func TestEnvironmentConfiguration(t *testing.T) {
 		{"port range", "DONOR_SMTP_PORT", "65536", true},
 		{"implicit TLS port", "DONOR_SMTP_PORT", "465", true},
 		{"missing host", "DONOR_SMTP_HOST", "", true},
-		{"bad sender", "DONOR_EMAIL_FROM", "invalid", true},
+		{"bad sender", "DONOR_EMAIL_FROM", "not-an-address", true},
 		{"header injection", "DONOR_EMAIL_FROM", "sender@example.org\r\nBcc: victim@example.org", true},
 		{"invalid key", "DONOR_EMAIL_ENCRYPTION_KEY", "configured", true},
 		{"partial credentials", "DONOR_SMTP_USERNAME", "sender", true},
@@ -33,6 +34,9 @@ func TestEnvironmentConfiguration(t *testing.T) {
 			if tc.invalid {
 				if !errors.Is(err, ErrConfiguration) || s != nil {
 					t.Fatalf("invalid settings accepted: %v", err)
+				}
+				if want := tc.field; !strings.Contains(err.Error(), want) || (tc.value != "" && strings.Contains(err.Error(), tc.value)) {
+					t.Fatalf("got %q, want it to name %s without its value", err, want)
 				}
 				return
 			}

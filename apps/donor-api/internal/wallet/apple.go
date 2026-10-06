@@ -13,8 +13,10 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/smallstep/pkcs7"
@@ -36,7 +38,10 @@ func certificate(data []byte) (*x509.Certificate, error) {
 	}
 	return cert, nil
 }
-func NewApple(certData, keyData, intermediateData []byte, now time.Time) (*Apple, error) {
+
+// newApple loads a Pass Type ID certificate, its key and Apple's WWDR
+// intermediate, which must be currently valid and match each other.
+func newApple(certData, keyData, intermediateData []byte, now time.Time) (*Apple, error) {
 	cert, err := certificate(certData)
 	if err != nil {
 		return nil, err
@@ -68,21 +73,32 @@ func NewApple(certData, keyData, intermediateData []byte, now time.Time) (*Apple
 func (a *Apple) validAt(now time.Time) bool {
 	return !now.Before(a.Certificate.NotBefore) && now.Before(a.Certificate.NotAfter) && !now.Before(a.Intermediate.NotBefore) && now.Before(a.Intermediate.NotAfter)
 }
-func icon(size int) ([]byte, error) {
-	img := image.NewRGBA(image.Rect(0, 0, size, size))
-	for y := range size {
-		for x := range size {
-			c := color.RGBA{20, 66, 54, 255}
-			if x >= size/4 && x < size*3/4 && y >= size/4 && y < size*3/4 {
-				c = color.RGBA{255, 255, 255, 255}
+
+// icons are the pass's generated logo at Apple's three required scales.
+var icons = sync.OnceValues(func() (map[string][]byte, error) {
+	files := map[string][]byte{}
+	for name, size := range map[string]int{"icon.png": 29, "icon@2x.png": 58, "icon@3x.png": 87} {
+		img := image.NewRGBA(image.Rect(0, 0, size, size))
+		for y := range size {
+			for x := range size {
+				c := color.RGBA{20, 66, 54, 255}
+				if x >= size/4 && x < size*3/4 && y >= size/4 && y < size*3/4 {
+					c = color.RGBA{255, 255, 255, 255}
+				}
+				img.SetRGBA(x, y, c)
 			}
-			img.SetRGBA(x, y, c)
 		}
+		var b bytes.Buffer
+		if err := png.Encode(&b, img); err != nil {
+			return nil, err
+		}
+		files[name] = b.Bytes()
 	}
-	var b bytes.Buffer
-	err := png.Encode(&b, img)
-	return b.Bytes(), err
-}
+	return files, nil
+})
+
+// ApplePass returns a signed .pkpass bundle whose QR code is link, the
+// donor's IRL referral URL.
 func (i *Issuer) ApplePass(link string, now time.Time) ([]byte, error) {
 	if i == nil || i.Apple == nil {
 		return nil, ErrUnavailable
@@ -103,44 +119,52 @@ func (i *Issuer) ApplePass(link string, now time.Time) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	files := map[string][]byte{"pass.json": pass}
-	for name, size := range map[string]int{"icon.png": 29, "icon@2x.png": 58, "icon@3x.png": 87} {
-		data, err := icon(size)
-		if err != nil {
-			return nil, err
-		}
-		files[name] = data
+	images, err := icons()
+	if err != nil {
+		return nil, err
 	}
+	files := maps.Clone(images)
+	files["pass.json"] = pass
+	if err = a.sign(files); err != nil {
+		return nil, err
+	}
+	return bundle(files)
+}
+
+// sign adds the manifest of every file's SHA-1 digest, as Apple specifies,
+// and its detached signature.
+func (a *Apple) sign(files map[string][]byte) error {
 	manifest := map[string]string{}
 	for name, data := range files {
 		sum := sha1.Sum(data)
 		manifest[name] = hex.EncodeToString(sum[:])
-	} // Apple specifies SHA-1 file hashes in the manifest.
-	files["manifest.json"], err = json.Marshal(manifest)
-	if err != nil {
-		return nil, err
 	}
-	signed, err := pkcs7.NewSignedData(files["manifest.json"])
+	encoded, err := json.Marshal(manifest)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	signed, err := pkcs7.NewSignedData(encoded)
+	if err != nil {
+		return err
 	}
 	signed.SetDigestAlgorithm(pkcs7.OIDDigestAlgorithmSHA256)
 	if err = signed.AddSignerChain(a.Certificate, a.Key, []*x509.Certificate{a.Intermediate}, pkcs7.SignerInfoConfig{}); err != nil {
-		return nil, err
+		return err
 	}
 	signed.Detach()
-	files["signature"], err = signed.Finish()
+	signature, err := signed.Finish()
 	if err != nil {
-		return nil, err
+		return err
 	}
+	files["manifest.json"], files["signature"] = encoded, signature
+	return nil
+}
+
+// bundle zips files in name order, so equal passes are byte-identical.
+func bundle(files map[string][]byte) ([]byte, error) {
 	var result bytes.Buffer
 	archive := zip.NewWriter(&result)
-	names := make([]string, 0, len(files))
-	for name := range files {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
+	for _, name := range slices.Sorted(maps.Keys(files)) {
 		entry, err := archive.Create(name)
 		if err != nil {
 			return nil, err
@@ -149,7 +173,7 @@ func (i *Issuer) ApplePass(link string, now time.Time) ([]byte, error) {
 			return nil, err
 		}
 	}
-	if err = archive.Close(); err != nil {
+	if err := archive.Close(); err != nil {
 		return nil, err
 	}
 	return result.Bytes(), nil

@@ -31,8 +31,8 @@ WHERE NOT EXISTS(SELECT 1 FROM donor_messages m WHERE m.dedup_key=c.dedup_key)
 ON CONFLICT(dedup_key) DO NOTHING;
 
 -- name: QueueLoginEmail :exec
-INSERT INTO donor_login_emails (id,donor_id,available_at,created_at)
-SELECT $1,$2,$3,$3 WHERE NOT EXISTS
+INSERT INTO donor_login_emails (id,donor_id,available_at,created_at,return_path)
+SELECT $1,$2,$3,$3,sqlc.narg(return_path) WHERE NOT EXISTS
 (SELECT 1 FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 minute');
 
 -- name: DueProjectionDonor :one

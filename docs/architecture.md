@@ -17,6 +17,22 @@ validation, CSRF checks, and business rules. The Next proxy cannot grant permiss
 Donor and staff cookies identify distinct server-side sessions. Staff require individual
 passwords and MFA; roles map to named permissions checked against current database state.
 
+## HTTP contract and native clients
+
+`apps/donor-api/api/openapi.json` (OpenAPI 3.1) is the HTTP contract for the web app and
+the R2 donor apps. Every route is declared once in `internal/httpapi/routes.go` with its
+authentication and client policy; the `TestContract*` tests fail when routes, security,
+client policy, or JSON shapes drift from the document. Errors are `{detail}` JSON, with
+an additive `code` for configuration states and `errors` for located spreadsheet
+problems. Money is integer cents and timestamps are RFC 3339.
+
+The R2 app calls the API host directly with a bearer session instead of cookies (see
+[security](security.md)). Only donor account routes admit it; giving stays on the web.
+Every donor-facing URL is built in `internal/store/links.go`, which is the starting list
+for app/universal links (`/account/claim`, `/account/email-change`,
+`/account/payment-method`, `/r/{code}`). Passkeys and push-notification device
+registration are not built yet and need new store work.
+
 ## Financial consistency
 
 Guest checkouts capture first-touch attribution before accounts exist. Durable commands

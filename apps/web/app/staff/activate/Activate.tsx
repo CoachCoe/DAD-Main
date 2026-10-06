@@ -1,38 +1,42 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
-import { api } from "@/lib/api";
+import { Page } from "@/components/donor/Page";
+import { api, classifyFailure, failureMessage } from "@/lib/api";
+import { useHashToken } from "@/lib/useHashToken";
 
 type Setup = { email: string; secret: string; uri: string };
+
+// Connection, rate-limit and configuration problems say so; anything else is about the invitation.
+const explain = (cause: unknown, fallback: string) =>
+  ["offline", "rateLimited", "unconfigured"].includes(classifyFailure(cause)) ? failureMessage(cause, fallback) : fallback;
+
 export default function Activate() {
-  const [token, setToken] = useState("");
+  const { token, clear } = useHashToken("dad.staff.invitation");
   const [setup, setSetup] = useState<Setup | null>(null);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => {
-    const invitation = new URLSearchParams(window.location.hash.slice(1)).get("token");
-    if (invitation) setToken(invitation);
-    window.history.replaceState(null, "", window.location.pathname);
-  }, []);
   async function provision() {
     setBusy(true); setError("");
     try { setSetup(await api<Setup>("/donor/staff/provision", { method: "POST", body: JSON.stringify({ token }) })); }
-    catch { setError("This invitation is unavailable or expired. Contact a DAD administrator."); }
+    catch (cause) { setError(explain(cause, "This invitation is unavailable or expired. Contact a DAD administrator.")); }
     finally { setBusy(false); }
   }
   async function activate(event: React.FormEvent) {
     event.preventDefault(); if (busy) return;
     setBusy(true); setError("");
-    try { await api("/donor/staff/activate", { method: "POST", body: JSON.stringify({ token, password, code }) }); setDone(true); setSetup(null); setToken(""); }
-    catch { setError("Activation was not confirmed. Check the authenticator code; invitations allow five attempts and expire after 24 hours."); }
+    try { await api("/donor/staff/activate", { method: "POST", body: JSON.stringify({ token, password, code }) }); setDone(true); setSetup(null); clear(); }
+    catch (cause) { setError(explain(cause, "Activation was not confirmed. Check the authenticator code; invitations allow five attempts and expire after 24 hours.")); }
     finally { setBusy(false); setPassword(""); setCode(""); }
   }
-  return <section className="panel"><h1>Activate your staff account</h1>
-    {done ? <p>Wait for a new authenticator code, then <Link href="/staff/sign-in">sign in</Link>.</p> : !setup ? <><p>Keep this invitation private. It can activate one individual staff account.</p>
+  return <Page eyebrow="Staff" title="Activate your staff account">
+    {done ? <p>Wait for a new authenticator code, then <Link href="/staff/sign-in">sign in</Link>.</p>
+      : token === "" ? <p className="callout">Open this page from the private invitation link a DAD administrator sent you. If the link has expired, ask them for a replacement invitation.</p>
+      : !setup ? <><p>Keep this invitation private. It can activate one individual staff account.</p>
         <button type="button" className="button" disabled={busy || !token} onClick={provision}>{busy ? "Checking…" : "Begin secure setup"}</button></> : <>
         <p>Set up {setup.email} in your authenticator app using this private setup key:</p>
         <p><code>{setup.secret}</code></p><p>Choose time-based codes, six digits, with a 30-second interval.</p>
@@ -43,5 +47,5 @@ export default function Activate() {
           <button type="submit" className="button">{busy ? "Activating…" : "Activate account"}</button>
         </fieldset></form>
       </>}<Announcer status={done ? "Your account is active." : ""} alert={error} />
-  </section>;
+  </Page>;
 }

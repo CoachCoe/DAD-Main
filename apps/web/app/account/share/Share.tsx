@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
+import { Page } from "@/components/donor/Page";
+import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, ApiError, failureMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
@@ -14,7 +16,7 @@ const text = "Join me in DAD’s sandbox preview. DAD launches in April 2027. Ab
 export default function Share() {
   const [name, setName] = useState("");
   const [signedOut, setSignedOut] = useState(false);
-  const { resource, data: sharing, reload, setData } = useApiResource<Sharing>(signedOut ? null : "/donor/me/sharing",
+  const { resource, data: sharing, failed, reload, setData } = useApiResource<Sharing>(signedOut ? null : "/donor/me/sharing",
     { onLoad: (result) => setName(result.public_name ?? "") });
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -51,32 +53,34 @@ export default function Share() {
     }
   }
   const absent = signedOut || resource.state === "signedOut";
-  return <div className="authLayout wide"><section className="panel authPanel">
-    <span className="eyebrow">DAD · SANDBOX PREVIEW</span><h1>Invite someone you know</h1>
-    {absent ? <p><Link href="/account/sign-in">Sign in to share</Link></p> : <>
+  return <Page eyebrow="Share" title="Invite someone you know" back={{ href: "/account/dashboard", label: "My dashboard" }}>
+    {absent ? <SignInPrompt>Sign in to share</SignInPrompt> : <>
       {sharing && <>
+        {sharing.link ? <>
+          <p className="lead">Send your personal link. When someone gives for the first time through it, they count toward your circle.</p>
+          <button type="button" className="button full" onClick={share}>Share invitation</button>
+          <label>Invitation<textarea readOnly rows={5} value={`${text}\n${sharing.link}`} /></label>
+          <label>Your referral link<input readOnly value={sharing.link} onFocus={(event) => event.target.select()} /></label>
+          <p><Link href="/account/code">Show my referral code in person</Link></p>
+        </> : <p className="lead">Choose the name people will see when they open your invitation. Then your personal link is ready to share.</p>}
         <form onSubmit={(event) => { event.preventDefault(); save(false); }}>
-          <label className="field">Public first name or nickname
-            <input required maxLength={80} value={name} disabled={busy || replacing} onChange={(event) => setName(event.target.value)} /></label>
-          <p>This name appears to anyone who opens your referral link or scans your code. Choose a name you’re comfortable sharing publicly.</p>
+          <label>Public first name or nickname
+            <input required maxLength={80} value={name} disabled={busy || replacing} aria-describedby="public-name-hint"
+              onChange={(event) => setName(event.target.value)} /></label>
+          <p id="public-name-hint" className="note">This name appears to anyone who opens your referral link or scans your code. Choose a name you’re comfortable sharing publicly.</p>
           <button type="submit" className={sharing.link ? "secondary" : "button"} disabled={busy || replacing}>{busy && !replacing ? "Saving…" : "Save public name"}</button>
         </form>
-        {sharing.link && <>
-          <label className="field">Your referral link<input readOnly value={sharing.link} onFocus={(event) => event.target.select()} /></label>
-          <label className="field">Invitation<textarea readOnly rows={5} value={`${text}\n${sharing.link}`} /></label>
-          <button type="button" className="button full" onClick={share}>Share invitation</button>
-          <p><Link href="/account/code">Show my referral code in person</Link></p>
-          {replacing ? <div className="confirmStep">
-            <h2 ref={step.heading} tabIndex={-1}>Replace your link and code?</h2>
-            <p>Replacing your link also changes your on-screen code. Previously shared links stop working for new visitors.</p>
+        {sharing.link && (replacing ? <div className="callout">
+          <h2 ref={step.heading} tabIndex={-1}>Replace your link and code?</h2>
+          <p>Replacing your link also changes your on-screen code. Previously shared links stop working for new visitors.</p>
+          <div className="actions">
             <button type="button" className="secondary danger" disabled={busy} onClick={() => save(true)}>{busy ? "Replacing…" : "Confirm replacement"}</button>
             <button type="button" className="secondary" disabled={busy} onClick={() => setReplacing(false)}>Keep current link</button>
-          </div> : <button type="button" ref={step.trigger} className="quiet" onClick={() => setReplacing(true)}>Replace my link and code</button>}
-        </>}
+          </div>
+        </div> : <button type="button" ref={step.trigger} className="quiet" onClick={() => setReplacing(true)}>Replace my link and code</button>)}
       </>}
-      {(resource.state === "offline" || resource.state === "error") && <button type="button" className="secondary" onClick={reload}>Retry loading</button>}
-      <p><Link href="/account/dashboard">My dashboard</Link></p>
+      <Announcer status={messages.status || message} alert={error || messages.alert} />
+      {failed && <button type="button" className="secondary" onClick={reload}>Retry loading</button>}
     </>}
-    <Announcer status={absent ? "" : messages.status || message} alert={absent ? "" : error || messages.alert} />
-  </section></div>;
+  </Page>;
 }

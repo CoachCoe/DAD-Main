@@ -27,6 +27,7 @@ it.each([
   [reply(404), { state: "notFound" }],
   [reply(429), { state: "error", rateLimited: true }],
   [reply(503), { state: "error", rateLimited: false }],
+  [reply(503, { detail: "Email is off", code: "EMAIL_UNCONFIGURED" }), { state: "unconfigured" }],
 ])("maps an HTTP failure to a screen state", async (response, expected) => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
   const { result } = renderHook(() => useApiResource("/donor/me/thing"));
@@ -64,6 +65,7 @@ it("gives each non-ready state its own copy", () => {
   expect(resourceMessages({ state: "error", rateLimited: true }, copy).alert).toBe(RATE_LIMITED_MESSAGE);
   expect(resourceMessages({ state: "error", rateLimited: false }, copy).alert).toBe("Could not load.");
   expect(resourceMessages({ state: "signedOut" }, copy)).toEqual({ status: "", alert: "" });
+  expect(resourceMessages({ state: "unconfigured" }, copy).alert).toMatch(/isn’t available in this environment/);
   expect(resourceMessages({ state: "notFound" }, copy).alert).toBe("Could not load.");
   expect(resourceMessages({ state: "notFound" }, { ...copy, notFound: "No such record." }).alert).toBe("No such record.");
 });

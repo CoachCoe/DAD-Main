@@ -3,13 +3,9 @@ import { trustedClientIp } from "@/lib/clientIp";
 import { donorApiBase } from "@/lib/donorApi";
 
 /**
- * Runtime proxy to the donor API.
- *
- * This was a `rewrites()` entry in next.config.ts, but with `output: standalone` the
- * destination is resolved when the config is evaluated and baked into server.js -- so the
- * image always pointed at whatever API_BASE_URL was set to at *build* time, and setting it
- * at runtime silently did nothing. A route handler reads it per request, which keeps one
- * image usable across environments.
+ * Runtime proxy to the donor API. A route handler rather than a rewrite: with
+ * `output: standalone` a rewrite destination is fixed at build time, so one image could not
+ * serve several environments.
  *
  * The proxy exists so the session cookie is first-party. Sent cross-origin it would need
  * SameSite=None, which requires HTTPS and would make the cookie usable from any site.
@@ -36,6 +32,18 @@ const HOP_BY_HOP = new Set([
   "set-cookie",
 ]);
 
+// The API's largest accepted body (a private source document). Bodies are buffered rather
+// than streamed: undici cannot hand back a response that arrives before a streamed request
+// body is consumed, so an early 401 or 422 would surface as an unreachable API.
+const MAX_BODY_BYTES = 10 << 20;
+
+async function readBody(request: NextRequest): Promise<ArrayBuffer | null> {
+  const declared = Number(request.headers.get("content-length") ?? 0);
+  if (declared > MAX_BODY_BYTES) return null;
+  const body = await request.arrayBuffer();
+  return body.byteLength > MAX_BODY_BYTES ? null : body;
+}
+
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
   if (path[0] !== "donor" || path.some((segment) => segment === "." || segment === ".." || /[\\/?#%]/.test(segment))) {
@@ -44,7 +52,8 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   const target = new URL(`${donorApiBase()}/${path.map(encodeURIComponent).join("/")}`);
   target.search = request.nextUrl.search;
 
-  const hasBody = request.method !== "GET" && request.method !== "HEAD";
+  const body = request.method === "GET" || request.method === "HEAD" ? undefined : await readBody(request);
+  if (body === null) return Response.json({ detail: "Request body is too large." }, { status: 413 });
   const requestHeaders = new Headers();
   for (const name of REQUEST_HEADERS) {
     const value = request.headers.get(name);
@@ -57,13 +66,10 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     response = await fetch(target, {
       method: request.method,
       headers: requestHeaders,
-      // Stream source documents without buffering them in the web server.
-      body: hasBody ? request.body : undefined,
+      body,
       redirect: "manual",
       signal: AbortSignal.any([request.signal, AbortSignal.timeout(28_000)]),
-      // Required by undici when the body is a stream.
-      ...(hasBody ? { duplex: "half" } : {}),
-    } as RequestInit);
+    });
   } catch {
     return Response.json(
       {

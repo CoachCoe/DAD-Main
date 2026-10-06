@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -18,7 +19,7 @@ import (
 func isolatedDatabase(t *testing.T) (*pgxpool.Pool, context.Context) {
 	t.Helper()
 	config, err := pgxpool.ParseConfig(os.Getenv("TEST_DATABASE_URL"))
-	if err != nil || config.ConnConfig.Database != "donor_go" {
+	if err != nil || (config.ConnConfig.Database != "donor_go" && !strings.HasPrefix(config.ConnConfig.Database, "donor_go_")) {
 		t.Fatal("TEST_DATABASE_URL must name the dedicated donor_go test database")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

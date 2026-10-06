@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"impactgraph/donor-api/internal/credentials"
 )
 
 var ErrDelivery = errors.New("email delivery failed")
@@ -41,8 +43,26 @@ func address(value string) (*netmail.Address, error) {
 	}
 	return parsed, nil
 }
+
+// Validate checks everything a delivery worker needs: the server, the
+// sender, and the key that encrypts queued sign-in links.
 func (s Settings) Validate() error {
-	if s.Host == "" || strings.ContainsAny(s.Host, "\r\n") || s.Port < 1 || s.Port > 65535 || s.EncryptionKey == "" {
+	if err := s.validateServer(); err != nil {
+		return err
+	}
+	if credentials.ValidateKey(s.EncryptionKey) != nil {
+		return ErrConfiguration
+	}
+	return nil
+}
+
+func validAddress(value string) bool {
+	_, err := address(value)
+	return err == nil
+}
+
+func (s Settings) validateServer() error {
+	if s.Host == "" || strings.ContainsAny(s.Host, "\r\n") || s.Port < 1 || s.Port > 65535 {
 		return ErrConfiguration
 	}
 	if s.Port == 465 {
@@ -92,8 +112,10 @@ type SMTPTransport struct {
 	RootCAs *x509.CertPool
 }
 
+// Send delivers message once over STARTTLS. Any failure after validation is
+// ErrDelivery: SMTP replies can echo addresses and must not reach logs.
 func (s SMTPTransport) Send(ctx context.Context, message Message) error {
-	if err := s.Settings.Validate(); err != nil {
+	if err := s.Settings.validateServer(); err != nil {
 		return err
 	}
 	wire, from, to, err := message.wire()
@@ -102,50 +124,54 @@ func (s SMTPTransport) Send(ctx context.Context, message Message) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	if err = s.deliver(ctx, wire, from, to); err != nil {
+		return ErrDelivery
+	}
+	return nil
+}
+
+func (s SMTPTransport) deliver(ctx context.Context, wire []byte, from, to string) error {
 	connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", net.JoinHostPort(s.Settings.Host, strconv.Itoa(s.Settings.Port)))
 	if err != nil {
-		return ErrDelivery
+		return err
 	}
 	defer connection.Close()
 	stop := context.AfterFunc(ctx, func() { _ = connection.Close() })
 	defer stop()
 	if deadline, ok := ctx.Deadline(); ok {
 		if err = connection.SetDeadline(deadline); err != nil {
-			return ErrDelivery
+			return err
 		}
 	}
 	client, err := smtp.NewClient(connection, s.Settings.Host)
 	if err != nil {
-		return ErrDelivery
+		return err
 	}
 	defer client.Close()
 	// STARTTLS is mandatory; never fall back to cleartext credentials or content.
 	if err = client.StartTLS(&tls.Config{ServerName: s.Settings.Host, RootCAs: s.RootCAs, MinVersion: tls.VersionTLS12}); err != nil {
-		return ErrDelivery
+		return err
 	}
 	if s.Settings.Username != "" {
 		if err = client.Auth(smtp.PlainAuth("", s.Settings.Username, s.Settings.Password, s.Settings.Host)); err != nil {
-			return ErrDelivery
+			return err
 		}
 	}
 	if err = client.Mail(from); err != nil {
-		return ErrDelivery
+		return err
 	}
 	if err = client.Rcpt(to); err != nil {
-		return ErrDelivery
+		return err
 	}
 	data, err := client.Data()
 	if err != nil {
-		return ErrDelivery
+		return err
 	}
 	if _, err = data.Write(wire); err != nil {
-		return ErrDelivery
+		return err
 	}
 	if err = data.Close(); err != nil {
-		return ErrDelivery
+		return err
 	}
-	if err = client.Quit(); err != nil {
-		return ErrDelivery
-	}
-	return nil
+	return client.Quit()
 }

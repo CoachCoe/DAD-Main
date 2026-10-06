@@ -126,9 +126,6 @@ UPDATE donor_stripe_checkouts SET status='CANCELLED' WHERE id=$1;
 -- name: PaymentUpdateByID :one
 SELECT * FROM donor_payment_updates WHERE id=$1 FOR UPDATE;
 
--- name: AttemptByID :one
-SELECT * FROM donor_stripe_checkouts WHERE id=$1 FOR UPDATE;
-
 -- name: SavePaymentUpdate :exec
 UPDATE donor_payment_updates SET stripe_session_id=$2,status=$3,hosted_url=$4,completed_at=$5 WHERE id=$1;
 

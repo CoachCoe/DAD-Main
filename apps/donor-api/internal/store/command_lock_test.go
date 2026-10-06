@@ -177,7 +177,7 @@ func TestRetryAfterCrashAppliesProcessorResultOnce(t *testing.T) {
 	pool := r.service.DB
 	request := PauseRequest{RequestID: testID(t), AttemptID: r.attempt, Months: 1, StartsAt: r.end, ResumesAt: r.end.AddDate(0, 1, 0)}
 	r.sub.loseAcknowledgement = true
-	if _, err := r.service.Pause(ctx, r.token, request); !errors.Is(err, payments.ErrCheckoutUnavailable) {
+	if _, err := r.service.Pause(ctx, r.token, request); !errors.Is(err, payments.ErrProcessorUnavailable) {
 		t.Fatal("expected an unacknowledged mutation", err)
 	}
 	// A crash after the processor call leaves the command's lease behind too.

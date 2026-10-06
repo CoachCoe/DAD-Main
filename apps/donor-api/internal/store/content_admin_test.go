@@ -120,3 +120,42 @@ func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
 		t.Fatal("corrupt source returned", err)
 	}
 }
+
+func TestPublicationErrorsLocateEachProblem(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	actor, token := staffFixture(t, pool, "ADMIN")
+	restoreContent(t, pool, actor)
+	s := ContentService{Staff: &StaffService{DB: pool}}
+	source := testID(t)
+	if err := queries.New(pool).InsertContentSource(ctx, queries.InsertContentSourceParams{ID: source, ActorID: actor, Name: "approval.pdf", Sha256: strings.Repeat("0", 64), EncryptedData: []byte("ciphertext")}); err != nil {
+		t.Fatal(err)
+	}
+	const initiativesHeader = "slug,title,summary,partner,planned_start,board_approval_source_id,approved_on\n"
+	const ledgerHeader = "metric,value,unit,source_id,illustrative\n"
+	initiative := "first,First,Planned,Partner,2027-04-22," + source.String() + ",2026-01-01\n"
+	ledger := "Collected,3000,USD_CENTS," + source.String() + ",false\n"
+	for _, c := range []struct {
+		name              string
+		initiatives, rows string
+		want              PublicationProblem
+	}{
+		{"bad header", "slug,title\n", ledgerHeader + ledger, PublicationProblem{Sheet: "initiatives", Row: 1, Reason: "invalid_header"}},
+		{"duplicate slug", initiativesHeader + initiative + initiative, ledgerHeader + ledger, PublicationProblem{Sheet: "initiatives", Row: 3, Column: "slug", Reason: "duplicate_slug"}},
+		{"bad date", initiativesHeader + "first,First,Planned,Partner,someday," + source.String() + ",2026-01-01\n", ledgerHeader + ledger, PublicationProblem{Sheet: "initiatives", Row: 2, Column: "planned_start", Reason: "invalid_date"}},
+		{"bad unit", initiativesHeader + initiative, ledgerHeader + "Collected,3000,EUROS," + source.String() + ",false\n", PublicationProblem{Sheet: "ledger", Row: 2, Column: "unit", Reason: "invalid_unit"}},
+		{"unknown source", initiativesHeader + initiative, ledgerHeader + "Collected,3000,USD_CENTS," + testID(t).String() + ",false\n", PublicationProblem{Sheet: "ledger", Row: 2, Column: "source_id", Reason: "unknown_source"}},
+		{"NUL byte", initiativesHeader + "first,First\x00,Planned,Partner,2027-04-22," + source.String() + ",2026-01-01\n", ledgerHeader + ledger, PublicationProblem{Sheet: "initiatives", Reason: "invalid_text"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := s.Publish(ctx, token, PublicationRequest{AsOf: "2026-01-01", Cadence: "Monthly", InitiativesCSV: c.initiatives, LedgerCSV: c.rows})
+			if !errors.Is(err, ErrStaffInput) {
+				t.Fatalf("got %v, want an ErrStaffInput", err)
+			}
+			problems, ok := errors.AsType[*PublicationError](err)
+			if !ok || len(problems.Problems) != 1 || problems.Problems[0] != c.want {
+				t.Fatalf("got %+v, want only %+v", problems, c.want)
+			}
+		})
+	}
+}

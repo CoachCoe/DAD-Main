@@ -49,9 +49,9 @@ func (d DonorDashboard) MarshalJSON() ([]byte, error) {
 	return json.Marshal(dashboard(d))
 }
 
-// Dashboard reads must share a repeatable snapshot: a worker may update several
-// related projections while the three constituent queries execute.
-func Dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (DonorDashboard, error) {
+// dashboard reads the donor's projections, which must come from one snapshot:
+// a worker may update several of them while the three queries run.
+func dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (DonorDashboard, error) {
 	row, err := q.Projection(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DonorDashboard{Mode: "test", State: "preparing"}, nil
@@ -87,23 +87,7 @@ func Dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time
 type DashboardReader struct{ DB *pgxpool.Pool }
 
 func (reader DashboardReader) DonorDashboard(ctx context.Context, token string) (DonorDashboard, error) {
-	tx, err := reader.DB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return DonorDashboard{}, err
-	}
-	defer tx.Rollback(ctx)
-	now := time.Now().UTC()
-	q := queries.New(tx)
-	donor, err := Authenticated(ctx, q, token, now)
-	if err != nil {
-		return DonorDashboard{}, err
-	}
-	body, err := Dashboard(ctx, q, donor.ID, now)
-	if err != nil {
-		return DonorDashboard{}, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return DonorDashboard{}, err
-	}
-	return body, nil
+	return donorRead(ctx, reader.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (DonorDashboard, error) {
+		return dashboard(ctx, q, d.ID, now)
+	})
 }

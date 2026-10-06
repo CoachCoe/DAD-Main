@@ -1,4 +1,6 @@
 // @vitest-environment node
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { NextRequest } from "next/server";
 import { afterEach, expect, it, vi } from "vitest";
 import { GET, POST } from "./route";
@@ -60,7 +62,7 @@ it("forwards only the allowlisted request headers", async () => {
     headers: {
       cookie: "dad_session=s", "content-type": "application/json", accept: "application/json", "accept-language": "en-US",
       "idempotency-key": "k", origin: "http://localhost:3000", "user-agent": "browser", "stripe-signature": "t=1,v1=x",
-      authorization: "Bearer stolen", "x-forwarded-host": "evil.example", "x-staff-role": "ADMIN", forwarded: "for=1.2.3.4", host: "evil.example",
+      authorization: "Bearer stolen", "x-dad-client": "native", "x-forwarded-host": "evil.example", "x-staff-role": "ADMIN", forwarded: "for=1.2.3.4", host: "evil.example",
     },
   }), context("donor", "checkouts"));
   const sent = new Headers(fetch.mock.calls[0][1].headers);
@@ -88,4 +90,33 @@ it("answers 502 with a structured error when the API is unreachable", async () =
   const response = await GET(new NextRequest("http://localhost:3000/api/donor/me"), context("donor", "me"));
   expect(response.status).toBe(502);
   expect(await response.json()).toEqual({ detail: { code: "API_UNREACHABLE", message: "The requested service could not be reached." } });
+});
+
+it("relays an upstream rejection of a request body instead of reporting the API unreachable", async () => {
+  // A real HTTP upstream that answers before reading the body, as the API does for a bad session.
+  const upstream = createServer((_request, response) => {
+    response.writeHead(401, { "content-type": "application/json" });
+    response.end(JSON.stringify({ detail: "This link has expired." }));
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    vi.stubEnv("DONOR_API_BASE_URL", `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`);
+    const response = await POST(new NextRequest("http://localhost:3000/api/donor/claim", {
+      method: "POST", body: JSON.stringify({ token: "x".repeat(64 * 1024) }), headers: { "content-type": "application/json" },
+    }), context("donor", "claim"));
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ detail: "This link has expired." });
+  } finally {
+    upstream.close();
+  }
+});
+
+it("refuses a body larger than the API accepts without contacting it", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const response = await POST(new NextRequest("http://localhost:3000/api/donor/staff/content/sources", {
+    method: "POST", body: new Uint8Array((10 << 20) + 1),
+  }), context("donor", "staff", "content", "sources"));
+  expect(response.status).toBe(413);
+  expect(fetch).not.toHaveBeenCalled();
 });

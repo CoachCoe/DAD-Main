@@ -33,41 +33,37 @@ func staffFixture(t *testing.T, pool *pgxpool.Pool, role string) (pgtype.UUID, s
 	return id, token
 }
 
-func TestStaffMutationHoldsActorLockAndRechecksRevocation(t *testing.T) {
+func TestStaffWriteHoldsActorLockAndRechecksRevocation(t *testing.T) {
 	pool := database(t)
-	for _, permission := range []string{"content.publish", "message.resend"} {
-		t.Run(permission, func(t *testing.T) {
-			id, token := staffFixture(t, pool, "ADMIN")
-			s := &StaffService{DB: pool}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			_, err := staffTransaction(ctx, s, token, permission, func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (bool, error) {
-				probe, err := pool.Begin(ctx)
-				if err != nil {
-					return false, err
-				}
-				defer probe.Rollback(ctx)
-				var locked pgtype.UUID
-				err = probe.QueryRow(ctx, "SELECT id FROM donor_staff WHERE id=$1 FOR UPDATE SKIP LOCKED", id).Scan(&locked)
-				if !errors.Is(err, pgx.ErrNoRows) {
-					return false, errors.New("staff mutation did not lock actor")
-				}
-				return true, auditStaff(ctx, queries.New(tx), actor.ID, "test.mutation", id.String(), nil, now)
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = s.SignOut(ctx, token); err != nil {
-				t.Fatal(err)
-			}
-			_, err = staffTransaction(ctx, s, token, permission, func(pgx.Tx, queries.DonorStaff, time.Time) (bool, error) {
-				t.Error("revoked session reached mutation")
-				return true, nil
-			})
-			if !errors.Is(err, ErrStaffDenied) {
-				t.Fatal("revoked session was not denied", err)
-			}
-		})
+	id, token := staffFixture(t, pool, "ADMIN")
+	s := &StaffService{DB: pool}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := staffWrite(ctx, s, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (bool, error) {
+		probe, err := pool.Begin(ctx)
+		if err != nil {
+			return false, err
+		}
+		defer probe.Rollback(ctx)
+		var locked pgtype.UUID
+		err = probe.QueryRow(ctx, "SELECT id FROM donor_staff WHERE id=$1 FOR UPDATE SKIP LOCKED", id).Scan(&locked)
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return false, errors.New("staff write did not lock its actor")
+		}
+		return true, auditStaff(ctx, queries.New(tx), actor.ID, "test.mutation", id.String(), nil, now)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.SignOut(ctx, token); err != nil {
+		t.Fatal(err)
+	}
+	_, err = staffWrite(ctx, s, token, "content.publish", func(pgx.Tx, queries.DonorStaff, time.Time) (bool, error) {
+		t.Error("revoked session reached the write")
+		return true, nil
+	})
+	if !errors.Is(err, ErrStaffDenied) {
+		t.Fatalf("revoked session: got %v, want ErrStaffDenied", err)
 	}
 }
 

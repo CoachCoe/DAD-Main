@@ -2,14 +2,17 @@
 import { useRef, useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
-import { api, ApiError, unconfirmedMessage } from "@/lib/api";
+import { Page } from "@/components/donor/Page";
+import { StaleNotice } from "@/components/donor/StaleNotice";
+import { api, ApiError, classifyFailure, unconfirmedMessage } from "@/lib/api";
 import { formatMoney, parseDollars } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
+import { formatDateTime } from "@/lib/dates";
 
-type Quote = { gift_id: string; donor_id: string; amount_minor: number; available_minor: number } | {
+type Quote = ({ gift_id: string; donor_id: string; amount_minor: number; available_minor: number } | {
   subscription: { id: string; amount_minor: number; period_end: string; stops_at: string | null } | null;
-};
+}) & { stale?: boolean; observed_at?: string };
 type Action = { id: string; actor_id: string; kind: string; target_id: string; amount_minor: number | null; period_end: string | null; reason: string; status: string };
 type Confirmation = { amount_minor: number; reason: string } | { subscription_id: string; period_end: string; reason: string };
 type Result = { status?: string; subscription?: { stops_at: string | null } };
@@ -86,34 +89,36 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
       }
       setMessage(result.status === "NOT_SUBMITTED" ? "No refund submitted. The available amount changed. Refresh and confirm a new request." :
         result.status ? `Stripe refund status: ${result.status}. Only successful refunds reduce collected totals.` :
-        `Cancellation confirmed at ${new Date(result.subscription?.stops_at ?? "").toLocaleString()}. Past gifts are not refunded.`);
+        `Cancellation confirmed at ${formatDateTime(result.subscription?.stops_at ?? "")}. Past gifts are not refunded.`);
       reload();
     } catch (cause) {
+      // Refused outright, so nothing is pending and the next attempt is a new request.
+      if (classifyFailure(cause) === "unconfigured") setRequestKey(null);
       setError(unconfirmedMessage(cause, "This action is not confirmed. Retry the same request to reconcile it. Do not issue another refund while its outcome is unknown."));
     } finally { setBusy(false); }
   }
   const describedBy = (field: "amount" | "reason") => invalid === field ? { "aria-invalid": true, "aria-describedby": "finance-error" } : {};
-  return <section className="panel"><h1>{gift ? "Refund a gift" : "Cancel monthly giving"}</h1>
-    <p><Link href="/staff">Staff back office</Link></p>
+  return <Page wide eyebrow="Staff" back={{ href: "/staff", label: "Staff back office" }} title={gift ? "Refund a gift" : "Cancel monthly giving"}>
     <p>Sandbox only. A named financial permission and an audit reason are required.</p>
     {!donor && <p>Select a donor and gift in the staff back office.</p>}
     {resource.state === "signedOut" && donor && <p><Link className="button" href="/staff/sign-in">Staff sign-in</Link></p>}
+    {quote?.stale && <StaleNotice observedAt={quote.observed_at} />}
     {quote && <>{"gift_id" in quote ? <p>Original gift: {formatMoney(quote.amount_minor)}. Available to refund: {formatMoney(quote.available_minor)} USD.</p> :
-      quote.subscription ? <p>{formatMoney(quote.subscription.amount_minor)}/month. Next renewal: {new Date(quote.subscription.period_end).toLocaleString()}.{quote.subscription.stops_at && " Cancellation is already scheduled."}</p> : <p>No monthly gift is available.</p>}
-      {confirmation ? <div className="confirmStep"><h2 ref={step.heading} tabIndex={-1}>Confirm financial action</h2>
-        <p>{"amount_minor" in confirmation ? `Refund ${formatMoney(confirmation.amount_minor)} USD to the original payment method.` : `Stop future renewals at ${new Date(confirmation.period_end).toLocaleString()}. No refund is included.`}</p>
+      quote.subscription ? <p>{formatMoney(quote.subscription.amount_minor)}/month. Next renewal: {formatDateTime(quote.subscription.period_end)}.{quote.subscription.stops_at && " Cancellation is already scheduled."}</p> : <p>No monthly gift is available.</p>}
+      {confirmation ? <div className="callout"><h2 ref={step.heading} tabIndex={-1}>Confirm financial action</h2>
+        <p>{"amount_minor" in confirmation ? `Refund ${formatMoney(confirmation.amount_minor)} USD to the original payment method.` : `Stop future renewals at ${formatDateTime(confirmation.period_end)}. No refund is included.`}</p>
         <p>Reason: {confirmation.reason}</p>
-        <button type="button" className="secondary danger" disabled={busy} onClick={submit}>{busy ? "Checking action…" : requestKey ? "Retry original financial action" : "Confirm financial action"}</button>
-        <button type="button" className="secondary" disabled={busy || requestKey !== null} onClick={() => setConfirmation(null)}>Back</button>
+        <div className="actions"><button type="button" className="secondary danger" disabled={busy || quote.stale} onClick={submit}>{busy ? "Checking action…" : requestKey ? "Retry original financial action" : "Confirm financial action"}</button>
+        <button type="button" className="secondary" disabled={busy || requestKey !== null} onClick={() => setConfirmation(null)}>Back</button></div>
       </div> : (("gift_id" in quote && quote.available_minor > 0) || ("subscription" in quote && quote.subscription && !quote.subscription.stops_at)) && <form onSubmit={review}>
         {"gift_id" in quote && <label>Refund in USD<input ref={amountInput} inputMode="decimal" value={amount} {...describedBy("amount")}
           onChange={(event) => { setAmount(event.target.value); setInvalid(null); }} required /></label>}
         <label>Audit reason<textarea ref={reasonInput} minLength={5} maxLength={500} value={reason} {...describedBy("reason")}
           onChange={(event) => { setReason(event.target.value); setInvalid(null); }} required /></label>
-        <button ref={step.trigger} className="button" disabled={busy} type="submit">Review financial action</button>
+        <button ref={step.trigger} className="button" disabled={busy || quote.stale} type="submit">Review financial action</button>
       </form>}
     </>}
     <Announcer id="finance-error" status={donor ? messages.status || message : ""} alert={donor ? error || messages.alert : ""} />
     {donor && resource.state !== "signedOut" && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh financial details</button>}
-  </section>;
+  </Page>;
 }

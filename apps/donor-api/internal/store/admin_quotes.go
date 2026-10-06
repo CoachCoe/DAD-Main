@@ -37,7 +37,7 @@ func (s StaffFinanceService) prefetchRefunds(ctx context.Context, token string, 
 		return refundSnapshot{}, err
 	}
 	if s.Gateway == nil {
-		return refundSnapshot{}, payments.ErrCheckoutUnavailable
+		return refundSnapshot{}, payments.ErrUnconfigured
 	}
 	rows, err := s.Gateway.ListPaymentRefunds(ctx, gift.StripePaymentIntentID.String)
 	if err != nil {
@@ -66,19 +66,37 @@ type RefundQuote struct {
 	DonorID        pgtype.UUID `json:"donor_id"`
 	GiftID         pgtype.UUID `json:"gift_id"`
 	Mode           string      `json:"mode"`
+	// ObservedAt and Stale mark a preview from stored refund states because
+	// the processor could not be read.
+	ObservedAt *time.Time `json:"observed_at,omitempty"`
+	Stale      bool       `json:"stale,omitempty"`
 }
 
+// RefundQuote previews how much of a gift can still be refunded, after
+// reconciling the processor's refunds of it.
 func (s StaffFinanceService) RefundQuote(ctx context.Context, token string, donorID, giftID pgtype.UUID) (RefundQuote, error) {
-	snapshot, err := s.prefetchRefunds(ctx, token, donorID, giftID)
+	snapshot, live, err := liveRead(ctx, func(ctx context.Context) (refundSnapshot, error) {
+		return s.prefetchRefunds(ctx, token, donorID, giftID)
+	})
 	if err != nil {
 		return RefundQuote{}, err
 	}
-	return staffTransaction(ctx, s.Staff, token, "gift.refund", func(tx pgx.Tx, _ queries.DonorStaff, now time.Time) (RefundQuote, error) {
+	if !live {
+		return staffRead(ctx, s.Staff, token, "gift.refund", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (RefundQuote, error) {
+			q := queries.New(tx)
+			gift, err := q.StaffGiftSnapshot(ctx, queries.StaffGiftSnapshotParams{DonorID: donorID, ID: giftID})
+			if err != nil {
+				return RefundQuote{}, err
+			}
+			quote, err := storedRefundQuote(ctx, q, gift)
+			if err != nil {
+				return RefundQuote{}, err
+			}
+			return quote, auditStaff(ctx, q, actor.ID, "gift.refund_preview", gift.ID.String(), map[string]bool{"stale": true}, now)
+		})
+	}
+	return staffDonorWrite(ctx, s.Staff, token, "gift.refund", donorID, func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (RefundQuote, error) {
 		q := queries.New(tx)
-		actor, _, err := staffFinancialOwner(ctx, q, token, donorID, "gift.refund", now)
-		if err != nil {
-			return RefundQuote{}, err
-		}
 		gift, err := staffGift(ctx, q, donorID, giftID)
 		if err != nil {
 			return RefundQuote{}, err
@@ -87,47 +105,10 @@ func (s StaffFinanceService) RefundQuote(ctx context.Context, token string, dono
 		if err != nil {
 			return RefundQuote{}, err
 		}
-		for _, current := range rows {
-			metadata, err := current.Object("metadata")
-			if err != nil {
-				continue
-			}
-			var id pgtype.UUID
-			if id.Scan(metadata.Text("dad_staff_action")) != nil || !id.Valid {
-				continue
-			}
-			command, err := q.StaffActionByID(ctx, id)
-			if errors.Is(err, pgx.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return RefundQuote{}, err
-			}
-			amount, err := current.Int("amount")
-			if err != nil {
-				return RefundQuote{}, err
-			}
-			if command.Kind != "REFUND" || command.TargetID != gift.ID || command.DonorID != donorID || !command.AmountMinor.Valid || command.AmountMinor.Int64 != amount {
-				continue
-			}
-			previous, err := q.RefundByStripeID(ctx, current.Text("id"))
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return RefundQuote{}, err
-			}
-			if err == nil && previous.Status == strings.ToUpper(current.Text("status")) {
-				continue
-			}
-			if err = RecordRefundInTx(ctx, q, gift, current, pgtype.UUID{}, command.ID, now); err != nil {
-				return RefundQuote{}, err
-			}
-			if err = q.SaveStaffAction(ctx, queries.SaveStaffActionParams{ID: command.ID, StripeRefundID: pgtype.Text{String: current.Text("id"), Valid: true}, Status: "OBSERVED", CompletedAt: timestamp(now)}); err != nil {
-				return RefundQuote{}, err
-			}
-			if err = auditStaff(ctx, q, actor.ID, "gift.refund_reconciled", command.ID.String(), map[string]string{"status": strings.ToUpper(current.Text("status"))}, now); err != nil {
-				return RefundQuote{}, err
-			}
+		if err = reconcileStaffRefunds(ctx, q, actor.ID, donorID, gift, rows, now); err != nil {
+			return RefundQuote{}, err
 		}
-		if _, err = RefreshProjectionInTx(ctx, tx, donorID, now); err != nil {
+		if _, err = refreshProjection(ctx, tx, donorID, now); err != nil {
 			return RefundQuote{}, err
 		}
 		if err = auditStaff(ctx, q, actor.ID, "gift.refund_preview", gift.ID.String(), nil, now); err != nil {
@@ -137,21 +118,82 @@ func (s StaffFinanceService) RefundQuote(ctx context.Context, token string, dono
 	})
 }
 
+// reconcileStaffRefunds records the current state of each processor refund
+// a staff command created for gift, completing commands whose outcome was
+// lost, so the preview reflects every refund DAD asked for.
+func reconcileStaffRefunds(ctx context.Context, q *queries.Queries, actor, donorID pgtype.UUID, gift queries.DonorGift, rows []payments.Object, now time.Time) error {
+	for _, current := range rows {
+		metadata, err := current.Object("metadata")
+		if err != nil {
+			continue
+		}
+		var id pgtype.UUID
+		if id.Scan(metadata.Text("dad_staff_action")) != nil || !id.Valid {
+			continue
+		}
+		command, err := q.StaffActionByID(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		amount, err := current.Int("amount")
+		if err != nil {
+			return err
+		}
+		if command.Kind != "REFUND" || command.TargetID != gift.ID || command.DonorID != donorID || !command.AmountMinor.Valid || command.AmountMinor.Int64 != amount {
+			continue
+		}
+		status := strings.ToUpper(current.Text("status"))
+		previous, err := q.RefundByStripeID(ctx, current.Text("id"))
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil && previous.Status == status {
+			continue
+		}
+		if err = recordRefund(ctx, q, gift, current, pgtype.UUID{}, command.ID, now); err != nil {
+			return err
+		}
+		if err = q.SaveStaffAction(ctx, queries.SaveStaffActionParams{ID: command.ID, StripeRefundID: text(current.Text("id")), Status: "OBSERVED", CompletedAt: timestamp(now)}); err != nil {
+			return err
+		}
+		if err = auditStaff(ctx, q, actor, "gift.refund_reconciled", command.ID.String(), map[string]string{"status": status}, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// CancellationQuote previews the donor's monthly gift for a staff
+// cancellation, from stored state if the processor cannot be read.
 func (s StaffFinanceService) CancellationQuote(ctx context.Context, token string, donorID pgtype.UUID) (RecurringDetails, error) {
 	if _, err := requireStaff(ctx, queries.New(s.Staff.DB), token, "gift.cancel", time.Now().UTC()); err != nil {
 		return RecurringDetails{}, err
 	}
-	recurring := RecurringService{DB: s.Staff.DB, Gateway: s.Gateway, Origin: s.Origin}
-	snapshot, err := recurring.prefetchSubscription(ctx, donorID)
+	recurring := s.recurring()
+	snapshot, live, err := liveRead(ctx, func(ctx context.Context) (*subscriptionSnapshot, error) {
+		return recurring.prefetchSubscription(ctx, donorID)
+	})
 	if err != nil {
 		return RecurringDetails{}, err
 	}
-	return staffTransaction(ctx, s.Staff, token, "gift.cancel", func(tx pgx.Tx, _ queries.DonorStaff, now time.Time) (RecurringDetails, error) {
+	if !live {
+		return staffRead(ctx, s.Staff, token, "gift.cancel", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (RecurringDetails, error) {
+			q := queries.New(tx)
+			view, err := storedDetails(ctx, q, donorID)
+			if err != nil {
+				return RecurringDetails{}, err
+			}
+			if view.Subscription == nil {
+				view = RecurringDetails{Mode: "test", Stale: view.Stale}
+			}
+			return view, auditStaff(ctx, q, actor.ID, "gift.cancel_preview", donorID.String(), map[string]bool{"stale": true}, now)
+		})
+	}
+	return staffDonorWrite(ctx, s.Staff, token, "gift.cancel", donorID, func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (RecurringDetails, error) {
 		q := queries.New(tx)
-		actor, _, err := staffFinancialOwner(ctx, q, token, donorID, "gift.cancel", now)
-		if err != nil {
-			return RecurringDetails{}, err
-		}
 		attempt, err := q.LatestMonthlyAttempt(ctx, donorID)
 		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !attempt.StripeSubscriptionID.Valid) {
 			return RecurringDetails{Mode: "test"}, nil
@@ -159,7 +201,7 @@ func (s StaffFinanceService) CancellationQuote(ctx context.Context, token string
 		if err != nil {
 			return RecurringDetails{}, err
 		}
-		row, _, err := recurring.read(ctx, tx, attempt, now, "", snapshot)
+		row, _, err := recurring.read(ctx, tx, attempt, now, viewOnly, snapshot)
 		if err != nil {
 			return RecurringDetails{}, err
 		}

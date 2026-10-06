@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 	"time"
 
@@ -43,7 +44,7 @@ type Receiver struct {
 }
 
 func (r Receiver) Receive(ctx context.Context, body []byte, signature string) error {
-	event, err := VerifyEvent(body, signature, r.Secret)
+	event, err := verifyEvent(body, signature, r.Secret)
 	if err != nil {
 		return err
 	}
@@ -56,7 +57,7 @@ func (r Receiver) Receive(ctx context.Context, body []byte, signature string) er
 	return r.Inbox.SaveVerifiedEvent(ctx, *event)
 }
 
-func VerifyEvent(body []byte, signature, secret string) (*VerifiedEvent, error) {
+func verifyEvent(body []byte, signature, secret string) (*VerifiedEvent, error) {
 	if secret == "" {
 		return nil, ErrUnavailable
 	}
@@ -81,7 +82,7 @@ func VerifyEvent(body []byte, signature, secret string) (*VerifiedEvent, error) 
 	default:
 		return nil, nil
 	}
-	if envelope.Created == nil || *envelope.Created < 0 || *envelope.Created > 253402300799 || event.ID == "" || len(event.ID) > 255 || event.Data == nil {
+	if envelope.Created == nil || *envelope.Created < 0 || *envelope.Created > maxUnix || event.ID == "" || len(event.ID) > 255 || event.Data == nil {
 		return nil, ErrEventShape
 	}
 	var obj map[string]any
@@ -135,6 +136,9 @@ func uuid(value any) error {
 	}
 	return nil
 }
+
+// minimalObject keeps only the allowlisted fields the worker verifies. keep is
+// false for an event about an object DAD did not create.
 func minimalObject(kind string, obj map[string]any) (map[string]any, bool, error) {
 	metadata, err := object(obj["metadata"])
 	if err != nil {
@@ -184,25 +188,9 @@ func minimalObject(kind string, obj map[string]any) (map[string]any, bool, error
 		}
 	}
 	if strings.HasPrefix(kind, "invoice.") {
-		lines, err := invoiceLines(obj["lines"])
-		if err != nil {
+		if err = addInvoiceFacts(data, obj); err != nil {
 			return nil, false, err
 		}
-		payments, err := invoicePayments(obj["payments"])
-		if err != nil {
-			return nil, false, err
-		}
-		for key, value := range lines {
-			data[key] = value
-		}
-		for key, value := range payments {
-			data[key] = value
-		}
-		transitions, err := object(obj["status_transitions"])
-		if err != nil {
-			return nil, false, err
-		}
-		data["paid_at"] = transitions["paid_at"]
 	}
 	if strings.HasPrefix(kind, "refund.") {
 		data = pick(obj, "id", "payment_intent", "amount", "currency", "status")
@@ -211,6 +199,27 @@ func minimalObject(kind string, obj map[string]any) (map[string]any, bool, error
 		data = map[string]any{"id": id, "payment_update_id": update}
 	}
 	return data, true, nil
+}
+
+// addInvoiceFacts copies the invoice line, payment and paid-time fields the
+// worker verifies into data.
+func addInvoiceFacts(data, invoice map[string]any) error {
+	lines, err := invoiceLines(invoice["lines"])
+	if err != nil {
+		return err
+	}
+	payments, err := invoicePayments(invoice["payments"])
+	if err != nil {
+		return err
+	}
+	transitions, err := object(invoice["status_transitions"])
+	if err != nil {
+		return err
+	}
+	maps.Copy(data, lines)
+	maps.Copy(data, payments)
+	data["paid_at"] = transitions["paid_at"]
+	return nil
 }
 
 func page(value any) ([]any, bool, error) {

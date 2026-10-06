@@ -3,15 +3,18 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
+import { Page } from "@/components/donor/Page";
+import { StaleNotice } from "@/components/donor/StaleNotice";
+import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, ApiError, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
+import { formatDateTime } from "@/lib/dates";
 
 type Dates = { months: number; starts_at: string; resumes_at: string };
 type Pause = Dates & { request_id: string; confirmed: boolean };
-type Options = { state: string; subscription_id?: string; pause: Pause | null; options: Dates[] };
+type Options = { state: string; stale?: boolean; subscription_id?: string; pause: Pause | null; options: Dates[] };
 
-const date = (value: string) => new Date(value).toLocaleString();
 const renewals = (months: number) => `${months} renewal${months === 1 ? "" : "s"}`;
 
 export default function PauseGiving() {
@@ -19,7 +22,7 @@ export default function PauseGiving() {
   const [choice, setChoice] = useState<Dates | null>(null);
   const [opener, setOpener] = useState<number | null>(null);
   const [requestKey, setRequestKey] = useState<string | null>(null);
-  const { resource, data, reload, setData } = useApiResource<Options>(signedOut ? null : "/donor/me/recurring/pause", {
+  const { resource, data, failed, reload, setData } = useApiResource<Options>(signedOut ? null : "/donor/me/recurring/pause", {
     onLoad: (value) => { setChoice(null); setError(""); setRequestKey(value.pause?.request_id ?? null); },
   });
   const [error, setError] = useState("");
@@ -46,34 +49,35 @@ export default function PauseGiving() {
       else setError(unconfirmedMessage(cause, "Pause is not confirmed. Retry the same request, or refresh to check its status."));
     } finally { setBusy(false); }
   }
-  const absent = signedOut || resource.state === "signedOut";
-  return <section className="panel">
-    <h1>Pause monthly giving</h1>
-    <p><Link href="/account/recurring">Manage monthly giving</Link></p>
-    <p>Sandbox only. These controls affect test subscriptions.</p>
-    {absent ? <p><Link href="/account/sign-in">Sign in to manage your giving</Link></p> : <>
-      {data?.pause ? <>
+  return <Page eyebrow="My account" title="Pause monthly giving" back={{ href: "/account/recurring", label: "Manage monthly giving" }}>
+    {signedOut || resource.state === "signedOut" ? <SignInPrompt>Sign in to manage your giving</SignInPrompt> : <>
+      {data?.stale && <StaleNotice />}
+      {data?.pause ? <div className="callout">
         {!message && <p>{data.pause.confirmed ? "Pause confirmed." : "Pause not yet confirmed."}</p>}
-        <p>Original pause starts {date(data.pause.starts_at)}.
-          Giving automatically resumes {date(data.pause.resumes_at)}.</p>
-        {!data.pause.confirmed && <button type="button" className="button" disabled={busy} onClick={() => data.pause && confirm(data.pause)}>Retry saved pause</button>}
-      </> : data && data.options.length === 0 ? <p>No monthly gift is currently available to pause.</p> : data && <>
-        {!choice ? <div className="actionRow">{data.options.map((option) => <button type="button" className="secondary" key={option.months}
-          ref={option.months === opener ? step.trigger : undefined} onClick={() => { setOpener(option.months); setChoice(option); }}>
-          Skip {renewals(option.months)}
-        </button>)}</div> : <div className="confirmStep">
+        <p>Original pause starts {formatDateTime(data.pause.starts_at)}. Giving automatically resumes {formatDateTime(data.pause.resumes_at)}.</p>
+        {!data.pause.confirmed && <button type="button" className="button" disabled={busy || data.stale} onClick={() => data.pause && confirm(data.pause)}>Retry saved pause</button>}
+        <p><Link href="/account/resume">Resume at next renewal</Link></p>
+      </div> : data && data.options.length === 0 ? <p>No monthly gift is currently available to pause.</p> : data && <>
+        {!choice ? <>
+          <p className="lead">Skip up to three monthly renewals. You’ll see the exact resume date before you confirm.</p>
+          <div className="actions">{data.options.map((option) => <button type="button" className="secondary" key={option.months} disabled={data.stale}
+            ref={option.months === opener ? step.trigger : undefined} onClick={() => { setOpener(option.months); setChoice(option); }}>
+            Skip {renewals(option.months)}
+          </button>)}</div>
+        </> : <div className="callout">
           <h2 ref={step.heading} tabIndex={-1}>Confirm your pause</h2>
-          <p>Skip {renewals(choice.months)}, starting <time dateTime={choice.starts_at}>{date(choice.starts_at)}</time>.</p>
-          <p>Giving automatically resumes <time dateTime={choice.resumes_at}>{date(choice.resumes_at)}</time>.</p>
-          <button type="button" className="button" disabled={busy} onClick={() => confirm(choice)}>{busy ? "Checking pause…" : "Confirm pause"}</button>
-          <button type="button" className="secondary" disabled={busy || requestKey !== null} onClick={() => setChoice(null)}>Back</button>
+          <p>Skip {renewals(choice.months)}, starting <time dateTime={choice.starts_at}>{formatDateTime(choice.starts_at)}</time>.</p>
+          <p>Giving automatically resumes <time dateTime={choice.resumes_at}>{formatDateTime(choice.resumes_at)}</time>.</p>
+          <div className="actions">
+            <button type="button" className="button" disabled={busy || data.stale} onClick={() => confirm(choice)}>{busy ? "Checking pause…" : "Confirm pause"}</button>
+            <button type="button" className="secondary" disabled={busy || requestKey !== null} onClick={() => setChoice(null)}>Back</button>
+          </div>
         </div>}
       </>}
-      <p>Your streak ends at the first skipped renewal. Your Founding Donor badge stays yours.
-        Pausing does not refund gifts or forgive an outstanding invoice.</p>
-      <p><Link href="/account/resume">Resume at next renewal</Link></p>
-      <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh pause dates</button>
+      <p className="note">Your streak ends at the first skipped renewal. Your Founding Donor badge stays yours.
+        Pausing does not refund gifts or forgive an outstanding invoice. Sandbox only: these controls affect test subscriptions.</p>
+      <Announcer status={messages.status || message} alert={error || messages.alert} />
+      {(failed || error || data?.stale) && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh pause dates</button>}
     </>}
-    <Announcer status={absent ? "" : messages.status || message} alert={absent ? "" : error || messages.alert} />
-  </section>;
+  </Page>;
 }
