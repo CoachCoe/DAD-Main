@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Page } from "@/components/donor/Page";
 import { ContentUnavailable, Ledger } from "@/components/donor/PublicContent";
 import { loadPublicContent } from "@/lib/publicContent";
 
@@ -9,10 +10,8 @@ export const metadata: Metadata = {
 
 export default async function LedgerPage() {
   const content = await loadPublicContent();
-  return <section className="panel">
-    <span className="eyebrow">DAD · IMPACT LEDGER</span>
-    <h1>Impact ledger</h1>
-    <p>A staff-updated record, with a stated cadence and a source document behind every reported figure. DAD launches in April 2027.</p>
+  return <Page wide eyebrow="Transparency" title="Impact ledger">
+    <p className="lead">A staff-updated record, with a stated cadence and a source document behind every reported figure. DAD launches in April 2027.</p>
     {content ? <Ledger content={content} /> : <ContentUnavailable />}
-  </section>;
+  </Page>;
 }

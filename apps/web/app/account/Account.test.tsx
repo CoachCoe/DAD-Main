@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import ClaimPage from "./claim/Claim";
-import SignInPage from "./sign-in/SignIn";
+import { SignInForm } from "@/components/donor/SignInForm";
+import { AlreadySignedIn } from "./sign-in/AlreadySignedIn";
 import GivingPage from "./giving/Giving";
 
 afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState(null, "", "/"); });
@@ -31,7 +32,7 @@ it("shows an expired link error and replacement path", async () => {
 it("requests email without granting access", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true,
     json: async () => ({ message: "If this email matches a donor account, a link will arrive." }) }));
-  render(<SignInPage />);
+  render(<SignInForm />);
   fireEvent.change(screen.getByLabelText("Email"), { target: { value: "donor@example.org" } });
   fireEvent.click(screen.getByRole("button", { name: "Email me a sign-in link" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("If this email matches"));
@@ -48,4 +49,40 @@ it("renders protected empty history, and removes it after logout", async () => {
   expect(await screen.findByRole("link", { name: "Sign in to view your giving" })).toBeVisible();
   expect(screen.queryByText("donor@example.org")).not.toBeInTheDocument();
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+});
+
+it("ignores a redirect target outside the account pages after claiming", async () => {
+  window.history.replaceState(null, "", "/account/claim#token=secret-link&next=https://evil.example/account/dashboard");
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ claimed: true }) }));
+  render(<ClaimPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm and sign in" }));
+  expect(await screen.findByRole("heading", { name: "You’re signed in" })).toBeVisible();
+  expect(window.location.href).toBe("http://localhost:3000/account/claim");
+});
+
+it("tells a donor who is already signed in, and stays silent for a visitor", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ email: "donor@example.org" }) }));
+  const { unmount } = render(<AlreadySignedIn />);
+  expect(await screen.findByText(/already signed in as/)).toHaveTextContent("donor@example.org");
+  expect(screen.getByRole("link", { name: "Go to my dashboard" })).toHaveAttribute("href", "/account/dashboard");
+  unmount();
+  const fetch = vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) });
+  vi.stubGlobal("fetch", fetch);
+  const { container } = render(<AlreadySignedIn />);
+  await waitFor(() => expect(fetch).toHaveBeenCalled());
+  expect(container).toBeEmptyDOMElement();
+});
+
+it("moves focus to the start of the new page of gifts", async () => {
+  const gift = (id: string) => ({ id, amount_minor: 3000, currency: "USD", frequency: "MONTHLY", paid_at: "2026-10-01T12:00:00Z", refunded_minor: id === "b" ? 1000 : 0, net_minor: 3000 });
+  const fetch = vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ email: "donor@example.org", gifts: [gift("a")], next_offset: 50 }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ email: "donor@example.org", gifts: [gift("b")], next_offset: null }) });
+  vi.stubGlobal("fetch", fetch);
+  render(<GivingPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
+  expect(await screen.findByRole("button", { name: "Newer gifts" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Gifts" })).toHaveFocus();
+  expect(screen.getByText(/Refunded \$10\.00/)).toBeVisible();
+  expect(fetch.mock.calls[1][0]).toBe("/api/donor/me/gifts?offset=50");
 });

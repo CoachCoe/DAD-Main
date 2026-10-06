@@ -49,7 +49,8 @@ it("does not substitute zeros for unavailable metrics", async () => {
 it("explains the payment grace state", async () => {
   respond({ ...data, streak: { current: 2, at_risk: true, grace_ends_at: "2027-02-15T00:00:00Z" } });
   render(<DashboardPage />);
-  expect(await screen.findByText(/Your streak is at risk/)).toHaveTextContent("Grace ends");
+  expect(await screen.findByText(/Your streak is at risk/)).toHaveTextContent("grace period ends, to keep your 2-month streak");
+  expect(screen.getByRole("link", { name: "Update payment method" })).toHaveAttribute("href", "/account/payment-method");
 });
 
 it("handles a logged-out response", async () => {

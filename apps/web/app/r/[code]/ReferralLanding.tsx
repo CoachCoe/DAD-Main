@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
+import { GiftFraming } from "@/components/donor/GiftFraming";
+import { Page } from "@/components/donor/Page";
 import { api, classifyFailure } from "@/lib/api";
 
 export type Referrer = { state: "found"; name: string } | { state: "unavailable" } | { state: "unknown" };
@@ -20,12 +22,14 @@ export default function ReferralLanding({ code, kind, referrer = { state: "unkno
   const [result, setResult] = useState<Capture | null>(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  const [leaving, setLeaving] = useState(false);
+  const capture = useRef<Promise<unknown>>(Promise.resolve());
   // biome-ignore lint/correctness/useExhaustiveDependencies: retry is the retry trigger, deliberately unread
   useEffect(() => {
     const controller = new AbortController();
     setResult(null); setError("");
     // The capture sets the attribution cookie, so it must come from the visitor's browser.
-    api<Capture>(`/donor/referrals/${encodeURIComponent(code)}`, {
+    capture.current = api<Capture>(`/donor/referrals/${encodeURIComponent(code)}`, {
       method: "POST", body: JSON.stringify({ kind }), signal: controller.signal,
     }).then((value) => { if (!controller.signal.aborted) setResult(value); })
       .catch((cause) => {
@@ -35,26 +39,44 @@ export default function ReferralLanding({ code, kind, referrer = { state: "unkno
       });
     return () => controller.abort();
   }, [code, kind, retry]);
+  // A tap before the referral is saved waits for it (briefly), so the gift is still attributed.
+  async function give(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (result || error || event.metaKey || event.ctrlKey || event.shiftKey) return;
+    event.preventDefault();
+    setLeaving(true);
+    await Promise.race([capture.current, new Promise((resolve) => setTimeout(resolve, 4000))]);
+    window.location.assign("/donate");
+  }
   // Always name the owner of the opened code. The capture's public_name describes an
   // earlier first-touch credit, which stays with that referrer and is not this page's to show.
   const name = referrer.state === "found" ? referrer.name : null;
   const unavailable = referrer.state === "unavailable" || (referrer.state === "unknown" && result?.captured === false);
-  return <div className="authLayout wide"><section className="panel authPanel">
-    <span className="eyebrow">DAD · SANDBOX PREVIEW</span>
-    {unavailable ? <>
-      <h1>This referral link is no longer available</h1>
-      <p>The person who shared it may have replaced it with a new link. You can still give without a referral.</p>
-      <p><Link className="button" href="/donate">Continue without a referral</Link></p>
-    </> : <h1>{name ? `${name} invited you to DAD` : "Join the beginning"}</h1>}
-    <p>DAD launches in April 2027. Join a growing circle of people giving together.</p>
-    <p>About a dollar a day · $30/month. One-time giving is also available.</p>
-    <p>A qualifying gift before launch earns a permanent Founding Donor badge.</p>
-    <p>This is a sandbox preview. No real donation is collected or live badge awarded.</p>
-    <Announcer status={!result && !error ? "Saving your referral…" : ""} alert={error} />
-    {result && !unavailable && <p><Link className="button" href="/donate">Continue to giving</Link></p>}
-    {error && <div className="actionRow">
+
+  if (unavailable) return <Page eyebrow="Invitation" title="This referral link is no longer available">
+    <p className="lead">The person who shared it may have replaced it with a new link. You can still give without a referral.</p>
+    <Link className="button full" href="/donate">Continue without a referral</Link>
+    <About />
+  </Page>;
+
+  return <Page eyebrow="You’re invited" title={name ? `${name} invited you to DAD` : "Join the beginning"}>
+    <p className="lead">Join a growing circle of people giving together. DAD launches in April 2027.</p>
+    <div className="callout highlight">
+      <GiftFraming minor={3000} />
+      <p>Monthly giving is the default. One-time gifts are welcome too.</p>
+    </div>
+    <Announcer status={leaving ? "Saving your referral…" : ""} alert={error} />
+    {error ? <div className="actions">
       <button type="button" className="button" onClick={() => setRetry((value) => value + 1)}>Retry referral</button>
       <Link className="secondary" href="/donate">Continue to giving anyway</Link>
-    </div>}
-  </section></div>;
+    </div> : <Link className="button full" href="/donate" onClick={give} aria-disabled={leaving || undefined}>
+      {leaving ? "Saving your referral…" : "Continue to giving"}</Link>}
+    <About />
+  </Page>;
+}
+
+function About() {
+  return <>
+    <p>A first gift before launch earns a permanent Founding Donor badge.</p>
+    <p className="note">This is a sandbox preview. No real donation is collected or live badge awarded.</p>
+  </>;
 }

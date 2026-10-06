@@ -3,6 +3,7 @@ import { useState } from "react";
 import Form from "next/form";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
+import { Page } from "@/components/donor/Page";
 import { api, ApiError, failureMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
@@ -14,7 +15,6 @@ export default function Staff({ q }: { q: string | null }) {
   const [signedOut, setSignedOut] = useState(false);
   const { resource, data: actor, reload } = useApiResource<StaffMember>(signedOut ? null : "/donor/staff/me");
   const [error, setError] = useState("");
-  const [accounts, setAccounts] = useState<StaffMember[] | null>(null);
   const [invitation, setInvitation] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -33,12 +33,13 @@ export default function Staff({ q }: { q: string | null }) {
       else setError(failureMessage(cause, "The request was not confirmed. Refresh to check its status before retrying."));
     } finally { setBusy(false); }
   }
-  const refreshAccounts = async () => setAccounts(await api<StaffMember[]>("/donor/staff/accounts"));
+  const manages = actor?.permissions.includes("staff.manage") ?? false;
+  const { data: accounts, reload: reloadAccounts } = useApiResource<StaffMember[]>(manages && !signedOut ? "/donor/staff/accounts" : null);
   const absent = signedOut || resource.state === "signedOut";
-  return <section className="panel"><h1>DAD staff back office</h1><p>Sandbox donor records. Staff access and actions are audited.</p>
+  return <Page wide eyebrow="Staff" title="DAD staff back office"><p>Sandbox donor records. Staff access and actions are audited.</p>
     {absent ? <p><Link className="button" href="/staff/sign-in">Staff sign-in</Link></p> : actor && <>
       <p>{actor.name} · {actor.role}</p>
-      <nav aria-label="Staff tools" className="accountLinks">
+      <nav aria-label="Staff tools" className="links">
         {actor.permissions.includes("data.export") && <Link href="/staff/exports">Exports and enrolment queue</Link>}
         {actor.permissions.includes("content.publish") && <><Link href="/staff/content">Publish spreadsheet content</Link><Link href="/staff/partners">Partner inquiries</Link></>}
         {actor.permissions.includes("audit.read") && <Link href="/staff/audit">Audit history</Link>}
@@ -48,26 +49,25 @@ export default function Staff({ q }: { q: string | null }) {
         <button type="submit" className="button">Search donors</button>
       </Form>
       {q !== null && <DonorSearch key={q} q={q} />}
-      {actor.permissions.includes("staff.manage") && <section><h2>Staff access</h2>
-        <button type="button" className="secondary" disabled={busy} onClick={() => action(refreshAccounts)}>Refresh staff accounts</button>
+      {manages && <section><h2>Staff access</h2>
         {accounts && <ul>{accounts.map((account) => <li key={account.id}>{account.name} · {account.email} · {account.role} · {account.disabled ? "Disabled" : account.active ? "Active" : "Invited"}
           {account.id !== actor.id && <>
             <details><summary>Replace credentials or invitation</summary>
               <p>This revokes existing sessions and invitations. The staff member must choose a new password and authenticator. Disabled accounts are restored only after completing setup.</p>
-              <button type="button" className="secondary danger" disabled={busy} onClick={() => action(async () => { const result = await api<{ invitation_url: string }>(`/donor/staff/accounts/${account.id}/recovery`, { method: "POST" }); setInvitation(result.invitation_url); await refreshAccounts(); })}>Confirm replacement invitation</button>
+              <button type="button" className="secondary danger" disabled={busy} onClick={() => action(async () => { const result = await api<{ invitation_url: string }>(`/donor/staff/accounts/${account.id}/recovery`, { method: "POST" }); setInvitation(result.invitation_url); reloadAccounts(); })}>Confirm replacement invitation</button>
             </details>
             <details><summary>Change role</summary>
-              <form onSubmit={(event) => { event.preventDefault(); const chosen = new FormData(event.currentTarget).get("role"); action(async () => { await api(`/donor/staff/accounts/${account.id}/role`, { method: "POST", body: JSON.stringify({ role: chosen }) }); await refreshAccounts(); }); }}>
+              <form onSubmit={(event) => { event.preventDefault(); const chosen = new FormData(event.currentTarget).get("role"); action(async () => { await api(`/donor/staff/accounts/${account.id}/role`, { method: "POST", body: JSON.stringify({ role: chosen }) }); reloadAccounts(); }); }}>
                 <label>New role for {account.name}<select name="role" defaultValue={account.role}><option>SUPPORT</option><option>FINANCE</option><option>ADMIN</option></select></label>
                 <p>A role change ends existing sessions and requires a new sign-in.</p><button type="submit" className="secondary" disabled={busy}>Confirm role change</button>
               </form>
             </details>
           </>}
           {!account.disabled && account.id !== actor.id && <details><summary>Disable account</summary><p>This immediately revokes staff access.</p>
-            <button type="button" className="secondary danger" disabled={busy} onClick={() => action(async () => { await api(`/donor/staff/accounts/${account.id}/disable`, { method: "POST" }); await refreshAccounts(); })}>Confirm disable {account.name}</button>
+            <button type="button" className="secondary danger" disabled={busy} onClick={() => action(async () => { await api(`/donor/staff/accounts/${account.id}/disable`, { method: "POST" }); reloadAccounts(); })}>Confirm disable {account.name}</button>
           </details>}
         </li>)}</ul>}
-        <form onSubmit={(event) => { event.preventDefault(); action(async () => { const result = await api<{ invitation_url: string }>("/donor/staff/accounts", { method: "POST", body: JSON.stringify({ email, name, role }) }); setInvitation(result.invitation_url); }); }}>
+        <form onSubmit={(event) => { event.preventDefault(); action(async () => { const result = await api<{ invitation_url: string }>("/donor/staff/accounts", { method: "POST", body: JSON.stringify({ email, name, role }) }); setInvitation(result.invitation_url); reloadAccounts(); }); }}>
           <fieldset disabled={busy}><legend>Invite individual staff member</legend>
             <label>Name<input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} required /></label>
             <label>Email<input type="email" value={email} maxLength={320} onChange={(event) => setEmail(event.target.value)} required /></label>
@@ -77,14 +77,14 @@ export default function Staff({ q }: { q: string | null }) {
         </form>
         {invitation && <p>Share this one-use, 24-hour link through your approved private channel: <code>{invitation}</code></p>}
       </section>}
-      <div className="actionRow">
+      <div className="actions">
         <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh access</button>
         <button type="button" className="quiet" disabled={busy} onClick={() => action(async () => { await api("/donor/staff/sign-out", { method: "POST" }); setSignedOut(true); })}>Sign out</button>
       </div>
     </>}
     {(resource.state === "offline" || resource.state === "error") && <button type="button" className="secondary" onClick={reload}>Refresh access</button>}
     <Announcer status={absent ? "" : busy ? "Working…" : invitation ? "Invitation created." : messages.status} alert={absent ? "" : error || messages.alert} />
-  </section>;
+  </Page>;
 }
 
 function DonorSearch({ q }: { q: string }) {

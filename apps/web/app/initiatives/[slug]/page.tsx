@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Page } from "@/components/donor/Page";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ContentUnavailable, InitiativeFacts } from "@/components/donor/PublicContent";
@@ -17,13 +18,11 @@ export async function generateMetadata({ params }: PageProps<"/initiatives/[slug
 export default async function InitiativePage({ params }: PageProps<"/initiatives/[slug]">) {
   const result = await initiative((await params).slug);
   if (result && !result.found) notFound();
-  return <section className="panel">
-    <span className="eyebrow">DAD · PLANNED INITIATIVE</span>
-    <h1>{result?.found?.title ?? "Planned initiative"}</h1>
-    <p><Link href="/initiatives">All initiatives</Link> · DAD launches in April 2027.</p>
+  return <Page eyebrow="Planned initiative" back={{ href: "/initiatives", label: "All initiatives" }} title={result?.found?.title ?? "Planned initiative"}>
     {result?.found ? <>
       <InitiativeFacts initiative={result.found} />
-      <p><Link href="/donate">Support DAD’s work</Link> — gifts support DAD as a whole and are not designated to this initiative.</p>
+      <Link className="button" href="/donate">Support DAD’s work</Link>
+      <p className="note">Gifts support DAD as a whole and are not designated to this initiative. DAD launches in April 2027.</p>
     </> : <ContentUnavailable />}
-  </section>;
+  </Page>;
 }

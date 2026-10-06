@@ -23,10 +23,11 @@ it("pairs the monthly charge with an approximate daily framing", () => {
 
 it.each([
   ["30", 3000], ["30.0", 3000], ["30.01", 3001], ["90.25", 9025], ["0.5", 50], [" 12 ", 1200], ["1234567.89", 123456789],
+  ["$30", 3000], ["30.", 3000], ["1,000", 100000], ["$1,234,567.89", 123456789],
 ])("parses %s as exact cents", (input, minor) => {
   expect(parseDollars(input)).toBe(minor);
 });
 
-it.each(["", "1.001", "-1", "1e3", "$30", "30.", ".5", "1,000", "99999999999999999999"])("rejects %s", (input) => {
+it.each(["", "$", "1.001", "-1", "$-1", "1e3", ".5", "30..", "1,00", "10,0000", "1,000,00", "$ 30", "99999999999999999999"])("rejects %s", (input) => {
   expect(parseDollars(input)).toBeNull();
 });

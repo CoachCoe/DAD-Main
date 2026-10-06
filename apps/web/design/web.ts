@@ -1,8 +1,12 @@
 import type { CSSProperties } from "react";
 import { tokens } from "./tokens";
 
-export const webTokenVariables = {
-  ...Object.fromEntries(Object.entries(tokens.color).map(([name, value]) => [`--${name}`, value])),
-  "--radius-card": `${tokens.radius.card}px`,
-  "--radius-pill": `${tokens.radius.pill}px`,
-} as CSSProperties;
+const lengths = (prefix: string, scale: Record<string, number>) =>
+  Object.entries(scale).map(([name, value]) => [`--${prefix}-${name}`, `${value}px`]);
+
+export const webTokenVariables = Object.fromEntries([
+  ...Object.entries(tokens.color).map(([name, value]) => [`--${name}`, value]),
+  ...lengths("radius", tokens.radius),
+  ...lengths("space", tokens.space),
+  ...lengths("text", tokens.text),
+]) as CSSProperties;

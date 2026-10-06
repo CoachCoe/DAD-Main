@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Donate from "./Donate";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); sessionStorage.clear(); });
 
 async function expectAlert(text: string | RegExp) {
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(text));
@@ -73,5 +73,48 @@ describe("sandbox giving", () => {
     expect(screen.queryByLabelText(/card number/i)).not.toBeInTheDocument();
     fireEvent.change(amount, { target: { value: "1.00" } });
     expect(amount).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("returns from a cancelled checkout with the same choice, and submits what is shown", async () => {
+    const fetch = vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetch);
+    const { unmount } = render(<Donate />);
+    fireEvent.click(screen.getByRole("radio", { name: "One time" }));
+    fireEvent.change(screen.getByLabelText("One-time amount (USD)"), { target: { value: "$1,000" } });
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
+    await expectAlert("offline");
+    unmount();
+    const retry = vi.fn().mockResolvedValue(new Response(JSON.stringify({ url: "https://evil.example/" }), { status: 200 }));
+    vi.stubGlobal("fetch", retry);
+    render(<Donate />);
+    expect(await screen.findByRole("radio", { name: "One time" })).toBeChecked();
+    expect(screen.getByLabelText("One-time amount (USD)")).toHaveValue("$1,000");
+    expect(screen.getByLabelText("Email")).toHaveValue("ben@example.org");
+    fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
+    await waitFor(() => expect(retry).toHaveBeenCalled());
+    expect(JSON.parse(retry.mock.calls[0][1].body)).toEqual({ email: "ben@example.org", amount_minor: 100000, frequency: "ONE_TIME" });
+  });
+
+  it("clears a stale error as soon as the donor edits the form", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    render(<Donate />);
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
+    fireEvent.change(screen.getByLabelText("Monthly amount (USD)"), { target: { value: "0.50" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
+    await expectAlert("between $1");
+    fireEvent.click(screen.getByRole("button", { name: "$90/month · about $3 a day" }));
+    expect(screen.getByRole("alert")).toBeEmptyDOMElement();
+  });
+
+  it("is usable again when the browser restores it from the back/forward cache mid-redirect", async () => {
+    vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+    render(<Donate />);
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
+    expect(await screen.findByRole("button", { name: "Opening secure checkout…" })).toBeDisabled();
+    const restored = Object.assign(new Event("pageshow"), { persisted: true });
+    act(() => { window.dispatchEvent(restored); });
+    expect(screen.getByRole("button", { name: "Continue to test checkout" })).toBeEnabled();
   });
 });

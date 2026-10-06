@@ -25,14 +25,19 @@ const lookUp = cache(async (code: string): Promise<Referrer> => {
 });
 
 export async function generateMetadata({ params }: PageProps<"/r/[code]">): Promise<Metadata> {
-  const referrer = await lookUp((await params).code);
+  const referrer = await lookUp(decoded((await params).code));
   const title = referrer.state === "found" ? `${referrer.name} invited you to DAD` : "You’re invited to DAD";
   const description = "Join with about a dollar a day — $30/month. DAD launches in April 2027.";
   return { title, description, openGraph: { title, description }, robots: { index: false } };
 }
 
+// Route params arrive still percent-encoded; every consumer encodes again, so decode once here.
+function decoded(code: string) {
+  try { return decodeURIComponent(code); } catch { return code; }
+}
+
 export default async function ReferralPage({ params, searchParams }: PageProps<"/r/[code]">) {
-  const { code } = await params;
+  const code = decoded((await params).code);
   const { via } = await searchParams;
   return <ReferralLanding code={code} kind={via === "irl" ? "IRL" : "LINK"} referrer={await lookUp(code)} />;
 }

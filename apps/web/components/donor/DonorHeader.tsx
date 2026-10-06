@@ -22,16 +22,22 @@ export function DonorHeader() {
     document.addEventListener("keydown", close);
     return () => document.removeEventListener("keydown", close);
   }, [open]);
-  return <header className="header dadHeader">
+  if (pathname.startsWith("/staff")) return <header className="header">
+    {/* Staff tools are internal: no public navigation or giving prompt. */}
+    <Link href="/staff" className="brand"><span className="brandMark" aria-hidden>D</span><span>DAD staff</span></Link>
+  </header>;
+  const current = (href: string) => (pathname === href || (href.startsWith("/account/") && pathname.startsWith("/account/")) ? "page" : undefined);
+  return <header className="header">
     <Link href="/" className="brand"><span className="brandMark" aria-hidden>D</span><span>Dynamic Aid Delivery</span></Link>
     <button className="burger" type="button" ref={toggle} aria-label="Menu" aria-expanded={open} aria-controls="dad-menu"
       onClick={() => setOpenOn(open ? null : pathname)}><span aria-hidden /><span aria-hidden /><span aria-hidden /></button>
     <div className="headerMenu" id="dad-menu" data-open={open}>
       <nav aria-label="Primary navigation">{destinations.map(([href, label]) =>
+        // Account pages carry a per-request CSP nonce, so they must load as a new document.
         href.startsWith("/account/")
-          ? <a key={href} href={href} aria-current={pathname === href ? "page" : undefined}>{label}</a>
-          : <Link key={href} href={href} aria-current={pathname === href ? "page" : undefined}>{label}</Link>)}</nav>
-      <div className="headerRight"><Link className="button" href="/donate" aria-current={pathname === "/donate" ? "page" : undefined}>Give</Link></div>
+          ? <a key={href} href={href} aria-current={current(href)}>{label}</a>
+          : <Link key={href} href={href} aria-current={current(href)}>{label}</Link>)}</nav>
+      <Link className="button" href="/donate" aria-current={current("/donate")}>Give</Link>
     </div>
   </header>;
 }

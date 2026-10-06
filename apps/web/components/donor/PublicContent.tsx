@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { Initiative, PublicContent } from "@/lib/publicContent";
+import { formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { RefreshButton } from "./RefreshButton";
 
@@ -13,26 +14,29 @@ export function ContentUnavailable() {
 
 export function Ledger({ content }: { content: PublicContent }) {
   return <>
-    {content.ledger_as_of && <p>As of <time dateTime={content.ledger_as_of}>{content.ledger_as_of}</time> · Updated {content.cadence}.</p>}
-    {content.ledger.length ? <div className="donorMetrics">{content.ledger.map((item) => <article key={item.id}>
-      <h2>{item.metric}</h2><p className="donorMetricValue">{item.unit === "USD_CENTS" ? formatMoney(item.value) : `${item.value.toLocaleString("en-US")} ${item.unit.toLowerCase()}`}</p>
+    {content.ledger_as_of && <p className="note">As of <time dateTime={content.ledger_as_of}>{formatDay(content.ledger_as_of)}</time> · Updated {content.cadence}.</p>}
+    {content.ledger.length ? <div className="metrics">{content.ledger.map((item) => <article key={item.id} className={item.illustrative ? "metric illustrative" : "metric"}>
+      <h2>{item.metric}</h2>
+      {/* The label sits on the figure itself, so no crop or screenshot can separate them. */}
+      <p className="metricValue">{item.unit === "USD_CENTS" ? formatMoney(item.value) : `${item.value.toLocaleString("en-US")} ${item.unit.toLowerCase()}`}
+        {item.illustrative && <span className="badge">Illustrative</span>}</p>
       <p>{item.illustrative ? <strong>Illustrative figure — not a reported outcome</strong> : "Source document retained by DAD and available on request."}</p>
-    </article>)}</div> : <p>No ledger figures have been published yet. Figures will appear with their source records and an as-of date.</p>}
+    </article>)}</div> : <p className="callout">No ledger figures have been published yet. Figures will appear with their source records and an as-of date.</p>}
   </>;
 }
 
 export function InitiativeList({ initiatives }: { initiatives: Initiative[] }) {
-  if (!initiatives.length) return <p>Board-approved plans will appear here as they are published. No initiatives have been published yet.</p>;
-  return initiatives.map((item) => <article key={item.slug}>
-    <h2><Link href={`/initiatives/${item.slug}`}>{item.title}</Link></h2>
+  if (!initiatives.length) return <p className="callout">Board-approved plans will appear here as they are published. No initiatives have been published yet.</p>;
+  return <div className="metrics">{initiatives.map((item) => <article key={item.slug} className="metric">
+    <h2 className="initiativeTitle"><Link href={`/initiatives/${item.slug}`}>{item.title}</Link></h2>
     <InitiativeFacts initiative={item} />
-  </article>);
+  </article>)}</div>;
 }
 
 export function InitiativeFacts({ initiative }: { initiative: Initiative }) {
   return <>
     <p>{initiative.summary}</p>
-    <p>Partner: {initiative.partner}. Planned start: <time dateTime={initiative.planned_start}>{initiative.planned_start}</time>.</p>
+    <p>Partner: {initiative.partner}. Planned start: <time dateTime={initiative.planned_start}>{formatDay(initiative.planned_start)}</time>.</p>
     <p>Planned initiative. Programs open at launch; this is not a recipient enrolment form.</p>
   </>;
 }

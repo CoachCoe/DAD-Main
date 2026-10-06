@@ -5,21 +5,30 @@ import ReferralLanding from "./ReferralLanding";
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 function response(data: unknown, status = 200) { return { ok: status < 400, status, json: async () => data }; }
 
-it("captures the IRL marker before enabling giving and names the code's owner", async () => {
+it("captures the IRL marker from the browser, names the code's owner, and offers giving at once", async () => {
   const fetch = vi.fn().mockResolvedValue(response({ captured: true, public_name: "Sam" }));
   vi.stubGlobal("fetch", fetch);
   render(<ReferralLanding code="code" kind="IRL" referrer={{ state: "found", name: "Sam" }} />);
   expect(screen.getByRole("heading", { name: "Sam invited you to DAD" })).toBeVisible();
-  expect(screen.queryByRole("link", { name: "Continue to giving" })).not.toBeInTheDocument();
-  expect(await screen.findByRole("link", { name: "Continue to giving" })).toHaveAttribute("href", "/donate");
+  expect(screen.getByRole("link", { name: "Continue to giving" })).toHaveAttribute("href", "/donate");
+  await waitFor(() => expect(fetch).toHaveBeenCalled());
   expect(fetch.mock.calls[0][0]).toBe("/api/donor/referrals/code");
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ kind: "IRL" });
+});
+
+it("holds a tap made before the referral is saved, rather than losing the attribution", async () => {
+  vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+  render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
+  const link = screen.getByRole("link", { name: "Continue to giving" });
+  expect(fireEvent.click(link)).toBe(false);
+  expect(await screen.findByRole("link", { name: "Saving your referral…" })).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByRole("status")).toHaveTextContent("Saving your referral…");
 });
 
 it("never names an earlier first-touch referrer returned by the capture", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ captured: true, public_name: "Earlier Referrer" })));
   render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
-  await screen.findByRole("link", { name: "Continue to giving" });
+  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sam invited you to DAD");
   expect(screen.queryByText(/Earlier Referrer/)).not.toBeInTheDocument();
 });
@@ -35,6 +44,7 @@ it("leads with the unavailable message for a replaced code", async () => {
   await waitFor(() => expect(fetch).toHaveBeenCalled());
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ kind: "LINK" });
   expect(screen.queryByRole("link", { name: "Continue to giving" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
 it("falls back to the capture when the server could not look the code up", async () => {

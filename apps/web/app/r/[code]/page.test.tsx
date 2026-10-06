@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import ReferralPage, { generateMetadata } from "./page";
 
@@ -49,4 +49,11 @@ it("encodes the code into the lookup path", async () => {
   const fetch = lookUp(404, {});
   await generateMetadata(props("a/b?c"));
   expect(fetch.mock.calls[0][0]).toMatch(/\/donor\/referrals\/a%2Fb%3Fc$/);
+});
+
+it("decodes the route parameter once, so an encoded code is not encoded twice", async () => {
+  const fetch = lookUp(200, { public_name: "Rae" });
+  render(await ReferralPage(props("r%C3%A6-1")));
+  expect(fetch.mock.calls[0][0]).toMatch(/\/donor\/referrals\/r%C3%A6-1$/);
+  await waitFor(() => expect(fetch.mock.calls.some(([target]) => target === "/api/donor/referrals/r%C3%A6-1")).toBe(true));
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, classifyFailure, OFFLINE_MESSAGE, RATE_LIMITED_MESSAGE } from "./api";
+import { api, classifyFailure, OFFLINE_MESSAGE, RATE_LIMITED_MESSAGE, UNCONFIGURED_MESSAGE } from "./api";
 
 export type Resource<T> =
   | { state: "loading" }
@@ -10,6 +10,7 @@ export type Resource<T> =
   | { state: "forbidden" }
   | { state: "notFound" }
   | { state: "offline" }
+  | { state: "unconfigured" }
   | { state: "error"; rateLimited: boolean };
 
 type Options<T> = {
@@ -42,7 +43,7 @@ export function useApiResource<T>(path: string | null, options: Options<T> = {})
     }).catch((cause) => {
       if (controller.signal.aborted) return;
       const failure = typeof navigator !== "undefined" && navigator.onLine === false ? "offline" : classifyFailure(cause);
-      if (failure === "signedOut" || failure === "forbidden" || failure === "notFound" || failure === "offline") setResource({ state: failure });
+      if (failure === "signedOut" || failure === "forbidden" || failure === "notFound" || failure === "offline" || failure === "unconfigured") setResource({ state: failure });
       else setResource({ state: "error", rateLimited: failure === "rateLimited" });
     });
     return () => controller.abort();
@@ -50,7 +51,8 @@ export function useApiResource<T>(path: string | null, options: Options<T> = {})
   const reload = useCallback(() => setGeneration((value) => value + 1), []);
   const setData = useCallback((update: T | ((current: T) => T)) => setResource((current) => current.state !== "ready" ? current
     : { state: "ready", data: typeof update === "function" ? (update as (current: T) => T)(current.data) : update }), []);
-  return { resource, data: resource.state === "ready" ? resource.data : null, reload, setData };
+  return { resource, data: resource.state === "ready" ? resource.data : null,
+    failed: resource.state === "offline" || resource.state === "error", reload, setData };
 }
 
 /** The live-region copy for a resource that is not ready. */
@@ -58,6 +60,7 @@ export function resourceMessages(resource: Resource<unknown>, copy: { loading: s
   switch (resource.state) {
     case "loading": return { status: copy.loading, alert: "" };
     case "offline": return { status: "", alert: OFFLINE_MESSAGE };
+    case "unconfigured": return { status: "", alert: UNCONFIGURED_MESSAGE };
     case "forbidden": return { status: "", alert: copy.forbidden ?? "You don’t have permission to view this page." };
     case "notFound": return { status: "", alert: copy.notFound ?? copy.failure };
     case "error": return { status: "", alert: resource.rateLimited ? RATE_LIMITED_MESSAGE : copy.failure };

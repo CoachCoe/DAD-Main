@@ -98,3 +98,25 @@ it("distinguishes missing permission from a signed-out session", async () => {
   expect(await screen.findByRole("link", { name: "Staff sign-in" })).toHaveAttribute("href", "/staff/sign-in");
   expect(screen.getByRole("alert")).toBeEmptyDOMElement();
 });
+
+it("treats switched-off payments as a definitive refusal, not an uncertain refund", async () => {
+  const fetch = vi.fn().mockResolvedValueOnce(response(quote)).mockResolvedValueOnce(pending())
+    .mockResolvedValueOnce({ ok: false, status: 503, json: async () => ({ detail: "Payments are not configured", code: "PAYMENTS_UNCONFIGURED" }) });
+  vi.stubGlobal("fetch", fetch);
+  render(<StaffFinancePage donor="donor" gift="gift" />);
+  fireEvent.change(await screen.findByLabelText("Audit reason"), { target: { value: "Donor requested refund" } });
+  fireEvent.click(screen.getByRole("button", { name: "Review financial action" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm financial action" }));
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("isn’t available in this environment"));
+  expect(screen.getByRole("alert")).not.toHaveTextContent(/another refund|Retry/);
+  expect(screen.getByRole("button", { name: "Confirm financial action" })).toBeEnabled();
+  expect(screen.getByRole("button", { name: "Back" })).toBeEnabled();
+});
+
+it("shows a stale quote as last known and allows no financial action from it", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response({ ...quote, stale: true, observed_at: "2027-01-02T15:04:00Z" }))
+    .mockResolvedValueOnce(pending()));
+  render(<StaffFinancePage donor="donor" gift="gift" />);
+  expect(await screen.findByRole("note")).toHaveTextContent("Showing the last known details as of");
+  expect(screen.getByRole("button", { name: "Review financial action" })).toBeDisabled();
+});
