@@ -7,6 +7,23 @@ hashed sessions. Donor and staff cookies are separate, HttpOnly, and Secure on H
 Staff cookies use SameSite=Strict; donor cookies use Lax. Anonymous login responses do
 not reveal whether an address exists.
 
+The R2 donor app uses neither cookies nor Origin. It sends `X-DAD-Client: native` on
+every request and authenticates with `Authorization: Bearer <session token>`. A request
+is native only when it has that header and neither an `Origin` nor a `Cookie` header;
+any other request is a browser request, whose Authorization header is ignored and whose
+mutations need the exact Origin. Browsers cannot add a custom header to a cross-origin
+request without a CORS preflight, and the API grants none, so another site cannot forge
+a native request. Bearer tokens are the same hashed, revocable 30-day donor sessions,
+ended by expiry, sign-out, sign-out everywhere, and email changes, and native requests
+are rate limited in the same classes. `POST /donor/claim` returns the token in the body
+only to a native request and then sets no cookie. Only donor account routes admit the
+app (sign-in, claim, email-change confirmation, sign-out, `/donor/me/*`); giving,
+referral capture, partner signup, and all staff routes stay browser-only, and staff
+sessions are never accepted as bearer tokens. The app must keep its token in the
+platform keychain/keystore. The Next proxy does not forward `Authorization` or
+`X-DAD-Client`, so the app calls the API host directly; that ingress must be listed in
+`DONOR_TRUSTED_PROXY_CIDRS` and set `X-Real-IP`.
+
 Named permissions are checked server-side against current staff state. Ownership comes
 from the session and database, never an email or customer ID supplied by the browser.
 Financial mutations record their actor, target, reason, immutable command, and result.
