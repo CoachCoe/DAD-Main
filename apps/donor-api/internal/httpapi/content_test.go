@@ -76,7 +76,7 @@ func TestSourceUploadWithoutStorageKeyIsRejectedBeforeBody(t *testing.T) {
 	}
 	stub := &uploadStub{authorizeErr: store.ErrSourceStorageUnconfigured}
 	response := upload(stub, unreadBody{t})
-	if response.Code != 503 || !strings.Contains(response.Body.String(), "Source document storage is not configured") || stub.stored != 0 {
+	if response.Code != 503 || !strings.Contains(response.Body.String(), `"code":"SOURCE_STORAGE_UNCONFIGURED"`) || stub.stored != 0 {
 		t.Fatalf("unconfigured storage: %d %s", response.Code, response.Body)
 	}
 	stub = &uploadStub{authorizeErr: store.ErrStaffForbidden}
@@ -86,5 +86,28 @@ func TestSourceUploadWithoutStorageKeyIsRejectedBeforeBody(t *testing.T) {
 	stub = &uploadStub{}
 	if response = upload(stub, strings.NewReader("signed record")); response.Code != 200 || stub.stored != 1 {
 		t.Fatalf("configured upload: %d %s", response.Code, response.Body)
+	}
+}
+
+type publishStub struct {
+	ContentAdminSource
+	err error
+}
+
+func (publishStub) Authorize(context.Context, string) error { return nil }
+func (s publishStub) Publish(context.Context, string, store.PublicationRequest) (store.Publication, error) {
+	return store.Publication{}, s.err
+}
+
+func TestRefusedPublicationListsEveryProblem(t *testing.T) {
+	refused := &store.PublicationError{Problems: []store.PublicationProblem{{Sheet: "ledger", Row: 3, Column: "value", Reason: "not_integer"}}}
+	r := httptest.NewRequest("POST", "/donor/staff/content/publish", strings.NewReader(`{"initiatives_csv":"","ledger_csv":"","as_of":"2026-10-01","cadence":"monthly"}`))
+	r.Header.Set("Origin", "http://localhost:3000")
+	r.AddCookie(&http.Cookie{Name: staffCookie, Value: "staff-session"})
+	response := httptest.NewRecorder()
+	NewServer("", Services{ContentAdmin: publishStub{err: refused}}).Handler.ServeHTTP(response, r)
+	want := `{"detail":"The spreadsheet has problems","errors":[{"sheet":"ledger","row":3,"column":"value","reason":"not_integer"}]}`
+	if response.Code != http.StatusUnprocessableEntity || strings.TrimSpace(response.Body.String()) != want {
+		t.Fatalf("got %d %s, want 422 %s", response.Code, response.Body, want)
 	}
 }

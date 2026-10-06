@@ -31,7 +31,7 @@ func TestSignedWebhookAndMinimalFacts(t *testing.T) {
 		t.Fatal("SDK API version drift")
 	}
 	body, signature := signed(t, event(), time.Now())
-	verified, err := VerifyEvent(body, signature, testSecret)
+	verified, err := verifyEvent(body, signature, testSecret)
 	if err != nil || verified == nil {
 		t.Fatalf("valid event: %v", err)
 	}
@@ -47,14 +47,14 @@ func TestSignedWebhookAndMinimalFacts(t *testing.T) {
 	if verified.Data()[0] != '{' {
 		t.Fatal("verified event was mutable")
 	}
-	if _, err = VerifyEvent(append(body, ' '), signature, testSecret); !errors.Is(err, ErrInvalidEvent) {
+	if _, err = verifyEvent(append(body, ' '), signature, testSecret); !errors.Is(err, ErrInvalidEvent) {
 		t.Fatal("tamper accepted")
 	}
-	if _, err = VerifyEvent(body, signature, ""); !errors.Is(err, ErrUnavailable) {
+	if _, err = verifyEvent(body, signature, ""); !errors.Is(err, ErrUnavailable) {
 		t.Fatal("unconfigured verifier")
 	}
 	_, oldSignature := signed(t, event(), time.Now().Add(-10*time.Minute))
-	if _, err = VerifyEvent(body, oldSignature, testSecret); !errors.Is(err, ErrInvalidEvent) {
+	if _, err = verifyEvent(body, oldSignature, testSecret); !errors.Is(err, ErrInvalidEvent) {
 		t.Fatal("old signature accepted")
 	}
 	for _, change := range []map[string]any{{"livemode": true}, {"livemode": nil}, {"account": "acct_other"}, {"api_version": "2026-10-01.endive"}, {"object": "thin_event"}, {"created": "1700000000"}} {
@@ -63,7 +63,7 @@ func TestSignedWebhookAndMinimalFacts(t *testing.T) {
 			input[key] = value
 		}
 		body, signature = signed(t, input, time.Now())
-		if _, err = VerifyEvent(body, signature, testSecret); err == nil {
+		if _, err = verifyEvent(body, signature, testSecret); err == nil {
 			t.Fatalf("invalid envelope accepted: %v", change)
 		}
 	}
@@ -72,19 +72,19 @@ func TestIgnoredAndMalformedEvents(t *testing.T) {
 	input := event()
 	input["type"] = "customer.created"
 	body, signature := signed(t, input, time.Now())
-	if result, err := VerifyEvent(body, signature, testSecret); err != nil || result != nil {
+	if result, err := verifyEvent(body, signature, testSecret); err != nil || result != nil {
 		t.Fatal("unsupported event should be ignored")
 	}
 	input = event()
 	obj := input["data"].(map[string]any)["object"].(map[string]any)
 	delete(obj, "metadata")
 	body, signature = signed(t, input, time.Now())
-	if result, err := VerifyEvent(body, signature, testSecret); err != nil || result != nil {
+	if result, err := verifyEvent(body, signature, testSecret); err != nil || result != nil {
 		t.Fatal("unrelated account payment not ignored")
 	}
 	obj["metadata"] = map[string]any{"dad_checkout_id": "not-a-uuid"}
 	body, signature = signed(t, input, time.Now())
-	if _, err := VerifyEvent(body, signature, testSecret); !errors.Is(err, ErrEventShape) {
+	if _, err := verifyEvent(body, signature, testSecret); !errors.Is(err, ErrEventShape) {
 		t.Fatal("bad UUID accepted")
 	}
 }
@@ -98,7 +98,7 @@ func TestInvoiceAllowlist(t *testing.T) {
 		"status_transitions": map[string]any{"paid_at": 1700000001},
 	}}
 	body, signature := signed(t, input, time.Now())
-	verified, err := VerifyEvent(body, signature, testSecret)
+	verified, err := verifyEvent(body, signature, testSecret)
 	if err != nil {
 		t.Fatal(err)
 	}

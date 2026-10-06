@@ -59,7 +59,7 @@ func iso(t time.Time) string {
 	}
 	return t.Format("2006-01-02T15:04:05.000000+00:00")
 }
-func ReadGiftRecord(ctx context.Context, q *queries.Queries, donor, gift pgtype.UUID, now time.Time) (GiftRecord, error) {
+func readGiftRecord(ctx context.Context, q *queries.Queries, donor, gift pgtype.UUID, now time.Time) (GiftRecord, error) {
 	out := GiftRecord{Refunds: []RefundRecord{}}
 	row, err := q.ReceiptGift(ctx, queries.ReceiptGiftParams{ID: gift, DonorID: donor, PaidAt: timestamp(now)})
 	if err != nil {
@@ -97,11 +97,11 @@ func giftRecord(row queries.DonorGift, refunds []queries.DonorRefund) (GiftRecor
 	out.Net = out.Amount - out.Refunded
 	return out, nil
 }
-func ReadReceipt(ctx context.Context, q *queries.Queries, donor, gift pgtype.UUID, now time.Time) (Receipt, error) {
-	record, err := ReadGiftRecord(ctx, q, donor, gift, now)
+func readReceipt(ctx context.Context, q *queries.Queries, donor, gift pgtype.UUID, now time.Time) (Receipt, error) {
+	record, err := readGiftRecord(ctx, q, donor, gift, now)
 	return Receipt{Mode: "test", AsOf: iso(now), ID: "DAD-TEST-" + gift.String(), Gift: record}, err
 }
-func ReadAnnualSummary(ctx context.Context, q *queries.Queries, donor pgtype.UUID, year int, now time.Time) (AnnualSummary, error) {
+func readAnnualSummary(ctx context.Context, q *queries.Queries, donor pgtype.UUID, year int, now time.Time) (AnnualSummary, error) {
 	zone := recognition.NewYork
 	out := AnnualSummary{Mode: "test", Year: year, Timezone: zone.String(), AsOf: iso(now), Currency: "USD", Gifts: []GiftRecord{}}
 	if year < 2026 || year > now.In(zone).Year() {
@@ -142,7 +142,7 @@ func money(value int64) string {
 	}
 	return fmt.Sprintf("$%s.%02d", dollars, value%100)
 }
-func RenderReceipt(r Receipt) string {
+func renderReceipt(r Receipt) string {
 	g := r.Gift
 	frequency := "One-time"
 	if g.Frequency == "MONTHLY" {
@@ -152,7 +152,7 @@ func RenderReceipt(r Receipt) string {
 		frequency + " test gift: " + money(g.Amount) + " USD\nCompleted: " + g.PaidAt + "\nSuccessful refunds: " + money(g.Refunded) + " USD\nNet test amount: " + money(g.Net) + " USD\nAs of: " + r.AsOf + "\n\n" +
 		"DAD launches in April 2027. Pre-launch giving earns permanent Founding Donor recognition; recognition in this sandbox is simulated.\n"
 }
-func RenderSummary(s AnnualSummary) string {
+func renderSummary(s AnnualSummary) string {
 	rows := make([]string, 0, len(s.Gifts))
 	for _, g := range s.Gifts {
 		rows = append(rows, g.PaidAt+" | "+money(g.Amount)+" | refunds "+money(g.Refunded)+" | "+g.ID)

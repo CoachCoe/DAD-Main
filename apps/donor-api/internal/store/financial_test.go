@@ -58,26 +58,26 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	}{{firstGift, firstPeriod, referrerID, jan}, {secondGift, secondPeriod, pgtype.UUID{}, feb}} {
 		mustExec(t, tx, `INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,period_id,referrer_id,referral_kind) VALUES ($1,$2,$3,$4,3000,'USD','MONTHLY',$5,$6,$7,CASE WHEN $7::uuid IS NULL THEN NULL ELSE 'IRL' END)`, g.id, donorID, checkout, "in_"+g.period.String(), g.paid, g.period, g.referrer)
 	}
-	preparing, err := Dashboard(ctx, q, referrerID, now)
+	preparing, err := dashboard(ctx, q, referrerID, now)
 	if err != nil || preparing.State != "preparing" {
 		t.Fatalf("missing projection: %v %v", preparing, err)
 	}
-	if _, err = refreshProjectionFactsInTx(ctx, tx, referrerID, now); err != nil {
+	if _, err = projectFacts(ctx, q, referrerID, now); err != nil {
 		t.Fatal(err)
 	}
-	missing, err := Dashboard(ctx, q, referrerID, now)
+	missing, err := dashboard(ctx, q, referrerID, now)
 	if err != nil || missing.Referrals != nil {
 		t.Fatal("missing referred history shown as zero")
 	}
-	initial, err := refreshProjectionFactsInTx(ctx, tx, donorID, now)
+	initial, err := projectFacts(ctx, q, donorID, now)
 	if err != nil || !initial.CurrentStreak.Valid || initial.CurrentStreak.Int32 != 2 || initial.BestStreak != 2 || initial.NetMinor.Int64 != 6000 || initial.ReferrerID != referrerID || initial.ReferralKind.String != "IRL" || !initial.FoundingAwardedAt.Valid {
 		t.Fatalf("wrong initial projection: %+v %v", initial, err)
 	}
-	dashboard, err := Dashboard(ctx, q, referrerID, now)
+	view, err := dashboard(ctx, q, referrerID, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	referrals := dashboard.Referrals
+	referrals := view.Referrals
 	if referrals == nil || referrals.IRL != 1 || referrals.Link != 0 || referrals.TotalMinor != 6000 {
 		t.Fatalf("wrong attribution: %v", referrals)
 	}
@@ -89,22 +89,22 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	mustExec(t, tx, `INSERT INTO donor_refund_observations (id,refund_id,source_event_id,status,observed_at) VALUES ($1,$2,$3,'SUCCEEDED',$4)`, testID(t), refund, event, observed)
 	// Rebuild from facts, not the existing best, proving historical refund replay.
 	mustExec(t, tx, `UPDATE donor_metric_projections SET best_streak=0 WHERE donor_id=$1`, donorID)
-	refunded, err := refreshProjectionFactsInTx(ctx, tx, donorID, now)
+	refunded, err := projectFacts(ctx, q, donorID, now)
 	if err != nil || refunded.NetMinor.Int64 != 3000 || refunded.CurrentStreak.Int32 != 0 || refunded.BestStreak != 2 || !refunded.FoundingAwardedAt.Time.Equal(initial.FoundingAwardedAt.Time) {
 		t.Fatalf("wrong refunded projection: %+v %v", refunded, err)
 	}
-	stale, err := Dashboard(ctx, q, referrerID, now.Add(24*time.Hour))
+	stale, err := dashboard(ctx, q, referrerID, now.Add(24*time.Hour))
 	if err != nil || stale.Referrals != nil || stale.Streak != nil {
 		t.Fatal("stale values exposed")
 	}
 	// An unobserved renewal keeps the current count through its grace window.
-	due, err := refreshProjectionFactsInTx(ctx, tx, donorID, mar)
+	due, err := projectFacts(ctx, q, donorID, mar)
 	if err != nil || !due.CurrentStreak.Valid || due.CurrentStreak.Int32 != 0 || due.AtRisk || !due.NextRefreshAt.Time.Equal(mar.Add(24*time.Hour)) {
 		t.Fatalf("unobserved renewal: %+v %v", due, err)
 	}
 	// Missing renewal history past grace cannot manufacture a zero streak.
 	lapsed := mar.Add(14 * 24 * time.Hour)
-	late, err := refreshProjectionFactsInTx(ctx, tx, donorID, lapsed)
+	late, err := projectFacts(ctx, q, donorID, lapsed)
 	if err != nil || late.CurrentStreak.Valid || !late.NextRefreshAt.Time.Equal(lapsed.Add(5*time.Minute)) {
 		t.Fatalf("missing history: %+v %v", late, err)
 	}

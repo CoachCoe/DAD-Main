@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -48,7 +47,9 @@ type ReferredDonor struct {
 }
 type DonorDetail struct {
 	AsOf                time.Time                   `json:"as_of"`
+	Claimed             bool                        `json:"claimed"`
 	Email               string                      `json:"email"`
+	FoundingDonor       bool                        `json:"founding_donor"`
 	Gifts               []queries.DonorGiftsPageRow `json:"gifts"`
 	ID                  pgtype.UUID                 `json:"id"`
 	NextGiftsOffset     *int64                      `json:"next_gifts_offset"`
@@ -57,6 +58,17 @@ type DonorDetail struct {
 	Referred            []ReferredDonor             `json:"referred"`
 	Referrer            *ReferrerLink               `json:"referrer"`
 	Streak              *StaffStreak                `json:"streak"`
+	Subscription        *StaffSubscription          `json:"subscription"`
+}
+
+// StaffSubscription is the donor's monthly gift as last observed; staff
+// previews read the processor live.
+type StaffSubscription struct {
+	AmountMinor int64      `json:"amount_minor"`
+	NextRenewal time.Time  `json:"next_renewal"`
+	ObservedAt  time.Time  `json:"observed_at"`
+	Status      string     `json:"status"`
+	StopsAt     *time.Time `json:"stops_at"`
 }
 type AuditEvent struct {
 	Action  string             `json:"action"`
@@ -86,20 +98,11 @@ type Enrolments struct {
 	State      string `json:"state"`
 }
 
-func pageOffsetValid(offset int64) bool { return offset >= 0 && offset <= math.MaxInt64-50 }
-func page[T any](rows []T, offset int64) ([]T, *int64) {
-	if len(rows) > 50 {
-		next := offset + 50
-		return rows[:50], &next
-	}
-	return rows, nil
-}
-
 func (s *StaffService) SearchDonors(ctx context.Context, token, term string, offset int64) (DonorSearch, error) {
-	if !pageOffsetValid(offset) || utf8.RuneCountInString(term) > 320 {
+	if !pageOffsetValid(offset) || !plainText(term, false) || utf8.RuneCountInString(term) > 320 {
 		return DonorSearch{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (DonorSearch, error) {
+	return staffRead(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (DonorSearch, error) {
 		q := queries.New(tx)
 		pattern := strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(identity.TrimSpace(term))
 		rows, err := q.StaffDonorSearch(ctx, queries.StaffDonorSearchParams{Term: "%" + pattern + "%", PageOffset: offset})
@@ -122,18 +125,19 @@ func (s *StaffService) DonorDetail(ctx context.Context, token string, id pgtype.
 	if !pageOffsetValid(giftsOffset) || !pageOffsetValid(referralsOffset) {
 		return DonorDetail{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (DonorDetail, error) {
+	return staffRead(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (DonorDetail, error) {
 		q := queries.New(tx)
 		donor, err := q.StaffDonorByID(ctx, id)
 		if err != nil {
 			return DonorDetail{}, err
 		}
-		out := DonorDetail{ID: donor.ID, Email: donor.Email, PublicName: donor.PublicName, AsOf: now}
+		out := DonorDetail{ID: donor.ID, Email: donor.Email, PublicName: donor.PublicName, AsOf: now, Claimed: donor.ClaimedAt.Valid}
 		projection, err := q.Projection(ctx, id)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return DonorDetail{}, err
 		}
 		if err == nil {
+			out.FoundingDonor = projection.FoundingAwardedAt.Valid
 			// A seeded projection has no facts yet; show it as updating rather than zero.
 			if projection.NetMinor.Valid {
 				out.Streak = &StaffStreak{Current: projection.CurrentStreak, Best: projection.BestStreak, AtRisk: projection.AtRisk, ComputedAt: projection.ComputedAt}
@@ -145,6 +149,9 @@ func (s *StaffService) DonorDetail(ctx context.Context, token string, id pgtype.
 				}
 				out.Referrer = &ReferrerLink{ID: row.ID, Email: row.Email, Type: projection.ReferralKind}
 			}
+		}
+		if out.Subscription, err = storedSubscription(ctx, q, id); err != nil {
+			return DonorDetail{}, err
 		}
 		gifts, err := q.DonorGiftsPage(ctx, queries.DonorGiftsPageParams{DonorID: id, PageOffset: giftsOffset})
 		if err != nil {
@@ -167,11 +174,21 @@ func (s *StaffService) DonorDetail(ctx context.Context, token string, id pgtype.
 	})
 }
 
+// storedSubscription returns the donor's last observed monthly gift, if any.
+func storedSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (*StaffSubscription, error) {
+	details, err := storedDetails(ctx, q, donor)
+	if err != nil || details.Subscription == nil {
+		return nil, err
+	}
+	sub := details.Subscription
+	return &StaffSubscription{AmountMinor: sub.AmountMinor, NextRenewal: sub.PeriodEnd, ObservedAt: *details.ObservedAt, Status: sub.Status, StopsAt: sub.StopsAt}, nil
+}
+
 func (s *StaffService) AuditEvents(ctx context.Context, token string, offset int64) (AuditPage, error) {
 	if !pageOffsetValid(offset) {
 		return AuditPage{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s, token, "audit.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (AuditPage, error) {
+	return staffRead(ctx, s, token, "audit.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (AuditPage, error) {
 		rows, err := queries.New(tx).StaffAuditPage(ctx, offset)
 		if err != nil {
 			return AuditPage{}, err
@@ -189,7 +206,7 @@ func (s *StaffService) DonorMessages(ctx context.Context, token string, id pgtyp
 	if !pageOffsetValid(offset) {
 		return MessagePage{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (MessagePage, error) {
+	return staffRead(ctx, s, token, "donor.read", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (MessagePage, error) {
 		q := queries.New(tx)
 		if _, err := q.StaffDonorByID(ctx, id); err != nil {
 			return MessagePage{}, err
@@ -211,7 +228,7 @@ func (s *StaffService) DonorActions(ctx context.Context, token string, id pgtype
 	if !pageOffsetValid(offset) {
 		return ActionPage{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s, token, "donor.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (ActionPage, error) {
+	return staffRead(ctx, s, token, "donor.read", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (ActionPage, error) {
 		rows, err := queries.New(tx).StaffActionPage(ctx, queries.StaffActionPageParams{DonorID: id, PageOffset: offset})
 		if err != nil {
 			return ActionPage{}, err
@@ -229,7 +246,7 @@ func (s *StaffService) PendingAction(ctx context.Context, token string, donorID,
 	} else if kind != "REFUND" {
 		return PendingAction{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s, token, permission, func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (PendingAction, error) {
+	return staffRead(ctx, s, token, permission, func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (PendingAction, error) {
 		row, err := queries.New(tx).StaffPendingAction(ctx, queries.StaffPendingActionParams{DonorID: donorID, ActorID: actor.ID, TargetID: targetID, Kind: kind})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return PendingAction{}, nil

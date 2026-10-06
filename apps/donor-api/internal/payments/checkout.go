@@ -1,23 +1,23 @@
 package payments
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/stripe/stripe-go/v87"
 )
 
 var (
-	ErrCheckoutConflict    = errors.New("checkout conflicts with an existing request")
-	ErrCheckoutUnavailable = errors.New("checkout is temporarily unavailable; retry the same request")
-	ErrCheckoutInput       = errors.New("invalid checkout fields")
+	ErrCheckoutConflict = errors.New("checkout conflicts with an existing request")
+	ErrCheckoutInput    = errors.New("invalid checkout fields")
+	// ErrProcessorUnavailable reports a processor call that failed or could not
+	// be made; the caller may retry the same request.
+	ErrProcessorUnavailable = errors.New("payment processor is unavailable; retry the same request")
+	// ErrUnconfigured reports that this deployment has no payment processor
+	// configured; retrying cannot help.
+	ErrUnconfigured = errors.New("payments are not configured")
 )
 
 type CheckoutRequest struct {
@@ -49,138 +49,10 @@ func ValidateOrigin(origin string) error {
 	return nil
 }
 
-type StripeGateway struct{ client *stripe.Client }
-
-type FinancialGateway interface {
-	RetrievePaymentIntent(context.Context, string) (Object, error)
-	RetrieveRefund(context.Context, string) (Object, error)
-	RetrieveSubscription(context.Context, string) (Object, error)
-}
-
-type PaymentMethodGateway interface {
-	FinancialGateway
-	RetrieveCheckout(context.Context, string) (Object, error)
-	RetrieveSetupIntent(context.Context, string) (Object, error)
-	UpdateSubscriptionPaymentMethod(context.Context, string, string, string) error
-}
-
-type SubscriptionGateway interface {
-	PaymentMethodGateway
-	CheckoutGateway
-	ScheduleCancellation(context.Context, string, int64, string) error
-	PauseCollection(context.Context, string, int64, string) error
-	ChangeMonthlyAmount(context.Context, string, string, string, int64, string) error
-}
-
-// Recurring changes never prorate: a new amount, pause, or cancellation takes
-// effect at a renewal boundary.
-func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, params *stripe.SubscriptionUpdateParams, key string) error {
-	params.ProrationBehavior = stripe.String("none")
-	params.SetIdempotencyKey(key)
-	if _, err := g.client.V1Subscriptions.Update(ctx, id, params); err != nil {
-		return ErrCheckoutUnavailable
-	}
-	return nil
-}
-func (g *StripeGateway) ScheduleCancellation(ctx context.Context, id string, end int64, key string) error {
-	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{CancelAt: stripe.Int64(end)}, key)
-}
-func (g *StripeGateway) PauseCollection(ctx context.Context, id string, resumes int64, key string) error {
-	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{PauseCollection: &stripe.SubscriptionUpdatePauseCollectionParams{Behavior: stripe.String("void"), ResumesAt: stripe.Int64(resumes)}}, key)
-}
-func (g *StripeGateway) ChangeMonthlyAmount(ctx context.Context, id, item, product string, amount int64, key string) error {
-	price := &stripe.SubscriptionUpdateItemPriceDataParams{Currency: stripe.String("usd"), Product: stripe.String(product), Recurring: &stripe.SubscriptionUpdateItemPriceDataRecurringParams{Interval: stripe.String("month")}, UnitAmount: stripe.Int64(amount)}
-	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{Items: []*stripe.SubscriptionUpdateItemParams{{ID: stripe.String(item), Quantity: stripe.Int64(1), PriceData: price}}}, key)
-}
-
-func (g *StripeGateway) RetrieveCheckout(ctx context.Context, id string) (Object, error) {
-	result, err := g.client.V1CheckoutSessions.Retrieve(ctx, id, nil)
-	if err != nil || result == nil || result.LastResponse == nil {
-		return nil, ErrCheckoutUnavailable
-	}
-	return DecodeObject(result.LastResponse.RawJSON)
-}
-func (g *StripeGateway) RetrieveSetupIntent(ctx context.Context, id string) (Object, error) {
-	result, err := g.client.V1SetupIntents.Retrieve(ctx, id, nil)
-	if err != nil || result == nil || result.LastResponse == nil {
-		return nil, ErrCheckoutUnavailable
-	}
-	return DecodeObject(result.LastResponse.RawJSON)
-}
-func (g *StripeGateway) UpdateSubscriptionPaymentMethod(ctx context.Context, id, method, key string) error {
-	params := &stripe.SubscriptionUpdateParams{DefaultPaymentMethod: stripe.String(method), ProrationBehavior: stripe.String("none")}
-	params.SetIdempotencyKey(key)
-	if _, err := g.client.V1Subscriptions.Update(ctx, id, params); err != nil {
-		return ErrCheckoutUnavailable
-	}
-	return nil
-}
-
-// RetrievePaymentIntent expands the latest charge, whose creation is when a
-// card payment succeeded.
-func (g *StripeGateway) RetrievePaymentIntent(ctx context.Context, id string) (Object, error) {
-	params := &stripe.PaymentIntentRetrieveParams{}
-	params.AddExpand("latest_charge")
-	result, err := g.client.V1PaymentIntents.Retrieve(ctx, id, params)
-	if err != nil || result == nil || result.LastResponse == nil {
-		return nil, ErrCheckoutUnavailable
-	}
-	return DecodeObject(result.LastResponse.RawJSON)
-}
-func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, error) {
-	result, err := g.client.V1Refunds.Retrieve(ctx, id, nil)
-	if err != nil || result == nil || result.LastResponse == nil {
-		return nil, ErrCheckoutUnavailable
-	}
-	return DecodeObject(result.LastResponse.RawJSON)
-}
-func (g *StripeGateway) RetrieveSubscription(ctx context.Context, id string) (Object, error) {
-	result, err := g.client.V1Subscriptions.Retrieve(ctx, id, nil)
-	if err != nil || result == nil || result.LastResponse == nil {
-		return nil, ErrCheckoutUnavailable
-	}
-	return DecodeObject(result.LastResponse.RawJSON)
-}
-
-func NewStripeGateway(key string) (*StripeGateway, error) {
-	if key == "" {
-		return nil, ErrCheckoutUnavailable
-	}
-	if !strings.HasPrefix(key, "sk_test_") {
-		return nil, errors.New("this release accepts only Stripe test keys")
-	}
-	backends := stripe.NewBackendsWithConfig(&stripe.BackendConfig{
-		HTTPClient: &http.Client{Timeout: 15 * time.Second}, MaxNetworkRetries: stripe.Int64(2),
-		// Provider errors may contain donor inputs. Application logs record operation
-		// classes separately, never the SDK's raw request/error diagnostics.
-		LeveledLogger: &stripe.LeveledLogger{Level: stripe.LevelNull},
-	})
-	return &StripeGateway{client: stripe.NewClient(key, stripe.WithBackends(backends))}, nil
-}
-func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key string) (RemoteCheckout, error) {
-	var params stripe.CheckoutSessionCreateParams
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	// Refuse an old/unknown saved parameter rather than silently dropping it and
-	// changing an idempotent request. Such attempts require reconciliation.
-	if err := decoder.Decode(&params); err != nil {
-		return RemoteCheckout{}, ErrCheckoutUnavailable
-	}
-	params.SetIdempotencyKey(key)
-	session, err := g.client.V1CheckoutSessions.Create(ctx, &params)
-	if err != nil {
-		return RemoteCheckout{}, ErrCheckoutUnavailable
-	}
-	var result RemoteCheckout
-	if session == nil || session.LastResponse == nil || json.Unmarshal(session.LastResponse.RawJSON, &result) != nil {
-		return result, ErrCheckoutUnavailable
-	}
-	return result, nil
-}
 func ValidateRemoteCheckout(remote RemoteCheckout) error {
 	u, err := url.Parse(remote.URL)
 	if err != nil || !strings.HasPrefix(remote.ID, "cs_test_") || len(remote.ID) > 255 || remote.Livemode == nil || *remote.Livemode || u.Scheme != "https" || u.Hostname() != "checkout.stripe.com" || u.User != nil || (u.Port() != "" && u.Port() != "443") {
-		return ErrCheckoutUnavailable
+		return ErrProcessorUnavailable
 	}
 	return nil
 }

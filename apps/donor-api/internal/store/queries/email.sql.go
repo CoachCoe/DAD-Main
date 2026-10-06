@@ -246,7 +246,7 @@ func (q *Queries) InsertLoginLink(ctx context.Context, arg InsertLoginLinkParams
 }
 
 const loginEmailByID = `-- name: LoginEmailByID :one
-SELECT donor_id, encrypted_token, expires_at, available_at, completed_at, attempts, last_error, id, created_at FROM donor_login_emails WHERE id=$1 FOR UPDATE
+SELECT donor_id, encrypted_token, expires_at, available_at, completed_at, attempts, last_error, id, created_at, return_path FROM donor_login_emails WHERE id=$1 FOR UPDATE
 `
 
 func (q *Queries) LoginEmailByID(ctx context.Context, id pgtype.UUID) (DonorLoginEmail, error) {
@@ -262,6 +262,7 @@ func (q *Queries) LoginEmailByID(ctx context.Context, id pgtype.UUID) (DonorLogi
 		&i.LastError,
 		&i.ID,
 		&i.CreatedAt,
+		&i.ReturnPath,
 	)
 	return i, err
 }
@@ -318,7 +319,7 @@ func (q *Queries) MessagePeriod(ctx context.Context, arg MessagePeriodParams) (D
 }
 
 const nextLoginEmail = `-- name: NextLoginEmail :one
-SELECT donor_id, encrypted_token, expires_at, available_at, completed_at, attempts, last_error, id, created_at FROM donor_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+SELECT donor_id, encrypted_token, expires_at, available_at, completed_at, attempts, last_error, id, created_at, return_path FROM donor_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
 `
 
@@ -335,6 +336,7 @@ func (q *Queries) NextLoginEmail(ctx context.Context, availableAt pgtype.Timesta
 		&i.LastError,
 		&i.ID,
 		&i.CreatedAt,
+		&i.ReturnPath,
 	)
 	return i, err
 }

@@ -28,58 +28,47 @@ func queueMessage(ctx context.Context, q *queries.Queries, donor pgtype.UUID, ki
 	return q.InsertFinancialMessage(ctx, queries.InsertFinancialMessageParams{ID: id, DonorID: donor, Kind: kind, DedupKey: key, Context: data, AvailableAt: timestamp(at)})
 }
 
-// QueueFinancialMessages requires the donor lock. Recognition and notification
-// intents commit together, while external delivery remains a separate worker.
-func QueueFinancialMessages(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) error {
-	return q.QueueFinancialIntents(ctx, queries.QueueFinancialIntentsParams{DonorID: id, AsOf: timestamp(now)})
-}
-
-func RefreshProjectionInTx(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.Time) (queries.SaveProjectionParams, error) {
-	result, err := refreshProjectionFactsInTx(ctx, tx, id, now)
+// refreshProjection recomputes the donor's recognition and queues the
+// messages its facts call for, which commit together with it. Delivery is a
+// separate worker. It takes the donor lock if the caller does not hold it.
+func refreshProjection(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.Time) (queries.SaveProjectionParams, error) {
+	q := queries.New(tx)
+	result, err := projectFacts(ctx, q, id, now)
 	if err != nil {
 		return result, err
 	}
-	return result, QueueFinancialMessages(ctx, queries.New(tx), id, now)
+	return result, q.QueueFinancialIntents(ctx, queries.QueueFinancialIntentsParams{DonorID: id, AsOf: timestamp(now)})
 }
 
 // RefreshNextProjection refreshes the donor whose projection is due soonest.
 // A donor whose facts cannot be projected is deferred with backoff and its
 // failure recorded for the monitor, so it cannot hold up every other donor.
 func RefreshNextProjection(ctx context.Context, pool *pgxpool.Pool, now time.Time) (bool, error) {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback(ctx)
-	q := queries.New(tx)
-	id, err := q.DueProjectionDonor(ctx, timestamp(now))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	work, err := tx.Begin(ctx)
-	if err != nil {
-		return false, err
-	}
-	_, refreshErr := RefreshProjectionInTx(ctx, work, id, now)
-	if refreshErr == nil {
-		refreshErr = work.Commit(ctx)
-	}
-	if refreshErr != nil {
+	worked := false
+	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		id, err := q.DueProjectionDonor(ctx, timestamp(now))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		worked = true
+		refreshErr := pgx.BeginFunc(ctx, tx, func(work pgx.Tx) error {
+			_, err := refreshProjection(ctx, work, id, now)
+			return err
+		})
+		if refreshErr == nil {
+			return nil
+		}
 		category, ok := projectionFailure(refreshErr)
 		if !ok {
-			return false, refreshErr
+			return refreshErr
 		}
-		if err = work.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			return false, err
-		}
-		if err = q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: pgtype.Text{String: category, Valid: true}, AsOf: timestamp(now)}); err != nil {
-			return false, err
-		}
-	}
-	return true, tx.Commit(ctx)
+		return q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: text(category), AsOf: timestamp(now)})
+	})
+	return worked && err == nil, err
 }
 
 // projectionFailure classifies errors that retrying cannot fix until the
@@ -97,8 +86,10 @@ func projectionFailure(err error) (string, bool) {
 	return "", false
 }
 
-func QueueLoginEmailInTx(ctx context.Context, tx pgx.Tx, email string, now time.Time) error {
-	q := queries.New(tx)
+// queueLoginEmail queues a sign-in link for the donor with email, if any,
+// returning them to next unless it is empty. The link itself is minted by the
+// delivery worker.
+func queueLoginEmail(ctx context.Context, q *queries.Queries, email, next string, now time.Time) error {
 	donor, err := q.DonorByEmail(ctx, email)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -117,5 +108,5 @@ func QueueLoginEmailInTx(ctx context.Context, tx pgx.Tx, email string, now time.
 	if err != nil {
 		return err
 	}
-	return q.QueueLoginEmail(ctx, queries.QueueLoginEmailParams{ID: id, DonorID: donor.ID, AvailableAt: timestamp(now)})
+	return q.QueueLoginEmail(ctx, queries.QueueLoginEmailParams{ID: id, DonorID: donor.ID, AvailableAt: timestamp(now), ReturnPath: pgtype.Text{String: next, Valid: next != ""}})
 }

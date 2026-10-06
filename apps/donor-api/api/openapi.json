@@ -1,0 +1,6368 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ImpactGraph donor API",
+    "version": "r1",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    },
+    "description": "The ImpactGraph (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <session token>`. A request with Origin or cookies is a browser request whatever else it carries. Obtain a session by calling POST /donor/login, opening the emailed `/account/claim#token=…` link in the app, and sending the fragment's token to POST /donor/claim as a native request. Routes that admit the app list `native` in `x-clients`; giving, referral capture, partner signup, and every staff route are web-only.\n- Staff routes are browser-only and never accept bearer tokens.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"…\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `…+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "The API host, which the donor app calls directly."
+    },
+    {
+      "url": "/api",
+      "description": "The web app's same-origin proxy, which forwards /api/donor/* only and drops Authorization and X-DAD-Client."
+    }
+  ],
+  "tags": [
+    {
+      "name": "Health",
+      "description": "Process and database health for orchestration."
+    },
+    {
+      "name": "Public",
+      "description": "Anonymous website surfaces: content, giving, referral landing, partner contact."
+    },
+    {
+      "name": "Account",
+      "description": "Donor sign-in, sessions, and email changes. Web and app."
+    },
+    {
+      "name": "Donor",
+      "description": "The signed-in donor's dashboard, profile, sharing, and gift records. Web and app."
+    },
+    {
+      "name": "Wallet",
+      "description": "Referral code passes for Apple and Google Wallet. Web and app."
+    },
+    {
+      "name": "Recurring",
+      "description": "Monthly gift controls and card updates. Web and app."
+    },
+    {
+      "name": "Staff",
+      "description": "Staff sign-in and access management. Web only."
+    },
+    {
+      "name": "Staff donors",
+      "description": "Donor support, messages, and audit. Web only."
+    },
+    {
+      "name": "Finance",
+      "description": "Audited refunds and cancellations. Web only."
+    },
+    {
+      "name": "Exports",
+      "description": "CSV exports. Web only."
+    },
+    {
+      "name": "Content",
+      "description": "Source documents, publishing, and partner inquiries. Web only."
+    }
+  ],
+  "paths": {
+    "/health/live": {
+      "get": {
+        "operationId": "live",
+        "summary": "Liveness",
+        "tags": [
+          "Health"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "alive"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "ready",
+        "summary": "Readiness: database reachable and fully migrated",
+        "tags": [
+          "Health"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "ready"
+                    },
+                    "payments": {
+                      "type": "string",
+                      "const": "test_mode_only"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "payments"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/public/content": {
+      "get": {
+        "operationId": "publicContent",
+        "summary": "Published initiatives and impact ledger",
+        "tags": [
+          "Public"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK. Cacheable for 60 seconds (`Cache-Control: public, max-age=60`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicContent"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/stripe/webhook": {
+      "post": {
+        "operationId": "stripeWebhook",
+        "summary": "Stripe event inbox",
+        "description": "Acknowledged only after the verified, allowlisted event is durably stored. Not a client endpoint.",
+        "tags": [
+          "Public"
+        ],
+        "security": [
+          {
+            "stripeSignature": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "Raw Stripe event, verified byte-for-byte against Stripe-Signature."
+              }
+            }
+          },
+          "description": "At most 256 KiB."
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "received"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/checkouts": {
+      "post": {
+        "operationId": "beginCheckout",
+        "summary": "Start a guest Stripe Checkout",
+        "description": "Web only: giving stays on the website. Reads the `dad_referral` cookie for attribution. 403 also means giving is unavailable for this account. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Public"
+        ],
+        "security": [],
+        "x-rate-limit": "visitor",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 320
+                  },
+                  "amount_minor": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Integer USD cents.",
+                    "minimum": 100,
+                    "maximum": 99999999
+                  },
+                  "frequency": {
+                    "type": "string",
+                    "description": "Defaults to MONTHLY when omitted; null is invalid.",
+                    "enum": [
+                      "MONTHLY",
+                      "ONE_TIME"
+                    ]
+                  }
+                },
+                "required": [
+                  "email",
+                  "amount_minor"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created; redirect the browser to `url`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckoutResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/referrals/{code}": {
+      "get": {
+        "operationId": "referrer",
+        "summary": "Referrer's public name for a referral landing page",
+        "tags": [
+          "Public"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{0,64}$"
+            },
+            "description": "Referral code from a /r/{code} link; any other form is 404."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "public_name": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "public_name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "captureReferral",
+        "summary": "Record a referral visit",
+        "description": "Web only. Sets or clears the HttpOnly `dad_referral` cookie (30 days); the first valid touch wins.",
+        "tags": [
+          "Public"
+        ],
+        "security": [],
+        "x-rate-limit": "visitor",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{0,64}$"
+            },
+            "description": "Referral code from a /r/{code} link; any other form is 404."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "description": "Defaults to LINK when omitted; null is invalid.",
+                    "enum": [
+                      "LINK",
+                      "IRL"
+                    ]
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "captured": {
+                      "type": "boolean",
+                      "description": "False when the visit did not start or keep a referral window."
+                    },
+                    "public_name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "captured",
+                    "public_name"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/public/partner-signup": {
+      "post": {
+        "operationId": "partnerSignup",
+        "summary": "Partner contact form",
+        "tags": [
+          "Public"
+        ],
+        "security": [],
+        "x-rate-limit": "visitor",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PartnerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "mode": {
+                      "type": "string",
+                      "const": "test"
+                    }
+                  },
+                  "required": [
+                    "received",
+                    "mode"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/login": {
+      "post": {
+        "operationId": "login",
+        "summary": "Email a sign-in link",
+        "description": "503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address exists. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim.",
+        "tags": [
+          "Account"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 320
+                  },
+                  "next": {
+                    "type": "string",
+                    "description": "Page the emailed link returns to after sign-in. Optional; null or any other value is 422.",
+                    "enum": [
+                      "/account/payment-method",
+                      "/account/dashboard"
+                    ]
+                  }
+                },
+                "required": [
+                  "email"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted, whether or not the address has an account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/claim": {
+      "post": {
+        "operationId": "claim",
+        "summary": "Exchange an emailed sign-in proof for a session",
+        "description": "A browser request receives an HttpOnly cookie and `{\"claimed\":true}`. A native request (`X-DAD-Client: native`, no Origin, no cookies) receives the token in the body as NativeSession and no cookie. Any session presented with the request (cookie or bearer) is revoked. 401 means the link is invalid, used, or expired.",
+        "tags": [
+          "Account"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "Proof from the emailed link fragment.",
+                    "minLength": 32,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "description": "Browser request: the session is set only as the `dad_donor_session` cookie.",
+                      "properties": {
+                        "claimed": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "claimed"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeSession"
+                    }
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "description": "Browser requests only.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/email-change/confirm": {
+      "post": {
+        "operationId": "confirmEmailChange",
+        "summary": "Confirm an email change step",
+        "description": "Needs only the emailed proof. Completion revokes every session, including the app's; it never issues one, so sign in again afterwards.",
+        "tags": [
+          "Account"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 32,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stage": {
+                      "type": "string",
+                      "description": "NEW: the current address is verified and a link went to the new address. COMPLETED: the email changed and every session was revoked.",
+                      "enum": [
+                        "NEW",
+                        "COMPLETED"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "stage"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/logout": {
+      "post": {
+        "operationId": "logout",
+        "summary": "Sign out this session",
+        "description": "Succeeds even when the session is already invalid (no 401), so a client can always discard its credential. Browser responses expire the cookie.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed_out": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "signed_out"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/logout-all": {
+      "post": {
+        "operationId": "logoutAll",
+        "summary": "Sign out every session",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed_out": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "signed_out"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/email-change": {
+      "post": {
+        "operationId": "requestEmailChange",
+        "summary": "Start an email change",
+        "description": "Sends a confirmation to the current address first, then to the new one. 503 `EMAIL_UNCONFIGURED` when the deployment has no email.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 320
+                  }
+                },
+                "required": [
+                  "email"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "stage": {
+                      "type": "string",
+                      "const": "CURRENT"
+                    }
+                  },
+                  "required": [
+                    "stage"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/dashboard": {
+      "get": {
+        "operationId": "dashboard",
+        "summary": "Dashboard: referrals, streak, founding badge",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DonorDashboard"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/profile": {
+      "get": {
+        "operationId": "profile",
+        "summary": "Profile and notification preferences",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/preferences": {
+      "post": {
+        "operationId": "savePreferences",
+        "summary": "Save notification preferences",
+        "description": "409 when `version` is stale: re-read the profile and retry.",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "integer",
+                    "format": "int32",
+                    "description": "The profile `version` being replaced.",
+                    "minimum": 0
+                  },
+                  "referral_emails": {
+                    "type": "boolean"
+                  },
+                  "marketing_emails": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "version",
+                  "referral_emails",
+                  "marketing_emails"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/sharing": {
+      "get": {
+        "operationId": "sharing",
+        "summary": "Public name and referral links",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sharing"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "saveSharing",
+        "summary": "Choose a public name, optionally replacing the referral code",
+        "description": "Replacing the code invalidates the old one for new visits.",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "public_name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "replace_code": {
+                    "type": "boolean",
+                    "description": "Defaults to false; null is invalid."
+                  }
+                },
+                "required": [
+                  "public_name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sharing"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/referral-code.svg": {
+      "get": {
+        "operationId": "referralCode",
+        "summary": "In-person referral QR code",
+        "description": "409 until a public name is chosen.",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "image/svg+xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/gifts": {
+      "get": {
+        "operationId": "gifts",
+        "summary": "Giving history",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GiftsPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/receipts/{gift_id}": {
+      "get": {
+        "operationId": "receipt",
+        "summary": "Gift record (sandbox, not a tax receipt)",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "gift_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/annual-summary/{year}": {
+      "get": {
+        "operationId": "annualSummary",
+        "summary": "Calendar-year giving summary",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "year",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 2000,
+              "maximum": 9999
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnualSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/wallet": {
+      "get": {
+        "operationId": "walletProviders",
+        "summary": "Which Wallet passes this deployment can issue",
+        "tags": [
+          "Wallet"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "apple": {
+                      "type": "boolean"
+                    },
+                    "google": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "apple",
+                    "google"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/wallet/apple": {
+      "post": {
+        "operationId": "applePass",
+        "summary": "Apple Wallet pass for the referral code",
+        "description": "409 until a public name is chosen.",
+        "tags": [
+          "Wallet"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/vnd.apple.pkpass": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/wallet/google": {
+      "post": {
+        "operationId": "googlePass",
+        "summary": "Google Wallet save link for the referral code",
+        "description": "409 until a public name is chosen.",
+        "tags": [
+          "Wallet"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "required": [
+                    "url"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/recurring": {
+      "get": {
+        "operationId": "recurring",
+        "summary": "Monthly gift status",
+        "description": "Reconciles with the processor, so it may take up to 25 seconds. When the processor cannot be read the stored state is returned with `stale: true`. 409 when billing needs reconciliation; 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Recurring"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/recurring/amount": {
+      "get": {
+        "operationId": "amountOptions",
+        "summary": "Amount change offer",
+        "description": "Reconciles with the processor, so it may take up to 25 seconds. When the processor cannot be read the stored state is returned with `stale: true`. 409 when billing needs reconciliation; 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Recurring"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AmountOptions"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "changeAmount",
+        "summary": "Change the monthly amount from the next renewal",
+        "description": "Idempotent. Echo the values the matching GET returned; 409 when they no longer match current billing. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Recurring"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subscription_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "amount_minor": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 100,
+                    "maximum": 99999999
+                  },
+                  "previous_minor": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 100,
+                    "maximum": 99999999
+                  },
+                  "effective_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "subscription_id",
+                  "amount_minor",
+                  "previous_minor",
+                  "effective_at"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AmountChange"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/recurring/pause": {
+      "get": {
+        "operationId": "pauseOptions",
+        "summary": "Pause offer: 1, 2, or 3 skipped renewals with exact dates",
+        "description": "Reconciles with the processor, so it may take up to 25 seconds. When the processor cannot be read the stored state is returned with `stale: true`. 409 when billing needs reconciliation; 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Recurring"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PauseOptions"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "pauseRecurring",
+        "summary": "Pause renewals",
+        "description": "Idempotent. Echo the values the matching GET returned; 409 when they no longer match current billing. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Recurring"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subscription_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "months": {
+                    "type": "integer",
+                    "format": "int32",
+                    "minimum": 1,
+                    "maximum": 3
+                  },
+                  "starts_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "resumes_at": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "subscription_id",
+                  "months",
+                  "starts_at",
+                  "resumes_at"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PauseResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/recurring/resume": {
+      "get": {
+        "operationId": "resumeOptions",
+        "summary": "Resume offer",
+        "description": "Reconciles with the processor, so it may take up to 25 seconds. When the processor cannot be read the stored state is returned with `stale: true`. 409 when billing needs reconciliation; 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Recurring"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResumeOptions"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "resumeRecurring",
+        "summary": "Resume a pause early",
+        "description": "Idempotent. Echo the values the matching GET returned; 409 when they no longer match current billing. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Recurring"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pause_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "next_renewal": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "pause_id",
+                  "next_renewal"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resumption"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/payment-method": {
+      "get": {
+        "operationId": "paymentMethod",
+        "summary": "Card update status",
+        "description": "Reconciles with the processor, so it may take up to 25 seconds. When the processor cannot be read the stored state is returned with `stale: true`. 409 when billing needs reconciliation; 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Recurring"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentMethodStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/recurring/cancel": {
+      "post": {
+        "operationId": "cancelRecurring",
+        "summary": "Stop future renewals",
+        "description": "Idempotent. Echo the values the matching GET returned; 409 when they no longer match current billing. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Recurring"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subscription_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "period_end": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                },
+                "required": [
+                  "subscription_id",
+                  "period_end"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/payment-method/setup": {
+      "post": {
+        "operationId": "beginPaymentUpdate",
+        "summary": "Start a Stripe-hosted card update",
+        "description": "No body. Open `url` in the system browser; poll GET /donor/me/payment-method afterwards.",
+        "tags": [
+          "Recurring"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentUpdate"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/sign-in": {
+      "post": {
+        "operationId": "staffSignIn",
+        "summary": "Staff sign-in with password and TOTP",
+        "description": "Sets the `dad_staff_session` cookie. 401 covers invalid, expired, and locked credentials alike.",
+        "tags": [
+          "Staff"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "maxLength": 320
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[0-9]{6}$"
+                  }
+                },
+                "required": [
+                  "email",
+                  "password",
+                  "code"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed_in": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "signed_in"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/provision": {
+      "post": {
+        "operationId": "staffProvision",
+        "summary": "Read the TOTP secret for an invitation",
+        "tags": [
+          "Staff"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 32,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "email": {
+                      "type": "string",
+                      "format": "email"
+                    },
+                    "secret": {
+                      "type": "string",
+                      "description": "Base32 TOTP secret."
+                    },
+                    "uri": {
+                      "type": "string",
+                      "description": "otpauth:// URI."
+                    }
+                  },
+                  "required": [
+                    "email",
+                    "secret",
+                    "uri"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/activate": {
+      "post": {
+        "operationId": "staffActivate",
+        "summary": "Set a password and confirm TOTP",
+        "tags": [
+          "Staff"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 32,
+                    "maxLength": 128
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 12,
+                    "maxLength": 128
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[0-9]{6}$"
+                  }
+                },
+                "required": [
+                  "token",
+                  "password",
+                  "code"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "activated": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "activated"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/sign-out": {
+      "post": {
+        "operationId": "staffSignOut",
+        "summary": "Staff sign-out",
+        "description": "Succeeds even when the session is already invalid (no 401).",
+        "tags": [
+          "Staff"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signed_out": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "signed_out"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/me": {
+      "get": {
+        "operationId": "staffMe",
+        "summary": "Current staff member",
+        "tags": [
+          "Staff"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffView"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/accounts": {
+      "get": {
+        "operationId": "staffAccounts",
+        "summary": "Staff accounts",
+        "tags": [
+          "Staff"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/StaffView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "inviteStaff",
+        "summary": "Invite a staff member",
+        "description": "409 when a staff account with this email already exists.",
+        "tags": [
+          "Staff"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "maxLength": 320
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "ADMIN",
+                      "FINANCE",
+                      "SUPPORT"
+                    ]
+                  }
+                },
+                "required": [
+                  "email",
+                  "name",
+                  "role"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invitation_url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "required": [
+                    "invitation_url"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/accounts/{staff_id}/disable": {
+      "post": {
+        "operationId": "disableStaff",
+        "summary": "Disable a staff member",
+        "tags": [
+          "Staff"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "staff_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessChange"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/accounts/{staff_id}/recovery": {
+      "post": {
+        "operationId": "recoverStaff",
+        "summary": "Reset a staff member's credentials",
+        "tags": [
+          "Staff"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "staff_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invitation_url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  },
+                  "required": [
+                    "invitation_url"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/accounts/{staff_id}/role": {
+      "post": {
+        "operationId": "changeStaffRole",
+        "summary": "Change a staff member's role",
+        "tags": [
+          "Staff"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "staff_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "ADMIN",
+                      "FINANCE",
+                      "SUPPORT"
+                    ]
+                  }
+                },
+                "required": [
+                  "role"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffView"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors": {
+      "get": {
+        "operationId": "searchDonors",
+        "summary": "Search donors",
+        "tags": [
+          "Staff donors"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 320
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DonorSearch"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}": {
+      "get": {
+        "operationId": "donorDetail",
+        "summary": "Donor detail",
+        "tags": [
+          "Staff donors"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          },
+          {
+            "name": "gifts_offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "default": 0
+            }
+          },
+          {
+            "name": "referrals_offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DonorDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}/messages": {
+      "get": {
+        "operationId": "donorMessages",
+        "summary": "Donor message history",
+        "tags": [
+          "Staff donors"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}/actions": {
+      "get": {
+        "operationId": "donorActions",
+        "summary": "Staff financial actions on a donor",
+        "tags": [
+          "Staff donors"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}/actions/pending": {
+      "get": {
+        "operationId": "pendingAction",
+        "summary": "Unresolved financial action for a target",
+        "tags": [
+          "Staff donors"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          },
+          {
+            "name": "target_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "REFUND",
+                "CANCEL"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingAction"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/audit": {
+      "get": {
+        "operationId": "auditEvents",
+        "summary": "Audit trail",
+        "tags": [
+          "Staff donors"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/enrolments": {
+      "get": {
+        "operationId": "enrolments",
+        "summary": "Recipient enrolment queue (inactive until R2)",
+        "tags": [
+          "Staff donors"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Enrolments"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}/claim-email": {
+      "post": {
+        "operationId": "requestClaim",
+        "summary": "Send the donor a claim link",
+        "tags": [
+          "Staff donors"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "queued": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "queued"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/messages/{message_id}/resend": {
+      "post": {
+        "operationId": "resendMessage",
+        "summary": "Resend a message",
+        "tags": [
+          "Staff donors"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedMessage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}/gifts/{gift_id}/refund": {
+      "get": {
+        "operationId": "refundQuote",
+        "summary": "Refund quote",
+        "tags": [
+          "Finance"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          },
+          {
+            "name": "gift_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RefundQuote"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "refund",
+        "summary": "Refund a gift",
+        "description": "Authorization is checked first; then 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Finance"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          },
+          {
+            "name": "gift_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "amount_minor": {
+                    "type": "integer",
+                    "format": "int64",
+                    "minimum": 1,
+                    "maximum": 99999999
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "amount_minor",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffRefund"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}/cancellation": {
+      "get": {
+        "operationId": "cancellationQuote",
+        "summary": "Cancellation quote",
+        "tags": [
+          "Finance"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecurringDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "cancelSubscription",
+        "summary": "Cancel a donor's monthly gift",
+        "description": "Authorization is checked first; then 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "tags": [
+          "Finance"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          },
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subscription_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "period_end": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "minLength": 5,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "subscription_id",
+                  "period_end",
+                  "reason"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffCancellation"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/exports": {
+      "get": {
+        "operationId": "exportDatasets",
+        "summary": "Exportable datasets",
+        "tags": [
+          "Exports"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExportDatasets"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/exports/{file}": {
+      "get": {
+        "operationId": "export",
+        "summary": "Download a dataset as CSV",
+        "tags": [
+          "Exports"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "file",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z-]+\\.csv$"
+            },
+            "description": "A dataset name from GET /donor/staff/exports, plus `.csv`."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Streamed CSV attachment. A failure after the first row aborts the connection rather than returning a truncated file.",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/content": {
+      "get": {
+        "operationId": "contentInventory",
+        "summary": "Published content and source documents",
+        "tags": [
+          "Content"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentInventory"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/partners": {
+      "get": {
+        "operationId": "partnerInquiries",
+        "summary": "Partner inquiries",
+        "tags": [
+          "Content"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PartnerPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/content/sources": {
+      "post": {
+        "operationId": "uploadSource",
+        "summary": "Upload a private source document",
+        "tags": [
+          "Content"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "description": "At most 10 MiB. Authorized before the body is read; 503 `SOURCE_STORAGE_UNCONFIGURED` when the deployment has no content encryption key."
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StoredSource"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/content/sources/{source_id}": {
+      "get": {
+        "operationId": "downloadSource",
+        "summary": "Download a source document",
+        "tags": [
+          "Content"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/content/publish": {
+      "post": {
+        "operationId": "publish",
+        "summary": "Publish initiatives and ledger",
+        "description": "A refused publication answers 422 `{\"detail\":\"The spreadsheet has problems\",\"errors\":[{sheet,row,column,reason}]}` listing every problem found.",
+        "tags": [
+          "Content"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicationRequest"
+              }
+            }
+          },
+          "description": "At most 8 MiB. Authorized before the body is read."
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Publication"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "dad_donor_session",
+        "description": "Web donor session: HttpOnly, Secure on HTTPS, SameSite=Lax, 30 days at most. Set by POST /donor/claim for browser requests. Mutations also require the exact configured `Origin`."
+      },
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Donor app session (the same server-side session store, expiry, and revocation as cookieAuth). Accepted only on native requests: `X-DAD-Client: native`, no `Origin` header, and no `Cookie` header. Any request carrying Origin or cookies is treated as a browser request, its Authorization header is ignored, and its mutations need the exact Origin. Obtain the token from POST /donor/claim sent as a native request. Never accepted for staff routes."
+      },
+      "staffCookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "dad_staff_session",
+        "description": "Staff session: HttpOnly, SameSite=Strict, 8 hours at most. Browser-only; mutations require the exact Origin. Permissions are checked server-side against current staff state on every request."
+      },
+      "stripeSignature": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Stripe-Signature",
+        "description": "Stripe webhook signature over the raw request body."
+      }
+    },
+    "parameters": {
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409.",
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "Offset": {
+        "name": "offset",
+        "in": "query",
+        "required": false,
+        "description": "Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null.",
+        "schema": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0,
+          "default": 0
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request could not be verified.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No valid session: missing, malformed, expired, or revoked. Sign in again.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Browser requests: Origin is not the configured site origin. App requests: the route does not admit the app, or the request also carried Origin or cookies. Some routes also use 403 for a permission or account restriction.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "No such record for this session, or no such route. A malformed record ID or referral code is also 404.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The record changed or conflicts with this request. Refresh before retrying; reusing an Idempotency-Key with different content also conflicts.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "The request body exceeds the route's limit (256 KiB for JSON unless stated).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "UnsupportedMediaType": {
+        "description": "Send `Content-Type: application/json` (or an `application/*+json` type), or omit it.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Unprocessable": {
+        "description": "The body is not one JSON object of exactly the documented fields, a field or parameter is invalid (including any string containing NUL), or the Idempotency-Key is missing or not a version 4 UUID.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "Without `code`: the dependency behind this route failed or is not connected; retry later, reusing the Idempotency-Key for commands. With `code`: the feature is not configured in this deployment; do not retry.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      },
+      "TooManyRequests": {
+        "description": "The client address exhausted this route's rate-limit class. Wait `Retry-After` seconds.",
+        "headers": {
+          "Retry-After": {
+            "description": "Whole seconds until a request would be admitted.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Problem"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Problem": {
+        "type": "object",
+        "description": "Every non-2xx response, including unmatched routes (404) and methods (405).",
+        "properties": {
+          "detail": {
+            "type": "string",
+            "description": "Human-readable explanation, safe to show to the user. Never contains credentials, donor data, or internal error text."
+          },
+          "code": {
+            "type": "string",
+            "description": "Present only on a 503 for a feature this deployment has deliberately not configured. Such a 503 is not transient: do not retry; show the feature as unavailable.",
+            "enum": [
+              "PAYMENTS_UNCONFIGURED",
+              "EMAIL_UNCONFIGURED",
+              "SOURCE_STORAGE_UNCONFIGURED"
+            ]
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicationProblem"
+            },
+            "description": "Present only on a 422 from POST /donor/staff/content/publish: every problem found, up to 100."
+          }
+        },
+        "required": [
+          "detail"
+        ],
+        "additionalProperties": false
+      },
+      "PublicationProblem": {
+        "type": "object",
+        "properties": {
+          "sheet": {
+            "type": "string",
+            "description": "`initiatives` or `ledger`, or empty for a request field named by `column`."
+          },
+          "row": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Spreadsheet row, counting the header as row 1; 0 for the whole sheet."
+          },
+          "column": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Stable machine code, e.g. `not_integer`, `too_large`, `invalid_text`."
+          }
+        },
+        "required": [
+          "sheet",
+          "row",
+          "column",
+          "reason"
+        ],
+        "additionalProperties": false
+      },
+      "NativeSession": {
+        "type": "object",
+        "description": "Returned by POST /donor/claim to native requests only. Browsers receive the same session solely as an HttpOnly cookie.",
+        "properties": {
+          "claimed": {
+            "type": "boolean"
+          },
+          "session_token": {
+            "type": "string",
+            "description": "Opaque donor session token. Send it as `Authorization: Bearer <token>` together with `X-DAD-Client: native`. Store it in the platform keychain/keystore."
+          },
+          "expires_in": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds until the session expires at the latest. Sign-out, sign-out everywhere, and email changes revoke it earlier."
+          }
+        },
+        "required": [
+          "claimed",
+          "session_token",
+          "expires_in"
+        ],
+        "additionalProperties": false
+      },
+      "PublicContent": {
+        "type": "object",
+        "properties": {
+          "cadence": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Publication cadence label."
+          },
+          "initiatives": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "Published initiative rows keyed by spreadsheet column."
+          },
+          "ledger": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "description": "Published impact ledger rows keyed by spreadsheet column."
+          },
+          "ledger_as_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Date the ledger figures describe.",
+            "format": "date"
+          },
+          "publication_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "unpublished",
+              "published"
+            ]
+          }
+        },
+        "required": [
+          "cadence",
+          "initiatives",
+          "ledger",
+          "ledger_as_of",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "ReferralSummary": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "irl": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Current in-person referral count."
+          },
+          "irl_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Collected dollars attributed to in-person referrals, after successful refunds, in cents."
+          },
+          "link": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Current link referral count."
+          },
+          "link_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Collected dollars attributed to link referrals, after successful refunds, in cents."
+          },
+          "total_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "irl_minor + link_minor."
+          }
+        },
+        "required": [
+          "currency",
+          "irl",
+          "irl_minor",
+          "link",
+          "link_minor",
+          "total_minor"
+        ],
+        "additionalProperties": false
+      },
+      "StreakSummary": {
+        "type": "object",
+        "properties": {
+          "at_risk": {
+            "type": "boolean",
+            "description": "A renewal failed and is inside its 14-day grace period."
+          },
+          "current": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "grace_ends_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "at_risk",
+          "current",
+          "grace_ends_at"
+        ],
+        "additionalProperties": false
+      },
+      "DonorDashboard": {
+        "type": "object",
+        "description": "While `state` is `preparing` only `mode` and `state` are present. A null `referrals` or `streak` means the figure is not currently known; never show it as zero.",
+        "properties": {
+          "computed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "founding_donor": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string",
+            "description": "Always `test`: R1 accepts Stripe test payments only.",
+            "enum": [
+              "test"
+            ]
+          },
+          "referrals": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferralSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "preparing",
+              "ready"
+            ]
+          },
+          "streak": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StreakSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "Profile": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "public_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "referral_emails": {
+            "type": "boolean"
+          },
+          "marketing_emails": {
+            "type": "boolean"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Optimistic concurrency version; send it back when saving preferences."
+          },
+          "consent_version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "public_name",
+          "referral_emails",
+          "marketing_emails",
+          "version",
+          "consent_version"
+        ],
+        "additionalProperties": false
+      },
+      "Sharing": {
+        "type": "object",
+        "properties": {
+          "public_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "link": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Referral link, once a public name is chosen.",
+            "format": "uri"
+          },
+          "irl_link": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "In-person (QR) referral link.",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "public_name",
+          "link",
+          "irl_link"
+        ],
+        "additionalProperties": false
+      },
+      "Gift": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "frequency": {
+            "type": "string",
+            "enum": [
+              "MONTHLY",
+              "ONE_TIME"
+            ]
+          },
+          "paid_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "refunded_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Successfully refunded so far, in cents."
+          },
+          "net_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "amount_minor - refunded_minor."
+          }
+        },
+        "required": [
+          "id",
+          "amount_minor",
+          "currency",
+          "frequency",
+          "paid_at",
+          "refunded_minor",
+          "net_minor"
+        ],
+        "additionalProperties": false
+      },
+      "GiftsPage": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "mode": {
+            "type": "string",
+            "description": "Always `test`: R1 accepts Stripe test payments only.",
+            "enum": [
+              "test"
+            ]
+          },
+          "gifts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Gift"
+            }
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Offset of the next page, or null on the last page.",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "email",
+          "mode",
+          "gifts",
+          "next_offset"
+        ],
+        "additionalProperties": false
+      },
+      "RefundRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "status": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "amount_minor",
+          "status",
+          "observed_at"
+        ],
+        "additionalProperties": false
+      },
+      "GiftRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "paid_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "frequency": {
+            "type": "string",
+            "enum": [
+              "MONTHLY",
+              "ONE_TIME"
+            ]
+          },
+          "refunded_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "net_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "refunds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RefundRecord"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "amount_minor",
+          "currency",
+          "paid_at",
+          "frequency",
+          "refunded_minor",
+          "net_minor",
+          "refunds"
+        ],
+        "additionalProperties": false
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "Always `test`: R1 accepts Stripe test payments only.",
+            "enum": [
+              "test"
+            ]
+          },
+          "tax_receipt": {
+            "type": "boolean",
+            "description": "Always false in R1: sandbox records are not tax receipts."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "receipt_id": {
+            "type": "string"
+          },
+          "gift": {
+            "$ref": "#/components/schemas/GiftRecord"
+          }
+        },
+        "required": [
+          "mode",
+          "tax_receipt",
+          "as_of",
+          "receipt_id",
+          "gift"
+        ],
+        "additionalProperties": false
+      },
+      "AnnualSummary": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "Always `test`: R1 accepts Stripe test payments only.",
+            "enum": [
+              "test"
+            ]
+          },
+          "tax_receipt": {
+            "type": "boolean",
+            "description": "Always false in R1."
+          },
+          "year": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA zone that bounds the calendar year."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "gifts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GiftRecord"
+            }
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "refunded_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "net_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "tax_receipt",
+          "year",
+          "timezone",
+          "as_of",
+          "gifts",
+          "amount_minor",
+          "refunded_minor",
+          "net_minor",
+          "currency"
+        ],
+        "additionalProperties": false
+      },
+      "Subscription": {
+        "type": "object",
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "description": "Subscription attempt ID used by recurring commands.",
+            "format": "uuid"
+          },
+          "period_end": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stops_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "amount_minor",
+          "currency",
+          "id",
+          "period_end",
+          "status",
+          "stops_at"
+        ],
+        "additionalProperties": false
+      },
+      "RecurringDetails": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "Always `test`: R1 accepts Stripe test payments only.",
+            "enum": [
+              "test"
+            ]
+          },
+          "observed_at": {
+            "type": "string",
+            "description": "When the stored state was last confirmed; present only with `stale`.",
+            "format": "date-time"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "Present and true when the processor could not be read and the response shows stored state as of `observed_at` (or the last reconciliation). Show it as possibly out of date and disable changes that depend on it."
+          },
+          "state": {
+            "type": "string"
+          },
+          "subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Subscription"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "subscription"
+        ],
+        "additionalProperties": false
+      },
+      "AmountChange": {
+        "type": "object",
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "confirmed": {
+            "type": "boolean"
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "previous_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "amount_minor",
+          "confirmed",
+          "effective_at",
+          "previous_minor",
+          "request_id"
+        ],
+        "additionalProperties": false
+      },
+      "AmountOptions": {
+        "type": "object",
+        "description": "Unless `state` is `ready`, only `state` (and `stale`, when set) is present.",
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Amount of the next renewal."
+          },
+          "change": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AmountChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "Present and true when the processor could not be read and the response shows stored state as of `observed_at` (or the last reconciliation). Show it as possibly out of date and disable changes that depend on it."
+          },
+          "state": {
+            "type": "string"
+          },
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "PauseOption": {
+        "type": "object",
+        "properties": {
+          "months": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "resumes_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "months",
+          "resumes_at",
+          "starts_at"
+        ],
+        "additionalProperties": false
+      },
+      "PauseView": {
+        "type": "object",
+        "properties": {
+          "confirmed": {
+            "type": "boolean"
+          },
+          "months": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "resumes_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "confirmed",
+          "months",
+          "request_id",
+          "resumes_at",
+          "starts_at"
+        ],
+        "additionalProperties": false
+      },
+      "PauseOptions": {
+        "type": "object",
+        "properties": {
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PauseOption"
+            }
+          },
+          "pause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PauseView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "Present and true when the processor could not be read and the response shows stored state as of `observed_at` (or the last reconciliation). Show it as possibly out of date and disable changes that depend on it."
+          },
+          "state": {
+            "type": "string"
+          },
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "options",
+          "pause",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "ResumeOptions": {
+        "type": "object",
+        "description": "Each state carries only its own fields.",
+        "properties": {
+          "confirmed": {
+            "type": "boolean"
+          },
+          "next_renewal": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "original_resume": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pause_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "Present and true when the processor could not be read and the response shows stored state as of `observed_at` (or the last reconciliation). Show it as possibly out of date and disable changes that depend on it."
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "PaymentMethodStatus": {
+        "type": "object",
+        "properties": {
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "mode": {
+            "type": "string",
+            "description": "Always `test`: R1 accepts Stripe test payments only.",
+            "enum": [
+              "test"
+            ]
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "completed_at",
+          "mode",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "PauseResult": {
+        "type": "object",
+        "properties": {
+          "pause": {
+            "$ref": "#/components/schemas/PauseView"
+          }
+        },
+        "required": [
+          "pause"
+        ],
+        "additionalProperties": false
+      },
+      "Resumption": {
+        "type": "object",
+        "properties": {
+          "confirmed": {
+            "type": "boolean"
+          },
+          "next_renewal": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "pause_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "confirmed",
+          "next_renewal",
+          "pause_id",
+          "request_id"
+        ],
+        "additionalProperties": false
+      },
+      "PaymentUpdate": {
+        "type": "object",
+        "properties": {
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stripe-hosted card setup page. Open it in the system browser.",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "CheckoutResult": {
+        "type": "object",
+        "properties": {
+          "checkoutId": {
+            "type": "string",
+            "description": "Equal to the Idempotency-Key. The only camelCase field in the API, kept for the web client.",
+            "format": "uuid"
+          },
+          "url": {
+            "type": "string",
+            "description": "Stripe-hosted Checkout page.",
+            "format": "uri"
+          }
+        },
+        "required": [
+          "checkoutId",
+          "url"
+        ],
+        "additionalProperties": false
+      },
+      "StaffView": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "FINANCE",
+              "SUPPORT"
+            ]
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean"
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "name",
+          "role",
+          "disabled",
+          "active",
+          "permissions"
+        ],
+        "additionalProperties": false
+      },
+      "AccessChange": {
+        "type": "object",
+        "properties": {
+          "disabled": {
+            "type": "boolean"
+          },
+          "staff": {
+            "$ref": "#/components/schemas/StaffView"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "DonorSummary": {
+        "type": "object",
+        "properties": {
+          "claimed": {
+            "type": "boolean"
+          },
+          "disabled": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "public_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "claimed",
+          "disabled",
+          "email",
+          "id",
+          "public_name"
+        ],
+        "additionalProperties": false
+      },
+      "DonorSearch": {
+        "type": "object",
+        "properties": {
+          "donors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DonorSummary"
+            }
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Offset of the next page, or null on the last page.",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "donors",
+          "next_offset"
+        ],
+        "additionalProperties": false
+      },
+      "ReferredDonor": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "net_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "LINK",
+              "IRL"
+            ]
+          }
+        },
+        "required": [
+          "email",
+          "id",
+          "net_minor",
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "ReferrerLink": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "LINK",
+              "IRL"
+            ]
+          }
+        },
+        "required": [
+          "email",
+          "id",
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "StaffStreak": {
+        "type": "object",
+        "properties": {
+          "at_risk": {
+            "type": "boolean"
+          },
+          "best": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "computed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "current": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        },
+        "required": [
+          "at_risk",
+          "best",
+          "computed_at",
+          "current"
+        ],
+        "additionalProperties": false
+      },
+      "StaffSubscription": {
+        "type": "object",
+        "description": "The monthly gift as last observed; quotes read the processor live.",
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "next_renewal": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "observed_at": {
+            "type": "string",
+            "description": "When the stored subscription state was last confirmed.",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stops_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "amount_minor",
+          "next_renewal",
+          "observed_at",
+          "status",
+          "stops_at"
+        ],
+        "additionalProperties": false
+      },
+      "DonorDetail": {
+        "type": "object",
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "claimed": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "founding_donor": {
+            "type": "boolean"
+          },
+          "gifts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Gift"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "next_gifts_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Pass as gifts_offset for the next page of gifts.",
+            "minimum": 0
+          },
+          "next_referrals_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Pass as referrals_offset for the next page of referred donors.",
+            "minimum": 0
+          },
+          "public_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "referred": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReferredDonor"
+            }
+          },
+          "referrer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReferrerLink"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "streak": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StaffStreak"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StaffSubscription"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "as_of",
+          "claimed",
+          "email",
+          "founding_donor",
+          "gifts",
+          "id",
+          "next_gifts_offset",
+          "next_referrals_offset",
+          "public_name",
+          "referred",
+          "referrer",
+          "streak",
+          "subscription"
+        ],
+        "additionalProperties": false
+      },
+      "AuditEvent": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "actor_id",
+          "at",
+          "details",
+          "id",
+          "target"
+        ],
+        "additionalProperties": false
+      },
+      "AuditPage": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuditEvent"
+            }
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Offset of the next page, or null on the last page.",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "events",
+          "next_offset"
+        ],
+        "additionalProperties": false
+      },
+      "StaffMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "suppressed_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "available_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "attempts",
+          "completed_at",
+          "last_error",
+          "suppressed_reason",
+          "available_at"
+        ],
+        "additionalProperties": false
+      },
+      "MessagePage": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StaffMessage"
+            }
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Offset of the next page, or null on the last page.",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "messages",
+          "next_offset"
+        ],
+        "additionalProperties": false
+      },
+      "StaffAction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "REFUND",
+              "CANCEL"
+            ]
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount_minor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "period_end": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "actor_id",
+          "kind",
+          "target_id",
+          "amount_minor",
+          "period_end",
+          "reason",
+          "status",
+          "completed_at"
+        ],
+        "additionalProperties": false
+      },
+      "ActionPage": {
+        "type": "object",
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StaffAction"
+            }
+          },
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Offset of the next page, or null on the last page.",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "actions",
+          "next_offset"
+        ],
+        "additionalProperties": false
+      },
+      "PendingAction": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StaffAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "Enrolments": {
+        "type": "object",
+        "properties": {
+          "enrolments": {
+            "type": "array",
+            "items": {},
+            "description": "Always empty until R2."
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "enrolments",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "QueuedMessage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "queued": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "queued"
+        ],
+        "additionalProperties": false
+      },
+      "RefundQuote": {
+        "type": "object",
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "available_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "donor_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "gift_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "description": "Always `test`: R1 accepts Stripe test payments only.",
+            "enum": [
+              "test"
+            ]
+          },
+          "observed_at": {
+            "type": "string",
+            "description": "When the stored refund states were last confirmed; present only with `stale`.",
+            "format": "date-time"
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "Present and true when the processor could not be read and the response shows stored state as of `observed_at` (or the last reconciliation). Show it as possibly out of date and disable changes that depend on it."
+          }
+        },
+        "required": [
+          "amount_minor",
+          "available_minor",
+          "currency",
+          "donor_id",
+          "gift_id",
+          "mode"
+        ],
+        "additionalProperties": false
+      },
+      "StaffRefund": {
+        "type": "object",
+        "properties": {
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Integer USD cents."
+          },
+          "currency": {
+            "type": "string",
+            "enum": [
+              "USD"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "description": "Always `test`: R1 accepts Stripe test payments only.",
+            "enum": [
+              "test"
+            ]
+          },
+          "refund_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "request_id",
+          "status"
+        ],
+        "additionalProperties": false
+      },
+      "StaffCancellation": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "description": "Always `test`: R1 accepts Stripe test payments only.",
+            "enum": [
+              "test"
+            ]
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "type": "string"
+          },
+          "subscription": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Subscription"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "request_id",
+          "state",
+          "subscription"
+        ],
+        "additionalProperties": false
+      },
+      "ExportDatasets": {
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-z-]+$"
+            }
+          }
+        },
+        "required": [
+          "datasets"
+        ],
+        "additionalProperties": false
+      },
+      "PublicationSummary": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "at",
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "StoredSource": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sha256"
+        ],
+        "additionalProperties": false
+      },
+      "ContentInventory": {
+        "type": "object",
+        "properties": {
+          "publications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSummary"
+            }
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StoredSource"
+            }
+          }
+        },
+        "required": [
+          "publications",
+          "sources"
+        ],
+        "additionalProperties": false
+      },
+      "Publication": {
+        "type": "object",
+        "properties": {
+          "publication_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "publication_id"
+        ],
+        "additionalProperties": false
+      },
+      "PartnerSignup": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "message": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "organization": {
+            "type": "string"
+          },
+          "website": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "email",
+          "id",
+          "message",
+          "name",
+          "organization",
+          "website"
+        ],
+        "additionalProperties": false
+      },
+      "PartnerPage": {
+        "type": "object",
+        "properties": {
+          "next_offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Offset of the next page, or null on the last page.",
+            "minimum": 0
+          },
+          "signups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartnerSignup"
+            }
+          }
+        },
+        "required": [
+          "next_offset",
+          "signups"
+        ],
+        "additionalProperties": false
+      },
+      "PublicationRequest": {
+        "type": "object",
+        "properties": {
+          "initiatives_csv": {
+            "type": "string",
+            "description": "Initiatives spreadsheet export (CSV)."
+          },
+          "ledger_csv": {
+            "type": "string",
+            "description": "Impact ledger spreadsheet export (CSV)."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date"
+          },
+          "cadence": {
+            "type": "string"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      },
+      "PartnerRequest": {
+        "type": "object",
+        "properties": {
+          "organization": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 320
+          },
+          "website": {
+            "type": "string",
+            "description": "Optional HTTPS URL.",
+            "maxLength": 500
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "contact_consent": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "organization",
+          "name",
+          "email",
+          "contact_consent"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

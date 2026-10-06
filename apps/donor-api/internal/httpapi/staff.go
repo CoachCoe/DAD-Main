@@ -36,6 +36,8 @@ func staffStatus(err error) (int, string) {
 		return http.StatusForbidden, "Permission denied"
 	case errors.Is(err, store.ErrStaffInput):
 		return http.StatusUnprocessableEntity, "Invalid request fields"
+	case errors.Is(err, store.ErrStaffExists):
+		return http.StatusConflict, "A staff account with this email already exists"
 	case errors.Is(err, store.ErrStaffConflict):
 		return http.StatusConflict, "Staff access changed or conflicts with this request"
 	case errors.Is(err, pgx.ErrNoRows):
@@ -45,16 +47,8 @@ func staffStatus(err error) (int, string) {
 	}
 }
 
-func staffInvalid(w http.ResponseWriter, r *http.Request) {
-	writeError(w, r, http.StatusUnprocessableEntity, "Invalid request fields", nil)
-}
-
-func (a *api) staffAvailable(w http.ResponseWriter, r *http.Request) bool {
-	if a.Staff == nil {
-		writeError(w, r, http.StatusServiceUnavailable, staffUnavailable, nil)
-		return false
-	}
-	return true
+func (a *api) staff() service {
+	return service{a.Staff != nil, staffUnavailable, readTimeout, staffStatus}
 }
 
 func validOTP(code string) bool {
@@ -80,21 +74,14 @@ func (a *api) invitationURL(token string) string {
 	return a.Origin + "/staff/activate#token=" + token
 }
 
-// staffCommand decodes and validates a staff request body, then runs it
-// with the staff time budget.
+// staffCommand runs a validated staff request body with the staff time
+// budget, which covers password hashing.
 func staffCommand[T requestBody](a *api, w http.ResponseWriter, r *http.Request, run func(context.Context, T) (any, error)) {
-	if !a.staffAvailable(w, r) {
+	body, ok := decodeValid[T](w, r)
+	if !ok {
 		return
 	}
-	var body T
-	if !decodeJSON(w, r, &body) || !body.valid() {
-		staffInvalid(w, r)
-		return
-	}
-	ctx, cancel := withTimeout(r, staffTimeout)
-	defer cancel()
-	result, err := run(ctx, body)
-	respond(w, r, result, err, staffStatus)
+	a.staff().within(staffTimeout).serve(w, r, func(ctx context.Context) (any, error) { return run(ctx, body) })
 }
 
 type signInBody struct {
@@ -121,7 +108,7 @@ type provisionBody struct {
 	Token string `json:"token"`
 }
 
-func (b provisionBody) valid() bool { return validProof(b.Token) }
+func (b provisionBody) valid() bool { return validToken(b.Token) }
 
 func (a *api) staffProvision(w http.ResponseWriter, r *http.Request) {
 	staffCommand(a, w, r, func(ctx context.Context, b provisionBody) (any, error) {
@@ -136,7 +123,7 @@ type activationBody struct {
 }
 
 func (b activationBody) valid() bool {
-	return validProof(b.Token) && validPassword(b.Password, 12) && validOTP(b.Code)
+	return validToken(b.Token) && validPassword(b.Password, 12) && validOTP(b.Code)
 }
 
 func (a *api) staffActivate(w http.ResponseWriter, r *http.Request) {
@@ -156,9 +143,9 @@ func (b invitationBody) valid() bool {
 	return utf8.RuneCountInString(b.Email) <= maxEmailRunes && n > 0 && n <= 100 && validRole(b.Role)
 }
 
-func (a *api) inviteStaff(w http.ResponseWriter, r *http.Request) {
+func (a *api) inviteStaff(w http.ResponseWriter, r *http.Request, session string) {
 	staffCommand(a, w, r, func(ctx context.Context, b invitationBody) (any, error) {
-		token, err := a.Staff.Invite(ctx, cookieValue(r, staffCookie), b.Email, b.Name, b.Role)
+		token, err := a.Staff.Invite(ctx, session, b.Email, b.Name, b.Role)
 		if err != nil {
 			return nil, err
 		}
@@ -166,71 +153,57 @@ func (a *api) inviteStaff(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *api) staffMe(w http.ResponseWriter, r *http.Request) {
-	if !a.staffAvailable(w, r) {
-		return
-	}
-	ctx, cancel := withTimeout(r, readTimeout)
-	defer cancel()
-	body, err := a.Staff.Me(ctx, cookieValue(r, staffCookie))
-	respond(w, r, body, err, staffStatus)
+func (a *api) staffMe(w http.ResponseWriter, r *http.Request, session string) {
+	a.staff().serve(w, r, func(ctx context.Context) (any, error) { return a.Staff.Me(ctx, session) })
 }
 
-func (a *api) staffAccounts(w http.ResponseWriter, r *http.Request) {
-	if !a.staffAvailable(w, r) {
-		return
-	}
-	ctx, cancel := withTimeout(r, readTimeout)
-	defer cancel()
-	body, err := a.Staff.Accounts(ctx, cookieValue(r, staffCookie))
-	respond(w, r, body, err, staffStatus)
+func (a *api) staffAccounts(w http.ResponseWriter, r *http.Request, session string) {
+	a.staff().serve(w, r, func(ctx context.Context) (any, error) { return a.Staff.Accounts(ctx, session) })
 }
 
+// staffSignOut succeeds even without a valid session, so the browser can
+// always discard its cookie.
 func (a *api) staffSignOut(w http.ResponseWriter, r *http.Request) {
-	if !a.staffAvailable(w, r) {
-		return
-	}
-	ctx, cancel := withTimeout(r, readTimeout)
-	defer cancel()
-	err := a.Staff.SignOut(ctx, cookieValue(r, staffCookie))
-	if err == nil || errors.Is(err, store.ErrStaffDenied) {
+	a.staff().serve(w, r, func(ctx context.Context) (any, error) {
+		err := a.Staff.SignOut(ctx, staffSession(r))
+		if err != nil && !errors.Is(err, store.ErrStaffDenied) {
+			return nil, err
+		}
 		a.setCookie(w, staffCookie, "", -1, http.SameSiteStrictMode)
-		err = nil
-	}
-	respond(w, r, map[string]bool{"signed_out": true}, err, staffStatus)
+		return map[string]bool{"signed_out": true}, nil
+	})
 }
 
-func (a *api) changeStaffAccess(action string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !a.staffAvailable(w, r) {
-			return
-		}
-		id, ok := pathUUID(r, "staff_id")
+type roleBody struct {
+	Role string `json:"role"`
+}
+
+func (b roleBody) valid() bool { return validRole(b.Role) }
+
+func (a *api) changeStaffAccess(action string) sessionHandler {
+	return func(w http.ResponseWriter, r *http.Request, session string) {
+		id, ok := pathID(w, r, "staff_id")
 		if !ok {
-			staffInvalid(w, r)
 			return
 		}
-		var body struct {
-			Role string `json:"role"`
+		var body roleBody
+		if action == "role" {
+			if body, ok = decodeValid[roleBody](w, r); !ok {
+				return
+			}
 		}
-		if action == "role" && (!decodeJSON(w, r, &body) || !validRole(body.Role)) {
-			staffInvalid(w, r)
-			return
-		}
-		ctx, cancel := withTimeout(r, readTimeout)
-		defer cancel()
-		change, err := a.Staff.ChangeAccess(ctx, cookieValue(r, staffCookie), id, action, body.Role)
-		if err != nil {
-			respond(w, r, nil, err, staffStatus)
-			return
-		}
-		switch action {
-		case "recovery":
-			writeJSON(w, http.StatusOK, map[string]string{"invitation_url": a.invitationURL(change.Token)})
-		case "role":
-			writeJSON(w, http.StatusOK, change.Staff)
-		default:
-			writeJSON(w, http.StatusOK, change)
-		}
+		a.staff().serve(w, r, func(ctx context.Context) (any, error) {
+			change, err := a.Staff.ChangeAccess(ctx, session, id, action, body.Role)
+			switch {
+			case err != nil:
+				return nil, err
+			case action == "recovery":
+				return map[string]string{"invitation_url": a.invitationURL(change.Token)}, nil
+			case action == "role":
+				return change.Staff, nil
+			default:
+				return change, nil
+			}
+		})
 	}
 }

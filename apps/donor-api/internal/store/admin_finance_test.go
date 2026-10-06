@@ -34,7 +34,7 @@ func (g *refundGateway) CreateRefund(_ context.Context, payment string, amount i
 	g.refund = paymentObject(g.t, map[string]any{"id": "re_" + command, "payment_intent": payment, "currency": "usd", "amount": amount, "status": "succeeded", "metadata": map[string]string{"dad_staff_action": command}})
 	if g.loseAcknowledgement {
 		g.loseAcknowledgement = false
-		return nil, payments.ErrCheckoutUnavailable
+		return nil, payments.ErrProcessorUnavailable
 	}
 	return g.refund, nil
 }
@@ -72,7 +72,7 @@ func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 	if gateway.creates != 0 {
 		t.Fatal("denied action reached processor")
 	}
-	if _, err := s.Refund(ctx, finance, r); !errors.Is(err, payments.ErrCheckoutUnavailable) {
+	if _, err := s.Refund(ctx, finance, r); !errors.Is(err, payments.ErrProcessorUnavailable) {
 		t.Fatal("expected lost acknowledgement", err)
 	}
 	for range 2 {

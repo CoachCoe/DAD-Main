@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,12 @@ import (
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/store/queries"
 )
+
+// testDatabaseName reports whether name is a dedicated test database, which
+// integration tests may freely write to.
+func testDatabaseName(name string) bool {
+	return name == "donor_go" || strings.HasPrefix(name, "donor_go_")
+}
 
 func database(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -24,8 +31,8 @@ func database(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.ConnConfig.Database != "donor_go" {
-		t.Fatal("integration tests require the dedicated donor_go database")
+	if !testDatabaseName(config.ConnConfig.Database) {
+		t.Fatal("integration tests require a dedicated donor_go database")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -94,7 +101,7 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 				return
 			}
 			defer tx.Rollback(ctx)
-			session, _, err := ClaimInTx(ctx, tx, token)
+			session, _, err := claim(ctx, tx, token)
 			if err == nil {
 				err = tx.Commit(ctx)
 				if err == nil {
@@ -122,14 +129,14 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 		t.Fatalf("success=%d denied=%d", successes, denied)
 	}
 	for session := range sessions {
-		got, err := Authenticated(context.Background(), queries.New(pool), session, now)
+		got, err := authenticate(context.Background(), queries.New(pool), session, now)
 		if err != nil || got.ID != id {
 			t.Fatalf("authentication: %v", err)
 		}
 		if len(session) != 43 {
 			t.Fatalf("token encoding changed")
 		}
-		if _, err = Authenticated(context.Background(), queries.New(pool), session, time.Now().Add(30*24*time.Hour)); !errors.Is(err, ErrDenied) {
+		if _, err = authenticate(context.Background(), queries.New(pool), session, time.Now().Add(30*24*time.Hour)); !errors.Is(err, ErrDenied) {
 			t.Fatal("session expiry boundary")
 		}
 	}
@@ -138,7 +145,7 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	if _, _, err = ClaimInTx(context.Background(), tx, sibling); !errors.Is(err, ErrDenied) {
+	if _, _, err = claim(context.Background(), tx, sibling); !errors.Is(err, ErrDenied) {
 		t.Fatalf("sibling remains usable: %v", err)
 	}
 }
@@ -152,14 +159,14 @@ func TestClaimRollbackLeavesProofUsable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, _, err := ClaimInTx(ctx, tx, token)
+	session, _, err := claim(ctx, tx, token)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = Authenticated(ctx, queries.New(pool), session, now); !errors.Is(err, ErrDenied) {
+	if _, err = authenticate(ctx, queries.New(pool), session, now); !errors.Is(err, ErrDenied) {
 		t.Fatalf("rolled back session: %v", err)
 	}
 	tx, err = pool.Begin(ctx)
@@ -167,7 +174,7 @@ func TestClaimRollbackLeavesProofUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, _, err = ClaimInTx(ctx, tx, token); err != nil {
+	if _, _, err = claim(ctx, tx, token); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -190,7 +197,7 @@ func TestDisabledDonorCannotClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, _, err = ClaimInTx(ctx, tx, token); !errors.Is(err, ErrDenied) {
+	if _, _, err = claim(ctx, tx, token); !errors.Is(err, ErrDenied) {
 		t.Fatalf("disabled donor claimed: %v", err)
 	}
 }
@@ -205,7 +212,7 @@ func TestExpiredProofCannotCreateSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, _, err = ClaimInTx(ctx, tx, token); !errors.Is(err, ErrDenied) {
+	if _, _, err = claim(ctx, tx, token); !errors.Is(err, ErrDenied) {
 		t.Fatalf("expiry boundary: %v", err)
 	}
 	var count int

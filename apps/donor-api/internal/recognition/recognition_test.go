@@ -49,7 +49,7 @@ func TestSharedFinancialScenarios(t *testing.T) {
 			case "net":
 				result, err = NetGifts(c.Gifts, c.Refunds, c.AsOf)
 			case "founding":
-				result, err = Founding(c.Gifts, c.DonorID, c.AsOf, c.PreviouslyAwarded)
+				result, err = founding(c.Gifts, c.DonorID, c.AsOf, c.PreviouslyAwarded)
 			case "streak":
 				result, err = GivingStreak(c.Gifts, c.Refunds, c.Periods, c.DonorID, c.AsOf, c.PreviousBest, c.Stops, c.Pauses)
 			default:
@@ -85,6 +85,20 @@ func TestSharedFinancialScenarios(t *testing.T) {
 		})
 	}
 }
+
+// founding is the badge the projection shows: permanent once awarded, and
+// otherwise earned by a qualifying first gift.
+func founding(gifts []Gift, donorID string, asOf time.Time, awarded bool) (bool, error) {
+	if asOf.IsZero() {
+		return false, ErrInvalid
+	}
+	if awarded {
+		return true, nil
+	}
+	_, qualified, err := FoundingQualifiedAt(gifts, donorID, asOf)
+	return qualified, err
+}
+
 func TestEquivalentTimezoneFactsDeduplicateWithoutChangingInput(t *testing.T) {
 	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 	first := Gift{ID: "a", DonorID: "ben", Amount: 3000, PaidAt: now, Frequency: "ONE_TIME", Currency: "USD"}

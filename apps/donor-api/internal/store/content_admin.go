@@ -72,7 +72,7 @@ type PartnerPage struct {
 }
 
 func (s ContentService) Inventory(ctx context.Context, token string) (ContentInventory, error) {
-	return staffTransaction(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (ContentInventory, error) {
+	return staffRead(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (ContentInventory, error) {
 		q := queries.New(tx)
 		sources, err := q.ContentSources(ctx)
 		if err != nil {
@@ -91,15 +91,10 @@ func (s ContentService) Inventory(ctx context.Context, token string) (ContentInv
 }
 
 func (s ContentService) StoreSource(ctx context.Context, token, name string, data []byte) (StoredSource, error) {
-	if len(data) == 0 || len(data) > 10*1024*1024 || utf8.RuneCountInString(name) < 1 || utf8.RuneCountInString(name) > 120 {
+	if len(data) == 0 || len(data) > 10*1024*1024 || !plainText(name, false) || utf8.RuneCountInString(name) < 1 || utf8.RuneCountInString(name) > 120 {
 		return StoredSource{}, ErrStaffInput
 	}
-	for _, r := range name {
-		if r < 32 {
-			return StoredSource{}, ErrStaffInput
-		}
-	}
-	return staffTransaction(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (StoredSource, error) {
+	return staffWrite(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (StoredSource, error) {
 		if s.EncryptionKey == "" {
 			return StoredSource{}, ErrSourceStorageUnconfigured
 		}
@@ -125,7 +120,7 @@ func (s ContentService) StoreSource(ctx context.Context, token, name string, dat
 }
 
 func (s ContentService) ReadSource(ctx context.Context, token string, id pgtype.UUID) (ContentDocument, error) {
-	return staffTransaction(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (ContentDocument, error) {
+	return staffRead(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (ContentDocument, error) {
 		q := queries.New(tx)
 		row, err := q.ContentSourceByID(ctx, id)
 		if err != nil {
@@ -150,7 +145,7 @@ func (s ContentService) Partners(ctx context.Context, token string, offset int64
 	if !pageOffsetValid(offset) {
 		return PartnerPage{}, ErrStaffInput
 	}
-	return staffTransaction(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (PartnerPage, error) {
+	return staffRead(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (PartnerPage, error) {
 		q := queries.New(tx)
 		rows, err := q.PartnerSignupsPage(ctx, offset)
 		if err != nil {

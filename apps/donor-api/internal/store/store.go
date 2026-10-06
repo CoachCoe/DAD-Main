@@ -1,4 +1,6 @@
-// Package store accesses the R1 donor database.
+// Package store holds the donor domain: identity, giving, recognition,
+// messaging and staff operations over the R1 database. Services take bearer
+// tokens rather than cookies, so any transport can present them.
 package store
 
 import (
@@ -8,7 +10,9 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -17,6 +21,14 @@ import (
 )
 
 var ErrDenied = errors.New("donor access denied")
+
+// uniqueViolation is PostgreSQL's SQLSTATE for a duplicate key.
+const uniqueViolation = "23505"
+
+// commandRetryWindow bounds a command's processor retries inside Stripe's
+// 24-hour idempotency window. An older unfinished command needs
+// reconciliation, never a fresh request that could act twice.
+const commandRetryWindow = 23 * time.Hour
 
 func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	if dsn == "" {
@@ -40,10 +52,24 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	}
 	return pool, nil
 }
+
+// HashToken is how every bearer secret is stored: hex SHA-256, the encoding
+// existing sessions and links were issued with.
 func HashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
+
+// randomToken returns size random bytes as unpadded URL-safe base64.
+func randomToken(size int) (string, error) {
+	secret := make([]byte, size)
+	if _, err := rand.Read(secret); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(secret), nil
+}
+
+// NewID returns a random version-4 UUID.
 func NewID() (pgtype.UUID, error) {
 	var bytes [16]byte
 	if _, err := rand.Read(bytes[:]); err != nil {
@@ -53,66 +79,39 @@ func NewID() (pgtype.UUID, error) {
 	bytes[8] = (bytes[8] & 0x3f) | 0x80
 	return pgtype.UUID{Bytes: bytes, Valid: true}, nil
 }
+
+// ValidRequestID reports whether id is a version-4 UUID, the only form accepted as an idempotency key.
+func ValidRequestID(id pgtype.UUID) bool {
+	return id.Valid && id.Bytes[6]>>4 == 4 && id.Bytes[8]&0xc0 == 0x80
+}
+
+// plainText reports whether s is valid UTF-8 without control characters,
+// which no field needs and PostgreSQL cannot store as NUL. multiline allows
+// tabs and line breaks.
+func plainText(s string, multiline bool) bool {
+	return utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
+		if multiline && (r == '\t' || r == '\n' || r == '\r') {
+			return false
+		}
+		return r < 0x20 || r == 0x7f
+	})
+}
+
 func timestamp(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t.UTC(), Valid: true} }
-func Authenticated(ctx context.Context, q *queries.Queries, token string, now time.Time) (queries.Donor, error) {
+
+func text(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
+
+func textPointer(value pgtype.Text) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
+}
+
+func authenticate(ctx context.Context, q *queries.Queries, token string, now time.Time) (queries.Donor, error) {
 	donor, err := q.AuthenticatedDonor(ctx, queries.AuthenticatedDonorParams{TokenHash: HashToken(token), ExpiresAt: timestamp(now)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return donor, ErrDenied
 	}
 	return donor, err
-}
-
-// ClaimInTx consumes email proof and inserts a hashed session. The caller must add
-// projection refresh and old-browser-session revocation in this SAME transaction,
-// commit it, and only then return the new cookie.
-func ClaimInTx(ctx context.Context, tx pgx.Tx, token string) (string, queries.Donor, error) {
-	q := queries.New(tx)
-	empty := queries.Donor{}
-	link, err := q.LoginLink(ctx, HashToken(token))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", empty, ErrDenied
-	}
-	if err != nil {
-		return "", empty, err
-	}
-	donor, err := q.LockDonor(ctx, link.DonorID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", empty, ErrDenied
-	}
-	if err != nil {
-		return "", empty, err
-	}
-	if donor.Disabled {
-		return "", empty, ErrDenied
-	}
-	now := time.Now().UTC()
-	if _, err = q.RedeemLoginLink(ctx, queries.RedeemLoginLinkParams{ID: link.ID, ConsumedAt: timestamp(now)}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			err = ErrDenied
-		}
-		return "", empty, err
-	}
-	if err = q.ConsumeDonorLinks(ctx, queries.ConsumeDonorLinksParams{DonorID: donor.ID, ConsumedAt: timestamp(now)}); err != nil {
-		return "", empty, err
-	}
-	if err = q.MarkClaimed(ctx, queries.MarkClaimedParams{ID: donor.ID, ClaimedAt: timestamp(now)}); err != nil {
-		return "", empty, err
-	}
-	secret := make([]byte, 32)
-	if _, err = rand.Read(secret); err != nil {
-		return "", empty, err
-	}
-	sessionToken := base64.RawURLEncoding.EncodeToString(secret)
-	id, err := NewID()
-	if err != nil {
-		return "", empty, err
-	}
-	err = q.InsertSession(ctx, queries.InsertSessionParams{ID: id, DonorID: donor.ID, TokenHash: HashToken(sessionToken), ExpiresAt: timestamp(now.Add(30 * 24 * time.Hour))})
-	if err != nil {
-		return "", empty, err
-	}
-	if !donor.ClaimedAt.Valid {
-		donor.ClaimedAt = timestamp(now)
-	}
-	return sessionToken, donor, nil
 }

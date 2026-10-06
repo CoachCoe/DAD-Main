@@ -47,7 +47,7 @@ func emailFixture(t *testing.T) (LoginEmailWorker, pgtype.UUID, *recordingMail, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = QueueLoginEmailInTx(context.Background(), tx, email, now); err != nil {
+	if err = queueLoginEmail(context.Background(), queries.New(tx), email, "", now); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(context.Background()); err != nil {
@@ -217,7 +217,7 @@ func TestSlowSendReleasesDonorLockAndKeepsJobClaimed(t *testing.T) {
 			var deliver func() (bool, error)
 			completed := "SELECT completed_at IS NOT NULL FROM donor_login_emails WHERE donor_id=$1"
 			if kind == "login" {
-				err = QueueLoginEmailInTx(ctx, tx, email, queued)
+				err = queueLoginEmail(ctx, queries.New(tx), email, "", queued)
 				w := LoginEmailWorker{DB: pool, Settings: settings, Origin: "https://donor.example.org", Transport: transport}
 				deliver = func() (bool, error) { return w.DeliverNext(ctx, queued) }
 			} else {
@@ -275,6 +275,36 @@ func TestSlowSendReleasesDonorLockAndKeepsJobClaimed(t *testing.T) {
 			var finished bool
 			if err = pool.QueryRow(ctx, completed, id).Scan(&finished); err != nil || !finished || len(transport.started) != 0 || sent.To != email {
 				t.Fatal("send not completed exactly once", err)
+			}
+		})
+	}
+}
+
+func TestLoginLinkReturnsOnlyToAllowedPages(t *testing.T) {
+	for _, c := range []struct{ next, want string }{
+		{"/account/payment-method", "&next=/account/payment-method\n"},
+		{"https://elsewhere.example/account", "#token="},
+		{"", "#token="},
+	} {
+		t.Run(c.next, func(t *testing.T) {
+			w, id, transport, now := emailFixture(t)
+			ctx := context.Background()
+			if _, err := w.DB.Exec(ctx, "DELETE FROM donor_login_emails WHERE donor_id=$1", id); err != nil {
+				t.Fatal(err)
+			}
+			var email string
+			if err := w.DB.QueryRow(ctx, "SELECT email FROM donors WHERE id=$1", id).Scan(&email); err != nil {
+				t.Fatal(err)
+			}
+			if err := (AccountService{DB: w.DB}).QueueLogin(ctx, email, c.next); err != nil {
+				t.Fatal(err)
+			}
+			if worked, err := w.DeliverNext(ctx, now.Add(time.Second)); err != nil || !worked {
+				t.Fatal(worked, err)
+			}
+			body := transport.messages[0].Body
+			if !strings.Contains(body, c.want) || (c.want == "#token=" && strings.Contains(body, "&next=")) {
+				t.Fatalf("link for next %q: got %q, want %q", c.next, body, c.want)
 			}
 		})
 	}

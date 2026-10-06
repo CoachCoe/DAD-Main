@@ -30,35 +30,35 @@ type financialGateway struct {
 func (g *financialGateway) RetrievePaymentIntent(_ context.Context, id string) (payments.Object, error) {
 	value, ok := g.intents[id]
 	if !ok {
-		return nil, payments.ErrCheckoutUnavailable
+		return nil, payments.ErrProcessorUnavailable
 	}
 	return value, nil
 }
 func (g *financialGateway) RetrieveRefund(_ context.Context, id string) (payments.Object, error) {
 	value, ok := g.refunds[id]
 	if !ok {
-		return nil, payments.ErrCheckoutUnavailable
+		return nil, payments.ErrProcessorUnavailable
 	}
 	return value, nil
 }
 func (g *financialGateway) RetrieveSubscription(_ context.Context, id string) (payments.Object, error) {
 	value, ok := g.subscriptions[id]
 	if !ok {
-		return nil, payments.ErrCheckoutUnavailable
+		return nil, payments.ErrProcessorUnavailable
 	}
 	return value, nil
 }
 func (g *financialGateway) RetrieveCheckout(_ context.Context, id string) (payments.Object, error) {
 	value, ok := g.sessions[id]
 	if !ok {
-		return nil, payments.ErrCheckoutUnavailable
+		return nil, payments.ErrProcessorUnavailable
 	}
 	return value, nil
 }
 func (g *financialGateway) RetrieveSetupIntent(_ context.Context, id string) (payments.Object, error) {
 	value, ok := g.setups[id]
 	if !ok {
-		return nil, payments.ErrCheckoutUnavailable
+		return nil, payments.ErrProcessorUnavailable
 	}
 	return value, nil
 }
@@ -66,12 +66,12 @@ func (g *financialGateway) UpdateSubscriptionPaymentMethod(_ context.Context, id
 	g.updateKeys = append(g.updateKeys, key)
 	value, ok := g.subscriptions[id]
 	if !ok {
-		return payments.ErrCheckoutUnavailable
+		return payments.ErrProcessorUnavailable
 	}
 	value["default_payment_method"], _ = json.Marshal(method)
 	if g.loseAcknowledgement {
 		g.loseAcknowledgement = false
-		return payments.ErrCheckoutUnavailable
+		return payments.ErrProcessorUnavailable
 	}
 	return nil
 }
@@ -376,7 +376,7 @@ func TestOneTimeInboxConcurrentWorkers(t *testing.T) {
 	if err != nil || p.NetMinor.Int64 != 3000 || p.CurrentStreak.Int32 != 0 {
 		t.Fatal("one-time payment changed streak")
 	}
-	if _, err = Authenticated(ctx, queries.New(f.service.DB), "", time.Now()); !errors.Is(err, ErrDenied) {
+	if _, err = authenticate(ctx, queries.New(f.service.DB), "", time.Now()); !errors.Is(err, ErrDenied) {
 		t.Fatal("payment granted account access")
 	}
 }

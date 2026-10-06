@@ -7,104 +7,81 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
+// Monthly amounts are whole cents from $1 to $999,999.99.
+const (
+	minAmountMinor = 100
+	maxAmountMinor = 99_999_999
+)
+
+func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxAmountMinor }
+
+// ChangeAmount sets a new monthly amount from the next renewal, without
+// proration. r.Previous must still be the amount that renewal would charge.
 func (s RecurringService) ChangeAmount(ctx context.Context, token string, r AmountRequest) (AmountChange, error) {
-	if !ValidRequestID(r.RequestID) || r.Amount < 100 || r.Amount > 99999999 || r.Previous < 100 || r.Previous > 99999999 || r.EffectiveAt.IsZero() {
+	if !ValidRequestID(r.RequestID) || !validAmount(r.Amount) || !validAmount(r.Previous) || r.EffectiveAt.IsZero() {
 		return AmountChange{}, payments.ErrFacts
 	}
 	snapshot, err := s.donorSnapshot(ctx, token)
 	if err != nil {
 		return AmountChange{}, err
 	}
-	owner := donorOwner(token)
-	var lease *subscriptionLease
 	var pending queries.DonorAmountChange
-	ready, err := ownerTransaction(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*AmountChange, error) {
+	prepare := func(tx pgx.Tx, d queries.Donor, now time.Time) (*AmountChange, *subscriptionLease, error) {
 		q := queries.New(tx)
 		attempt, err := ownedAttempt(ctx, q, d.ID, r.AttemptID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		command, err := q.AmountChangeByID(ctx, r.RequestID)
 		fresh := errors.Is(err, pgx.ErrNoRows)
 		if err != nil && !fresh {
-			return nil, err
+			return nil, nil, err
 		}
 		if !fresh {
 			if command.DonorID != d.ID || command.CheckoutID != attempt.CheckoutID || command.AmountMinor != r.Amount || command.PreviousMinor != r.Previous || !command.EffectiveAt.Time.Equal(r.EffectiveAt) {
-				return nil, ErrSubscriptionConflict
+				return nil, nil, ErrSubscriptionConflict
 			}
 			if command.ConfirmedAt.Valid {
-				return amountView(command), releaseLease(ctx, q, attempt.ID, command.ID)
+				return amountView(command), nil, releaseLease(ctx, q, attempt.ID, command.ID)
 			}
 		}
-		schedule, remote, err := s.read(ctx, tx, attempt, now, "amount", snapshot)
+		schedule, remote, err := s.read(ctx, tx, attempt, now, forAmount, snapshot)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if fresh {
-			draft, err := q.CheckoutDraft(ctx, attempt.CheckoutID)
-			if err != nil {
-				return nil, err
-			}
-			prior, err := q.LatestAmountChange(ctx, draft.ID)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return nil, err
-			}
-			if err == nil && !prior.ConfirmedAt.Valid {
-				return nil, ErrSubscriptionConflict
-			}
-			previous, err := nextAmount(ctx, q, draft)
-			if err != nil {
-				return nil, err
-			}
-			if schedule.Status != "active" || schedule.StopsAt.Valid || !schedule.PeriodEnd.Time.Equal(r.EffectiveAt) || previous != r.Previous || r.Amount == r.Previous || !now.Before(r.EffectiveAt.Add(-time.Minute)) {
-				return nil, ErrSubscriptionConflict
-			}
-			itemID, product, err := amountChangeItem(remote)
-			if err != nil {
-				return nil, err
-			}
-			if err = q.InsertAmountChange(ctx, queries.InsertAmountChangeParams{ID: r.RequestID, DonorID: d.ID, CheckoutID: draft.ID, PreviousMinor: r.Previous, AmountMinor: r.Amount, EffectiveAt: timestamp(r.EffectiveAt), ItemID: itemID, ProductID: product, CreatedAt: timestamp(now)}); err != nil {
-				return nil, err
+			if err = insertAmountChange(ctx, q, d.ID, attempt.CheckoutID, schedule, remote, r, now); err != nil {
+				return nil, nil, err
 			}
 		}
 		if command, err = q.AmountChangeByID(ctx, r.RequestID); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if command.ConfirmedAt.Valid {
-			return amountView(command), releaseLease(ctx, q, attempt.ID, command.ID)
+			return amountView(command), nil, releaseLease(ctx, q, attempt.ID, command.ID)
 		}
-		if schedule.Status != "active" || schedule.StopsAt.Valid || !schedule.PeriodEnd.Time.Equal(command.EffectiveAt.Time) || !now.Before(command.EffectiveAt.Time.Add(-time.Minute)) || now.Sub(command.CreatedAt.Time) >= 23*time.Hour {
-			return nil, ErrSubscriptionConflict
+		if !amountChangeable(schedule, command.EffectiveAt.Time, now) || now.Sub(command.CreatedAt.Time) >= commandRetryWindow {
+			return nil, nil, ErrSubscriptionConflict
 		}
 		pending = command
-		lease, err = leaseSubscription(ctx, q, d.ID, attempt, command.ID, now)
-		return nil, err
-	})
-	if err != nil {
-		return AmountChange{}, err
+		lease, err := leaseSubscription(ctx, q, d.ID, attempt, command.ID, now)
+		return nil, lease, err
 	}
-	if ready != nil {
-		return *ready, nil
-	}
-	defer s.release(ctx, lease)
-	snapshot, err = s.submit(ctx, lease, func(ctx context.Context) error {
+	mutate := func(ctx context.Context, lease *subscriptionLease) error {
 		return s.Gateway.ChangeMonthlyAmount(ctx, lease.subscription, pending.ItemID, pending.ProductID, pending.AmountMinor, "dad-amount-"+pending.ID.String())
-	})
-	if err != nil {
-		return AmountChange{}, err
 	}
-	return ownerTransaction(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (AmountChange, error) {
+	complete := func(tx pgx.Tx, d queries.Donor, now time.Time, snapshot *subscriptionSnapshot) (AmountChange, error) {
 		q := queries.New(tx)
 		attempt, err := ownedAttempt(ctx, q, d.ID, r.AttemptID)
 		if err != nil {
 			return AmountChange{}, err
 		}
-		if _, _, err = s.read(ctx, tx, attempt, now, "amount", snapshot); err != nil {
+		if _, _, err = s.read(ctx, tx, attempt, now, forAmount, snapshot); err != nil {
 			return AmountChange{}, err
 		}
 		command, err := q.AmountChangeByID(ctx, r.RequestID)
@@ -115,7 +92,42 @@ func (s RecurringService) ChangeAmount(ctx context.Context, token string, r Amou
 			return AmountChange{}, ErrSubscriptionConflict
 		}
 		return *amountView(command), releaseLease(ctx, q, attempt.ID, command.ID)
-	})
+	}
+	return leasedCommand(ctx, s, donorOwner(token), prepare, mutate, complete)
+}
+
+// amountChangeable reports whether a change effective at the subscription's
+// next renewal can still be sent: the processor needs a minute's margin.
+func amountChangeable(schedule queries.DonorSubscription, effective, now time.Time) bool {
+	return schedule.Status == "active" && !schedule.StopsAt.Valid && schedule.PeriodEnd.Time.Equal(effective) && now.Before(effective.Add(-time.Minute))
+}
+
+// insertAmountChange records r if no earlier change is still unconfirmed and
+// r.Previous is what the next renewal would charge.
+func insertAmountChange(ctx context.Context, q *queries.Queries, donor, checkout pgtype.UUID, schedule queries.DonorSubscription, remote payments.Object, r AmountRequest, now time.Time) error {
+	draft, err := q.CheckoutDraft(ctx, checkout)
+	if err != nil {
+		return err
+	}
+	prior, err := q.LatestAmountChange(ctx, draft.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	if err == nil && !prior.ConfirmedAt.Valid {
+		return ErrSubscriptionConflict
+	}
+	previous, err := nextAmount(ctx, q, draft)
+	if err != nil {
+		return err
+	}
+	if !amountChangeable(schedule, r.EffectiveAt, now) || previous != r.Previous || r.Amount == r.Previous {
+		return ErrSubscriptionConflict
+	}
+	itemID, product, err := amountChangeItem(remote)
+	if err != nil {
+		return err
+	}
+	return q.InsertAmountChange(ctx, queries.InsertAmountChangeParams{ID: r.RequestID, DonorID: donor, CheckoutID: draft.ID, PreviousMinor: r.Previous, AmountMinor: r.Amount, EffectiveAt: timestamp(r.EffectiveAt), ItemID: itemID, ProductID: product, CreatedAt: timestamp(now)})
 }
 
 // amountChangeItem returns the single monthly item and its product, which an

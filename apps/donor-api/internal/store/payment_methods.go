@@ -38,96 +38,111 @@ func fetchPaymentUpdate(ctx context.Context, q *queries.Queries, gateway payment
 		return facts, nil
 	}
 	if gateway == nil {
-		return facts, payments.ErrCheckoutUnavailable
+		return facts, payments.ErrUnconfigured
 	}
 	if !strings.HasPrefix(sessionID, "cs_test_") || (row.StripeSessionID.Valid && row.StripeSessionID.String != sessionID) {
 		return facts, payments.ErrFacts
 	}
+	method, status, err := verifiedSetup(ctx, gateway, row, sessionID)
+	if err != nil || status != "" {
+		facts.status = status
+		return facts, err
+	}
+	facts.status, err = applyDefaultMethod(ctx, q, gateway, row, method, now)
+	return facts, err
+}
+
+// verifiedSetup returns the card a completed setup session verified for the
+// update's customer, or the status of a session that did not complete: empty
+// while it is still open.
+func verifiedSetup(ctx context.Context, gateway payments.PaymentMethodGateway, row queries.DonorPaymentUpdate, sessionID string) (string, string, error) {
 	remote, err := gateway.RetrieveCheckout(ctx, sessionID)
 	if err != nil {
-		return facts, err
+		return "", "", err
 	}
 	metadata, err := remote.Object("metadata")
 	if err != nil || metadata.Text("dad_payment_update_id") != row.ID.String() || remote.Text("id") != sessionID || !remote.BoolIs("livemode", false) || remote.Text("mode") != "setup" || remote.Text("customer") != row.CustomerID {
-		return facts, payments.ErrFacts
+		return "", "", payments.ErrFacts
 	}
 	switch remote.Text("status") {
 	case "expired":
-		facts.status = "EXPIRED"
-		return facts, nil
+		return "", "EXPIRED", nil
 	case "open":
-		return facts, nil
+		return "", "", nil
 	case "complete":
 	default:
-		return facts, payments.ErrFacts
+		return "", "", payments.ErrFacts
 	}
 	setupID := remote.Text("setup_intent")
 	if !strings.HasPrefix(setupID, "seti_") {
-		return facts, payments.ErrFacts
+		return "", "", payments.ErrFacts
 	}
 	setup, err := gateway.RetrieveSetupIntent(ctx, setupID)
 	if err != nil {
-		return facts, err
+		return "", "", err
 	}
 	metadata, err = setup.Object("metadata")
 	var types []string
 	typesErr := json.Unmarshal(setup["payment_method_types"], &types)
 	method := setup.Text("payment_method")
 	if err != nil || metadata.Text("dad_payment_update_id") != row.ID.String() || setup.Text("id") != setupID || !setup.BoolIs("livemode", false) || setup.Text("customer") != row.CustomerID || setup.Text("status") != "succeeded" || setup.Text("usage") != "off_session" || typesErr != nil || len(types) != 1 || types[0] != "card" || !strings.HasPrefix(method, "pm_") {
-		return facts, payments.ErrFacts
+		return "", "", payments.ErrFacts
 	}
+	return method, "", nil
+}
+
+// applyDefaultMethod makes method the update's subscription's default card
+// and returns the update's resulting status.
+func applyDefaultMethod(ctx context.Context, q *queries.Queries, gateway payments.PaymentMethodGateway, row queries.DonorPaymentUpdate, method string, now time.Time) (string, error) {
 	attempt, err := q.AttemptSnapshotByID(ctx, row.AttemptID)
 	if err != nil {
-		return facts, err
+		return "", err
 	}
 	draft, err := q.CheckoutDraft(ctx, attempt.CheckoutID)
 	if err != nil {
-		return facts, err
+		return "", err
 	}
 	if draft.DonorID != row.DonorID || draft.Frequency != "MONTHLY" || !attempt.StripeSubscriptionID.Valid {
-		return facts, payments.ErrFacts
+		return "", payments.ErrFacts
 	}
+	subscription := attempt.StripeSubscriptionID.String
 	read := func() (payments.Object, error) {
-		sub, err := gateway.RetrieveSubscription(ctx, attempt.StripeSubscriptionID.String)
+		sub, err := gateway.RetrieveSubscription(ctx, subscription)
 		if err != nil {
 			return nil, err
 		}
 		metadata, err := sub.Object("metadata")
-		if err != nil || metadata.Text("dad_checkout_id") != draft.ID.String() || sub.Text("id") != attempt.StripeSubscriptionID.String || !sub.BoolIs("livemode", false) || !strings.HasPrefix(sub.Text("customer"), "cus_") || sub.Text("customer") != row.CustomerID {
+		if err != nil || metadata.Text("dad_checkout_id") != draft.ID.String() || sub.Text("id") != subscription || !sub.BoolIs("livemode", false) || !strings.HasPrefix(sub.Text("customer"), "cus_") || sub.Text("customer") != row.CustomerID {
 			return nil, payments.ErrFacts
 		}
 		return sub, nil
 	}
 	sub, err := read()
 	if err != nil {
-		return facts, err
+		return "", err
 	}
 	if terminalSubscription(sub.Text("status")) {
-		facts.status = "CANCELLED"
-		return facts, nil
+		return "CANCELLED", nil
 	}
-	switch sub.Text("status") {
-	case "active", "past_due", "unpaid":
-	default:
-		return facts, payments.ErrFacts
+	if !renews(sub.Text("status")) {
+		return "", payments.ErrFacts
 	}
 	if sub.Text("default_payment_method") != method {
-		if now.Sub(row.CreatedAt.Time) >= 23*time.Hour {
-			return facts, payments.ErrFacts
+		if now.Sub(row.CreatedAt.Time) >= commandRetryWindow {
+			return "", payments.ErrFacts
 		}
-		if err = gateway.UpdateSubscriptionPaymentMethod(ctx, attempt.StripeSubscriptionID.String, method, "dad-payment-apply-"+row.ID.String()); err != nil {
-			return facts, err
+		if err = gateway.UpdateSubscriptionPaymentMethod(ctx, subscription, method, "dad-payment-apply-"+row.ID.String()); err != nil {
+			return "", err
 		}
 		confirmed, err := read()
 		if err != nil {
-			return facts, err
+			return "", err
 		}
 		if confirmed.Text("default_payment_method") != method {
-			return facts, payments.ErrFacts
+			return "", payments.ErrFacts
 		}
 	}
-	facts.status = "APPLIED"
-	return facts, nil
+	return "APPLIED", nil
 }
 
 // applyPaymentUpdate records fetched facts on the update, which the caller has
@@ -149,6 +164,6 @@ func applyPaymentUpdate(ctx context.Context, q *queries.Queries, row queries.Don
 	if status == "APPLIED" {
 		completed = timestamp(now)
 	}
-	err := q.SavePaymentUpdate(ctx, queries.SavePaymentUpdateParams{ID: row.ID, StripeSessionID: pgtype.Text{String: facts.session, Valid: true}, Status: status, HostedUrl: url, CompletedAt: completed})
+	err := q.SavePaymentUpdate(ctx, queries.SavePaymentUpdateParams{ID: row.ID, StripeSessionID: text(facts.session), Status: status, HostedUrl: url, CompletedAt: completed})
 	return status, err
 }

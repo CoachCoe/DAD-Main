@@ -28,7 +28,7 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 	mustExec(t, tx, "UPDATE donor_metric_projections SET referrer_id=$1,referral_kind='LINK',net_minor=3000 WHERE donor_id=$2", owner, first)
 	mustExec(t, tx, "UPDATE donor_metric_projections SET referrer_id=$1,referral_kind='IRL',net_minor=9000 WHERE donor_id=$2", owner, second)
 	q := queries.New(tx)
-	result, err := Dashboard(ctx, q, owner, now)
+	result, err := dashboard(ctx, q, owner, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 	} {
 		mustExec(t, tx, "SAVEPOINT invalid_projection")
 		mustExec(t, tx, "UPDATE donor_metric_projections SET "+modification+" WHERE donor_id=$1", first)
-		result, err = Dashboard(ctx, q, owner, now)
+		result, err = dashboard(ctx, q, owner, now)
 		if err != nil || result.Referrals != nil {
 			t.Fatal("incomplete aggregate exposed", modification, result, err)
 		}
@@ -52,7 +52,7 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 		if sameChannel {
 			mustExec(t, tx, "UPDATE donor_metric_projections SET referral_kind='LINK' WHERE donor_id=$1", second)
 		}
-		result, err = Dashboard(ctx, q, owner, now)
+		result, err = dashboard(ctx, q, owner, now)
 		if err != nil || result.Referrals != nil {
 			t.Fatal("overflowing aggregate exposed", result, err)
 		}

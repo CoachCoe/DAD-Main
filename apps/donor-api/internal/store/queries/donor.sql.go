@@ -24,8 +24,14 @@ func (q *Queries) CapturedReferrerName(ctx context.Context, tokenHash string) (p
 }
 
 const donorGiftsPage = `-- name: DonorGiftsPage :many
-SELECT id,amount_minor,currency,frequency,paid_at FROM donor_gifts WHERE donor_id=$1
-ORDER BY paid_at DESC,id DESC LIMIT 51 OFFSET $2::bigint
+SELECT g.id,g.amount_minor,g.currency,g.frequency,g.paid_at,r.refunded_minor,
+(g.amount_minor-r.refunded_minor)::bigint AS net_minor
+FROM donor_gifts g CROSS JOIN LATERAL (
+ SELECT coalesce(sum(amount_minor),0)::bigint AS refunded_minor FROM donor_refunds
+ WHERE gift_id=g.id AND status='SUCCEEDED'
+) r
+WHERE g.donor_id=$1
+ORDER BY g.paid_at DESC,g.id DESC LIMIT 51 OFFSET $2::bigint
 `
 
 type DonorGiftsPageParams struct {
@@ -34,11 +40,13 @@ type DonorGiftsPageParams struct {
 }
 
 type DonorGiftsPageRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	AmountMinor int64              `json:"amount_minor"`
-	Currency    string             `json:"currency"`
-	Frequency   string             `json:"frequency"`
-	PaidAt      pgtype.Timestamptz `json:"paid_at"`
+	ID            pgtype.UUID        `json:"id"`
+	AmountMinor   int64              `json:"amount_minor"`
+	Currency      string             `json:"currency"`
+	Frequency     string             `json:"frequency"`
+	PaidAt        pgtype.Timestamptz `json:"paid_at"`
+	RefundedMinor int64              `json:"refunded_minor"`
+	NetMinor      int64              `json:"net_minor"`
 }
 
 func (q *Queries) DonorGiftsPage(ctx context.Context, arg DonorGiftsPageParams) ([]DonorGiftsPageRow, error) {
@@ -56,6 +64,8 @@ func (q *Queries) DonorGiftsPage(ctx context.Context, arg DonorGiftsPageParams) 
 			&i.Currency,
 			&i.Frequency,
 			&i.PaidAt,
+			&i.RefundedMinor,
+			&i.NetMinor,
 		); err != nil {
 			return nil, err
 		}

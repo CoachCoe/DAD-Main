@@ -51,10 +51,10 @@ func TestWalletHTTPRequiresSessionOriginAndSharing(t *testing.T) {
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, request)
 		if response.Code != tc.status || response.Header().Get("Cache-Control") != "no-store" || strings.Contains(response.Body.String(), "PRIVATE KEY") {
-			t.Fatal(tc.path, response.Code, response.Body.String())
+			t.Errorf("%s %s session %q origin %q: got %d %s, want %d", tc.method, tc.path, tc.token, tc.origin, response.Code, response.Body, tc.status)
 		}
 		if tc.status == 200 && tc.method == "POST" && !strings.Contains(response.Body.String(), "https://pay.google.com/gp/v/save/") {
-			t.Fatal("missing signed link")
+			t.Errorf("%s: got %s, want a signed Google Wallet link", tc.path, response.Body)
 		}
 	}
 }

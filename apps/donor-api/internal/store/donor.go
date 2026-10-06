@@ -2,10 +2,10 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
+	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -18,10 +18,34 @@ import (
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-const ConsentVersion = "r1-notifications-v1"
+// consentVersion names the notification consent wording a donor accepted;
+// RecordPreferenceConsent records the same value.
+const consentVersion = "r1-notifications-v1"
+
+// referralWindow is how long the first valid referral touch holds.
+const referralWindow = 30 * 24 * time.Hour
+
+// pageSize is the length of every offset-paged list. Queries fetch one extra
+// row to learn whether another page follows.
+const pageSize = 50
+
+func pageOffsetValid(offset int64) bool { return offset >= 0 && offset <= math.MaxInt64-pageSize }
+
+// page trims a query's look-ahead row and returns the next page's offset, if any.
+func page[T any](rows []T, offset int64) ([]T, *int64) {
+	if len(rows) > pageSize {
+		next := offset + pageSize
+		return rows[:pageSize], &next
+	}
+	return rows, nil
+}
 
 var ErrPreferenceConflict = errors.New("preferences changed; refresh before saving")
 var ErrPublicName = errors.New("choose a public first name or nickname of 1 to 80 characters")
+
+// ErrPublicNameCharacters is an ErrPublicName for a name that looks like an
+// email address or contains control characters.
+var ErrPublicNameCharacters = fmt.Errorf("%w, without @ or control characters", ErrPublicName)
 
 type DonorService struct {
 	DB     *pgxpool.Pool
@@ -55,56 +79,8 @@ type GiftsPage struct {
 	NextOffset *int64                      `json:"next_offset"`
 }
 
-func textPointer(value pgtype.Text) *string {
-	if !value.Valid {
-		return nil
-	}
-	return &value.String
-}
-func randomToken(size int) (string, error) {
-	secret := make([]byte, size)
-	if _, err := rand.Read(secret); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(secret), nil
-}
-
-func donorTransaction[T any](ctx context.Context, pool *pgxpool.Pool, token string, write bool, operation func(*queries.Queries, queries.Donor) (T, error)) (T, error) {
-	var empty T
-	options := pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}
-	if write {
-		options = pgx.TxOptions{}
-	}
-	tx, err := pool.BeginTx(ctx, options)
-	if err != nil {
-		return empty, err
-	}
-	defer tx.Rollback(ctx)
-	q := queries.New(tx)
-	donor, err := Authenticated(ctx, q, token, time.Now())
-	if err != nil {
-		return empty, err
-	}
-	if write {
-		if _, err = q.LockDonor(ctx, donor.ID); err != nil {
-			return empty, err
-		}
-		donor, err = Authenticated(ctx, q, token, time.Now())
-		if err != nil {
-			return empty, err
-		}
-	}
-	result, err := operation(q, donor)
-	if err != nil {
-		return empty, err
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return empty, err
-	}
-	return result, nil
-}
 func readProfile(ctx context.Context, q *queries.Queries, donor queries.Donor) (Profile, error) {
-	out := Profile{Email: donor.Email, PublicName: textPointer(donor.PublicName), ConsentVersion: ConsentVersion}
+	out := Profile{Email: donor.Email, PublicName: textPointer(donor.PublicName), ConsentVersion: consentVersion}
 	pref, err := q.DonorPreference(ctx, donor.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil
@@ -118,10 +94,14 @@ func readProfile(ctx context.Context, q *queries.Queries, donor queries.Donor) (
 	return out, nil
 }
 func (s DonorService) Profile(ctx context.Context, token string) (Profile, error) {
-	return donorTransaction(ctx, s.DB, token, false, func(q *queries.Queries, d queries.Donor) (Profile, error) { return readProfile(ctx, q, d) })
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (Profile, error) { return readProfile(ctx, q, d) })
 }
+
+// SavePreferences replaces the donor's notification choices if pref.Version
+// is still current, and records the consent change.
 func (s DonorService) SavePreferences(ctx context.Context, token string, pref Preferences) (Profile, error) {
-	return donorTransaction(ctx, s.DB, token, true, func(q *queries.Queries, d queries.Donor) (Profile, error) {
+	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, _ time.Time) (Profile, error) {
+		q := queries.New(tx)
 		current, err := readProfile(ctx, q, d)
 		if err != nil {
 			return Profile{}, err
@@ -148,135 +128,153 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, pref Pr
 	})
 }
 func (s DonorService) SignOutEverywhere(ctx context.Context, token string) error {
-	_, err := donorTransaction(ctx, s.DB, token, true, func(q *queries.Queries, d queries.Donor) (bool, error) {
-		return true, q.RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: d.ID, RevokedAt: timestamp(time.Now())})
+	_, err := donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (struct{}, error) {
+		return struct{}{}, queries.New(tx).RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: d.ID, RevokedAt: timestamp(now)})
 	})
 	return err
 }
-func sharing(d queries.Donor, origin string) Sharing {
+
+// sharing offers referral links only once the donor has chosen a public name.
+func sharing(d queries.Donor, site publicSite) Sharing {
 	out := Sharing{PublicName: textPointer(d.PublicName)}
-	if d.ReferralCode.Valid && d.ReferralCode.String != "" && d.PublicName.Valid && d.PublicName.String != "" {
-		link := origin + "/r/" + d.ReferralCode.String
-		irl := link + "?via=irl"
-		out.Link = &link
-		out.IRLLink = &irl
+	if d.ReferralCode.String != "" && d.PublicName.String != "" {
+		link, irl := site.referral(d.ReferralCode.String), site.irlReferral(d.ReferralCode.String)
+		out.Link, out.IRLLink = &link, &irl
 	}
 	return out
 }
 func (s DonorService) Sharing(ctx context.Context, token string) (Sharing, error) {
-	if err := payments.ValidateOrigin(s.Origin); err != nil {
+	site, err := site(s.Origin)
+	if err != nil {
 		return Sharing{}, err
 	}
-	return donorTransaction(ctx, s.DB, token, false, func(q *queries.Queries, d queries.Donor) (Sharing, error) { return sharing(d, s.Origin), nil })
+	return donorRead(ctx, s.DB, token, func(_ *queries.Queries, d queries.Donor, _ time.Time) (Sharing, error) { return sharing(d, site), nil })
 }
+
+// SaveSharing sets the donor's public name, issuing a referral code on first
+// use or a replacement when replace is set; a replaced code stops working.
 func (s DonorService) SaveSharing(ctx context.Context, token, name string, replace bool) (Sharing, error) {
-	if err := payments.ValidateOrigin(s.Origin); err != nil {
+	site, err := site(s.Origin)
+	if err != nil {
 		return Sharing{}, err
 	}
 	name = identity.TrimSpace(name)
-	if name == "" || !utf8.ValidString(name) || utf8.RuneCountInString(name) > 80 || strings.Contains(name, "@") || strings.ContainsFunc(name, func(r rune) bool { return r < 32 }) {
+	if !plainText(name, false) || strings.Contains(name, "@") {
+		return Sharing{}, ErrPublicNameCharacters
+	}
+	if name == "" || utf8.RuneCountInString(name) > 80 {
 		return Sharing{}, ErrPublicName
 	}
-	return donorTransaction(ctx, s.DB, token, true, func(q *queries.Queries, d queries.Donor) (Sharing, error) {
+	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, _ time.Time) (Sharing, error) {
 		code := d.ReferralCode
 		if !code.Valid || replace {
 			value, err := randomToken(24)
 			if err != nil {
 				return Sharing{}, err
 			}
-			code = pgtype.Text{String: value, Valid: true}
+			code = text(value)
 		}
-		d, err := q.SaveSharing(ctx, queries.SaveSharingParams{ID: d.ID, PublicName: pgtype.Text{String: name, Valid: true}, ReferralCode: code})
+		d, err := queries.New(tx).SaveSharing(ctx, queries.SaveSharingParams{ID: d.ID, PublicName: text(name), ReferralCode: code})
 		if err != nil {
 			return Sharing{}, err
 		}
-		return sharing(d, s.Origin), nil
+		return sharing(d, site), nil
 	})
 }
 
+// referralCode matches the codes SaveSharing issues; anything else cannot
+// name a referrer.
+var referralCode = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
 // ReferrerName resolves a shareable code to its owner's chosen public name.
 func (s DonorService) ReferrerName(ctx context.Context, code string) (string, error) {
-	referrer, err := queries.New(s.DB).ReferrerByCode(ctx, pgtype.Text{String: code, Valid: true})
+	if !referralCode.MatchString(code) {
+		return "", pgx.ErrNoRows
+	}
+	referrer, err := queries.New(s.DB).ReferrerByCode(ctx, text(code))
 	if err != nil {
 		return "", err
 	}
 	return referrer.PublicName.String, nil
 }
 
+// CaptureReferral records a visit through referral code, unless visitor
+// already carries an unexpired capture: the first valid touch wins for its
+// whole window. It returns the visitor token to keep, which is empty for an
+// unknown code, with the captured referrer's public name.
 func (s DonorService) CaptureReferral(ctx context.Context, code, kind, visitor string, now time.Time) (ReferralCapture, error) {
 	if kind != "LINK" && kind != "IRL" {
 		return ReferralCapture{}, payments.ErrFacts
 	}
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return ReferralCapture{}, err
-	}
-	defer tx.Rollback(ctx)
-	q := queries.New(tx)
-	token := ""
+	var capture ReferralCapture
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		token, err := captureTouch(ctx, q, code, kind, visitor, now)
+		if err != nil || token == "" {
+			return err
+		}
+		name, err := q.CapturedReferrerName(ctx, HashToken(token))
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		capture = ReferralCapture{Token: token, PublicName: textPointer(name)}
+		return nil
+	})
+	return capture, err
+}
+
+func captureTouch(ctx context.Context, q *queries.Queries, code, kind, visitor string, now time.Time) (string, error) {
 	if visitor != "" {
 		touch, err := q.ReferralTouchByToken(ctx, HashToken(visitor))
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return ReferralCapture{}, err
-		}
 		if err == nil && touch.ExpiresAt.Time.After(now) {
-			token = visitor
+			return visitor, nil
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", err
 		}
 	}
-	if token == "" {
-		referrer, err := q.ReferrerByCode(ctx, pgtype.Text{String: code, Valid: true})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ReferralCapture{}, nil
-		}
-		if err != nil {
-			return ReferralCapture{}, err
-		}
-		token, err = randomToken(32)
-		if err != nil {
-			return ReferralCapture{}, err
-		}
-		id, err := NewID()
-		if err != nil {
-			return ReferralCapture{}, err
-		}
-		if err = q.InsertReferralTouch(ctx, queries.InsertReferralTouchParams{ID: id, TokenHash: HashToken(token), ReferrerID: referrer.ID, Kind: kind, TouchedAt: timestamp(now), ExpiresAt: timestamp(now.Add(30 * 24 * time.Hour))}); err != nil {
-			return ReferralCapture{}, err
-		}
+	if !referralCode.MatchString(code) {
+		return "", nil
 	}
-	name, err := q.CapturedReferrerName(ctx, HashToken(token))
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return ReferralCapture{}, err
+	referrer, err := q.ReferrerByCode(ctx, text(code))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return ReferralCapture{}, err
+	if err != nil {
+		return "", err
 	}
-	return ReferralCapture{Token: token, PublicName: textPointer(name)}, nil
+	token, err := randomToken(32)
+	if err != nil {
+		return "", err
+	}
+	id, err := NewID()
+	if err != nil {
+		return "", err
+	}
+	return token, q.InsertReferralTouch(ctx, queries.InsertReferralTouchParams{ID: id, TokenHash: HashToken(token), ReferrerID: referrer.ID, Kind: kind, TouchedAt: timestamp(now), ExpiresAt: timestamp(now.Add(referralWindow))})
 }
+
 func (s DonorService) Gifts(ctx context.Context, token string, offset int64) (GiftsPage, error) {
-	if offset < 0 || offset > math.MaxInt64-50 {
+	if !pageOffsetValid(offset) {
 		return GiftsPage{}, payments.ErrFacts
 	}
-	return donorTransaction(ctx, s.DB, token, false, func(q *queries.Queries, d queries.Donor) (GiftsPage, error) {
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (GiftsPage, error) {
 		gifts, err := q.DonorGiftsPage(ctx, queries.DonorGiftsPageParams{DonorID: d.ID, PageOffset: offset})
 		if err != nil {
 			return GiftsPage{}, err
 		}
-		out := GiftsPage{Email: d.Email, Mode: "test", Gifts: gifts}
-		if len(gifts) > 50 {
-			next := offset + 50
-			out.NextOffset = &next
-			out.Gifts = gifts[:50]
-		}
+		out := GiftsPage{Email: d.Email, Mode: "test"}
+		out.Gifts, out.NextOffset = page(gifts, offset)
 		return out, nil
 	})
 }
 func (s DonorService) Receipt(ctx context.Context, token string, gift pgtype.UUID) (Receipt, error) {
-	return donorTransaction(ctx, s.DB, token, false, func(q *queries.Queries, d queries.Donor) (Receipt, error) {
-		return ReadReceipt(ctx, q, d.ID, gift, time.Now())
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (Receipt, error) {
+		return readReceipt(ctx, q, d.ID, gift, now)
 	})
 }
 func (s DonorService) AnnualSummary(ctx context.Context, token string, year int) (AnnualSummary, error) {
-	return donorTransaction(ctx, s.DB, token, false, func(q *queries.Queries, d queries.Donor) (AnnualSummary, error) {
-		return ReadAnnualSummary(ctx, q, d.ID, year, time.Now())
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (AnnualSummary, error) {
+		return readAnnualSummary(ctx, q, d.ID, year, now)
 	})
 }

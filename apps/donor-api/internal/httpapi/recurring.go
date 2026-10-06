@@ -32,49 +32,31 @@ func recurringStatus(err error) (int, string) {
 	return donorStatus(err)
 }
 
-func (a *api) recurringAvailable(w http.ResponseWriter, r *http.Request) bool {
-	if a.Recurring == nil {
-		writeError(w, r, http.StatusServiceUnavailable, "Recurring giving is temporarily unavailable", nil)
-		return false
-	}
-	return true
+// Recurring requests reconcile with the processor, so they get its time budget.
+func (a *api) recurring() service {
+	return service{a.Recurring != nil, "Recurring giving is temporarily unavailable", providerTimeout, recurringStatus}
 }
 
-// Recurring reads reconcile with the processor, so they get the provider budget.
 func recurringRead[R any](a *api, read func(RecurringSource, context.Context, string) (R, error)) sessionHandler {
 	return func(w http.ResponseWriter, r *http.Request, session string) {
-		if !a.recurringAvailable(w, r) {
-			return
-		}
-		ctx, cancel := withTimeout(r, providerTimeout)
-		defer cancel()
-		body, err := read(a.Recurring, ctx, session)
-		respond(w, r, body, err, recurringStatus)
+		a.recurring().serve(w, r, func(ctx context.Context) (any, error) { return read(a.Recurring, ctx, session) })
 	}
 }
-
-type requestBody interface{ valid() bool }
 
 // recurringCommand runs an idempotent donor command against their subscription.
 func recurringCommand[T requestBody, R any](a *api, run func(RecurringSource, context.Context, string, pgtype.UUID, T) (R, error)) sessionHandler {
 	return func(w http.ResponseWriter, r *http.Request, session string) {
-		if !a.recurringAvailable(w, r) {
+		key, ok := idempotencyKey(w, r)
+		if !ok {
 			return
 		}
-		var body T
-		key, ok := idempotencyKey(r)
-		if !ok || !decodeJSON(w, r, &body) || !body.valid() {
-			invalidFields(w, r)
+		body, ok := decodeValid[T](w, r)
+		if !ok {
 			return
 		}
-		ctx, cancel := withTimeout(r, providerTimeout)
-		defer cancel()
-		result, err := run(a.Recurring, ctx, session, key, body)
-		respond(w, r, result, err, recurringStatus)
+		a.recurring().serve(w, r, func(ctx context.Context) (any, error) { return run(a.Recurring, ctx, session, key, body) })
 	}
 }
-
-func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxAmountMinor }
 
 type cancelBody struct {
 	ID  pgtype.UUID `json:"subscription_id"`
@@ -129,16 +111,7 @@ func changeAmount(s RecurringSource, ctx context.Context, session string, key pg
 }
 
 func (a *api) beginPaymentUpdate(w http.ResponseWriter, r *http.Request, session string) {
-	if !a.recurringAvailable(w, r) {
-		return
+	if key, ok := idempotencyKey(w, r); ok {
+		a.recurring().serve(w, r, func(ctx context.Context) (any, error) { return a.Recurring.BeginPaymentUpdate(ctx, session, key) })
 	}
-	key, ok := idempotencyKey(r)
-	if !ok {
-		invalidFields(w, r)
-		return
-	}
-	ctx, cancel := withTimeout(r, providerTimeout)
-	defer cancel()
-	body, err := a.Recurring.BeginPaymentUpdate(ctx, session, key)
-	respond(w, r, body, err, recurringStatus)
 }

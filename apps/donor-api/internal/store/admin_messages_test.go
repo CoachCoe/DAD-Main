@@ -117,7 +117,7 @@ func TestStaffDonorDetailShowsUncomputedStreakAsUpdating(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = RefreshProjectionInTx(ctx, tx, id, now); err != nil {
+	if _, err = refreshProjection(ctx, tx, id, now); err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {

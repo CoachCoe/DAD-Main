@@ -66,7 +66,7 @@ func TestConcurrentFinancialRefreshPreservesLongHistories(t *testing.T) {
 					return
 				}
 				defer tx.Rollback(ctx)
-				facts, err := RefreshProjectionInTx(ctx, tx, id, now)
+				facts, err := refreshProjection(ctx, tx, id, now)
 				if err == nil && (!facts.CurrentStreak.Valid || facts.CurrentStreak.Int32 != 24 || facts.BestStreak != 24 || facts.NetMinor.Int64 != 72000) {
 					err = fmt.Errorf("incorrect financial projection in writer %d", round)
 				}

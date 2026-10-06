@@ -25,20 +25,22 @@ type checkoutBody struct {
 
 func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 	const unavailable = "Checkout is temporarily unavailable; retry the same request"
-	if a.Checkout == nil {
-		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
+	key, ok := idempotencyKey(w, r)
+	if !ok {
 		return
 	}
 	var body checkoutBody
-	key, validKey := idempotencyKey(r)
-	if !validKey || !decodeJSON(w, r, &body) || body.Email == nil || body.Amount == nil ||
-		utf8.RuneCountInString(*body.Email) > 320 || *body.Amount < minAmountMinor || *body.Amount > maxAmountMinor {
-		invalidFields(w, r)
+	if !decodeJSON(w, r, &body) {
 		return
 	}
 	frequency, ok := optional(body.Frequency, "MONTHLY")
-	if !ok || (frequency != "MONTHLY" && frequency != "ONE_TIME") {
+	if !ok || (frequency != "MONTHLY" && frequency != "ONE_TIME") || body.Email == nil || body.Amount == nil ||
+		utf8.RuneCountInString(*body.Email) > maxEmailRunes || !validAmount(*body.Amount) {
 		invalidFields(w, r)
+		return
+	}
+	if a.Checkout == nil {
+		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
 		return
 	}
 	request := payments.CheckoutRequest{RequestID: key, Email: *body.Email, Amount: *body.Amount, Frequency: frequency}
@@ -49,6 +51,8 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	result, err := a.Checkout.BeginCheckout(ctx, request)
 	switch {
+	case errors.Is(err, payments.ErrUnconfigured):
+		paymentsOff.write(w)
 	case errors.Is(err, payments.ErrCheckoutConflict):
 		writeError(w, r, http.StatusConflict, "Checkout conflicts with an existing request", nil)
 	case errors.Is(err, store.ErrDenied):
@@ -61,3 +65,5 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, result)
 	}
 }
+
+func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxAmountMinor }

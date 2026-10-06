@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -19,21 +20,20 @@ var (
 	ErrStaffForbidden = errors.New("staff permission denied")
 	ErrStaffInput     = errors.New("invalid staff request")
 	ErrStaffConflict  = errors.New("staff account change conflicts with current access")
+	// ErrStaffExists is an ErrStaffConflict for an invitation to an email that
+	// already has a staff account.
+	ErrStaffExists = fmt.Errorf("%w: a staff account with this email already exists", ErrStaffConflict)
 )
 
-func staffPermissions(role string) []string {
-	var permissions []string
-	switch role {
-	case "SUPPORT":
-		permissions = []string{"donor.read", "message.resend"}
-	case "FINANCE":
-		permissions = []string{"donor.read", "message.resend", "gift.refund", "gift.cancel", "data.export"}
-	case "ADMIN":
-		permissions = []string{"donor.read", "message.resend", "gift.refund", "gift.cancel", "data.export", "staff.manage", "content.publish", "audit.read"}
-	}
-	slices.Sort(permissions)
-	return permissions
+// rolePermissions lists each role's named permissions, sorted. Each role adds
+// to the one before it.
+var rolePermissions = map[string][]string{
+	"SUPPORT": {"donor.read", "message.resend"},
+	"FINANCE": {"data.export", "donor.read", "gift.cancel", "gift.refund", "message.resend"},
+	"ADMIN":   {"audit.read", "content.publish", "data.export", "donor.read", "gift.cancel", "gift.refund", "message.resend", "staff.manage"},
 }
+
+func staffPermissions(role string) []string { return rolePermissions[role] }
 
 type StaffView struct {
 	ID          string   `json:"id"`
@@ -57,7 +57,7 @@ type StaffService struct {
 }
 
 func NewStaffService(db *pgxpool.Pool, key string) (*StaffService, error) {
-	if _, err := credentials.Encrypt(nil, key); err != nil {
+	if err := credentials.ValidateKey(key); err != nil {
 		return nil, err
 	}
 	secret, err := randomToken(32)
@@ -118,25 +118,12 @@ func (s *StaffService) Me(ctx context.Context, token string) (StaffView, error) 
 }
 
 func (s *StaffService) SignOut(ctx context.Context, token string) error {
-	tx, err := s.DB.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	q := queries.New(tx)
-	now := time.Now().UTC()
-	staff, err := requireStaff(ctx, q, token, "", now)
-	if err != nil {
-		return err
-	}
-	if _, err = q.StaffByID(ctx, staff.ID); err != nil {
-		return err
-	}
-	if err = q.RevokeStaffSession(ctx, queries.RevokeStaffSessionParams{TokenHash: HashToken(token), RevokedAt: timestamp(now)}); err != nil {
-		return err
-	}
-	if err = auditStaff(ctx, q, staff.ID, "staff.signed_out", staff.ID.String(), nil, now); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	_, err := staffWrite(ctx, s, token, "", func(tx pgx.Tx, staff queries.DonorStaff, now time.Time) (struct{}, error) {
+		q := queries.New(tx)
+		if err := q.RevokeStaffSession(ctx, queries.RevokeStaffSessionParams{TokenHash: HashToken(token), RevokedAt: timestamp(now)}); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, auditStaff(ctx, q, staff.ID, "staff.signed_out", staff.ID.String(), nil, now)
+	})
+	return err
 }

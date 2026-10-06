@@ -3,10 +3,19 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
+
+// TestMain silences failure logs that tests provoke on purpose; the log test
+// installs its own handler.
+func TestMain(m *testing.M) {
+	slog.SetDefault(slog.New(slog.DiscardHandler))
+	os.Exit(m.Run())
+}
 
 func TestUnconfiguredServerCannotAdvertiseReadiness(t *testing.T) {
 	server := NewServer("127.0.0.1:8002", Services{})
@@ -57,6 +66,15 @@ func TestUnmatchedRoutesAnswerInJSONAndKeepAllow(t *testing.T) {
 	server.Handler.ServeHTTP(response, httptest.NewRequest("DELETE", "/donor/checkouts", nil))
 	if response.Code != 405 || response.Header().Get("Allow") != "POST" || response.Header().Get("Content-Type") != "application/json" || !strings.Contains(response.Body.String(), `"detail":"Method Not Allowed"`) {
 		t.Fatalf("%d %v %s", response.Code, response.Header(), response.Body.String())
+	}
+}
+
+func TestPathCleaningRedirectKeepsLocation(t *testing.T) {
+	response := httptest.NewRecorder()
+	NewServer("", Services{}).Handler.ServeHTTP(response, httptest.NewRequest("GET", "/donor/staff/exports/../secrets.csv", nil))
+	if response.Code != 307 || response.Header().Get("Location") != "/donor/staff/secrets.csv" || response.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("got %d Location %q Content-Type %q, want a JSON 307 to the clean path",
+			response.Code, response.Header().Get("Location"), response.Header().Get("Content-Type"))
 	}
 }
 

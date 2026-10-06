@@ -13,7 +13,7 @@ import (
 )
 
 // This deliberately exhaustive oracle reconstructs each historical snapshot independently.
-func exhaustiveBest(h History, history []recognition.Refund, now time.Time, best int64) int64 {
+func exhaustiveBest(h history, history []recognition.Refund, now time.Time, best int64) int64 {
 	points := map[time.Time]bool{}
 	for _, g := range h.Gifts {
 		if !g.PaidAt.After(now) {
@@ -50,9 +50,9 @@ func exhaustiveBest(h History, history []recognition.Refund, now time.Time, best
 	return best
 }
 
-func replayFixture(months int, random *rand.Rand) (History, []recognition.Refund, time.Time) {
+func replayFixture(months int, random *rand.Rand) (history, []recognition.Refund, time.Time) {
 	start := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
-	h := History{}
+	h := history{}
 	refunds := []recognition.Refund{}
 	for i := range months {
 		due, end := start.AddDate(0, i, 0), start.AddDate(0, i+1, 0)

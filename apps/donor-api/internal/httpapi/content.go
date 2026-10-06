@@ -6,6 +6,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -31,50 +32,38 @@ const (
 	maxPublicationBytes = 8 << 20
 )
 
-func (a *api) contentAvailable(w http.ResponseWriter, r *http.Request) bool {
-	if a.ContentAdmin == nil {
-		writeError(w, r, http.StatusServiceUnavailable, "Content administration is temporarily unavailable", nil)
-		return false
-	}
-	return true
+func (a *api) contentAdmin() service {
+	return service{a.ContentAdmin != nil, "Content administration is temporarily unavailable", readTimeout, staffStatus}
 }
 
-func (a *api) contentInventory(w http.ResponseWriter, r *http.Request) {
-	if !a.contentAvailable(w, r) {
-		return
-	}
-	ctx, cancel := withTimeout(r, readTimeout)
-	defer cancel()
-	body, err := a.ContentAdmin.Inventory(ctx, cookieValue(r, staffCookie))
-	respond(w, r, body, err, staffStatus)
+func (a *api) contentInventory(w http.ResponseWriter, r *http.Request, session string) {
+	a.contentAdmin().serve(w, r, func(ctx context.Context) (any, error) { return a.ContentAdmin.Inventory(ctx, session) })
 }
 
-func (a *api) partnerInquiries(w http.ResponseWriter, r *http.Request) {
-	if !a.contentAvailable(w, r) {
-		return
-	}
+func (a *api) partnerInquiries(w http.ResponseWriter, r *http.Request, session string) {
 	offset, ok := offsetParam(r, "offset")
 	if !ok {
-		staffInvalid(w, r)
+		invalidFields(w, r)
 		return
 	}
-	ctx, cancel := withTimeout(r, readTimeout)
-	defer cancel()
-	body, err := a.ContentAdmin.Partners(ctx, cookieValue(r, staffCookie), offset)
-	respond(w, r, body, err, staffStatus)
+	a.contentAdmin().serve(w, r, func(ctx context.Context) (any, error) { return a.ContentAdmin.Partners(ctx, session, offset) })
 }
 
 // Uploads are authorized before the body is read so anonymous clients cannot
 // make the API buffer large documents.
-func (a *api) uploadSource(w http.ResponseWriter, r *http.Request) {
-	if !a.contentAvailable(w, r) {
+func (a *api) uploadSource(w http.ResponseWriter, r *http.Request, session string) {
+	name := r.URL.Query().Get("name")
+	if strings.ContainsRune(name, 0) {
+		invalidFields(w, r)
 		return
 	}
-	session := cookieValue(r, staffCookie)
+	if !a.contentAdmin().available(w, r) {
+		return
+	}
 	ctx, cancel := withTimeout(r, staffTimeout)
 	defer cancel()
 	if err := a.ContentAdmin.AuthorizeSourceUpload(ctx, session); err != nil {
-		respond(w, r, nil, err, sourceStatus)
+		respond(w, r, nil, err, staffStatus)
 		return
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSourceBytes))
@@ -83,32 +72,24 @@ func (a *api) uploadSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		staffInvalid(w, r)
+		invalidFields(w, r)
 		return
 	}
-	body, err := a.ContentAdmin.StoreSource(ctx, session, r.URL.Query().Get("name"), data)
-	respond(w, r, body, err, sourceStatus)
+	body, err := a.ContentAdmin.StoreSource(ctx, session, name, data)
+	respond(w, r, body, err, staffStatus)
 }
 
-func sourceStatus(err error) (int, string) {
-	if errors.Is(err, store.ErrSourceStorageUnconfigured) {
-		return http.StatusServiceUnavailable, "Source document storage is not configured"
-	}
-	return staffStatus(err)
-}
-
-func (a *api) downloadSource(w http.ResponseWriter, r *http.Request) {
-	if !a.contentAvailable(w, r) {
-		return
-	}
-	id, ok := pathUUID(r, "source_id")
+func (a *api) downloadSource(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "source_id")
 	if !ok {
-		staffInvalid(w, r)
+		return
+	}
+	if !a.contentAdmin().available(w, r) {
 		return
 	}
 	ctx, cancel := withTimeout(r, staffTimeout)
 	defer cancel()
-	document, err := a.ContentAdmin.ReadSource(ctx, cookieValue(r, staffCookie), id)
+	document, err := a.ContentAdmin.ReadSource(ctx, session, id)
 	if err != nil {
 		respond(w, r, nil, err, staffStatus)
 		return
@@ -118,11 +99,11 @@ func (a *api) downloadSource(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(document.Data)
 }
 
-func (a *api) publish(w http.ResponseWriter, r *http.Request) {
-	if !a.contentAvailable(w, r) {
+// publish authorizes before reading its large body, as uploads do.
+func (a *api) publish(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.contentAdmin().available(w, r) {
 		return
 	}
-	session := cookieValue(r, staffCookie)
 	ctx, cancel := withTimeout(r, staffTimeout)
 	defer cancel()
 	if err := a.ContentAdmin.Authorize(ctx, session); err != nil {
@@ -131,10 +112,13 @@ func (a *api) publish(w http.ResponseWriter, r *http.Request) {
 	}
 	var body store.PublicationRequest
 	if !decodeJSONLimit(w, r, &body, maxPublicationBytes) {
-		staffInvalid(w, r)
 		return
 	}
 	result, err := a.ContentAdmin.Publish(ctx, session, body)
+	if refused, ok := errors.AsType[*store.PublicationError](err); ok {
+		writeJSON(w, http.StatusUnprocessableEntity, problem{Detail: "The spreadsheet has problems", Errors: refused.Problems})
+		return
+	}
 	respond(w, r, result, err, staffStatus)
 }
 
@@ -150,18 +134,16 @@ func partnerStatus(err error) (int, string) {
 }
 
 func (a *api) partnerSignup(w http.ResponseWriter, r *http.Request) {
-	if a.Partner == nil {
-		writeError(w, r, http.StatusServiceUnavailable, "Partner signup is temporarily unavailable", nil)
+	key, ok := idempotencyKey(w, r)
+	if !ok {
 		return
 	}
-	key, ok := idempotencyKey(r)
 	var body store.PartnerRequest
-	if !ok || !decodeJSON(w, r, &body) {
-		invalidFields(w, r)
+	if !decodeJSON(w, r, &body) {
 		return
 	}
-	ctx, cancel := withTimeout(r, readTimeout)
-	defer cancel()
-	err := a.Partner.Signup(ctx, key, body)
-	respond(w, r, map[string]any{"received": true, "mode": "test"}, err, partnerStatus)
+	partners := service{a.Partner != nil, "Partner signup is temporarily unavailable", readTimeout, partnerStatus}
+	partners.serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]any{"received": true, "mode": "test"}, a.Partner.Signup(ctx, key, body)
+	})
 }

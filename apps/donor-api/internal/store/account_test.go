@@ -30,7 +30,7 @@ func claimProof(t *testing.T, pool *pgxpool.Pool, proof string) string {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	token, _, err := ClaimInTx(ctx, tx, proof)
+	token, _, err := claim(ctx, tx, proof)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,11 +55,11 @@ func TestClaimRefreshesAndReplacesOnlyThisBrowser(t *testing.T) {
 	}
 	q := queries.New(pool)
 	for _, session := range []string{token, other} {
-		if _, err = Authenticated(ctx, q, session, time.Now()); err != nil {
+		if _, err = authenticate(ctx, q, session, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err = Authenticated(ctx, q, old, time.Now()); !errors.Is(err, ErrDenied) {
+	if _, err = authenticate(ctx, q, old, time.Now()); !errors.Is(err, ErrDenied) {
 		t.Fatal("old browser session survived")
 	}
 	projection, err := q.Projection(ctx, id)
@@ -117,7 +117,7 @@ func TestLoginQueueDeduplicatesConcurrentRequests(t *testing.T) {
 	results := make(chan error, 5)
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
-		go func() { defer wg.Done(); results <- service.QueueLogin(ctx, email) }()
+		go func() { defer wg.Done(); results <- service.QueueLogin(ctx, email, "") }()
 	}
 	wg.Wait()
 	close(results)
@@ -130,13 +130,13 @@ func TestLoginQueueDeduplicatesConcurrentRequests(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_login_emails WHERE donor_id=$1", id).Scan(&count); err != nil || count != 1 {
 		t.Fatal("email queue was not throttled under donor lock")
 	}
-	if err := service.QueueLogin(ctx, "unknown-"+id.String()+"@example.org"); err != nil {
+	if err := service.QueueLogin(ctx, "unknown-"+id.String()+"@example.org", ""); err != nil {
 		t.Fatal("unknown account distinguishable")
 	}
 	if _, err := pool.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.QueueLogin(ctx, email); err != nil {
+	if err := service.QueueLogin(ctx, email, ""); err != nil {
 		t.Fatal("disabled account distinguishable")
 	}
 }

@@ -79,7 +79,7 @@ func (h *historyFixture) gift(g recognition.Gift) {
 	}
 	object := "pi_" + testID(h.t).String()
 	h.objects[g.ID] = object
-	if err = recordGift(ctx, h.tx, checkout, paidGift{objectID: object, amount: g.Amount, paid: g.PaidAt, paymentIntent: object}, g.PaidAt); err != nil {
+	if err = recordGift(ctx, h.q, checkout, paidGift{objectID: object, amount: g.Amount, paid: g.PaidAt, paymentIntent: object}, g.PaidAt); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -95,7 +95,7 @@ func (h *historyFixture) refund(r recognition.Refund) {
 		h.t.Fatal(err)
 	}
 	current := paymentObject(h.t, map[string]any{"id": "re_" + event.String(), "payment_intent": gift.StripePaymentIntentID.String, "amount": r.Amount, "currency": "usd", "status": strings.ToLower(r.Status)})
-	if err = RecordRefundInTx(ctx, h.q, gift, current, event, pgtype.UUID{}, r.UpdatedAt); err != nil {
+	if err = recordRefund(ctx, h.q, gift, current, event, pgtype.UUID{}, r.UpdatedAt); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -140,13 +140,13 @@ func TestSharedReferralScenariosAgainstSQLAggregate(t *testing.T) {
 			}
 			slices.Sort(names)
 			for _, name := range names {
-				if _, err = RefreshProjectionInTx(ctx, tx, h.donors[name], c.AsOf); err != nil {
+				if _, err = refreshProjection(ctx, tx, h.donors[name], c.AsOf); err != nil {
 					t.Fatal(name, err)
 				}
 			}
 			for _, name := range names {
 				want := expected[name]
-				board, err := Dashboard(ctx, h.q, h.donors[name], c.AsOf)
+				board, err := dashboard(ctx, h.q, h.donors[name], c.AsOf)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -229,13 +229,13 @@ func TestConversionAndFoundingArePermanentOnceProjected(t *testing.T) {
 	earlier := later.AddDate(0, -1, 0)
 	window := later.AddDate(0, 1, 0)
 	h.gift(recognition.Gift{ID: "later", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: later, Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: window}})
-	first, err := refreshProjectionFactsInTx(ctx, tx, h.donor("ben"), later)
+	first, err := projectFacts(ctx, queries.New(tx), h.donor("ben"), later)
 	if err != nil || first.ReferrerID != h.donor("alice") || !first.FoundingAwardedAt.Time.Equal(later) {
 		t.Fatalf("first projection: %+v %v", first, err)
 	}
 	// An earlier gift processed late must not move the converted relationship.
 	h.gift(recognition.Gift{ID: "earlier", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: earlier, Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: window}})
-	second, err := refreshProjectionFactsInTx(ctx, tx, h.donor("ben"), later.Add(time.Hour))
+	second, err := projectFacts(ctx, queries.New(tx), h.donor("ben"), later.Add(time.Hour))
 	if err != nil || second.ReferrerID != first.ReferrerID || second.ReferralKind != first.ReferralKind || second.FirstGiftID != first.FirstGiftID || !second.FoundingAwardedAt.Time.Equal(first.FoundingAwardedAt.Time) || second.NetMinor.Int64 != 6000 {
 		t.Fatalf("relationship moved: %+v %v", second, err)
 	}
@@ -258,11 +258,11 @@ func TestRefundRecordedByLaterClockUsesEarlierObservation(t *testing.T) {
 	if _, err = tx.Exec(ctx, "UPDATE donor_refunds SET status='SUCCEEDED',observed_at=$2 WHERE gift_id=(SELECT id FROM donor_gifts WHERE stripe_object_id=$1)", h.objects["g"], ahead); err != nil {
 		t.Fatal(err)
 	}
-	before, err := refreshProjectionFactsInTx(ctx, tx, h.donor("ben"), asOf)
+	before, err := projectFacts(ctx, queries.New(tx), h.donor("ben"), asOf)
 	if err != nil || before.NetMinor.Int64 != 3000 || !before.NextRefreshAt.Time.Equal(ahead) {
 		t.Fatalf("as-of refund state: %+v %v", before, err)
 	}
-	after, err := refreshProjectionFactsInTx(ctx, tx, h.donor("ben"), ahead)
+	after, err := projectFacts(ctx, queries.New(tx), h.donor("ben"), ahead)
 	if err != nil || after.NetMinor.Int64 != 0 {
 		t.Fatalf("later refund state: %+v %v", after, err)
 	}

@@ -3,9 +3,10 @@
 package recognition
 
 import (
+	"cmp"
 	"errors"
 	"reflect"
-	"sort"
+	"slices"
 	"time"
 	_ "time/tzdata"
 )
@@ -107,6 +108,9 @@ func cleanGifts(input []Gift) ([]Gift, error) {
 	}
 	return result, nil
 }
+
+// NetGifts returns each gift paid by asOf, keyed by gift ID, net of the
+// refunds that had succeeded by then.
 func NetGifts(input []Gift, refunds []Refund, asOf time.Time) (map[string]int64, error) {
 	if asOf.IsZero() {
 		return nil, ErrInvalid
@@ -154,6 +158,9 @@ func NetGifts(input []Gift, refunds []Refund, asOf time.Time) (map[string]int64,
 	}
 	return net, nil
 }
+
+// Relationships returns each donor's first gift paid by asOf and the
+// referral it converted, if its window was still open.
 func Relationships(input []Gift, asOf time.Time) (map[string]Relationship, error) {
 	if asOf.IsZero() {
 		return nil, ErrInvalid
@@ -162,11 +169,8 @@ func Relationships(input []Gift, asOf time.Time) (map[string]Relationship, error
 	if err != nil {
 		return nil, err
 	}
-	sort.Slice(gifts, func(i, j int) bool {
-		if gifts[i].PaidAt.Equal(gifts[j].PaidAt) {
-			return gifts[i].ID < gifts[j].ID
-		}
-		return gifts[i].PaidAt.Before(gifts[j].PaidAt)
+	slices.SortFunc(gifts, func(a, b Gift) int {
+		return cmp.Or(a.PaidAt.Compare(b.PaidAt), cmp.Compare(a.ID, b.ID))
 	})
 	result := map[string]Relationship{}
 	for _, g := range gifts {
@@ -200,16 +204,6 @@ func FoundingQualifiedAt(input []Gift, donorID string, asOf time.Time) (time.Tim
 		}
 	}
 	return first, !first.IsZero(), nil
-}
-func Founding(input []Gift, donorID string, asOf time.Time, awarded bool) (bool, error) {
-	if asOf.IsZero() {
-		return false, ErrInvalid
-	}
-	if awarded {
-		return true, nil
-	}
-	_, qualified, err := FoundingQualifiedAt(input, donorID, asOf)
-	return qualified, err
 }
 
 // GivingStreak counts consecutive paid monthly periods as of asOf. A renewal
@@ -285,7 +279,7 @@ func donorPeriods(input []Period, donorID string) ([]Period, error) {
 			periods = append(periods, p)
 		}
 	}
-	sort.Slice(periods, func(i, j int) bool { return periods[i].DueAt.Before(periods[j].DueAt) })
+	slices.SortFunc(periods, func(a, b Period) int { return a.DueAt.Compare(b.DueAt) })
 	for i := 1; i < len(periods); i++ {
 		if periods[i-1].EndsAt.After(periods[i].DueAt) {
 			return nil, ErrInvalid
