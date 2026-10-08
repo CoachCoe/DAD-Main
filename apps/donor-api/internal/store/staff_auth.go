@@ -29,10 +29,9 @@ type Ceremony struct {
 // Invitation is the passkey registration for an invited account, naming the
 // person it was issued to so they can recognise it as theirs.
 type Invitation struct {
-	ID      string `json:"ceremony"`
-	Options any    `json:"options"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
+	Ceremony
+	Email string `json:"email"`
+	Name  string `json:"name"`
 }
 
 // staffUser presents an account to WebAuthn. Its user handle is the account
@@ -234,12 +233,12 @@ func (s *StaffService) BeginActivation(ctx context.Context, token string) (Invit
 		if err != nil {
 			return err
 		}
-		creation, session, err := s.WebAuthn.BeginRegistration(user, webauthn.WithExclusions(webauthn.Credentials(user.passkeys).CredentialDescriptors()))
+		creation, session, err := s.WebAuthn.BeginRegistration(user)
 		if err != nil {
 			return err
 		}
 		id, err := saveCeremony(ctx, q, "ACTIVATION", invite.ID, session)
-		result = Invitation{ID: id, Options: creation.Response, Email: user.staff.Email, Name: user.staff.Name}
+		result = Invitation{Ceremony: Ceremony{ID: id, Options: creation.Response}, Email: user.staff.Email, Name: user.staff.Name}
 		return err
 	})
 	return result, err

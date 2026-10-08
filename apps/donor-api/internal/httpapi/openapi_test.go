@@ -297,9 +297,10 @@ func (c *contract) checkShape(t *testing.T, where string, typ reflect.Type, sche
 	}
 	properties, _ := schema["properties"].(map[string]any)
 	fields := map[string]reflect.Type{}
-	for field := range typ.Fields() {
+	for _, field := range reflect.VisibleFields(typ) {
 		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
-		if !field.IsExported() || name == "-" {
+		// encoding/json promotes the fields of an untagged embedded struct.
+		if !field.IsExported() || name == "-" || (field.Anonymous && name == "" && field.Type.Kind() == reflect.Struct) {
 			continue
 		}
 		fields[cmp.Or(name, field.Name)] = field.Type
