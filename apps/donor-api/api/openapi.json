@@ -4447,18 +4447,16 @@
           "initiatives": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": true
+              "$ref": "#/components/schemas/Initiative"
             },
-            "description": "Published initiative rows keyed by spreadsheet column."
+            "description": "Published initiatives, in spreadsheet order."
           },
           "ledger": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": true
+              "$ref": "#/components/schemas/LedgerFigure"
             },
-            "description": "Published impact ledger rows keyed by spreadsheet column."
+            "description": "Published impact ledger figures, in spreadsheet order."
           },
           "ledger_as_of": {
             "type": [
@@ -4490,6 +4488,73 @@
           "ledger",
           "ledger_as_of",
           "state"
+        ],
+        "additionalProperties": false
+      },
+      "Initiative": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "partner": {
+            "type": "string"
+          },
+          "planned_start": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "required": [
+          "slug",
+          "title",
+          "summary",
+          "partner",
+          "planned_start"
+        ],
+        "additionalProperties": false
+      },
+      "LedgerFigure": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique within the publication."
+          },
+          "metric": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64",
+            "description": "In `unit`; USD_CENTS is integer cents."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "USD_CENTS",
+              "PEOPLE",
+              "INITIATIVES",
+              "PARTNERS"
+            ]
+          },
+          "illustrative": {
+            "type": "boolean",
+            "description": "An illustrative example, not a reported outcome."
+          }
+        },
+        "required": [
+          "id",
+          "metric",
+          "value",
+          "unit",
+          "illustrative"
         ],
         "additionalProperties": false
       },
@@ -4739,10 +4804,7 @@
             ]
           },
           "paid_at": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "format": "date-time"
           },
           "refunded_minor": {
@@ -5082,7 +5144,11 @@
             "format": "date-time"
           },
           "state": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "preparing",
+              "ready"
+            ]
           },
           "subscription": {
             "anyOf": [
@@ -5380,7 +5446,15 @@
             ]
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "NONE",
+              "PENDING",
+              "OPEN",
+              "APPLIED",
+              "EXPIRED",
+              "CANCELLED"
+            ]
           }
         },
         "required": [
@@ -5736,10 +5810,7 @@
             "format": "int32"
           },
           "computed_at": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "format": "date-time"
           },
           "current": {

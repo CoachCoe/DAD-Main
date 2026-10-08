@@ -1160,14 +1160,10 @@ export interface components {
         PublicContent: {
             /** @description Publication cadence label. */
             cadence: string | null;
-            /** @description Published initiative rows keyed by spreadsheet column. */
-            initiatives: {
-                [key: string]: unknown;
-            }[];
-            /** @description Published impact ledger rows keyed by spreadsheet column. */
-            ledger: {
-                [key: string]: unknown;
-            }[];
+            /** @description Published initiatives, in spreadsheet order. */
+            initiatives: components["schemas"]["Initiative"][];
+            /** @description Published impact ledger figures, in spreadsheet order. */
+            ledger: components["schemas"]["LedgerFigure"][];
             /**
              * Format: date
              * @description Date the ledger figures describe.
@@ -1179,6 +1175,28 @@ export interface components {
             published_at?: string;
             /** @enum {string} */
             state: "unpublished" | "published";
+        };
+        Initiative: {
+            slug: string;
+            title: string;
+            summary: string;
+            partner: string;
+            /** Format: date */
+            planned_start: string;
+        };
+        LedgerFigure: {
+            /** @description Unique within the publication. */
+            id: string;
+            metric: string;
+            /**
+             * Format: int64
+             * @description In `unit`; USD_CENTS is integer cents.
+             */
+            value: number;
+            /** @enum {string} */
+            unit: "USD_CENTS" | "PEOPLE" | "INITIATIVES" | "PARTNERS";
+            /** @description An illustrative example, not a reported outcome. */
+            illustrative: boolean;
         };
         ReferralSummary: {
             /** @enum {string} */
@@ -1279,7 +1297,7 @@ export interface components {
             /** @enum {string} */
             frequency: "MONTHLY" | "ONE_TIME";
             /** Format: date-time */
-            paid_at: string | null;
+            paid_at: string;
             /**
              * Format: int64
              * @description Successfully refunded so far, in cents.
@@ -1427,7 +1445,8 @@ export interface components {
              * @description When the subscription was last synced from Stripe; present with `subscription`.
              */
             observed_at?: string;
-            state?: string;
+            /** @enum {string} */
+            state?: "preparing" | "ready";
             subscription: components["schemas"]["Subscription"] | null;
         };
         AmountChange: {
@@ -1527,7 +1546,8 @@ export interface components {
              * @enum {string}
              */
             mode: "test";
-            status: string;
+            /** @enum {string} */
+            status: "NONE" | "PENDING" | "OPEN" | "APPLIED" | "EXPIRED" | "CANCELLED";
         };
         PauseResult: {
             pause: components["schemas"]["PauseView"];
@@ -1640,7 +1660,7 @@ export interface components {
             /** Format: int32 */
             best: number;
             /** Format: date-time */
-            computed_at: string | null;
+            computed_at: string;
             /** Format: int32 */
             current: number | null;
         };
