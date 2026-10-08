@@ -33,9 +33,12 @@ one host for both.
 | `INGRESS_STAFF_ACCESS` | `deploy/nginx/staff-access.conf` (allows all) | nginx `allow`/`deny` rules for the staff host. |
 | `DONOR_STAFF_ORIGIN` | required | Staff origin, also passed to the web build and the API. |
 
-Single-file mounts (`INGRESS_ORIGIN_PULL_CA`, `INGRESS_STAFF_ACCESS`) need
-`./scripts/deploy.sh up` after a change; certificates and the Cloudflare range list are
-picked up by `./scripts/deploy.sh reload-ingress`.
+nginx renders its configuration only at start, and a replaced single-file mount keeps
+showing the old file, so `./scripts/deploy.sh up` and `reload-ingress` label the container
+with a hash of everything it mounts except the certificates. Compose recreates nginx when
+that hash changes, which briefly drops connections; `reload-ingress` then reloads it,
+which picks up renewed certificates without dropping any. Use those commands rather than
+`docker compose up`, which clears the label and so recreates nginx.
 
 ## Certificates
 

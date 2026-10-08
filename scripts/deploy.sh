@@ -7,6 +7,21 @@ export ENV_FILE
 cd "$root"
 compose() { docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml "$@"; }
 usage() { printf '%s\n' 'Usage: scripts/deploy.sh {build|migrate|adopt|up|workers|monitor [--max-age DURATION]|reload-ingress|down|logs [SERVICE...]|smoke}'; }
+# nginx reads its bind-mounted files and renders its templates only at start, and a
+# replaced single-file mount keeps showing the old file, so a reload can mix old and new
+# configuration. Labelling nginx with a hash of what it mounts (certificates aside, which a
+# reload picks up) makes Compose recreate it exactly when that changes.
+ingress_config() {
+  local sources=()
+  mapfile -t sources < <(compose config nginx | awk '
+    /^  [^ ]/ { nginx = $1 == "nginx:" }
+    nginx && $2 == "type:" { bind = $3 == "bind" }
+    nginx && bind && $1 == "source:" { sub(/^ *source: /, ""); source = $0 }
+    nginx && bind && $1 == "target:" && $2 != "/etc/nginx/tls" { print source }')
+  ((${#sources[@]})) || { echo 'Could not list the nginx mounts.' >&2; return 1; }
+  INGRESS_CONFIG_HASH="$(find "${sources[@]}" -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum)"
+  export INGRESS_CONFIG_HASH="${INGRESS_CONFIG_HASH%% *}"
+}
 workers_enabled() {
   compose --profile workers config stripe-worker | grep -q 'DONOR_GO_WORKERS_ENABLED: "true"'
 }
@@ -14,7 +29,7 @@ case "${1:-help}" in
   build) compose build api web ;;
   migrate) compose up -d --wait postgres; compose run --rm migrate ;;
   adopt) compose up -d --wait postgres; compose run --rm migrate migrate --adopt-existing ;;
-  up) compose up -d --wait api web nginx ;;
+  up) ingress_config; compose up -d --wait api web nginx ;;
   workers)
     if ! workers_enabled; then
       printf 'Refusing to start workers: set DONOR_GO_WORKERS_ENABLED=true in %s first.\n' "$ENV_FILE" >&2
@@ -23,8 +38,12 @@ case "${1:-help}" in
     compose --profile workers up -d stripe-worker projection-worker login-email-worker email-change-worker message-worker
     ;;
   monitor) shift; compose run --rm --no-deps api monitor "$@" ;;
-  # Picks up renewed certificates and refreshed Cloudflare ranges without dropping connections.
-  reload-ingress) compose exec -T nginx sh -c 'nginx -t -q && nginx -s reload' ;;
+  # Recreates nginx if its configuration changed, then reloads it for renewed certificates.
+  reload-ingress)
+    ingress_config
+    compose up -d --wait --no-deps nginx
+    compose exec -T nginx sh -c 'nginx -t -q && nginx -s reload'
+    ;;
   down) compose down ;;
   logs) shift; compose logs -f "$@" ;;
   smoke)

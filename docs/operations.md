@@ -41,8 +41,9 @@ only when ready to process test payments and deliver configured email, then run
 services without deleting database volumes. `logs` follows service logs. No command
 pushes images or activates live donations. `ENV_FILE` may be relative to the current
 directory. The web container runs with a read-only filesystem and tmpfs mounts for
-`/tmp` and `/app/.next/cache`. `reload-ingress` makes nginx reread its certificates and
-Cloudflare ranges without dropping connections.
+`/tmp` and `/app/.next/cache`. `up` and `reload-ingress` recreate nginx when its
+configuration has changed ([edge](edge.md#modes)), and `reload-ingress` makes it reread
+renewed certificates without dropping connections.
 
 The API refuses to start with only one of `STRIPE_SECRET_KEY` and
 `STRIPE_WEBHOOK_SECRET`, with a malformed encryption key, with a trusted proxy range
