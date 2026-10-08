@@ -4,20 +4,25 @@
 // projection worker's own code.
 //
 // It refuses any database that might hold real donors. The URL must be given
-// as a flag, never taken from the environment, and -confirm must repeat the
-// database's name. A database holding any donor without a seeded address is
-// refused outright; one already seeded is refused unless -append is set.
+// as a flag and must itself name the server and database, since pgx fills
+// omitted parts from PG* variables and service files; -confirm must repeat
+// the database's name. A database holding any donor without a seeded address
+// is refused outright; one already seeded is refused unless -append is set.
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,7 +43,7 @@ type options struct {
 func parse(args []string) (options, error) {
 	var o options
 	flags := flag.NewFlagSet("seed", flag.ContinueOnError)
-	flags.StringVar(&o.databaseURL, "database-url", "", "disposable database to fill (required; the environment is never read)")
+	flags.StringVar(&o.databaseURL, "database-url", "", "disposable database to fill, as a URL naming its host and database (required)")
 	flags.StringVar(&o.confirm, "confirm", "", "the database's name, repeated to confirm it is disposable (required)")
 	flags.IntVar(&o.donors, "donors", 50000, "donors to create (1–1,000,000)")
 	flags.Uint64Var(&o.seed, "seed", 1, "random seed; the same seed and size give the same population")
@@ -59,20 +64,42 @@ func parse(args []string) (options, error) {
 	case o.fixture == "" && o.sessions > 0:
 		return o, errors.New("-fixture is required to hand out sessions")
 	}
-	config, err := pgxpool.ParseConfig(o.databaseURL)
+	name, err := database(o.databaseURL)
 	if err != nil {
-		return o, errors.New("invalid -database-url")
+		return o, err
 	}
-	if config.ConnConfig.Database == "" || config.ConnConfig.Database != o.confirm {
+	if name != o.confirm {
 		return o, errors.New("-confirm must repeat the database name in -database-url")
 	}
 	return o, nil
 }
 
+// database returns the database a URL names, refusing one whose server or
+// database pgx would take from PG* variables or a service file instead.
+func database(databaseURL string) (string, error) {
+	invalid := errors.New("-database-url must be a postgresql:// URL naming one host and a database")
+	u, err := url.Parse(databaseURL)
+	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Query().Has("service") {
+		return "", invalid
+	}
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return "", invalid
+	}
+	c, name := config.ConnConfig, strings.TrimPrefix(u.Path, "/")
+	if name == "" || c.Database != name || c.Host != u.Hostname() || strconv.Itoa(int(c.Port)) != cmp.Or(u.Port(), "5432") {
+		return "", invalid
+	}
+	return name, nil
+}
+
 // insideRepository reports whether path would land in a git working tree,
 // where a fixture of live session tokens could be committed.
 func insideRepository(path string) (bool, error) {
-	dir, err := filepath.Abs(filepath.Dir(path))
+	dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err == nil {
+		dir, err = filepath.Abs(dir)
+	}
 	if err != nil {
 		return false, err
 	}
@@ -91,7 +118,11 @@ func insideRepository(path string) (bool, error) {
 // createFixture opens a new private file for session tokens, refusing an
 // existing file or one inside a working tree.
 func createFixture(path string) (*os.File, error) {
-	if inside, err := insideRepository(path); err != nil || inside {
+	inside, err := insideRepository(path)
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("create fixture: %w", err)
+	case inside:
 		return nil, errors.New("-fixture must be outside any git working tree")
 	}
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -136,7 +167,7 @@ type report struct {
 func seed(ctx context.Context, pool *pgxpool.Pool, o options, now time.Time) (*population, report, error) {
 	r := report{Donors: o.donors, Seed: o.seed}
 	if err := migrations.Verify(ctx, pool); err != nil {
-		return nil, r, errors.New("seed database schema is not current; run migrations first")
+		return nil, r, fmt.Errorf("verify migrations (run them first): %w", err)
 	}
 	offset, err := guard(ctx, pool, o.appendPopulation)
 	if err != nil {
@@ -192,9 +223,12 @@ func run(ctx context.Context, args []string, out io.Writer) (err error) {
 	config.MaxConns = int32(o.workers + 2)
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
-		return errors.New("seed database unavailable")
+		return err
 	}
 	defer pool.Close()
+	if err = pool.Ping(ctx); err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
 	started := time.Now()
 	pop, r, err := seed(ctx, pool, o, started)
 	if err != nil {

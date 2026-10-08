@@ -44,18 +44,54 @@ func TestParseRequiresAnExplicitConfirmedDatabase(t *testing.T) {
 	}
 }
 
+// TestDatabaseIgnoresTheEnvironment checks that the URL alone decides which
+// server and database are seeded, whatever PG* variables would supply.
+func TestDatabaseIgnoresTheEnvironment(t *testing.T) {
+	t.Setenv("PGHOST", "127.0.0.1")
+	t.Setenv("PGDATABASE", "loadtest_a")
+	if name, err := database("postgres://seed@127.0.0.1/loadtest_a?sslmode=disable"); err != nil || name != "loadtest_a" {
+		t.Fatalf("explicit URL rejected: %q %v", name, err)
+	}
+	for _, invalid := range []string{
+		"postgresql:///loadtest_a",
+		"postgresql://127.0.0.1:5432/",
+		"postgresql://127.0.0.1:5432",
+		"postgresql://127.0.0.1:5432/loadtest_a?host=db.internal",
+		"postgresql://127.0.0.1:5432/loadtest_a?dbname=production",
+		"postgresql://127.0.0.1:5432/loadtest_a?port=6543",
+		"postgresql://127.0.0.1:5432/loadtest_a?service=production",
+		"postgresql://a.internal,b.internal/loadtest_a",
+		"host=127.0.0.1 dbname=loadtest_a",
+	} {
+		if _, err := database(invalid); err == nil {
+			t.Errorf("%q accepted", invalid)
+		}
+	}
+	t.Setenv("PGPORT", "6543")
+	if _, err := database("postgresql://127.0.0.1/loadtest_a"); err == nil {
+		t.Error("a port taken from PGPORT was accepted")
+	}
+}
+
 func TestFixtureMustStayOutOfRepositories(t *testing.T) {
 	repository := t.TempDir()
-	if err := os.Mkdir(filepath.Join(repository, ".git"), 0o700); err != nil {
+	deep := filepath.Join(repository, "deep")
+	if err := os.MkdirAll(filepath.Join(repository, ".git"), 0o700); err != nil || os.Mkdir(deep, 0o700) != nil {
 		t.Fatal(err)
 	}
-	if inside, err := insideRepository(filepath.Join(repository, "deep", "fixture.json")); err != nil || !inside {
-		t.Fatal("a fixture inside a working tree was allowed")
+	link := filepath.Join(t.TempDir(), "elsewhere")
+	if err := os.Symlink(deep, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(deep, "fixture.json"), filepath.Join(link, "fixture.json")} {
+		if inside, err := insideRepository(path); err != nil || !inside {
+			t.Fatalf("a fixture inside a working tree was allowed at %s: %v", path, err)
+		}
 	}
 	if inside, err := insideRepository(filepath.Join(t.TempDir(), "fixture.json")); err != nil || inside {
 		t.Fatal("a fixture outside any working tree was refused")
 	}
-	err := run(context.Background(), []string{"-database-url", "postgresql://x@127.0.0.1/loadtest_a", "-confirm", "loadtest_a", "-fixture", filepath.Join(repository, "f.json")}, io.Discard)
+	err := run(context.Background(), []string{"-database-url", "postgresql://x@127.0.0.1/loadtest_a", "-confirm", "loadtest_a", "-fixture", filepath.Join(link, "f.json")}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "outside any git working tree") {
 		t.Fatalf("run wrote a fixture into a repository: %v", err)
 	}
