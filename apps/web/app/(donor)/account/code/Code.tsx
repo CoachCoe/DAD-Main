@@ -7,6 +7,7 @@ import { Announcer } from "@/components/donor/Announcer";
 import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
+import type { Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
 /** Keeps the screen on while the code is shown. Browsers drop the lock when the page is hidden. */
@@ -33,7 +34,7 @@ function useScreenWakeLock(active: boolean) {
 }
 
 export default function Code() {
-  const { resource, data, failed, reload } = useApiResource<{ irl_link: string | null }>("/donor/me/sharing");
+  const { resource, data, failed, reload } = useApiResource<Schema<"Sharing">>("/donor/me/sharing");
   const [full, setFull] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);

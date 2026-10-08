@@ -3,14 +3,14 @@
 The R1 application is a Next.js TypeScript web client backed by a Go HTTP service and
 PostgreSQL 16. Hosted Stripe Checkout handles USD test payments and card setup. Separate
 Go workers reconcile signed Stripe events, refresh donor projections, apply referral-touch
-retention, and deliver email.
+retention, deliver email, and send donor app notifications.
 
 ```text
 Browser → Next.js /api/donor/* → Go HTTP API → PostgreSQL
              ↓                     ↓               ↑
        Stripe-hosted UI        Stripe API      Go workers
                                                 ↓
-                                          SMTP with STARTTLS
+                                SMTP with STARTTLS, APNs and FCM
 ```
 
 The browser uses the same origin for API requests. In production it reaches Next.js
@@ -26,9 +26,18 @@ map to named permissions checked against current database state.
 `apps/donor-api/api/openapi.json` (OpenAPI 3.1) is the HTTP contract for the web app and
 the R2 donor apps. Every route is declared once in `internal/httpapi/routes.go` with its
 authentication and client policy; the `TestContract*` tests fail when routes, security,
-client policy, or JSON shapes drift from the document. Errors are `{detail}` JSON, with
-an additive `code` for configuration states and `errors` for located spreadsheet
-problems. Money is integer cents and timestamps are RFC 3339.
+client policy, or JSON shapes drift from the document, including which response fields
+are always present. A response whose fields depend on its state documents each state as
+a `oneOf` variant. Errors are `{detail}` JSON, with an additive `code` for configuration
+states and `errors` for located spreadsheet problems. Money is integer cents and
+timestamps are RFC 3339.
+
+The web app's request and response types are generated from the contract into
+`apps/web/lib/openapi.d.ts` by pinned openapi-typescript, and pages name them through
+`Schema`, `RequestBody`, and `ResponseBody` in `lib/api.ts` rather than declaring their
+own. `make generate` refreshes the file and `make check-generated` fails CI when it no
+longer matches the contract. The R2 native apps generate their own clients from the same
+document.
 
 Staff routes admit mutations only from the staff origin; every other route admits only
 the public origin. Passkey ceremonies take two calls each. `POST
@@ -38,12 +47,34 @@ sets the staff cookie. Activation is the same pair under `/donor/staff/activate`
 with the invitation token, and also signs the new staff member in. Options and
 credentials use the WebAuthn JSON forms, with binary fields in base64url.
 
-The R2 app calls the API host directly with a bearer session instead of cookies (see
-[security](security.md)). Only donor account routes admit it; giving stays on the web.
+The R2 app calls the API host directly with a 15-minute bearer access token instead of
+cookies, and renews it with a rotating refresh token at `POST /donor/refresh`, a route
+that admits only the app (see [security](security.md)). Every sign-in, in a browser or
+the app, is a donor session the donor can list and end through `/donor/me/sessions`,
+which the web profile page shows. Only donor account routes admit the app; giving stays
+on the web.
 Every donor-facing URL is built in `internal/store/links.go`, which is the starting list
 for app/universal links (`/account/claim`, `/account/email-change`,
-`/account/payment-method`, `/r/{code}`). Donor passkeys and push-notification device
-registration are not built yet and need new store work.
+`/account/payment-method`, `/r/{code}`). Donor passkeys are not built yet.
+
+## App notifications
+
+The app registers its installation's push token on its own session with `POST
+/donor/me/push-device`; the token is a column of that session, so it lasts exactly as
+long as the sign-in, and a token registered by another session moves to the new one.
+Each projection refresh queues push intents in the same transaction as the facts
+behind them, next to the email outbox: a referral conversion (the referral email's own
+condition, announced only within a day of the gift), a failed latest renewal while the streak is at risk (the decision behind the
+recovery email's "your streak is at risk"), and a streak milestone. Stable keys make
+each intent once: `push:referral:<referred donor>`, `push:streak-at-risk:<period>`,
+and `push:streak-milestone:<donor>:<run start>:<months>`. Only donors with a live
+registered device get intents. The push worker delivers each to every live device of the
+donor through APNs or FCM (`internal/push`), rechecking preferences and facts first,
+and records the sessions reached so a retry after a partial failure reaches only the
+rest. Notifications carry generic copy, a category and an app path, and a collapse ID,
+so a resend replaces the notification on the device instead of repeating it. `GET
+/donor/me/conversions` lists recent conversions with their time and channel for the
+app's conversion moment.
 
 ## Financial consistency
 
@@ -97,6 +128,9 @@ Publishing is manual; there is no CMS or live outcome pipeline.
 
 Embedded SQL migrations are applied under a transaction advisory lock and recorded with
 SHA-256 checksums. The API and workers require the complete known migration history.
+Each process connects as its own database role; `internal/dbroles` declares what each role
+may do to each table, and every migration run brings the roles' privileges to that
+declaration in the same transaction ([database roles](operations.md#database-roles)).
 `migrate --adopt-existing` supports a database at the former `0030_donor_public_content`
 revision only after comparing the donor schema to the embedded baseline. It preserves all
 existing records and leaves unrelated legacy tables untouched. Back up and restore-test

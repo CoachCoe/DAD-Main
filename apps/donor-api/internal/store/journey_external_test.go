@@ -17,6 +17,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stripe/stripe-go/v87"
+	"impactgraph/donor-api/internal/credentials"
+	"impactgraph/donor-api/internal/dbroles"
+	"impactgraph/donor-api/internal/dbroles/dbrolestest"
 	"impactgraph/donor-api/internal/httpapi"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/payments"
@@ -90,6 +93,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 			"DELETE FROM donor_referral_touches WHERE referrer_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_preference_events WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_preferences WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
+			"DELETE FROM donor_session_events WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_sessions WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_login_links WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donors WHERE email=ANY($1::text[])",
@@ -112,7 +116,8 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	}
 	const origin = "https://donor.example.org"
 	const secret = "whsec_public_journey_fixture"
-	services := httpapi.Services{Origin: origin, EmailConfigured: true, Account: store.AccountService{DB: pool}, Donor: store.DonorService{DB: pool, Origin: origin}, Checkout: store.CheckoutService{DB: pool, Origin: origin, Gateway: journeyGateway{}}, Dashboard: store.DashboardReader{DB: pool}, Webhook: payments.Receiver{Secret: secret, Inbox: store.StripeInbox{DB: pool}}}
+	api := dbrolestest.Open(t, dbroles.API)
+	services := httpapi.Services{Origin: origin, EmailConfigured: true, Account: store.AccountService{DB: api}, Donor: store.DonorService{DB: api, Origin: origin}, Checkout: store.CheckoutService{DB: api, Origin: origin, Gateway: journeyGateway{}}, Dashboard: store.DashboardReader{DB: api}, Webhook: payments.Receiver{Secret: secret, Inbox: store.StripeInbox{DB: api}}}
 	server := httptest.NewTLSServer(httpapi.NewServer("", services).Handler)
 	defer server.Close()
 	browser := func() *http.Client {
@@ -175,8 +180,8 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	if !bytes.Contains(body, []byte(`"captured":true`)) || bytes.Contains(body, []byte(ownerEmail)) {
 		t.Fatal("referral capture privacy or state mismatch")
 	}
-	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": true, "marketing_emails": false}, nil, 200)
-	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": false, "marketing_emails": false}, nil, 409)
+	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": true, "marketing_emails": false, "push_referral_converted": true, "push_streak_at_risk": true, "push_streak_milestone": true}, nil, 200)
+	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": false, "marketing_emails": false, "push_referral_converted": true, "push_streak_at_risk": true, "push_streak_milestone": true}, nil, 409)
 	checkoutBody := map[string]any{"email": guestEmail, "amount_minor": 3000, "frequency": "ONE_TIME"}
 	body = call(guest, "POST", "/donor/checkouts", checkoutBody, map[string]string{"Idempotency-Key": requestID.String()}, 201)
 	var checkout payments.CheckoutResult
@@ -196,7 +201,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		call(guest, "POST", "/donor/stripe/webhook", raw, map[string]string{"Stripe-Signature": signature}, 200)
 	}
-	if worked, err := (store.EventWorker{DB: pool, Gateway: journeyCharges{at: now}}).ProcessNext(ctx); err != nil || !worked {
+	if worked, err := (store.EventWorker{DB: dbrolestest.Open(t, dbroles.StripeWorker), Gateway: journeyCharges{at: now}}).ProcessNext(ctx); err != nil || !worked {
 		t.Fatal(worked, err)
 	}
 	body = call(referrer, "GET", "/donor/me/dashboard", nil, nil, 200)
@@ -210,7 +215,11 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 		t.Fatal("guest credit missing", string(body), err)
 	}
 	transport := &journeyMail{}
-	email := store.LoginEmailWorker{DB: pool, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="}, Origin: origin, Transport: transport}
+	keys, err := credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := store.LoginEmailWorker{DB: dbrolestest.Open(t, dbroles.LoginEmailWorker), Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: keys}, Origin: origin, Transport: transport}
 	if worked, err := email.DeliverNext(ctx, time.Now().Add(time.Second)); err != nil || !worked {
 		t.Fatal(worked, err)
 	}

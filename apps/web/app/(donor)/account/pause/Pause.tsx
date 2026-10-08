@@ -5,14 +5,12 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
-import { api, ApiError, unconfirmedMessage } from "@/lib/api";
+import { api, ApiError, type RequestBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
 import { formatDate } from "@/lib/dates";
 
-type Dates = { months: number; starts_at: string; resumes_at: string };
-type Pause = Dates & { request_id: string; confirmed: boolean };
-type Options = { state: string; subscription_id?: string; pause: Pause | null; options: Dates[] };
+type Dates = Schema<"PauseOption">;
 
 const renewals = (months: number) => `${months} renewal${months === 1 ? "" : "s"}`;
 
@@ -21,7 +19,7 @@ export default function PauseGiving() {
   const [choice, setChoice] = useState<Dates | null>(null);
   const [opener, setOpener] = useState<number | null>(null);
   const [requestKey, setRequestKey] = useState<string | null>(null);
-  const { resource, data, failed, reload, setData } = useApiResource<Options>(signedOut ? null : "/donor/me/recurring/pause", {
+  const { resource, data, failed, reload, setData } = useApiResource<Schema<"PauseOptions">>(signedOut ? null : "/donor/me/recurring/pause", {
     onLoad: (value) => { setChoice(null); setError(""); setRequestKey(value.pause?.request_id ?? null); },
   });
   const [error, setError] = useState("");
@@ -36,10 +34,10 @@ export default function PauseGiving() {
     const key = requestKey ?? crypto.randomUUID();
     setRequestKey(key); setBusy(true); setError(""); setMessage("");
     try {
-      const result = await api<{ pause: Pause }>("/donor/me/recurring/pause", {
+      const result = await api<Schema<"PauseResult">>("/donor/me/recurring/pause", {
         method: "POST", headers: { "Idempotency-Key": key },
         body: JSON.stringify({ subscription_id: data.subscription_id, months: dates.months,
-          starts_at: dates.starts_at, resumes_at: dates.resumes_at }),
+          starts_at: dates.starts_at, resumes_at: dates.resumes_at } satisfies RequestBody<"/donor/me/recurring/pause", "post">),
       });
       setData({ ...data, pause: result.pause, options: [] }); setChoice(null);
       setMessage(result.pause.confirmed ? "Pause confirmed." : "Pause not yet confirmed.");

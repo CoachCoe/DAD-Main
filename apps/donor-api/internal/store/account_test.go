@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -22,39 +23,40 @@ func accountCleanup(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID) {
 		}
 	})
 }
-func claimProof(t *testing.T, pool *pgxpool.Pool, proof string) string {
+func claimProof(t *testing.T, proof string) string {
 	t.Helper()
 	ctx := context.Background()
-	tx, err := pool.Begin(ctx)
+	tx, err := as(t, dbroles.API).Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	token, _, err := claim(ctx, tx, proof)
+	tokens, _, err := claim(ctx, tx, proof, Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	return token
+	return tokens.Access
 }
 func TestClaimRefreshesAndReplacesOnlyThisBrowser(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	old := claimProof(t, pool, link(t, pool, id, now))
-	other := claimProof(t, pool, link(t, pool, id, now))
+	old := claimProof(t, link(t, pool, id, now))
+	other := claimProof(t, link(t, pool, id, now))
 	proof := link(t, pool, id, now)
-	service := AccountService{DB: pool}
-	token, err := service.ClaimAccount(ctx, proof, old)
+	service := AccountService{DB: api}
+	tokens, err := service.ClaimAccount(ctx, proof, old, Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	q := queries.New(pool)
-	for _, session := range []string{token, other} {
+	for _, session := range []string{tokens.Access, other} {
 		if _, err = authenticate(ctx, q, session, time.Now()); err != nil {
 			t.Fatal(err)
 		}
@@ -66,12 +68,13 @@ func TestClaimRefreshesAndReplacesOnlyThisBrowser(t *testing.T) {
 	if err != nil || !projection.CurrentStreak.Valid || projection.CurrentStreak.Int32 != 0 || projection.NetMinor.Int64 != 0 {
 		t.Fatal("claim did not atomically initialize recognition")
 	}
-	if _, err = service.ClaimAccount(ctx, proof, token); !errors.Is(err, ErrDenied) {
+	if _, err = service.ClaimAccount(ctx, proof, tokens.Access, Client{}); !errors.Is(err, ErrDenied) {
 		t.Fatal("proof reused")
 	}
 }
 func TestClaimProjectionFailureRollsBackProofAndSession(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	ctx := context.Background()
@@ -85,8 +88,8 @@ func TestClaimProjectionFailureRollsBackProofAndSession(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES ($1,$2,$3,$4,3000,'USD','BROKEN',$5)`, gift, id, checkout, "pi_"+gift.String(), now); err != nil {
 		t.Fatal(err)
 	}
-	service := AccountService{DB: pool}
-	if token, err := service.ClaimAccount(ctx, proof, ""); err == nil || token != "" {
+	service := AccountService{DB: api}
+	if tokens, err := service.ClaimAccount(ctx, proof, "", Client{}); err == nil || tokens.Access != "" {
 		t.Fatal("failed projection exposed session")
 	}
 	var claimed *time.Time
@@ -100,7 +103,7 @@ func TestClaimProjectionFailureRollsBackProofAndSession(t *testing.T) {
 	if _, err := pool.Exec(ctx, "UPDATE donor_gifts SET frequency='ONE_TIME' WHERE id=$1", gift); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ClaimAccount(ctx, proof, ""); err != nil {
+	if _, err := service.ClaimAccount(ctx, proof, "", Client{}); err != nil {
 		t.Fatalf("rolled-back proof unusable: %v", err)
 	}
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 AND kind='RECEIPT'", id).Scan(&count); err != nil || count != 1 {
@@ -109,9 +112,10 @@ func TestClaimProjectionFailureRollsBackProofAndSession(t *testing.T) {
 }
 func TestLoginQueueDeduplicatesConcurrentRequests(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, email := donor(t, pool)
 	accountCleanup(t, pool, id)
-	service := AccountService{DB: pool}
+	service := AccountService{DB: api}
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	results := make(chan error, 5)

@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/dbroles"
+	"impactgraph/donor-api/internal/dbroles/dbrolestest"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -92,7 +94,8 @@ func (f retentionFixture) remaining(t *testing.T, ids ...pgtype.UUID) map[pgtype
 	return found
 }
 
-// purgeAll runs one pass with batches of size batch, as the worker does.
+// purgeAll runs one pass with batches of size batch, as the worker does on
+// its pool.
 func purgeAll(t *testing.T, pool *pgxpool.Pool, now time.Time, batch int32) [][]queries.PurgeReferralTouchesRow {
 	t.Helper()
 	var batches [][]queries.PurgeReferralTouchesRow
@@ -137,7 +140,7 @@ func TestTouchPurgeDeletesOnlyUnconvertedTouchesPastRetention(t *testing.T) {
 	recent := f.touch(t, "LINK", cutoff.Add(time.Minute), cutoff.Add(time.Minute+window))
 	inWindow := f.touch(t, "IRL", old, now.Add(time.Hour))
 
-	purgeAll(t, f.pool, now, touchPurgeBatch)
+	purgeAll(t, as(t, dbroles.ProjectionWorker), now, touchPurgeBatch)
 	left := f.remaining(t, converted, unconverted, otherKind, abandoned, paidLate, recent, inWindow)
 	if !left[converted] {
 		t.Error("touch that led to an attributed gift deleted")
@@ -172,7 +175,9 @@ func TestTouchPurgeBatchesAreBoundedAndConcurrentPassesShareTheWork(t *testing.T
 		mine[id] = true
 	}
 
-	first, err := purgeTouches(context.Background(), f.pool, now, queries.PurgeReferralTouchesRow{}, 4)
+	// Three workers, each with its own pool, as separate processes would have.
+	workers := []*pgxpool.Pool{dbrolestest.Open(t, dbroles.ProjectionWorker), dbrolestest.Open(t, dbroles.ProjectionWorker), dbrolestest.Open(t, dbroles.ProjectionWorker)}
+	first, err := purgeTouches(context.Background(), workers[0], now, queries.PurgeReferralTouchesRow{}, 4)
 	if err != nil || len(first) != 4 || first[0].ID != ids[0] || first[3].ID != ids[3] {
 		t.Fatal("first batch was not the four oldest touches", err)
 	}
@@ -182,7 +187,7 @@ func TestTouchPurgeBatchesAreBoundedAndConcurrentPassesShareTheWork(t *testing.T
 	var wg sync.WaitGroup
 	for runner := range 3 {
 		wg.Go(func() {
-			for _, batch := range purgeAll(t, f.pool, now, 4) {
+			for _, batch := range purgeAll(t, workers[runner], now, 4) {
 				if len(batch) > 4 {
 					t.Errorf("batch of %d exceeds 4", len(batch))
 				}
@@ -222,7 +227,7 @@ FROM generate_series(1,$2::int) n, LATERAL (SELECT $3::timestamptz+n*interval '1
 		return n
 	}
 
-	retention := &TouchRetention{DB: f.pool}
+	retention := &TouchRetention{DB: as(t, dbroles.ProjectionWorker)}
 	if worked, err := retention.PurgeNext(ctx, now); err != nil || !worked || count() != 1 {
 		t.Fatal("first batch did not delete exactly one batch", err)
 	}

@@ -1,5 +1,8 @@
 name: impactgraph
 
+# Every donor service receives ENV_FILE, so it holds no database credentials. Each service
+# instead gets its own login's URL from the database environment file, which Compose only
+# interpolates; see docs/operations.md#database-roles.
 x-donor: &donor
   image: ${IMAGE_PREFIX:-impactgraph}/api:${IMAGE_TAG:?set IMAGE_TAG}
   build:
@@ -36,11 +39,13 @@ services:
       # Only the web proxy may supply X-Real-IP; it strips any client-sent copy.
       DONOR_TRUSTED_PROXY_CIDRS: 172.30.42.10/32
       DONOR_STAFF_ORIGIN: ${DONOR_STAFF_ORIGIN:?set DONOR_STAFF_ORIGIN}
-    # Wallet signing keys stay outside the image. Mount them read-only (files readable
-    # by uid 10001) and set DONOR_WALLET_*_FILE to the container paths, for example
-    # DONOR_WALLET_GOOGLE_KEY_FILE=/run/secrets/wallet/google.json.
+      DONOR_API_DATABASE_URL: ${DONOR_API_DATABASE_URL:?set DONOR_API_DATABASE_URL}
+    # Wallet signing and push provider keys stay outside the image. Mount them read-only
+    # (files readable by uid 10001) and set DONOR_WALLET_*_FILE and DONOR_PUSH_*_FILE to
+    # the container paths, for example DONOR_WALLET_GOOGLE_KEY_FILE=/run/secrets/wallet/google.json.
     # volumes:
     #   - /etc/impactgraph/wallet:/run/secrets/wallet:ro
+    #   - /etc/impactgraph/push:/run/secrets/push:ro
     ports: ["127.0.0.1:${API_PORT:-8002}:8002"]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8002/health/live]
@@ -53,35 +58,98 @@ services:
     <<: *donor
     command: [migrate]
     profiles: [maintenance]
+    environment:
+      DONOR_GO_DATABASE_URL: ${DONOR_GO_DATABASE_URL:?set DONOR_GO_DATABASE_URL}
+
+  provision:
+    <<: *donor
+    command: [provision]
+    profiles: [maintenance]
+    environment:
+      DONOR_GO_DATABASE_URL: ${DONOR_GO_DATABASE_URL:?set DONOR_GO_DATABASE_URL}
+      DONOR_API_DATABASE_URL: ${DONOR_API_DATABASE_URL:?set DONOR_API_DATABASE_URL}
+      DONOR_WORKER_STRIPE_DATABASE_URL: ${DONOR_WORKER_STRIPE_DATABASE_URL:?set DONOR_WORKER_STRIPE_DATABASE_URL}
+      DONOR_WORKER_PROJECTIONS_DATABASE_URL: ${DONOR_WORKER_PROJECTIONS_DATABASE_URL:?set DONOR_WORKER_PROJECTIONS_DATABASE_URL}
+      DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL: ${DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL:?set DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL}
+      DONOR_WORKER_EMAIL_CHANGES_DATABASE_URL: ${DONOR_WORKER_EMAIL_CHANGES_DATABASE_URL:?set DONOR_WORKER_EMAIL_CHANGES_DATABASE_URL}
+      DONOR_WORKER_MESSAGES_DATABASE_URL: ${DONOR_WORKER_MESSAGES_DATABASE_URL:?set DONOR_WORKER_MESSAGES_DATABASE_URL}
+      DONOR_WORKER_PUSH_DATABASE_URL: ${DONOR_WORKER_PUSH_DATABASE_URL:?set DONOR_WORKER_PUSH_DATABASE_URL}
+      DONOR_MONITOR_DATABASE_URL: ${DONOR_MONITOR_DATABASE_URL:?set DONOR_MONITOR_DATABASE_URL}
+      DONOR_STAFF_CLI_DATABASE_URL: ${DONOR_STAFF_CLI_DATABASE_URL:?set DONOR_STAFF_CLI_DATABASE_URL}
+      DONOR_REKEY_DATABASE_URL: ${DONOR_REKEY_DATABASE_URL:?set DONOR_REKEY_DATABASE_URL}
+
+  monitor:
+    <<: *donor
+    command: [monitor]
+    profiles: [maintenance]
+    environment:
+      DONOR_MONITOR_DATABASE_URL: ${DONOR_MONITOR_DATABASE_URL:?set DONOR_MONITOR_DATABASE_URL}
+
+  staff:
+    <<: *donor
+    command: [staff]
+    profiles: [maintenance]
+    environment:
+      DONOR_STAFF_CLI_DATABASE_URL: ${DONOR_STAFF_CLI_DATABASE_URL:?set DONOR_STAFF_CLI_DATABASE_URL}
+
+  rekey:
+    <<: *donor
+    command: [rekey]
+    profiles: [maintenance]
+    environment:
+      DONOR_REKEY_DATABASE_URL: ${DONOR_REKEY_DATABASE_URL:?set DONOR_REKEY_DATABASE_URL}
 
   stripe-worker:
     <<: *donor
     command: [worker, --kind, stripe]
     profiles: [workers]
+    environment:
+      DONOR_WORKER_STRIPE_DATABASE_URL: ${DONOR_WORKER_STRIPE_DATABASE_URL:?set DONOR_WORKER_STRIPE_DATABASE_URL}
     restart: unless-stopped
 
   projection-worker:
     <<: *donor
     command: [worker, --kind, projections]
     profiles: [workers]
+    environment:
+      DONOR_WORKER_PROJECTIONS_DATABASE_URL: ${DONOR_WORKER_PROJECTIONS_DATABASE_URL:?set DONOR_WORKER_PROJECTIONS_DATABASE_URL}
     restart: unless-stopped
 
   login-email-worker:
     <<: *donor
     command: [worker, --kind, login-email]
     profiles: [workers]
+    environment:
+      DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL: ${DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL:?set DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL}
     restart: unless-stopped
 
   message-worker:
     <<: *donor
     command: [worker, --kind, messages]
     profiles: [workers]
+    environment:
+      DONOR_WORKER_MESSAGES_DATABASE_URL: ${DONOR_WORKER_MESSAGES_DATABASE_URL:?set DONOR_WORKER_MESSAGES_DATABASE_URL}
     restart: unless-stopped
 
   email-change-worker:
     <<: *donor
     command: [worker, --kind, email-changes]
     profiles: [workers]
+    environment:
+      DONOR_WORKER_EMAIL_CHANGES_DATABASE_URL: ${DONOR_WORKER_EMAIL_CHANGES_DATABASE_URL:?set DONOR_WORKER_EMAIL_CHANGES_DATABASE_URL}
+    restart: unless-stopped
+
+  # Push provider keys stay outside the image, like the API's Wallet keys: mount them
+  # read-only and set DONOR_PUSH_APNS_KEY_FILE and DONOR_PUSH_FCM_KEY_FILE to the
+  # container paths. The API reads the same settings to accept device registrations.
+  push-worker:
+    <<: *donor
+    command: [worker, --kind, push]
+    profiles: [workers]
+    environment:
+      DONOR_WORKER_PUSH_DATABASE_URL: ${DONOR_WORKER_PUSH_DATABASE_URL:?set DONOR_WORKER_PUSH_DATABASE_URL}
+    # volumes:
+    #   - /etc/impactgraph/push:/run/secrets/push:ro
     restart: unless-stopped
 
   web:

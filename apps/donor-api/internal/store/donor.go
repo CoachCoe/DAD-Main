@@ -18,9 +18,9 @@ import (
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-// consentVersion names the notification consent wording a donor accepted;
-// RecordPreferenceConsent records the same value.
-const consentVersion = "r1-notifications-v1"
+// consentVersion names the notification consent wording a donor accepted,
+// which preference events record.
+const consentVersion = "r2-notifications-v1"
 
 // referralWindow is how long the first valid referral touch holds.
 const referralWindow = 30 * 24 * time.Hour
@@ -52,17 +52,38 @@ type DonorService struct {
 	Origin string
 }
 type Profile struct {
-	Email           string  `json:"email"`
-	PublicName      *string `json:"public_name"`
-	ReferralEmails  bool    `json:"referral_emails"`
-	MarketingEmails bool    `json:"marketing_emails"`
-	Version         int32   `json:"version"`
-	ConsentVersion  string  `json:"consent_version"`
+	Email          string  `json:"email"`
+	PublicName     *string `json:"public_name"`
+	ConsentVersion string  `json:"consent_version"`
+	Preferences
 }
+
+// Preferences are the donor's notification choices. Email is opt-in; app
+// notifications start on, since the device's permission prompt is the opt-in.
 type Preferences struct {
-	Version                         int32
-	ReferralEmails, MarketingEmails bool
+	Version               int32 `json:"version"`
+	ReferralEmails        bool  `json:"referral_emails"`
+	MarketingEmails       bool  `json:"marketing_emails"`
+	PushReferralConverted bool  `json:"push_referral_converted"`
+	PushStreakAtRisk      bool  `json:"push_streak_at_risk"`
+	PushStreakMilestone   bool  `json:"push_streak_milestone"`
 }
+
+// defaultPreferences apply until a donor first saves a choice.
+var defaultPreferences = Preferences{PushReferralConverted: true, PushStreakAtRisk: true, PushStreakMilestone: true}
+
+// readPreferences returns the donor's current choices.
+func readPreferences(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (Preferences, error) {
+	pref, err := q.DonorPreference(ctx, donor)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return defaultPreferences, nil
+	}
+	return Preferences{
+		Version: pref.Version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
+		PushReferralConverted: pref.PushReferralConverted, PushStreakAtRisk: pref.PushStreakAtRisk, PushStreakMilestone: pref.PushStreakMilestone,
+	}, err
+}
+
 type Sharing struct {
 	PublicName *string `json:"public_name"`
 	Link       *string `json:"link"`
@@ -80,18 +101,8 @@ type GiftsPage struct {
 }
 
 func readProfile(ctx context.Context, q *queries.Queries, donor queries.Donor) (Profile, error) {
-	out := Profile{Email: donor.Email, PublicName: textPointer(donor.PublicName), ConsentVersion: consentVersion}
-	pref, err := q.DonorPreference(ctx, donor.ID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return out, nil
-	}
-	if err != nil {
-		return out, err
-	}
-	out.ReferralEmails = pref.ReferralEmails
-	out.MarketingEmails = pref.MarketingEmails
-	out.Version = pref.Version
-	return out, nil
+	pref, err := readPreferences(ctx, q, donor.ID)
+	return Profile{Email: donor.Email, PublicName: textPointer(donor.PublicName), ConsentVersion: consentVersion, Preferences: pref}, err
 }
 func (s DonorService) Profile(ctx context.Context, token string) (Profile, error) {
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (Profile, error) { return readProfile(ctx, q, d) })
@@ -114,24 +125,25 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, pref Pr
 			return Profile{}, err
 		}
 		version := current.Version + 1
-		if err = q.SavePreference(ctx, queries.SavePreferenceParams{ID: id, DonorID: d.ID, Version: version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails}); err != nil {
+		if err = q.SavePreference(ctx, queries.SavePreferenceParams{
+			ID: id, DonorID: d.ID, Version: version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
+			PushReferralConverted: pref.PushReferralConverted, PushStreakAtRisk: pref.PushStreakAtRisk, PushStreakMilestone: pref.PushStreakMilestone,
+		}); err != nil {
 			return Profile{}, err
 		}
 		event, err := NewID()
 		if err != nil {
 			return Profile{}, err
 		}
-		if err = q.RecordPreferenceConsent(ctx, queries.RecordPreferenceConsentParams{ID: event, DonorID: d.ID, Version: version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails}); err != nil {
+		if err = q.RecordPreferenceConsent(ctx, queries.RecordPreferenceConsentParams{
+			ID: event, DonorID: d.ID, Version: version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
+			PushReferralConverted: pgtype.Bool{Bool: pref.PushReferralConverted, Valid: true}, PushStreakAtRisk: pgtype.Bool{Bool: pref.PushStreakAtRisk, Valid: true},
+			PushStreakMilestone: pgtype.Bool{Bool: pref.PushStreakMilestone, Valid: true}, ConsentVersion: consentVersion,
+		}); err != nil {
 			return Profile{}, err
 		}
 		return readProfile(ctx, q, d)
 	})
-}
-func (s DonorService) SignOutEverywhere(ctx context.Context, token string) error {
-	_, err := donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (struct{}, error) {
-		return struct{}{}, queries.New(tx).RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: d.ID, RevokedAt: timestamp(now)})
-	})
-	return err
 }
 
 // sharing offers referral links only once the donor has chosen a public name.
@@ -268,6 +280,37 @@ func (s DonorService) Gifts(ctx context.Context, token string, offset int64) (Gi
 		return out, nil
 	})
 }
+
+// conversionPage bounds a conversions response, matching ReferralConversions.
+const conversionPage = 20
+
+// Conversions are the donor's latest referral conversions, newest first. More
+// says older ones after since were left out.
+type Conversions struct {
+	Conversions []queries.ReferralConversionsRow `json:"conversions"`
+	More        bool                             `json:"more"`
+}
+
+// Conversions lists the referrals that converted after since, if set: when
+// each referred donor's first gift was paid, and its channel. Nothing about
+// a referred donor is shown, as on the dashboard.
+func (s DonorService) Conversions(ctx context.Context, token string, since *time.Time) (Conversions, error) {
+	after := pgtype.Timestamptz{}
+	if since != nil {
+		after = timestamp(*since)
+	}
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (Conversions, error) {
+		rows, err := q.ReferralConversions(ctx, queries.ReferralConversionsParams{ReferrerID: d.ID, Since: after})
+		if err != nil {
+			return Conversions{}, err
+		}
+		if len(rows) > conversionPage {
+			return Conversions{Conversions: rows[:conversionPage], More: true}, nil
+		}
+		return Conversions{Conversions: rows}, nil
+	})
+}
+
 func (s DonorService) Receipt(ctx context.Context, token string, gift pgtype.UUID) (Receipt, error) {
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (Receipt, error) {
 		return readReceipt(ctx, q, d.ID, gift, now)

@@ -3,10 +3,15 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"impactgraph/donor-api/internal/store"
 )
@@ -17,6 +22,8 @@ var appSession = strings.Repeat("s", 43)
 type sessionDonor struct {
 	DonorSource
 	sessions []string
+	revoked  pgtype.UUID
+	err      error
 }
 
 func (s *sessionDonor) check(token string) error {
@@ -24,7 +31,7 @@ func (s *sessionDonor) check(token string) error {
 	if token != appSession {
 		return store.ErrDenied
 	}
-	return nil
+	return s.err
 }
 
 func (s *sessionDonor) Profile(_ context.Context, token string) (store.Profile, error) {
@@ -39,6 +46,19 @@ func (s *sessionDonor) SignOutEverywhere(_ context.Context, token string) error 
 	return s.check(token)
 }
 
+func (s *sessionDonor) Sessions(_ context.Context, token string) (store.Sessions, error) {
+	return store.Sessions{Sessions: []store.DeviceSession{{Label: "Web browser", Current: true}}}, s.check(token)
+}
+
+func (s *sessionDonor) SignOutSession(_ context.Context, token string, id pgtype.UUID) (store.Sessions, error) {
+	s.revoked = id
+	return store.Sessions{Sessions: []store.DeviceSession{}}, s.check(token)
+}
+
+func (s *sessionDonor) SignOutOthers(_ context.Context, token string) (store.Sessions, error) {
+	return store.Sessions{Sessions: []store.DeviceSession{}}, s.check(token)
+}
+
 func appRequest(method, path, body string) *http.Request {
 	r := httptest.NewRequest(method, path, strings.NewReader(body))
 	r.Header.Set("X-DAD-Client", "native")
@@ -46,7 +66,7 @@ func appRequest(method, path, body string) *http.Request {
 	return r
 }
 
-const preferences = `{"version":0,"referral_emails":true,"marketing_emails":false}`
+const preferences = `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":false,"push_streak_milestone":true}`
 
 func TestDonorSessionSource(t *testing.T) {
 	for _, tc := range []struct {
@@ -147,13 +167,13 @@ func TestAppRequestsAreRateLimited(t *testing.T) {
 	}
 }
 
-func TestClaimReturnsSessionTokenOnlyToTheApp(t *testing.T) {
+func TestClaimReturnsTokensOnlyToTheApp(t *testing.T) {
 	proof := `{"token":"` + strings.Repeat("p", 43) + `"}`
 	for _, tc := range []struct {
 		name        string
 		request     func() *http.Request
 		status      int
-		bodyToken   bool
+		bodyTokens  bool
 		cookieToken bool
 	}{
 		{"app", func() *http.Request {
@@ -182,15 +202,125 @@ func TestClaimReturnsSessionTokenOnlyToTheApp(t *testing.T) {
 		NewServer("", Services{Account: &accountStub{}}).Handler.ServeHTTP(response, tc.request())
 		var body map[string]any
 		_ = json.Unmarshal(response.Body.Bytes(), &body)
-		_, bodyToken := body["session_token"]
-		cookieToken := strings.Contains(response.Header().Get("Set-Cookie"), "new-secret-session")
-		if response.Code != tc.status || bodyToken != tc.bodyToken || cookieToken != tc.cookieToken {
-			t.Errorf("%s: got %d, token in body %v, in cookie %v; want %d, %v, %v",
-				tc.name, response.Code, bodyToken, cookieToken, tc.status, tc.bodyToken, tc.cookieToken)
+		_, access := body["access_token"]
+		_, refresh := body["refresh_token"]
+		cookieToken := strings.Contains(response.Header().Get("Set-Cookie"), browserTokens.Access)
+		if response.Code != tc.status || access != tc.bodyTokens || refresh != tc.bodyTokens || cookieToken != tc.cookieToken {
+			t.Errorf("%s: got %d, tokens in body %v/%v, in cookie %v; want %d, %v, %v",
+				tc.name, response.Code, access, refresh, cookieToken, tc.status, tc.bodyTokens, tc.cookieToken)
 		}
-		if tc.bodyToken && (body["session_token"] != "new-secret-session" || body["expires_in"] != float64(donorSessionAge)) {
-			t.Errorf("%s: native session body %v", tc.name, body)
+		want := map[string]any{"access_token": appTokens.Access, "expires_in": float64(15 * 60), "refresh_token": appTokens.Refresh, "refresh_expires_in": float64(60 * 24 * 60 * 60)}
+		if tc.bodyTokens && !reflect.DeepEqual(body, want) {
+			t.Errorf("%s: native session body %v, want %v", tc.name, body, want)
 		}
+	}
+}
+
+func TestClaimRecordsOnlyTheAppsDeviceDescription(t *testing.T) {
+	proof := strings.Repeat("p", 43)
+	name := strings.Repeat("é", store.MaxDeviceName)
+	for _, tc := range []struct {
+		name, fields string
+		app          bool
+		status       int
+		client       store.Client
+	}{
+		{"app device", `,"device_name":"` + name + `","platform":"IOS"`, true, http.StatusOK, store.Client{App: true, Device: name, Platform: "IOS"}},
+		{"app without description", ``, true, http.StatusOK, store.Client{App: true}},
+		{"browser description ignored", `,"device_name":"Laptop","platform":"ANDROID"`, false, http.StatusOK, store.Client{}},
+		{"unknown platform", `,"platform":"WINDOWS"`, true, http.StatusUnprocessableEntity, store.Client{}},
+		{"null platform", `,"platform":null`, true, http.StatusUnprocessableEntity, store.Client{}},
+		{"long device name", `,"device_name":"` + name + `x"`, true, http.StatusUnprocessableEntity, store.Client{}},
+	} {
+		body := `{"token":"` + proof + `"` + tc.fields + `}`
+		r := httptest.NewRequest("POST", "/donor/claim", strings.NewReader(body))
+		if tc.app {
+			r.Header.Set("X-DAD-Client", "native")
+		} else {
+			r.Header.Set("Origin", "http://localhost:3000")
+		}
+		stub := &accountStub{}
+		response := httptest.NewRecorder()
+		NewServer("", Services{Account: stub}).Handler.ServeHTTP(response, r)
+		if response.Code != tc.status || stub.client != tc.client {
+			t.Errorf("%s: got %d issuing to %+v, want %d issuing to %+v", tc.name, response.Code, stub.client, tc.status, tc.client)
+		}
+	}
+}
+
+func TestRefreshServesOnlyTheApp(t *testing.T) {
+	refresh := strings.Repeat("f", 43) + "." + strings.Repeat("s", 43)
+	body := `{"refresh_token":"` + refresh + `"}`
+	app := func() *http.Request {
+		r := httptest.NewRequest("POST", "/donor/refresh", strings.NewReader(body))
+		r.Header.Set("X-DAD-Client", "native")
+		return r
+	}
+	stub := &accountStub{}
+	response := httptest.NewRecorder()
+	NewServer("", Services{Account: stub}).Handler.ServeHTTP(response, app())
+	var tokens map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &tokens); err != nil || response.Code != http.StatusOK || stub.refresh != refresh ||
+		tokens["access_token"] != appTokens.Access || tokens["refresh_token"] != appTokens.Refresh || response.Header().Get("Set-Cookie") != "" {
+		t.Fatalf("app refresh: got %d %s exchanging %q, want 200 with new tokens and no cookie", response.Code, response.Body, stub.refresh)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*http.Request)
+	}{
+		{"same-origin browser", func(r *http.Request) { r.Header.Set("Origin", "http://localhost:3000") }},
+		{"browser without origin", func(r *http.Request) { r.Header.Del("X-DAD-Client") }},
+		{"marker with cookie", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: donorCookie, Value: appSession}) }},
+	} {
+		stub := &accountStub{}
+		r := app()
+		tc.mutate(r)
+		response := httptest.NewRecorder()
+		NewServer("", Services{Account: stub}).Handler.ServeHTTP(response, r)
+		if response.Code != http.StatusForbidden || stub.refresh != "" || strings.Contains(response.Body.String(), "token") {
+			t.Errorf("%s: got %d %s after exchanging %q, want 403 before the store", tc.name, response.Code, response.Body, stub.refresh)
+		}
+	}
+}
+
+func TestRefreshAnswersWithoutLeakingCauses(t *testing.T) {
+	refresh := `{"refresh_token":"` + strings.Repeat("f", 43) + "." + strings.Repeat("s", 43) + `"}`
+	for _, tc := range []struct {
+		body   string
+		err    error
+		status int
+	}{
+		{refresh, store.ErrDenied, http.StatusUnauthorized},
+		{refresh, errors.New("private failure"), http.StatusServiceUnavailable},
+		{`{"refresh_token":"short"}`, nil, http.StatusUnprocessableEntity},
+		{`{}`, nil, http.StatusUnprocessableEntity},
+	} {
+		r := httptest.NewRequest("POST", "/donor/refresh", strings.NewReader(tc.body))
+		r.Header.Set("X-DAD-Client", "native")
+		response := httptest.NewRecorder()
+		NewServer("", Services{Account: &accountStub{err: tc.err}}).Handler.ServeHTTP(response, r)
+		if response.Code != tc.status || strings.Contains(response.Body.String(), "private") || strings.Contains(response.Body.String(), appTokens.Refresh) {
+			t.Errorf("%s with %v: got %d %s, want %d without causes or tokens", tc.body, tc.err, response.Code, response.Body, tc.status)
+		}
+	}
+}
+
+func TestRefreshUsesTheAccountBudget(t *testing.T) {
+	server := NewServer("", Services{Account: &accountStub{}})
+	refresh := func() int {
+		r := httptest.NewRequest("POST", "/donor/refresh", strings.NewReader(`{"refresh_token":"`+strings.Repeat("r", 87)+`"}`))
+		r.Header.Set("X-DAD-Client", "native")
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, r)
+		return response.Code
+	}
+	for i := range accountLimit.limit {
+		if status := refresh(); status != http.StatusOK {
+			t.Fatalf("refresh %d: got %d, want 200 within the account budget", i+1, status)
+		}
+	}
+	if status := refresh(); status != http.StatusTooManyRequests {
+		t.Fatalf("refresh over budget: got %d, want 429", status)
 	}
 }
 
@@ -216,7 +346,7 @@ func TestAppLogoutRevokesBearerWithoutCookies(t *testing.T) {
 // The app may call donor account routes only; giving, referral capture,
 // partner signup, and the back office stay on the web.
 func TestOnlyDonorAccountRoutesAdmitTheApp(t *testing.T) {
-	entries := map[string]bool{"POST /donor/login": true, "POST /donor/claim": true, "POST /donor/email-change/confirm": true, "POST /donor/logout": true, "POST /donor/logout-all": true}
+	entries := map[string]bool{"POST /donor/login": true, "POST /donor/claim": true, "POST /donor/refresh": true, "POST /donor/email-change/confirm": true, "POST /donor/logout": true, "POST /donor/logout-all": true}
 	server := NewServer("", Services{})
 	for _, route := range allRoutes() {
 		if !strings.HasPrefix(route.pattern, "POST ") || route.auth == stripeAuth {
@@ -233,5 +363,58 @@ func TestOnlyDonorAccountRoutesAdmitTheApp(t *testing.T) {
 	server.Handler.ServeHTTP(response, appRequest("GET", "/donor/staff/me", ""))
 	if response.Code != http.StatusUnauthorized {
 		t.Errorf("staff read with a bearer token: got %d, want 401", response.Code)
+	}
+}
+
+func TestSessionRoutesServeCookieAndBearerCallers(t *testing.T) {
+	browser := func(method, path string) *http.Request {
+		r := httptest.NewRequest(method, path, nil)
+		r.Header.Set("Origin", "http://localhost:3000")
+		r.AddCookie(&http.Cookie{Name: donorCookie, Value: appSession})
+		return r
+	}
+	for _, caller := range []struct {
+		name    string
+		request func(method, path string) *http.Request
+	}{
+		{"cookie", browser},
+		{"bearer", func(method, path string) *http.Request { return appRequest(method, path, "") }},
+	} {
+		for _, path := range []string{"GET /donor/me/sessions", "POST /donor/me/sessions/" + testID + "/revoke", "POST /donor/me/sessions/revoke-others"} {
+			method, path, _ := strings.Cut(path, " ")
+			donor := &sessionDonor{}
+			response := httptest.NewRecorder()
+			NewServer("", Services{Donor: donor}).Handler.ServeHTTP(response, caller.request(method, path))
+			var body struct {
+				Sessions []store.DeviceSession `json:"sessions"`
+			}
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK || body.Sessions == nil || len(donor.sessions) != 1 || donor.sessions[0] != appSession {
+				t.Errorf("%s %s %s: got %d %s with sessions %q, want 200 with a session list for the caller", caller.name, method, path, response.Code, response.Body, donor.sessions)
+			}
+			if strings.HasSuffix(path, "/revoke") && donor.revoked.String() != testID {
+				t.Errorf("%s: revoked %s, want %s", caller.name, donor.revoked.String(), testID)
+			}
+		}
+	}
+}
+
+func TestSessionRevocationErrors(t *testing.T) {
+	for _, tc := range []struct {
+		path   string
+		err    error
+		status int
+		calls  int
+	}{
+		{"/donor/me/sessions/" + testID + "/revoke", store.ErrCurrentSession, http.StatusConflict, 1},
+		{"/donor/me/sessions/" + testID + "/revoke", pgx.ErrNoRows, http.StatusNotFound, 1},
+		{"/donor/me/sessions/not-a-session/revoke", nil, http.StatusNotFound, 0},
+		{"/donor/me/sessions/revoke-others", errors.New("private failure"), http.StatusServiceUnavailable, 1},
+	} {
+		donor := &sessionDonor{err: tc.err}
+		response := httptest.NewRecorder()
+		NewServer("", Services{Donor: donor}).Handler.ServeHTTP(response, appRequest("POST", tc.path, ""))
+		if response.Code != tc.status || len(donor.sessions) != tc.calls || strings.Contains(response.Body.String(), "private") {
+			t.Errorf("%s with %v: got %d %s after %d store calls, want %d after %d", tc.path, tc.err, response.Code, response.Body, len(donor.sessions), tc.status, tc.calls)
+		}
 	}
 }

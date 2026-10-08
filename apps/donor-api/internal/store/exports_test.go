@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"impactgraph/donor-api/internal/dbroles"
 )
 
 type failedExportWriter struct{}
@@ -17,6 +19,7 @@ func (failedExportWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPip
 
 func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	actor, admin := staffFixture(t, pool, "ADMIN")
 	_, support := staffFixture(t, pool, "SUPPORT")
@@ -25,7 +28,7 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 	if _, err := pool.Exec(ctx, "UPDATE donors SET public_name=$2 WHERE id=$1", id, " \t=HYPERLINK(\"https://example.invalid\")"); err != nil {
 		t.Fatal(err)
 	}
-	s := &StaffService{DB: pool}
+	s := &StaffService{DB: api}
 	if err := s.Export(ctx, support, "donors", io.Discard); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatal("support exported donors", err)
 	}

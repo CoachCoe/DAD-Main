@@ -3,14 +3,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
+import type { Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { formatDateTime } from "@/lib/dates";
 
-type Events = { events: { id: string; actor_id: string | null; action: string; target: string; at: string; details: Record<string, unknown> }[]; next_offset: number | null };
-
 export default function Audit() {
   const [offset, setOffset] = useState(0);
-  const { resource, data, reload } = useApiResource<Events>(`/donor/staff/audit?offset=${offset}`);
+  const { resource, data, reload } = useApiResource<Schema<"AuditPage">>(`/donor/staff/audit?offset=${offset}`);
   const messages = resourceMessages(resource, { loading: "Loading audit history…",
     failure: "Audit history could not be loaded right now. Please retry in a moment.",
     forbidden: "Audit history requires administrator access." });

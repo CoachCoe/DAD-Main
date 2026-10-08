@@ -5,21 +5,16 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
+import type { Schema } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { FIRST_SUMMARY_YEAR } from "@/lib/taxYear";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { formatDate, formatDateTime } from "@/lib/dates";
 
-type Gift = { id: string; amount_minor: number; refunded_minor: number; net_minor: number; paid_at: string; frequency: string;
-  refunds: { id: string; amount_minor: number; status: string; observed_at: string }[] };
-type Document = { as_of: string; receipt_id: string; gift: Gift } | {
-  as_of: string; year: number; timezone: string; gifts: Gift[]; amount_minor: number; refunded_minor: number; net_minor: number;
-};
-
 /** What is shown comes from the address (?gift= or ?year=), so every record can be linked, bookmarked and reached with Back. */
 export default function Receipts({ gift, year, defaultYear, latestYear }: { gift?: string; year?: number; defaultYear: number; latestYear: number }) {
   const path = gift ? `/donor/me/receipts/${encodeURIComponent(gift)}` : year ? `/donor/me/annual-summary/${year}` : null;
-  const { resource, data: document, failed, reload } = useApiResource<Document>(path);
+  const { resource, data: document, failed, reload } = useApiResource<Schema<"Receipt"> | Schema<"AnnualSummary">>(path);
   const messages = resourceMessages(resource, { loading: "Loading gift records…",
     failure: "This gift record could not be loaded. Check the year and try again in a moment." });
   const active = path !== null;

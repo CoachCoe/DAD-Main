@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -41,6 +42,7 @@ func (g *refundGateway) CreateRefund(_ context.Context, payment string, amount i
 
 func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	_, finance := staffFixture(t, pool, "FINANCE")
 	_, support := staffFixture(t, pool, "SUPPORT")
@@ -64,7 +66,7 @@ func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 		}
 	})
 	gateway := &refundGateway{t: t, loseAcknowledgement: true}
-	s := StaffFinanceService{Staff: &StaffService{DB: pool}, Gateway: gateway, Origin: "https://example.org"}
+	s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: gateway, Origin: "https://example.org"}
 	r := StaffFinancialRequest{RequestID: testID(t), DonorID: f.donorID, TargetID: giftID, Amount: 1000, Reason: "Donor requested partial refund"}
 	if _, err := s.Refund(ctx, support, r); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatal("support permitted refund", err)
@@ -100,6 +102,7 @@ func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 
 func TestStaffRefundCallsProcessorOutsideDonorLock(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	_, finance := staffFixture(t, pool, "FINANCE")
 	f := newWorkerFixture(t, "MONTHLY")
@@ -122,7 +125,7 @@ func TestStaffRefundCallsProcessorOutsideDonorLock(t *testing.T) {
 	})
 	stalled := newGate(t)
 	gateway := &refundGateway{t: t, beforeCreate: stalled.wait}
-	s := StaffFinanceService{Staff: &StaffService{DB: pool}, Gateway: gateway, Origin: "https://example.org"}
+	s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: gateway, Origin: "https://example.org"}
 	r := StaffFinancialRequest{RequestID: testID(t), DonorID: f.donorID, TargetID: giftID, Amount: 1000, Reason: "Donor requested partial refund"}
 	var result StaffRefund
 	err := whileStalled(t, stalled, func() error {

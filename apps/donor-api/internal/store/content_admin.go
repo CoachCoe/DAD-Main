@@ -17,8 +17,8 @@ import (
 var ErrSourceStorageUnconfigured = errors.New("source document storage is not configured")
 
 type ContentService struct {
-	Staff         *StaffService
-	EncryptionKey string
+	Staff          *StaffService
+	EncryptionKeys credentials.Keyring
 }
 type ContentDocument struct {
 	Name string
@@ -36,7 +36,7 @@ func (s ContentService) AuthorizeSourceUpload(ctx context.Context, token string)
 	if err := s.Authorize(ctx, token); err != nil {
 		return err
 	}
-	if s.EncryptionKey == "" {
+	if !s.EncryptionKeys.Configured() {
 		return ErrSourceStorageUnconfigured
 	}
 	return nil
@@ -95,10 +95,10 @@ func (s ContentService) StoreSource(ctx context.Context, token, name string, dat
 		return StoredSource{}, ErrStaffInput
 	}
 	return staffWrite(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (StoredSource, error) {
-		if s.EncryptionKey == "" {
+		if !s.EncryptionKeys.Configured() {
 			return StoredSource{}, ErrSourceStorageUnconfigured
 		}
-		ciphertext, err := credentials.Encrypt(data, s.EncryptionKey)
+		ciphertext, err := s.EncryptionKeys.Encrypt(data)
 		if err != nil {
 			return StoredSource{}, err
 		}
@@ -126,7 +126,7 @@ func (s ContentService) ReadSource(ctx context.Context, token string, id pgtype.
 		if err != nil {
 			return ContentDocument{}, err
 		}
-		data, err := credentials.Decrypt(row.EncryptedData, s.EncryptionKey)
+		data, err := s.EncryptionKeys.Decrypt(row.EncryptedData)
 		if err != nil {
 			return ContentDocument{}, err
 		}

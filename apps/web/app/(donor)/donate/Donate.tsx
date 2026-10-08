@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, failureMessage } from "@/lib/api";
+import { api, failureMessage, type RequestBody, type Schema } from "@/lib/api";
 import { formatDollars, MAX_GIFT_MINOR, MIN_GIFT_MINOR, monthlyFraming, parseDollars } from "@/lib/money";
 
 const presets = [3000, 9000, 15000];
@@ -60,13 +60,13 @@ export default function Donate() {
     const minor = parseDollars(amount);
     if (minor === null) return rejectAmount("Enter a dollar amount with no more than two decimal places, like 30 or 30.50.");
     if (minor < MIN_GIFT_MINOR || minor > MAX_GIFT_MINOR) return rejectAmount("Enter an amount between $1 and $999,999.99.");
-    const payload = JSON.stringify({ email, amount_minor: minor, frequency: monthly ? "MONTHLY" : "ONE_TIME" });
+    const payload = JSON.stringify({ email, amount_minor: minor, frequency: monthly ? "MONTHLY" : "ONE_TIME" } satisfies RequestBody<"/donor/checkouts", "post">);
     if (attempt.current?.payload !== payload) attempt.current = { payload, key: crypto.randomUUID() };
     try { sessionStorage.setItem(CHOICE_KEY, JSON.stringify({ amount, monthly, email } satisfies Choice)); } catch {}
     setBusy(true);
     let destination: URL;
     try {
-      const result = await api<{ url: string }>("/donor/checkouts", {
+      const result = await api<Schema<"CheckoutResult">>("/donor/checkouts", {
         method: "POST", headers: { "Idempotency-Key": attempt.current.key }, body: payload,
       });
       destination = new URL(result.url);

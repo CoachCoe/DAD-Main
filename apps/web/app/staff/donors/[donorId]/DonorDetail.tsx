@@ -3,23 +3,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api } from "@/lib/api";
+import { api, type Schema } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
-import type { StaffMember } from "../../Staff";
 import { formatDate, formatDateTime } from "@/lib/dates";
 
-type Subscription = { amount_minor: number; next_renewal: string; observed_at: string; status: string; stops_at: string | null };
-type Detail = { id: string; email: string; public_name: string | null; claimed: boolean; founding_donor: boolean; subscription: Subscription | null;
-  streak: { current: number | null; best: number; at_risk: boolean; computed_at: string } | null;
-  referrer: { id: string; email: string; type: string } | null;
-  gifts: { id: string; amount_minor: number; currency: string; frequency: string; paid_at: string; refunded_minor: number; net_minor: number }[];
-  referred: { id: string; email: string; type: string; net_minor: number | null }[];
-  next_gifts_offset: number | null; next_referrals_offset: number | null };
 const statusWords: Record<string, string> = { active: "Active", past_due: "Payment overdue", unpaid: "Payment overdue", paused: "Paused",
   canceled: "Cancelled", incomplete_expired: "Cancelled", incomplete: "Setting up", trialing: "Setting up" };
-type Actions = { actions: { id: string; actor_id: string; kind: string; target_id: string; amount_minor: number | null; period_end: string | null;
-  reason: string; status: string; completed_at: string | null }[]; next_offset: number | null };
 
 export default function DonorDetail({ donor }: { donor: string }) {
   const id = encodeURIComponent(donor);
@@ -28,7 +18,7 @@ export default function DonorDetail({ donor }: { donor: string }) {
   const path = `/donor/staff/donors/${id}?gifts_offset=${gifts}&referrals_offset=${referrals}`;
   const { resource, data, reload } = useApiResource(path, {
     load: async (signal) => {
-      const [detail, actor] = await Promise.all([api<Detail>(path, { signal }), api<StaffMember>("/donor/staff/me", { signal })]);
+      const [detail, actor] = await Promise.all([api<Schema<"DonorDetail">>(path, { signal }), api<Schema<"StaffView">>("/donor/staff/me", { signal })]);
       return { detail, actor };
     },
   });
@@ -76,7 +66,7 @@ export default function DonorDetail({ donor }: { donor: string }) {
 
 function ActionHistory({ donor }: { donor: string }) {
   const [offset, setOffset] = useState(0);
-  const { resource, data, reload } = useApiResource<Actions>(`/donor/staff/donors/${donor}/actions?offset=${offset}`);
+  const { resource, data, reload } = useApiResource<Schema<"ActionPage">>(`/donor/staff/donors/${donor}/actions?offset=${offset}`);
   const messages = resourceMessages(resource, { loading: "Loading staff actions…",
     failure: "Staff actions could not be loaded right now. Please retry in a moment." });
   return <section aria-labelledby="staff-actions"><h2 id="staff-actions">Staff financial actions</h2>

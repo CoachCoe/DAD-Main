@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 !.env.production.example
+!.env.database.example
 node_modules/
 .next/
 coverage/
@@ -9,6 +10,7 @@ test-results/
 playwright-report/
 *.tsbuildinfo
 apps/web/next-env.d.ts
+apps/web/lib/openapi.d.ts.tmp
 .DS_Store
 
 # Local dev-server config for the agent preview pane.

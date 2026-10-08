@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/payments"
 )
 
@@ -32,7 +33,7 @@ func TestControlCharactersAreRejectedBeforeStorage(t *testing.T) {
 	if err = (PartnerService{DB: s.DB}).Signup(ctx, testID(t), partner); !errors.Is(err, ErrStaffInput) {
 		t.Fatalf("NUL partner message: got %v, want ErrStaffInput", err)
 	}
-	_, support := staffFixture(t, s.DB, "SUPPORT")
+	_, support := staffFixture(t, database(t), "SUPPORT")
 	if _, err = (&StaffService{DB: s.DB}).SearchDonors(ctx, support, "a\x00", 0); !errors.Is(err, ErrStaffInput) {
 		t.Fatalf("NUL search: got %v, want ErrStaffInput", err)
 	}
@@ -40,13 +41,14 @@ func TestControlCharactersAreRejectedBeforeStorage(t *testing.T) {
 
 func TestDuplicateStaffInviteIsDistinct(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	_, admin := staffFixture(t, pool, "ADMIN")
 	var email string
 	_, other := staffFixture(t, pool, "SUPPORT")
 	if err := pool.QueryRow(context.Background(), "SELECT s.email FROM donor_staff s JOIN donor_staff_sessions x ON x.staff_id=s.id WHERE x.token_hash=$1", HashToken(other)).Scan(&email); err != nil {
 		t.Fatal(err)
 	}
-	_, err := (&StaffService{DB: pool}).Invite(context.Background(), admin, email, "Again", "SUPPORT")
+	_, err := (&StaffService{DB: api}).Invite(context.Background(), admin, email, "Again", "SUPPORT")
 	if !errors.Is(err, ErrStaffExists) || !errors.Is(err, ErrStaffConflict) {
 		t.Fatalf("got %v, want ErrStaffExists", err)
 	}
@@ -56,9 +58,10 @@ func TestDuplicateStaffInviteIsDistinct(t *testing.T) {
 // processor from answering callers who may not act at all.
 func TestStaffAuthorizationPrecedesPaymentConfiguration(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	_, finance := staffFixture(t, pool, "FINANCE")
 	_, support := staffFixture(t, pool, "SUPPORT")
-	s := StaffFinanceService{Staff: &StaffService{DB: pool}}
+	s := StaffFinanceService{Staff: &StaffService{DB: api}}
 	request := StaffFinancialRequest{RequestID: testID(t), DonorID: testID(t), TargetID: testID(t), Reason: "Donor asked by phone", Amount: 100}
 	for _, c := range []struct {
 		token string

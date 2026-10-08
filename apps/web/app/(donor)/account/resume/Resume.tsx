@@ -4,21 +4,17 @@ import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
-import { api, ApiError, unconfirmedMessage } from "@/lib/api";
+import { api, ApiError, type RequestBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
 import { formatDate } from "@/lib/dates";
-
-type Options = { state: "unavailable" } | { state: "ready" | "saved"; pause_id: string;
-  next_renewal: string; request_id?: string; confirmed?: boolean };
-
 
 export default function Resume() {
   const [signedOut, setSignedOut] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [requestKey, setRequestKey] = useState<string | null>(null);
-  const { resource, data, failed, reload, setData } = useApiResource<Options>(signedOut ? null : "/donor/me/recurring/resume", {
-    onLoad: (value) => { setConfirming(false); setError(""); setRequestKey(value.state === "saved" ? value.request_id ?? null : null); },
+  const { resource, data, failed, reload, setData } = useApiResource<Schema<"ResumeOptions">>(signedOut ? null : "/donor/me/recurring/resume", {
+    onLoad: (value) => { setConfirming(false); setError(""); setRequestKey(value.state === "saved" ? value.request_id : null); },
   });
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -32,9 +28,8 @@ export default function Resume() {
     const key = requestKey ?? crypto.randomUUID();
     setRequestKey(key); setBusy(true); setError(""); setMessage("");
     try {
-      const result = await api<{ request_id: string; pause_id: string; next_renewal: string; confirmed: boolean }>(
-        "/donor/me/recurring/resume", { method: "POST", headers: { "Idempotency-Key": key },
-          body: JSON.stringify({ pause_id: data.pause_id, next_renewal: data.next_renewal }) });
+      const result = await api<Schema<"Resumption">>("/donor/me/recurring/resume", { method: "POST", headers: { "Idempotency-Key": key },
+        body: JSON.stringify({ pause_id: data.pause_id, next_renewal: data.next_renewal } satisfies RequestBody<"/donor/me/recurring/resume", "post">) });
       setData({ state: "saved", ...result }); setConfirming(false);
       setMessage(result.confirmed ? `Resumption confirmed for ${formatDate(result.next_renewal)}.` : "Your resumption request is not confirmed yet.");
     } catch (cause) {
@@ -47,7 +42,7 @@ export default function Resume() {
     {signedOut || resource.state === "signedOut" ? <SignInPrompt>Sign in to manage your giving</SignInPrompt> : <>
       {data?.state === "unavailable" && <p>No pause is currently available to shorten. Giving may already resume at the next renewal.</p>}
       {data && data.state !== "unavailable" && <>
-        {data.confirmed ? !message && <p>Resumption confirmed for <time dateTime={data.next_renewal}>{formatDate(data.next_renewal)}</time>.</p> : <>
+        {data.state === "saved" && data.confirmed ? !message && <p>Resumption confirmed for <time dateTime={data.next_renewal}>{formatDate(data.next_renewal)}</time>.</p> : <>
           <p className="lead">Resume at your next regular renewal: <time dateTime={data.next_renewal}>{formatDate(data.next_renewal)}</time>.</p>
           {data.state === "saved" && !message && <p>Your resumption request is not confirmed yet.</p>}
           <p>This does not charge you immediately or collect renewals skipped during your pause.</p>

@@ -4,13 +4,11 @@ import { useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInForm } from "@/components/donor/SignInForm";
-import { api, ApiError, unconfirmedMessage } from "@/lib/api";
+import { api, ApiError, type Schema, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { formatDateTime } from "@/lib/dates";
 
-type Update = { status: "NONE" | "PENDING" | "OPEN" | "APPLIED" | "EXPIRED" | "CANCELLED"; completed_at: string | null };
-
-const states: Partial<Record<Update["status"], string>> = {
+const states: Partial<Record<Schema<"PaymentMethodStatus">["status"], string>> = {
   PENDING: "Your update is not confirmed yet. You can continue the Stripe flow or refresh after completing it.",
   OPEN: "Your update is not confirmed yet. You can continue the Stripe flow or refresh after completing it.",
   EXPIRED: "The Stripe session expired. Start a new update below.",
@@ -20,7 +18,7 @@ const states: Partial<Record<Update["status"], string>> = {
 export default function PaymentMethod() {
   const [signedOut, setSignedOut] = useState(false);
   const key = useRef<string | null>(null);
-  const { resource, data, failed, reload, setData } = useApiResource<Update>(signedOut ? null : "/donor/me/payment-method", {
+  const { resource, data, failed, reload, setData } = useApiResource<Schema<"PaymentMethodStatus">>(signedOut ? null : "/donor/me/payment-method", {
     onLoad: () => { key.current = null; setError(""); },
   });
   const [error, setError] = useState("");
@@ -32,15 +30,15 @@ export default function PaymentMethod() {
     setBusy(true); setError("");
     key.current ??= crypto.randomUUID();
     try {
-      const result = await api<{ url: string | null; status?: Update["status"]; completed_at?: string | null }>("/donor/me/payment-method/setup", {
+      const result = await api<Schema<"PaymentUpdate">>("/donor/me/payment-method/setup", {
         method: "POST", headers: { "Idempotency-Key": key.current },
       });
-      if (result.url === null && (result.status === "APPLIED" || result.status === "CANCELLED")) {
-        setData({ status: result.status, completed_at: result.completed_at ?? null });
+      if (result.url === null) {
+        setData((current) => ({ ...current, status: result.status, completed_at: result.completed_at }));
         key.current = null;
         return;
       }
-      const url = new URL(result.url ?? "about:blank");
+      const url = new URL(result.url);
       if (url.protocol !== "https:" || url.host !== "checkout.stripe.com" || url.username || url.password) {
         setError("We could not open Stripe: it returned an unexpected address. Retry, or refresh to check whether the update has completed.");
         return;

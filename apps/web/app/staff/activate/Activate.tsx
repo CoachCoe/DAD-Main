@@ -3,11 +3,11 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { ApiError, api, classifyFailure, failureMessage } from "@/lib/api";
+import { ApiError, api, classifyFailure, failureMessage, type Schema } from "@/lib/api";
 import { type Ceremony, createPasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, passkeysSupported, UNSUPPORTED_MESSAGE, WAITING_MESSAGE } from "@/lib/passkeys";
 import { useHashToken } from "@/lib/useHashToken";
 
-type Invitation = Ceremony<PublicKeyCredentialCreationOptionsJSON> & { email: string; name: string };
+type Invitation = Ceremony<PublicKeyCredentialCreationOptionsJSON> & Pick<Schema<"Invitation">, "email" | "name">;
 
 // The server keeps a ceremony for five minutes. An older one is replaced before the passkey
 // is made, so a slow reader is not left holding a passkey the server will refuse.

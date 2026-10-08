@@ -81,7 +81,7 @@ func (w LoginEmailWorker) claim(ctx context.Context, site publicSite, id pgtype.
 		if err = q.ClaimLoginEmail(ctx, queries.ClaimLoginEmailParams{ID: id, AvailableAt: timestamp(now.Add(deliveryLease))}); err != nil {
 			return err
 		}
-		token, err := loginToken(job.EncryptedToken, w.Settings.EncryptionKey)
+		token, err := loginToken(job.EncryptedToken, w.Settings.EncryptionKeys)
 		if err != nil {
 			category := "DeliveryError"
 			if errors.Is(err, credentials.ErrInvalid) {
@@ -106,8 +106,8 @@ func (w LoginEmailWorker) claim(ctx context.Context, site publicSite, id pgtype.
 
 // loginToken decrypts a queued sign-in token. Tokens are 32 random bytes in
 // unpadded URL-safe base64, the contract shared with every issued claim link.
-func loginToken(ciphertext []byte, key string) (string, error) {
-	token, err := credentials.Decrypt(ciphertext, key)
+func loginToken(ciphertext []byte, keys credentials.Keyring) (string, error) {
+	token, err := keys.Decrypt(ciphertext)
 	if err != nil {
 		return "", err
 	}
@@ -150,7 +150,7 @@ func (w LoginEmailWorker) prepare(ctx context.Context, now time.Time) (pgtype.UU
 		if err != nil {
 			return err
 		}
-		ciphertext, err := credentials.Encrypt([]byte(token), w.Settings.EncryptionKey)
+		ciphertext, err := w.Settings.EncryptionKeys.Encrypt([]byte(token))
 		if err != nil {
 			return err
 		}

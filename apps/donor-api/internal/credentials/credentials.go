@@ -5,7 +5,9 @@ package credentials
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/fernet/fernet-go"
@@ -23,30 +25,67 @@ func key(value string) (*fernet.Key, error) {
 	return k, nil
 }
 
-// ValidateKey reports whether value is a usable encryption key, so services
-// can refuse to start instead of failing on first use.
-func ValidateKey(value string) error {
-	_, err := key(value)
-	return err
+// KeyError names the unusable entry of a key list by position, counting from
+// one, so a configuration error never has to repeat key material.
+type KeyError struct{ Position, Count int }
+
+func (e *KeyError) Error() string {
+	return fmt.Sprintf("key %d of %d must be 32 bytes of URL-safe base64", e.Position, e.Count)
 }
 
-func Encrypt(value []byte, encodedKey string) ([]byte, error) {
-	k, err := key(encodedKey)
-	if err != nil {
-		return nil, err
+func (e *KeyError) Is(target error) bool { return target == ErrInvalid }
+
+// Keyring is an ordered list of Fernet keys. The first, the primary,
+// encrypts; any of them decrypts, so a new key can be prepended and data
+// re-encrypted before the old key is removed. The zero Keyring is
+// unconfigured: it neither encrypts nor decrypts.
+type Keyring struct{ keys []*fernet.Key }
+
+// ParseKeyring parses a comma-separated key list, primary first, refusing
+// it unless every key is usable.
+func ParseKeyring(value string) (Keyring, error) {
+	fields := strings.Split(value, ",")
+	keys := make([]*fernet.Key, len(fields))
+	for i, field := range fields {
+		k, err := key(strings.TrimSpace(field))
+		if err != nil {
+			return Keyring{}, &KeyError{Position: i + 1, Count: len(fields)}
+		}
+		keys[i] = k
 	}
-	return fernet.EncryptAndSign(value, k)
+	return Keyring{keys}, nil
 }
-func Decrypt(token []byte, encodedKey string) ([]byte, error) {
-	k, err := key(encodedKey)
-	if err != nil {
-		return nil, err
+
+func (k Keyring) Configured() bool { return len(k.keys) > 0 }
+
+func (k Keyring) Encrypt(value []byte) ([]byte, error) {
+	if !k.Configured() {
+		return nil, ErrInvalid
 	}
-	if _, err = base64.URLEncoding.Strict().DecodeString(string(token)); err != nil {
+	return fernet.EncryptAndSign(value, k.keys[0])
+}
+
+func (k Keyring) Decrypt(token []byte) ([]byte, error) {
+	return decrypt(token, k.keys)
+}
+
+// IsCurrent reports whether token decrypts under the primary key. Fernet
+// tokens do not name their key, so this is how re-encryption finds the
+// tokens still needing an older one.
+func (k Keyring) IsCurrent(token []byte) bool {
+	if !k.Configured() {
+		return false
+	}
+	_, err := decrypt(token, k.keys[:1])
+	return err == nil
+}
+
+func decrypt(token []byte, keys []*fernet.Key) ([]byte, error) {
+	if _, err := base64.URLEncoding.Strict().DecodeString(string(token)); err != nil {
 		return nil, ErrInvalid
 	}
 	// Expiration comes from login/session records, not the Fernet creation timestamp.
-	result := fernet.VerifyAndDecrypt(token, 0, []*fernet.Key{k})
+	result := fernet.VerifyAndDecrypt(token, 0, keys)
 	if result == nil {
 		return nil, ErrInvalid
 	}

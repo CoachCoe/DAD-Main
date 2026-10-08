@@ -7,12 +7,13 @@ import (
 	"testing"
 	"time"
 
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-func notificationWorker(f *workerFixture, transport *recordingMail) MessageWorker {
-	return MessageWorker{DB: f.service.DB, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: emailTestKey}, Origin: "https://donor.example.org", Transport: transport}
+func notificationWorker(t *testing.T, transport *recordingMail) MessageWorker {
+	return MessageWorker{DB: as(t, dbroles.MessageWorker), Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys}, Origin: "https://donor.example.org", Transport: transport}
 }
 func TestReceiptMessagePersistsBodyBeforeSendAndRetriesUnchanged(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
@@ -21,11 +22,11 @@ func TestReceiptMessagePersistsBodyBeforeSendAndRetriesUnchanged(t *testing.T) {
 	f.receive(t, "invoice.payment_succeeded", invoice(result.CheckoutID, "in_"+result.CheckoutID, time.Now().Add(-24*time.Hour), true))
 	f.process(t)
 	transport := &recordingMail{failure: errors.New("lost receipt acknowledgement")}
-	w := notificationWorker(f, transport)
+	w := notificationWorker(t, transport)
 	now := time.Now().Add(time.Second)
 	transport.check = func(m mail.Message) {
 		var saved string
-		if err := w.DB.QueryRow(ctx, "SELECT body FROM donor_messages WHERE donor_id=$1 AND kind='RECEIPT'", f.donorID).Scan(&saved); err != nil || saved != m.Body {
+		if err := f.db.QueryRow(ctx, "SELECT body FROM donor_messages WHERE donor_id=$1 AND kind='RECEIPT'", f.donorID).Scan(&saved); err != nil || saved != m.Body {
 			t.Fatal("uncommitted rendering sent", err)
 		}
 	}
@@ -35,7 +36,7 @@ func TestReceiptMessagePersistsBodyBeforeSendAndRetriesUnchanged(t *testing.T) {
 	// A later refund changes an on-demand receipt, but not a retry of the already
 	// issued message. A lost SMTP acknowledgement must preserve message identity.
 	refund := testID(t)
-	if _, err := w.DB.Exec(ctx, `INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) SELECT $1,id,$2,3000,'USD','SUCCEEDED',$3 FROM donor_gifts WHERE donor_id=$4`, refund, "re_"+refund.String(), now, f.donorID); err != nil {
+	if _, err := f.db.Exec(ctx, `INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) SELECT $1,id,$2,3000,'USD','SUCCEEDED',$3 FROM donor_gifts WHERE donor_id=$4`, refund, "re_"+refund.String(), now, f.donorID); err != nil {
 		t.Fatal(err)
 	}
 	transport.failure = nil
@@ -59,7 +60,7 @@ func TestRecoveryMessagesSuppressObsoleteAndRecoveredReminders(t *testing.T) {
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
 	transport := &recordingMail{}
-	w := notificationWorker(f, transport)
+	w := notificationWorker(t, transport)
 	for i := 0; i < 2; i++ {
 		if worked, err := w.DeliverNext(ctx, now.Add(time.Second)); err != nil || !worked {
 			t.Fatal(worked, err)
@@ -69,10 +70,10 @@ func TestRecoveryMessagesSuppressObsoleteAndRecoveredReminders(t *testing.T) {
 		t.Fatal("wrong reminder delivery")
 	}
 	var reason string
-	if err := w.DB.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='0'", f.donorID).Scan(&reason); err != nil || reason != "newer_reminder_due" {
+	if err := f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='0'", f.donorID).Scan(&reason); err != nil || reason != "newer_reminder_due" {
 		t.Fatal(reason, err)
 	}
-	if _, err := w.DB.Exec(ctx, "UPDATE donor_billing_periods SET status='PAID' WHERE donor_id=$1", f.donorID); err != nil {
+	if _, err := f.db.Exec(ctx, "UPDATE donor_billing_periods SET status='PAID' WHERE donor_id=$1", f.donorID); err != nil {
 		t.Fatal(err)
 	}
 	if worked, err := w.DeliverNext(ctx, due.Add(13*24*time.Hour+time.Second)); err != nil || !worked {
@@ -81,7 +82,7 @@ func TestRecoveryMessagesSuppressObsoleteAndRecoveredReminders(t *testing.T) {
 	if len(transport.messages) != 1 {
 		t.Fatal("recovered gift received another warning")
 	}
-	if err := w.DB.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='13'", f.donorID).Scan(&reason); err != nil || reason != "payment_recovered" {
+	if err := f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='13'", f.donorID).Scan(&reason); err != nil || reason != "payment_recovered" {
 		t.Fatal(reason, err)
 	}
 }
@@ -89,23 +90,23 @@ func TestReferralSuppressionRechecksPreferencesAfterRendering(t *testing.T) {
 	f := newWorkerFixture(t, "ONE_TIME")
 	ctx := context.Background()
 	now := time.Now()
-	referred, _ := donor(t, f.service.DB)
+	referred, _ := donor(t, f.db)
 	t.Cleanup(func() {
-		_, err := f.service.DB.Exec(ctx, "DELETE FROM donor_metric_projections WHERE donor_id=$1", referred)
+		_, err := f.db.Exec(ctx, "DELETE FROM donor_metric_projections WHERE donor_id=$1", referred)
 		if err != nil {
 			t.Error(err)
 		}
 	})
 	t.Cleanup(func() {
-		_, err := f.service.DB.Exec(ctx, "DELETE FROM donor_preferences WHERE donor_id=$1", f.donorID)
+		_, err := f.db.Exec(ctx, "DELETE FROM donor_preferences WHERE donor_id=$1", f.donorID)
 		if err != nil {
 			t.Error(err)
 		}
 	})
-	if _, err := f.service.DB.Exec(ctx, "INSERT INTO donor_preferences(id,donor_id,version,referral_emails,marketing_emails) VALUES($1,$2,1,true,false)", testID(t), f.donorID); err != nil {
+	if _, err := f.db.Exec(ctx, "INSERT INTO donor_preferences(id,donor_id,version,referral_emails,marketing_emails) VALUES($1,$2,1,true,false)", testID(t), f.donorID); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := f.service.DB.Begin(ctx)
+	tx, err := f.db.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,14 +121,15 @@ func TestReferralSuppressionRechecksPreferencesAfterRendering(t *testing.T) {
 		t.Fatal(err)
 	}
 	transport := &recordingMail{failure: errors.New("retry")}
-	w := notificationWorker(f, transport)
+	w := notificationWorker(t, transport)
 	if _, err = w.DeliverNext(ctx, now); err != nil {
 		t.Fatal(err)
 	}
-	if len(transport.messages) != 1 || !strings.Contains(transport.messages[0].Subject, "IRL Referral") {
-		t.Fatal("lost referral channel")
+	if len(transport.messages) != 1 || transport.messages[0].Subject != "An IRL Referral completed a first test gift" ||
+		!strings.Contains(transport.messages[0].Body, "Someone you invited through an IRL Referral completed") {
+		t.Fatal("lost referral channel", transport.messages)
 	}
-	if _, err = w.DB.Exec(ctx, "UPDATE donor_preferences SET referral_emails=false WHERE donor_id=$1", f.donorID); err != nil {
+	if _, err = f.db.Exec(ctx, "UPDATE donor_preferences SET referral_emails=false WHERE donor_id=$1", f.donorID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = w.DeliverNext(ctx, now.Add(2*time.Minute)); err != nil {
@@ -137,7 +139,7 @@ func TestReferralSuppressionRechecksPreferencesAfterRendering(t *testing.T) {
 		t.Fatal("opt-out ignored on retry")
 	}
 	var reason string
-	if err = w.DB.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1", f.donorID).Scan(&reason); err != nil || reason != "opted_out" {
+	if err = f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1", f.donorID).Scan(&reason); err != nil || reason != "opted_out" {
 		t.Fatal(reason, err)
 	}
 }

@@ -10,11 +10,12 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"impactgraph/donor-api/internal/credentials"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-const emailTestKey = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+var emailTestKeys, _ = credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
 
 type recordingMail struct {
 	mu       sync.Mutex
@@ -54,7 +55,7 @@ func emailFixture(t *testing.T) (LoginEmailWorker, pgtype.UUID, *recordingMail, 
 		t.Fatal(err)
 	}
 	transport := &recordingMail{}
-	return LoginEmailWorker{DB: pool, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: emailTestKey}, Origin: "https://donor.example.org", Transport: transport}, id, transport, now
+	return LoginEmailWorker{DB: as(t, dbroles.LoginEmailWorker), Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys}, Origin: "https://donor.example.org", Transport: transport}, id, transport, now
 }
 func tokenFromMail(t *testing.T, m mail.Message) string {
 	t.Helper()
@@ -65,13 +66,38 @@ func tokenFromMail(t *testing.T, m mail.Message) string {
 	token, _, _ := strings.Cut(tail, "\n")
 	return token
 }
+
+// rotatedTestKeys prepends a new primary to emailTestKeys, as a key rotation does.
+func rotatedTestKeys(t *testing.T) credentials.Keyring {
+	t.Helper()
+	return keyring(t, "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=,MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+}
+
+func TestLoginLinkPreparedBeforeAKeyRotationIsStillSent(t *testing.T) {
+	w, id, transport, now := emailFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	if _, _, err := w.prepare(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	w.Settings.EncryptionKeys = rotatedTestKeys(t)
+	if worked, err := w.DeliverNext(ctx, now); err != nil || !worked || len(transport.messages) != 1 {
+		t.Fatal("link prepared under the previous key was not sent", worked, err)
+	}
+	link, err := queries.New(pool).LoginLink(ctx, HashToken(tokenFromMail(t, transport.messages[0])))
+	if err != nil || link.DonorID != id {
+		t.Fatal("sent link does not sign in", err)
+	}
+}
+
 func TestLoginEmailCommitsProofBeforeSendAndReusesItOnRetry(t *testing.T) {
 	w, id, transport, now := emailFixture(t)
+	pool := database(t)
 	ctx := context.Background()
 	transport.failure = errors.New("lost acknowledgement with private server content")
 	transport.check = func(m mail.Message) {
 		token := tokenFromMail(t, m)
-		link, err := queries.New(w.DB).LoginLink(ctx, HashToken(token))
+		link, err := queries.New(pool).LoginLink(ctx, HashToken(token))
 		if err != nil || link.DonorID != id {
 			t.Fatal("uncommitted credential sent", err)
 		}
@@ -82,11 +108,11 @@ func TestLoginEmailCommitsProofBeforeSendAndReusesItOnRetry(t *testing.T) {
 	var encrypted []byte
 	var attempts int
 	var last string
-	if err := w.DB.QueryRow(ctx, "SELECT encrypted_token,attempts,last_error FROM donor_login_emails WHERE donor_id=$1", id).Scan(&encrypted, &attempts, &last); err != nil {
+	if err := pool.QueryRow(ctx, "SELECT encrypted_token,attempts,last_error FROM donor_login_emails WHERE donor_id=$1", id).Scan(&encrypted, &attempts, &last); err != nil {
 		t.Fatal(err)
 	}
 	token := tokenFromMail(t, transport.messages[0])
-	clear, err := credentials.Decrypt(encrypted, emailTestKey)
+	clear, err := emailTestKeys.Decrypt(encrypted)
 	if err != nil || string(clear) != token || strings.Contains(string(encrypted), token) || attempts != 1 || last != "DeliveryError" {
 		t.Fatal("unsafe retry state", err)
 	}
@@ -101,14 +127,15 @@ func TestLoginEmailCommitsProofBeforeSendAndReusesItOnRetry(t *testing.T) {
 		t.Fatal("retry changed link or message identity")
 	}
 	var complete bool
-	if err := w.DB.QueryRow(ctx, "SELECT completed_at IS NOT NULL,encrypted_token FROM donor_login_emails WHERE donor_id=$1", id).Scan(&complete, &encrypted); err != nil || !complete || encrypted != nil {
+	if err := pool.QueryRow(ctx, "SELECT completed_at IS NOT NULL,encrypted_token FROM donor_login_emails WHERE donor_id=$1", id).Scan(&complete, &encrypted); err != nil || !complete || encrypted != nil {
 		t.Fatal("completed job retained credential", err)
 	}
-	session, err := (AccountService{DB: w.DB}).ClaimAccount(ctx, token, "")
-	if err != nil || session == "" {
+	api := AccountService{DB: as(t, dbroles.API)}
+	session, err := api.ClaimAccount(ctx, token, "", Client{})
+	if err != nil || session.Access == "" {
 		t.Fatal("delivered proof failed claim", err)
 	}
-	if _, err = (AccountService{DB: w.DB}).ClaimAccount(ctx, token, ""); !errors.Is(err, ErrDenied) {
+	if _, err = api.ClaimAccount(ctx, token, "", Client{}); !errors.Is(err, ErrDenied) {
 		t.Fatal("proof replay allowed", err)
 	}
 }
@@ -134,10 +161,11 @@ func TestLoginEmailSuppressesDisabledExpiredAndParksFailures(t *testing.T) {
 	for _, mode := range []string{"disabled", "expired", "five failures", "bad key"} {
 		t.Run(mode, func(t *testing.T) {
 			w, id, transport, now := emailFixture(t)
+			pool := database(t)
 			ctx := context.Background()
 			switch mode {
 			case "disabled":
-				if _, err := w.DB.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
+				if _, err := pool.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
 					t.Fatal(err)
 				}
 			case "expired":
@@ -153,7 +181,7 @@ func TestLoginEmailSuppressesDisabledExpiredAndParksFailures(t *testing.T) {
 			case "five failures":
 				transport.failure = errors.New("SMTP failed")
 			case "bad key":
-				w.Settings.EncryptionKey = "not a key"
+				w.Settings.EncryptionKeys = credentials.Keyring{}
 			}
 			if mode == "bad key" {
 				if _, err := w.DeliverNext(ctx, now); err == nil {
@@ -201,7 +229,7 @@ func (b *blockingMail) Send(ctx context.Context, m mail.Message) error {
 }
 func TestSlowSendReleasesDonorLockAndKeepsJobClaimed(t *testing.T) {
 	queued := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC) // Isolates this queue from other tests' due work.
-	settings := mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: emailTestKey}
+	settings := mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys}
 	for _, kind := range []string{"login", "message"} {
 		t.Run(kind, func(t *testing.T) {
 			pool := database(t)
@@ -218,7 +246,7 @@ func TestSlowSendReleasesDonorLockAndKeepsJobClaimed(t *testing.T) {
 			completed := "SELECT completed_at IS NOT NULL FROM donor_login_emails WHERE donor_id=$1"
 			if kind == "login" {
 				err = queueLoginEmail(ctx, queries.New(tx), email, "", queued)
-				w := LoginEmailWorker{DB: pool, Settings: settings, Origin: "https://donor.example.org", Transport: transport}
+				w := LoginEmailWorker{DB: as(t, dbroles.LoginEmailWorker), Settings: settings, Origin: "https://donor.example.org", Transport: transport}
 				deliver = func() (bool, error) { return w.DeliverNext(ctx, queued) }
 			} else {
 				referred := testID(t)
@@ -236,7 +264,7 @@ func TestSlowSendReleasesDonorLockAndKeepsJobClaimed(t *testing.T) {
 				mustExec(t, tx, "INSERT INTO donor_preferences(id,donor_id,version,referral_emails,marketing_emails) VALUES($1,$2,1,true,false)", testID(t), id)
 				mustExec(t, tx, "INSERT INTO donor_metric_projections(id,donor_id,referrer_id,referral_kind,net_minor,computed_at,next_refresh_at) VALUES($1,$2,$3,'LINK',3000,$4,$4)", testID(t), referred, id, queued)
 				err = queueMessage(ctx, queries.New(tx), id, "REFERRAL", "referral:"+referred.String(), map[string]any{"referred_id": referred.String(), "kind": "LINK"}, queued)
-				w := MessageWorker{DB: pool, Settings: settings, Origin: "https://donor.example.org", Transport: transport}
+				w := MessageWorker{DB: as(t, dbroles.MessageWorker), Settings: settings, Origin: "https://donor.example.org", Transport: transport}
 				deliver = func() (bool, error) { return w.DeliverNext(ctx, queued) }
 				completed = "SELECT completed_at IS NOT NULL FROM donor_messages WHERE donor_id=$1"
 			}
@@ -288,15 +316,16 @@ func TestLoginLinkReturnsOnlyToAllowedPages(t *testing.T) {
 	} {
 		t.Run(c.next, func(t *testing.T) {
 			w, id, transport, now := emailFixture(t)
+			pool := database(t)
 			ctx := context.Background()
-			if _, err := w.DB.Exec(ctx, "DELETE FROM donor_login_emails WHERE donor_id=$1", id); err != nil {
+			if _, err := pool.Exec(ctx, "DELETE FROM donor_login_emails WHERE donor_id=$1", id); err != nil {
 				t.Fatal(err)
 			}
 			var email string
-			if err := w.DB.QueryRow(ctx, "SELECT email FROM donors WHERE id=$1", id).Scan(&email); err != nil {
+			if err := pool.QueryRow(ctx, "SELECT email FROM donors WHERE id=$1", id).Scan(&email); err != nil {
 				t.Fatal(err)
 			}
-			if err := (AccountService{DB: w.DB}).QueueLogin(ctx, email, c.next); err != nil {
+			if err := (AccountService{DB: as(t, dbroles.API)}).QueueLogin(ctx, email, c.next); err != nil {
 				t.Fatal(err)
 			}
 			if worked, err := w.DeliverNext(ctx, now.Add(time.Second)); err != nil || !worked {

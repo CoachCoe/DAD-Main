@@ -12,22 +12,25 @@ import (
 )
 
 type AccountSource interface {
-	ClaimAccount(context.Context, string, string) (string, error)
+	ClaimAccount(context.Context, string, string, store.Client) (store.Tokens, error)
+	Refresh(context.Context, string) (store.Tokens, error)
 	SignOut(context.Context, string) error
 	QueueLogin(ctx context.Context, email, next string) error
 }
 
-const (
-	donorSessionAge = 30 * 24 * 60 * 60
-	maxEmailRunes   = 320
-)
+const maxEmailRunes = 320
 
-// nativeSession hands the donor app its session; browsers get the same
-// secret only as an HttpOnly cookie.
+// nativeSession hands the donor app its tokens. Browsers never receive one:
+// their session is only an HttpOnly cookie.
 type nativeSession struct {
-	Claimed      bool   `json:"claimed"`
-	SessionToken string `json:"session_token"`
-	ExpiresIn    int    `json:"expires_in"`
+	AccessToken      string `json:"access_token"`
+	ExpiresIn        int    `json:"expires_in"`
+	RefreshToken     string `json:"refresh_token"`
+	RefreshExpiresIn int    `json:"refresh_expires_in"`
+}
+
+func newNativeSession(tokens store.Tokens) nativeSession {
+	return nativeSession{tokens.Access, int(tokens.AccessTTL.Seconds()), tokens.Refresh, int(tokens.RefreshTTL.Seconds())}
 }
 
 func (a *api) account() service {
@@ -76,35 +79,73 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 }
 
 // claim exchanges an emailed proof for a session, revoking the session the
-// caller presented, if any.
+// caller presented, if any. The app may describe its device; a browser's
+// description is ignored.
 func (a *api) claim(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Token *string `json:"token"`
+		Token    *string         `json:"token"`
+		Device   json.RawMessage `json:"device_name"`
+		Platform json.RawMessage `json:"platform"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.Token == nil || !validToken(*body.Token) {
+	device, deviceOK := optional(body.Device, "")
+	platform, platformOK := optional(body.Platform, "")
+	if body.Token == nil || !validToken(*body.Token) || !deviceOK || utf8.RuneCountInString(device) > store.MaxDeviceName ||
+		!platformOK || (platform != "" && platform != "IOS" && platform != "ANDROID") {
 		invalidFields(w, r)
 		return
 	}
 	if !a.account().available(w, r) {
 		return
 	}
+	client := store.Client{}
+	if native(r) {
+		client = store.Client{App: true, Device: device, Platform: platform}
+	}
 	ctx, cancel := withTimeout(r, readTimeout)
 	defer cancel()
-	token, err := a.Account.ClaimAccount(ctx, *body.Token, donorSession(r))
+	tokens, err := a.Account.ClaimAccount(ctx, *body.Token, donorSession(r), client)
 	if err != nil {
 		status, detail := accountStatus(err)
 		writeError(w, r, status, detail, err)
 		return
 	}
-	if native(r) {
-		writeJSON(w, http.StatusOK, nativeSession{Claimed: true, SessionToken: token, ExpiresIn: donorSessionAge})
+	if client.App {
+		writeJSON(w, http.StatusOK, newNativeSession(tokens))
 		return
 	}
-	a.setCookie(w, donorCookie, token, donorSessionAge, http.SameSiteLaxMode)
+	a.setCookie(w, donorCookie, tokens.Access, int(tokens.AccessTTL.Seconds()), http.SameSiteLaxMode)
 	writeJSON(w, http.StatusOK, map[string]bool{"claimed": true})
+}
+
+// refresh exchanges the app's refresh token for new tokens.
+func (a *api) refresh(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RefreshToken *string `json:"refresh_token"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.RefreshToken == nil || !validToken(*body.RefreshToken) {
+		invalidFields(w, r)
+		return
+	}
+	refreshes := a.account()
+	refreshes.classify = refreshStatus
+	refreshes.serve(w, r, func(ctx context.Context) (any, error) {
+		tokens, err := a.Account.Refresh(ctx, *body.RefreshToken)
+		return newNativeSession(tokens), err
+	})
+}
+
+// refreshStatus answers a refused refresh as an ended session, not a bad link.
+func refreshStatus(err error) (int, string) {
+	if errors.Is(err, store.ErrDenied) {
+		return http.StatusUnauthorized, "Sign in required"
+	}
+	return accountStatus(err)
 }
 
 // logout succeeds even without a valid session, so a client can always

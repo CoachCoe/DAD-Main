@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/credentials"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -71,7 +70,7 @@ func (w EmailChangeWorker) claim(ctx context.Context, site publicSite, now time.
 		if donor.Disabled || donor.Email != job.OldEmail || !job.ExpiresAt.Time.After(now) {
 			return q.CancelEmailChanges(ctx, owner)
 		}
-		proof, err := credentials.Decrypt(job.EncryptedToken, w.Settings.EncryptionKey)
+		proof, err := w.Settings.EncryptionKeys.Decrypt(job.EncryptedToken)
 		if err != nil {
 			return q.EmailChangeDeliveryFailed(ctx, queries.EmailChangeDeliveryFailedParams{ID: job.ID, AvailableAt: timestamp(now.Add(time.Minute))})
 		}

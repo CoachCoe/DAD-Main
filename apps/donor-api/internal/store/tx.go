@@ -19,20 +19,24 @@ import (
 // donorRead runs fn as the signed-in donor holding token.
 func donorRead[T any](ctx context.Context, db *pgxpool.Pool, token string, fn func(*queries.Queries, queries.Donor, time.Time) (T, error)) (T, error) {
 	var result T
+	var user signedIn
+	now := time.Now().UTC()
 	err := pgx.BeginTxFunc(ctx, db, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		now := time.Now().UTC()
-		donor, err := authenticate(ctx, q, token, now)
-		if err != nil {
+		var err error
+		if user, err = authenticate(ctx, q, token, now); err != nil {
 			return err
 		}
-		result, err = fn(q, donor, now)
+		result, err = fn(q, user.Donor, now)
 		return err
 	})
 	if err != nil {
 		var zero T
 		return zero, err
 	}
+	// The snapshot is read-only, so the session's use is recorded after it.
+	// It is advisory, and failing to record it must not fail the read.
+	_ = user.touch(ctx, queries.New(db), now)
 	return result, nil
 }
 
@@ -40,21 +44,30 @@ func donorRead[T any](ctx context.Context, db *pgxpool.Pool, token string, fn fu
 // signed-in donor, or the donor a staff member acts on.
 type ownerResolver func(context.Context, pgx.Tx) (queries.Donor, error)
 
-// donorOwner resolves the donor signed in with token. The session is checked
-// again once the lock is held, so a sign-out that committed while the lock
-// was awaited is honoured.
+// donorOwner resolves the donor signed in with token.
 func donorOwner(token string) ownerResolver {
 	return func(ctx context.Context, tx pgx.Tx) (queries.Donor, error) {
-		q := queries.New(tx)
-		d, err := authenticate(ctx, q, token, time.Now().UTC())
-		if err != nil {
-			return d, err
-		}
-		if _, err = q.LockDonor(ctx, d.ID); err != nil {
-			return d, err
-		}
-		return authenticate(ctx, q, token, time.Now().UTC())
+		user, err := lockSignedIn(ctx, queries.New(tx), token)
+		return user.Donor, err
 	}
+}
+
+// lockSignedIn authenticates token and locks its donor. The session is
+// checked again once the lock is held, so a sign-out that committed while the
+// lock was awaited is honoured.
+func lockSignedIn(ctx context.Context, q *queries.Queries, token string) (signedIn, error) {
+	user, err := authenticate(ctx, q, token, time.Now().UTC())
+	if err != nil {
+		return user, err
+	}
+	if _, err = q.LockDonor(ctx, user.ID); err != nil {
+		return user, err
+	}
+	now := time.Now().UTC()
+	if user, err = authenticate(ctx, q, token, now); err != nil {
+		return user, err
+	}
+	return user, user.touch(ctx, q, now)
 }
 
 // donorWrite runs fn holding the lock of the donor owner resolves.

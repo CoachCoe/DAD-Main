@@ -4,17 +4,14 @@ import Form from "next/form";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, ApiError, failureMessage } from "@/lib/api";
+import { api, ApiError, failureMessage, type ResponseBody, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
-
-export type StaffMember = { id: string; email: string; name: string; role: string; permissions: string[]; active: boolean; disabled: boolean };
-type Donors = { donors: { id: string; email: string; public_name: string | null; claimed: boolean; disabled: boolean }[]; next_offset: number | null };
 
 /** `q` is the submitted search, kept in the URL so Back from a donor record returns to it. */
 export default function Staff({ q }: { q: string | null }) {
   // "left" when this person chose to sign out, "expired" when the server ended the session.
   const [signedOut, setSignedOut] = useState<"" | "left" | "expired">("");
-  const { resource, data: actor, reload } = useApiResource<StaffMember>(signedOut ? null : "/donor/staff/me");
+  const { resource, data: actor, reload } = useApiResource<Schema<"StaffView">>(signedOut ? null : "/donor/staff/me");
   // Signing out removes the focused button, so focus moves to the way back in.
   const signIn = useRef<HTMLAnchorElement>(null);
   useEffect(() => { if (signedOut === "left") signIn.current?.focus(); }, [signedOut]);
@@ -38,7 +35,7 @@ export default function Staff({ q }: { q: string | null }) {
     } finally { setBusy(false); }
   }
   const manages = actor?.permissions.includes("staff.manage") ?? false;
-  const { data: accounts, reload: reloadAccounts } = useApiResource<StaffMember[]>(manages && !signedOut ? "/donor/staff/accounts" : null);
+  const { data: accounts, reload: reloadAccounts } = useApiResource<Schema<"StaffView">[]>(manages && !signedOut ? "/donor/staff/accounts" : null);
   const absent = signedOut !== "" || resource.state === "signedOut";
   return <Page wide eyebrow="Staff" title="DAD staff back office"><p>Sandbox donor records. Staff access and actions are audited.</p>
     {absent ? <p><Link className="button" href="/staff/sign-in" ref={signIn}>Staff sign-in</Link></p> : actor && <>
@@ -61,7 +58,7 @@ export default function Staff({ q }: { q: string | null }) {
           {account.id !== actor.id && <>
             <details><summary>Replace passkeys or invitation</summary>
               <p>This removes the staff member’s passkeys and revokes their sessions and invitations. They sign in again only after creating a new passkey from the replacement invitation, which also restores a disabled account.</p>
-              <button type="button" className="secondary danger" disabled={busy} onClick={() => action(async () => { const result = await api<{ invitation_url: string }>(`/donor/staff/accounts/${account.id}/recovery`, { method: "POST" }); setInvitation(result.invitation_url); reloadAccounts(); })}>Confirm replacement invitation</button>
+              <button type="button" className="secondary danger" disabled={busy} onClick={() => action(async () => { const result = await api<ResponseBody<"/donor/staff/accounts/{staff_id}/recovery", "post">>(`/donor/staff/accounts/${account.id}/recovery`, { method: "POST" }); setInvitation(result.invitation_url); reloadAccounts(); })}>Confirm replacement invitation</button>
             </details>
             <details><summary>Change role</summary>
               <form onSubmit={(event) => { event.preventDefault(); const chosen = new FormData(event.currentTarget).get("role"); action(async () => { await api(`/donor/staff/accounts/${account.id}/role`, { method: "POST", body: JSON.stringify({ role: chosen }) }); reloadAccounts(); }); }}>
@@ -74,7 +71,7 @@ export default function Staff({ q }: { q: string | null }) {
             <button type="button" className="secondary danger" disabled={busy} onClick={() => action(async () => { await api(`/donor/staff/accounts/${account.id}/disable`, { method: "POST" }); reloadAccounts(); })}>Confirm disable {account.name}</button>
           </details>}
         </li>)}</ul>}
-        <form className="divided" onSubmit={(event) => { event.preventDefault(); action(async () => { const result = await api<{ invitation_url: string }>("/donor/staff/accounts", { method: "POST", body: JSON.stringify({ email, name, role }) }); setInvitation(result.invitation_url); reloadAccounts(); }); }}>
+        <form className="divided" onSubmit={(event) => { event.preventDefault(); action(async () => { const result = await api<ResponseBody<"/donor/staff/accounts", "post">>("/donor/staff/accounts", { method: "POST", body: JSON.stringify({ email, name, role }) }); setInvitation(result.invitation_url); reloadAccounts(); }); }}>
           <fieldset disabled={busy}><legend>Invite individual staff member</legend>
             <label>Name<input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} required /></label>
             <label>Email<input type="email" value={email} maxLength={320} onChange={(event) => setEmail(event.target.value)} required /></label>
@@ -93,7 +90,7 @@ export default function Staff({ q }: { q: string | null }) {
 
 function DonorSearch({ q }: { q: string }) {
   const [offset, setOffset] = useState(0);
-  const { resource, data, reload } = useApiResource<Donors>(`/donor/staff/donors?q=${encodeURIComponent(q)}&offset=${offset}`);
+  const { resource, data, reload } = useApiResource<Schema<"DonorSearch">>(`/donor/staff/donors?q=${encodeURIComponent(q)}&offset=${offset}`);
   const messages = resourceMessages(resource, { loading: "Searching donors…",
     failure: "Donor search could not be completed right now. Please retry in a moment.",
     forbidden: "Your staff role does not permit donor search." });

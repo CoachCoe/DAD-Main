@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/store/queries"
@@ -23,19 +24,22 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *maxAge <= 0 {
 		return errors.New("invalid monitor arguments")
 	}
-	dsn := getenv("DONOR_GO_DATABASE_URL")
+	dsn := dbroles.Monitor.URL(getenv)
 	if dsn == "" {
-		return errors.New("DONOR_GO_DATABASE_URL is required")
+		return errors.New(dbroles.Monitor.Variable() + " is required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := store.Open(ctx, dsn, 2)
+	pool, err := store.Open(ctx, dsn, dbroles.Monitor.Pool)
 	if err != nil {
 		return errors.New("monitor database unavailable")
 	}
 	defer pool.Close()
 	if err = migrations.Verify(ctx, pool); err != nil {
 		return errors.New("monitor schema is not current")
+	}
+	if err = dbroles.Monitor.Check(ctx, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
+		return err
 	}
 	rows, err := queries.New(pool).QueueHealth(ctx, pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true})
 	if err != nil {

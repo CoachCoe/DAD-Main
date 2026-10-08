@@ -7,18 +7,32 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"impactgraph/donor-api/internal/store"
 )
 
 type accountStub struct {
-	err                     error
-	proof, old, email, next string
+	err                              error
+	proof, old, email, next, refresh string
+	client                           store.Client
 }
 
-func (s *accountStub) ClaimAccount(_ context.Context, proof, old string) (string, error) {
-	s.proof, s.old = proof, old
-	return "new-secret-session", s.err
+var (
+	browserTokens = store.Tokens{Access: "new-secret-session", AccessTTL: 30 * 24 * time.Hour}
+	appTokens     = store.Tokens{Access: "new-access-token", AccessTTL: 15 * time.Minute, Refresh: "new-refresh-token", RefreshTTL: 60 * 24 * time.Hour}
+)
+
+func (s *accountStub) ClaimAccount(_ context.Context, proof, old string, client store.Client) (store.Tokens, error) {
+	s.proof, s.old, s.client = proof, old, client
+	if client.App {
+		return appTokens, s.err
+	}
+	return browserTokens, s.err
+}
+func (s *accountStub) Refresh(_ context.Context, token string) (store.Tokens, error) {
+	s.refresh = token
+	return appTokens, s.err
 }
 func (s *accountStub) SignOut(_ context.Context, token string) error { s.old = token; return s.err }
 func (s *accountStub) QueueLogin(_ context.Context, email, next string) error {

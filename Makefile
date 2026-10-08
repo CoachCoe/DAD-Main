@@ -1,6 +1,7 @@
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
 SQLC := sqlc/sqlc:1.31.1@sha256:70f53171d27b2424e9358869975455a6e955a5aa8e58a998a270a6e34e525537
+GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts
 
 # Load testing against a disposable, seeded deployment; see docs/operations.md.
 SEED_DONORS ?= 50000
@@ -10,7 +11,7 @@ LOAD_MIX ?=
 LOAD_ORIGIN ?= http://localhost:3000
 LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -origin "$(LOAD_ORIGIN)" -client-ips
 
-.PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
+.PHONY: install db-up migrate provision api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 
 install:
 	cd apps/donor-api && go mod download
@@ -21,6 +22,9 @@ db-up:
 
 migrate:
 	cd apps/donor-api && go run ./cmd/migrate
+
+provision:
+	cd apps/donor-api && go run ./cmd/provision
 
 api donor-go:
 	cd apps/donor-api && go run ./cmd/api
@@ -36,10 +40,11 @@ worker:
 
 generate:
 	docker run --rm -v "$(CURDIR)/apps/donor-api:/src" -w /src $(SQLC) generate
+	cd apps/web && npm run --silent generate:api
 
 check-generated: generate
-	@test -z "$$(git status --porcelain -- apps/donor-api/internal/store/queries)" || \
-		{ git status --porcelain -- apps/donor-api/internal/store/queries; echo "Generated queries differ from SQL sources; run make generate and commit the result." >&2; exit 1; }
+	@test -z "$$(git status --porcelain -- $(GENERATED))" || \
+		{ git status --porcelain -- $(GENERATED); echo "Generated code differs from its sources; run make generate and commit the result." >&2; exit 1; }
 
 test: test-donor-go test-web
 

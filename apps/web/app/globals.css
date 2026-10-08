@@ -279,6 +279,8 @@ details[open] > summary::after { content: "–"; }
   border-bottom: 1px solid var(--line);
 }
 .rows strong { font-variant-numeric: tabular-nums; }
+.session { flex: 1 1 0; display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
+.badge.current { border-color: var(--ok); background: var(--ok-wash); color: var(--ok-ink); }
 
 .details { display: grid; gap: var(--space-1); font-size: var(--text-sm); }
 .details > div { display: flex; flex-wrap: wrap; column-gap: var(--space-3); }

@@ -6,20 +6,24 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
 
 	"impactgraph/donor-api/internal/credentials"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/httpapi"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/payments"
+	"impactgraph/donor-api/internal/push"
 	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/wallet"
 )
@@ -27,10 +31,6 @@ import (
 // shutdownTimeout lets in-flight processor calls finish within the server's
 // write timeout instead of being cut off and left for reconciliation.
 const shutdownTimeout = 35 * time.Second
-
-// poolConns is the API's database pool. Load tests at 50,000 donors found a
-// 10-connection pool, not PostgreSQL, capped throughput; 40 doubled it.
-const poolConns = 40
 
 // trustedProxies parses DONOR_TRUSTED_PROXY_CIDRS. Ranges broader than a
 // private /8 (IPv4) or /32 (IPv6) are refused because trusting them would let
@@ -111,9 +111,15 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if err = validateStaffOrigin(services.StaffOrigin, services.Origin, getenv); err != nil {
 		return services, release, err
 	}
-	contentKey := getenv("DONOR_CONTENT_ENCRYPTION_KEY")
-	if contentKey != "" && credentials.ValidateKey(contentKey) != nil {
-		return services, release, errors.New("DONOR_CONTENT_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
+	var contentKeys credentials.Keyring
+	if value := getenv("DONOR_CONTENT_ENCRYPTION_KEY"); value != "" {
+		if contentKeys, err = credentials.ParseKeyring(value); err != nil {
+			return services, release, fmt.Errorf("DONOR_CONTENT_ENCRYPTION_KEY %w", err)
+		}
+	}
+	notifications, err := push.FromEnvironment(getenv)
+	if err != nil {
+		return services, release, err
 	}
 	for _, feature := range []struct {
 		name    string
@@ -122,27 +128,33 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		{"payments (STRIPE_SECRET_KEY)", gateway != nil},
 		{"account email (SMTP settings)", email != nil},
 		{"staff back office (DONOR_STAFF_ORIGIN)", services.StaffOrigin != ""},
-		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKey != ""},
+		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKeys.Configured()},
+		{"iOS app notifications (DONOR_PUSH_APNS_*)", notifications.APNs != nil},
+		{"Android app notifications (DONOR_PUSH_FCM_KEY_FILE)", notifications.FCM != nil},
 	} {
 		if !feature.enabled {
 			slog.Info("feature disabled until configured", "feature", feature.name)
 		}
 	}
 
-	dsn := getenv("DONOR_GO_DATABASE_URL")
+	dsn := dbroles.API.URL(getenv)
 	if dsn == "" {
-		slog.Warn("DONOR_GO_DATABASE_URL is unset; only health and static responses are available")
+		slog.Warn(dbroles.API.Variable() + " is unset; only health and static responses are available")
 		return services, release, nil
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := store.Open(startup, dsn, poolConns)
+	pool, err := store.Open(startup, dsn, dbroles.API.Pool)
 	if err != nil {
 		return services, release, errors.New("donor database startup failed")
 	}
 	if err = migrations.Verify(startup, pool); err != nil {
 		pool.Close()
 		return services, release, errors.New("donor schema is not current; run migrations before starting the API")
+	}
+	if err = dbroles.API.Check(startup, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
+		pool.Close()
+		return services, release, err
 	}
 	services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
 	services.Content = store.ContentReader{DB: pool}
@@ -152,11 +164,12 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
 	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
+	services.Push = store.PushService{DB: pool, Platforms: slices.Collect(maps.Keys(notifications.Providers()))}
 	if webhookSecret != "" {
 		services.Webhook = payments.Receiver{Secret: webhookSecret, Inbox: store.StripeInbox{DB: pool}}
 	}
 	if email != nil {
-		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKey: email.EncryptionKey}
+		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKeys: email.EncryptionKeys}
 	}
 	if services.StaffOrigin != "" {
 		staff, err := store.NewStaffService(pool, services.StaffOrigin)
@@ -166,7 +179,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		}
 		services.Staff, services.Admin, services.Exports = staff, staff, staff
 		services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
-		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKey: contentKey}
+		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKeys: contentKeys}
 	}
 	return services, pool.Close, nil
 }

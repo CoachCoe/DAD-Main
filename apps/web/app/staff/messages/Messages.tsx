@@ -3,20 +3,18 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, unconfirmedMessage } from "@/lib/api";
+import { api, type Schema, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
-
-type Messages = { messages: { id: string; kind: string; attempts: number; completed_at: string | null; last_error: string | null; suppressed_reason: string | null; available_at: string }[]; next_offset: number | null };
 
 export default function DeliveryHistory({ donor }: { donor: string }) {
   const [offset, setOffset] = useState(0);
-  const { resource, data, reload } = useApiResource<Messages>(donor ? `/donor/staff/donors/${encodeURIComponent(donor)}/messages?offset=${offset}` : null);
+  const { resource, data, reload } = useApiResource<Schema<"MessagePage">>(donor ? `/donor/staff/donors/${encodeURIComponent(donor)}/messages?offset=${offset}` : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const keys = useRef<Record<string, string>>({});
   // Only an unclaimed donor needs a claim email; until that is known, the option stays hidden.
-  const { data: record } = useApiResource<{ claimed: boolean }>(donor ? `/donor/staff/donors/${encodeURIComponent(donor)}` : null);
+  const { data: record } = useApiResource<Schema<"DonorDetail">>(donor ? `/donor/staff/donors/${encodeURIComponent(donor)}` : null);
   const messages = resourceMessages(resource, { loading: "Loading delivery history…",
     failure: "Delivery history could not be loaded right now. Please retry in a moment.",
     forbidden: "Your staff role does not permit viewing delivery history." });

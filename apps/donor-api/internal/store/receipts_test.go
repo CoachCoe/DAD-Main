@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -43,6 +44,7 @@ func TestAnnualSummaryReadsGiftsAndRefundsInTwoQueries(t *testing.T) {
 		mustExec(t, tx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)", gift, owner, checkout, "pi_"+gift.String(), paid.Add(time.Duration(i)*time.Minute))
 		mustExec(t, tx, "INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,500,'USD','SUCCEEDED',$4)", refund, gift, "re_"+refund.String(), paid.Add(time.Hour))
 	}
+	actAs(t, tx, dbroles.MessageWorker)
 	db := &countedQueries{DBTX: tx}
 	summary, err := readAnnualSummary(ctx, queries.New(db), owner, 2026, paid.AddDate(1, 0, 0))
 	if err != nil {

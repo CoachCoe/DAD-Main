@@ -3,7 +3,10 @@
  * with binary fields in base64url; browsers without the JSON helpers are converted here.
  */
 
-export type Ceremony<Options> = { ceremony: string; options: Options };
+import type { Schema } from "./api";
+
+/** The contract types options only as an object; the DOM's WebAuthn JSON types describe them. */
+export type Ceremony<Options> = Omit<Schema<"Ceremony">, "options"> & { options: Options };
 
 export function passkeysSupported(): boolean {
   return typeof PublicKeyCredential === "function" && typeof navigator.credentials?.create === "function";

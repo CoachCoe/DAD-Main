@@ -17,7 +17,9 @@ func TestHandlersValidateInputBeforeCallingServices(t *testing.T) {
 		key                bool
 		status             int
 	}{
-		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false}`, false, 503},
+		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":false}`, false, 503},
+		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false}`, false, 422},
+		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":null,"push_streak_milestone":false}`, false, 422},
 		{"POST", "/donor/me/preferences", `{"version":-1,"referral_emails":true,"marketing_emails":false}`, false, 422},
 		{"POST", "/donor/me/preferences", `{"version":0,"referral_emails":true}`, false, 422},
 		{"POST", "/donor/me/sharing", `{"public_name":"Sam"}`, false, 503},
@@ -31,6 +33,8 @@ func TestHandlersValidateInputBeforeCallingServices(t *testing.T) {
 		{"POST", "/donor/referrals/code", `{"kind":"QR"}`, false, 422},
 		{"POST", "/donor/public/partner-signup", `{}`, false, 422},
 		{"GET", "/donor/me/gifts?offset=50", "", false, 503},
+		{"GET", "/donor/me/conversions?since=2026-10-01T12:00:00.5Z", "", false, 503},
+		{"GET", "/donor/me/conversions?since=yesterday", "", false, 422},
 		{"GET", "/donor/me/gifts?offset=-1", "", false, 422},
 		{"GET", "/donor/me/receipts/not-a-uuid", "", false, 404},
 		{"GET", "/donor/me/annual-summary/1999", "", false, 422},

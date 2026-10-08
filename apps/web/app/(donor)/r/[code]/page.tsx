@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { cache } from "react";
+import type { ResponseBody } from "@/lib/api";
 import { trustedClientIp } from "@/lib/clientIp";
 import { donorApiBase } from "@/lib/donorApi";
 import ReferralLanding, { type Referrer } from "./ReferralLanding";
@@ -16,7 +17,7 @@ const lookUp = cache(async (code: string): Promise<Referrer> => {
     });
     if (response.status === 404) return { state: "unavailable" };
     if (!response.ok) return { state: "unknown" };
-    const { public_name: name } = await response.json();
+    const { public_name: name }: ResponseBody<"/donor/referrals/{code}", "get"> = await response.json();
     return typeof name === "string" && name.trim() ? { state: "found", name } : { state: "unknown" };
   } catch {
     // The browser's own capture request confirms the referral; the name can wait for it.

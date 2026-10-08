@@ -5,21 +5,17 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
-import { api, failureMessage } from "@/lib/api";
+import { api, failureMessage, type Schema } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { formatDate } from "@/lib/dates";
-
-type Gifts = { email: string; next_offset: number | null; gifts: {
-  id: string; amount_minor: number; currency: string; frequency: string; paid_at: string; refunded_minor?: number;
-}[] };
 
 export default function Giving() {
   const [offset, setOffset] = useState(0);
   const [signedOut, setSignedOut] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const { resource, data, failed, reload } = useApiResource<Gifts>(signedOut ? null : `/donor/me/gifts?offset=${offset}`);
+  const { resource, data, failed, reload } = useApiResource<Schema<"GiftsPage">>(signedOut ? null : `/donor/me/gifts?offset=${offset}`);
   const heading = useRef<HTMLHeadingElement>(null);
   const paged = useRef(false);
   // Paging replaces the list the donor was reading; land them at the top of the new page.

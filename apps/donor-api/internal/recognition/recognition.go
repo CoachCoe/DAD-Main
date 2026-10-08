@@ -68,11 +68,15 @@ type Relationship struct {
 	ReferrerID  *string `json:"referrer_id"`
 	Kind        *string `json:"kind"`
 }
+
+// Streak is a donor's giving streak. Since is the due date of the current
+// run's first period, which identifies the run; it is nil with no run.
 type Streak struct {
 	Current     int64      `json:"current"`
 	Best        int64      `json:"best"`
 	AtRisk      bool       `json:"at_risk"`
 	GraceEndsAt *time.Time `json:"grace_ends_at"`
+	Since       *time.Time `json:"since"`
 }
 type Pause struct {
 	Start time.Time `json:"start"`
@@ -253,6 +257,7 @@ func GivingStreak(input []Gift, refunds []Refund, inputPeriods []Period, donorID
 		result.Current = 0
 		result.AtRisk = false
 		result.GraceEndsAt = nil
+		result.Since = nil
 	}
 	return result, nil
 }
@@ -337,6 +342,7 @@ func countStreak(elapsed []Period, payments map[string][]Gift, net map[string]in
 	for _, p := range elapsed {
 		if !last.Equal(p.DueAt) {
 			result.Current = 0
+			result.Since = nil
 		}
 		var paid time.Time
 		for _, g := range payments[p.ID] {
@@ -352,11 +358,15 @@ func countStreak(elapsed []Period, payments map[string][]Gift, net map[string]in
 			if !paid.Before(deadline) || (!lastPaid.IsZero() && paid.Before(lastPaid)) {
 				result.Current = 0
 			}
+			if result.Current == 0 {
+				result.Since = &p.DueAt
+			}
 			result.Current++
 			lastPaid = paid
 			result.Best = max(result.Best, result.Current)
 		case len(payments[p.ID]) > 0 || !asOf.Before(deadline):
 			result.Current = 0
+			result.Since = nil
 			lastPaid = time.Time{}
 		case result.Current > 0:
 			result.AtRisk = true
@@ -365,4 +375,12 @@ func countStreak(elapsed []Period, payments map[string][]Gift, net map[string]in
 		last = p.EndsAt
 	}
 	return result
+}
+
+// Milestone reports whether a run of months consecutive monthly gifts earns a
+// congratulation: three and six months, a year, and every year after. The
+// product requirements name streak milestones without defining them, so this
+// set is a product judgment.
+func Milestone(months int64) bool {
+	return months == 3 || months == 6 || (months >= 12 && months%12 == 0)
 }

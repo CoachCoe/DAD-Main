@@ -5,30 +5,42 @@ these with a later production database or describe sandbox awards as real recogn
 
 ## Database and containers
 
-Use a distinct PostgreSQL database and least-privilege credentials for each environment.
-Each process's database pool is sized for its role: the API opens up to 40 connections,
-and each worker, the monitor, migrations, and the staff command up to 2. A full
-deployment therefore needs about 54 of PostgreSQL's default 100 `max_connections`. When
-adding API replicas, raise `max_connections` (or put a pooler such as PgBouncer in front)
-so the total stays below it; `pool_max_conns=N` in `DONOR_GO_DATABASE_URL` overrides every
-process's size at once.
+Use a distinct PostgreSQL database and cluster for each environment. Every process
+connects with its own login, which holds only what that process needs
+([database roles](#database-roles)). Each process's database pool is sized for its role:
+the API opens up to 40 connections, and each worker, the monitor, migrations, the staff
+command, and `rekey` up to 2. A full deployment therefore needs about 56 of PostgreSQL's
+default 100 `max_connections`. When adding API replicas, raise `max_connections` (or put a
+pooler such as PgBouncer in front) so the total stays below it; `pool_max_conns=N` in a
+process's database URL overrides its size.
 
 Back up the database together with its separately stored encryption keys, then verify a
 restore. Losing the email or content encryption key makes its encrypted records
-unreadable. No automatic key-rotation or backup service is included.
+unreadable. No automatic backup service is included, and keys are rotated by hand
+([encryption keys](#encryption-keys)).
 
 ```sh
 cp .env.production.example .env.production
-# Fill in IMAGE_TAG (for example the git commit), database settings, the public and staff
-# HTTPS origins, the ingress mode and certificate directory, and required test-mode
-# secrets. Keep the previous IMAGE_TAG for rollback.
+cp .env.database.example .env.database
+# Fill in IMAGE_TAG (for example the git commit), the public and staff HTTPS origins, the
+# ingress mode and certificate directory, and required test-mode secrets in
+# .env.production, and the database password and every process's login in .env.database.
+# Keep the previous IMAGE_TAG for rollback.
 ./scripts/deploy.sh build
 ./scripts/deploy.sh migrate
+./scripts/deploy.sh provision-roles
 ./scripts/deploy.sh up
 ./scripts/deploy.sh smoke
 ```
 
-`migrate` starts PostgreSQL and applies embedded forward SQL migrations. An existing
+`ENV_FILE` (default `.env.production`) holds application settings and reaches every donor
+container; `DATABASE_ENV_FILE` (default `.env.database`) holds database credentials and
+reaches none: Compose reads it to give each service its own login's URL, and the scripts
+refuse database credentials in `ENV_FILE`. Both may be relative to the current directory.
+
+`migrate` starts PostgreSQL, applies embedded forward SQL migrations, and brings the
+process roles and their privileges to their declaration. `provision-roles` then creates or
+updates each process's login ([database roles](#database-roles)). An existing
 pre-rewrite database at `0030_donor_public_content` requires `./scripts/deploy.sh adopt`
 instead of the initial migrate step. Adoption compares the complete donor schema, records
 the baseline checksum, and preserves data. Stop all older API/worker processes before
@@ -42,18 +54,21 @@ services without deleting database volumes. `logs` follows service logs, which D
 default `json-file` driver keeps without limit; they include nginx's access log of client
 addresses, so set rotation in the Docker daemon's `log-opts` and keep logs no longer than
 the approved retention policy allows. No command
-pushes images or activates live donations. `ENV_FILE` may be relative to the current
-directory. The web container runs with a read-only filesystem and tmpfs mounts for
+pushes images or activates live donations. The web container runs with a read-only filesystem and tmpfs mounts for
 `/tmp` and `/app/.next/cache`. `up` and `reload-ingress` recreate nginx when its
 configuration has changed ([edge](edge.md#modes)), and `reload-ingress` makes it reread
 renewed certificates without dropping connections.
 
 The API refuses to start with only one of `STRIPE_SECRET_KEY` and
-`STRIPE_WEBHOOK_SECRET`, with a malformed encryption key, with a trusted proxy range
+`STRIPE_WEBHOOK_SECRET`, with a malformed key in an encryption key list (the error names
+the variable and the key's position, never the key), with a trusted proxy range
 broader than an IPv4 /8 or IPv6 /32, with a `DONOR_STAFF_ORIGIN` that is not an exact
 HTTPS origin or that is the public host or a parent domain of it, or with the retired
 `DONOR_STAFF_ENCRYPTION_KEY` set but no staff origin. Both origins must be written as
 browsers send them: lowercase, with no default port, path, or trailing slash. It logs which optional features are disabled.
+Every process except migrations and provisioning refuses to start when its database login
+can change the schema, even while assuming a role, or lacks its role
+([database roles](#database-roles)).
 Workers that hit a database or provider failure log the error type and retry with
 exponential backoff up to one minute; persistent failures show up as queue age.
 
@@ -90,7 +105,7 @@ through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is inte
 unconfigured. Readiness is not payment-provider acceptance or live-release authorization.
 
 Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURED`,
-`EMAIL_UNCONFIGURED`, or `SOURCE_STORAGE_UNCONFIGURED`) and are not logged as errors; a
+`EMAIL_UNCONFIGURED`, `SOURCE_STORAGE_UNCONFIGURED`, or `PUSH_UNCONFIGURED`) and are not logged as errors; a
 503 without a code is a transient failure and is logged.
 
 ### Upgrading an existing deployment
@@ -101,7 +116,7 @@ Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURE
    requires the complete migration history.
 3. Run `./scripts/deploy.sh up`, then `workers` if they are enabled, then `smoke`.
 
-Some migrations need more:
+Some migrations and releases need more:
 
 - `0007_staff_passkeys` replaces staff passwords and authenticator codes with passkeys.
   It deletes the old credentials and ends every staff session and open invitation, so
@@ -114,6 +129,121 @@ Some migrations need more:
 - `0009_subscription_sync` adds the billing anchor that dates paused renewals. A
   subscription synced before it shows no anchor until the Stripe worker next syncs it, so
   start the workers promptly after `up`.
+- The release that introduces [database roles](#database-roles) runs each process as its
+  own login, and the processes refuse to start as the schema owner. Before step 2, create
+  `.env.database` from `.env.database.example`: move `POSTGRES_USER`, `POSTGRES_PASSWORD`,
+  `POSTGRES_DB`, and `DONOR_GO_DATABASE_URL` out of `.env.production` into it, and give
+  every process URL its own generated password. Between steps 2 and 3, run
+  `./scripts/deploy.sh provision-roles`. Rolling back to an earlier image also needs that
+  release's Compose file and environment files, since earlier processes read the owner's
+  URL.
+
+## Database roles
+
+Each process connects as a login that is a member of one `NOLOGIN` group role, and the
+role holds only the privileges that process's statements need, so a fault or compromise in
+one process reaches only that process's data. No process role owns objects, can create
+them, or can grant anything; only the schema owner, which migrations use, changes the
+schema.
+
+| Role | Process | URL variable | Access |
+|---|---|---|---|
+| `dad_api` | API | `DONOR_API_DATABASE_URL` | Reads every table for views and exports; writes donor, session, checkout, recurring-command, projection, staff, content, and webhook-inbox records; cannot change gifts or billing periods, and deletes only reservations, subscription leases, passkey ceremonies, and passkeys |
+| `dad_worker_stripe` | Stripe worker | `DONOR_WORKER_STRIPE_DATABASE_URL` | Processes the webhook inbox and writes gifts, billing periods and observations, refunds, subscriptions, projections, and the mail and push queues; reads sessions only to find app devices; no staff or content records |
+| `dad_worker_projections` | Projection worker | `DONOR_WORKER_PROJECTIONS_DATABASE_URL` | Reads financial facts; writes projections and queues mail and push; deletes expired referral touches |
+| `dad_worker_login_email` | Login-email worker | `DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL` | Sign-in email queue and the links it issues |
+| `dad_worker_email_changes` | Email-change worker | `DONOR_WORKER_EMAIL_CHANGES_DATABASE_URL` | Email-change proofs |
+| `dad_worker_messages` | Message worker | `DONOR_WORKER_MESSAGES_DATABASE_URL` | Financial mail queue; reads the facts a message renders |
+| `dad_worker_push` | Push worker | `DONOR_WORKER_PUSH_DATABASE_URL` | Push queue and session push tokens; reads the facts it rechecks |
+| `dad_monitor` | Monitor | `DONOR_MONITOR_DATABASE_URL` | Reads queue status columns only: no addresses, bodies, tokens, or payloads |
+| `dad_staff_cli` | Staff command | `DONOR_STAFF_CLI_DATABASE_URL` | Staff accounts, invitations, passkeys, sessions; writes audit records |
+| `dad_rekey` | `rekey` | `DONOR_REKEY_DATABASE_URL` | Reads and rewrites the encrypted columns and their ids only |
+
+Every role reads the migration history. A worker that only locks a donor (`SELECT … FOR
+UPDATE`, which PostgreSQL allows only with `UPDATE` on some column) holds `UPDATE` on the
+`id` column alone, so it cannot change an address or any other field.
+`DONOR_GO_DATABASE_URL` is the schema owner's URL, used only by `migrate` and
+`provision-roles`.
+
+The privileges are declared table by table in `apps/donor-api/internal/dbroles/privileges.go`,
+in `GRANT` syntax, derived from the statements each process runs. Every `migrate` run
+creates any missing role and brings privileges to the declaration in the same transaction
+as the migrations, revoking anything else granted to `PUBLIC` or a process role, so a
+manual grant does not survive the next deployment. Privileges of other roles, such as an
+operator's reporting role, are left alone. The tests compare the database catalog with the
+declaration, fail for any table without one, and run each process's code with exactly its
+role's privileges.
+
+To add a table, create it in a new migration and, in the same change, give it an entry in
+the declaration listing every role whose statements touch it. A table no process uses
+still needs an entry, empty. A table in a new schema, such as R2's recipient schema, is
+declared as `schema.table`; roles receive `USAGE` on exactly the schemas holding their
+tables. A new process needs a new role in `internal/dbroles/roles.go`, its URL in
+`.env.database.example` and its Compose service, and a provisioned login. `make test`
+fails until the declaration matches.
+
+### Provisioning logins
+
+`./scripts/deploy.sh provision-roles` (or `make provision` with the variables loaded) runs
+as the schema owner after migrations. For each process it reads the user and password from
+the process's URL, creates or updates that login, makes it a member of the process's role,
+and sets its connection limit to the process's pool size, or to `pool_max_conns` in its
+URL. Only a SCRAM verifier computed locally reaches the server, never the password. It
+refuses a URL naming the owner, a group role, a superuser or other privileged role, the
+same user for two processes, a password shorter than 16 printable ASCII characters, or a
+database other than the owner's, and it refuses while a role's privileges reach any user
+besides its configured login, such as a login left from a rename: revoke the role from it
+or drop it, then run provisioning again. It can be run at any time and changes nothing
+else. Connection limits assume one instance of each process, as Compose runs them; a
+one-off run of a process, such as the Stripe worker's `--retry-event`, shares its login's
+limit, and more replicas of a process need a higher limit than provisioning sets.
+
+Under Compose, `./scripts/deploy.sh monitor`, `rekey`, and `staff` run those commands as
+their own services with their own logins, and the Stripe worker's retry runs as
+`docker compose … run --rm stripe-worker worker --kind stripe --retry-event evt_example --once`
+with both environment files.
+
+### Rotating database passwords
+
+1. Generate a new password (`openssl rand -hex 32`) and put it in the process's URL in
+   `.env.database`.
+2. Run `./scripts/deploy.sh provision-roles`. The login accepts only the new password
+   from now on: connections already open stay open, but the running process cannot open
+   new ones, so go straight on.
+3. Restart the process: `./scripts/deploy.sh up` for the API, `workers` for workers.
+   Commands such as `monitor` read the URL on each run.
+
+The owner's password is changed with `ALTER ROLE` by a superuser, then in
+`DONOR_GO_DATABASE_URL`; the bundled PostgreSQL reads `POSTGRES_PASSWORD` only when it
+initializes an empty data volume. A suspected leak of any database credential is handled
+the same way, together with [incident response](#queue-alerts-and-incident-response).
+
+### Local development and managed PostgreSQL
+
+Locally, processes connect as the owner when `DONOR_ALLOW_OWNER_CONNECTION=true` and
+their own URL is unset, as `.env.example` sets. To run a process with only its role's
+privileges, give it a URL that assumes the role, which a superuser may, such as
+`DONOR_API_DATABASE_URL="$DONOR_GO_DATABASE_URL?role=dad_api"`; since the session's login
+could still reset the role, a process accepts that only with the same setting, and checks
+that the role is its own. For the closest match to a deployment, set every process URL to
+a login of its own and run `make provision`. Tests and browser tests run the API, workers,
+and commands with assumed roles, so the test database's user must be a superuser.
+
+Roles belong to the whole PostgreSQL cluster, not one database, so run each environment
+in its own cluster: provisioning refuses a role whose privileges reach another
+environment's login. The migration user needs `CREATEROLE` the first time `migrate`
+creates the roles, and provisioning needs `CREATEROLE` with admin rights over the roles
+and logins it manages, which PostgreSQL 16 grants to the role that creates them. The
+bundled Compose database's owner is its superuser. On Amazon RDS, create a dedicated
+owner with `CREATE ROLE owner LOGIN CREATEROLE` as the master user (a member of
+`rds_superuser`) and give it the application database; Cloud SQL's
+`cloudsqlsuperuser` members can do the same. If a DBA creates the group roles instead,
+they must be plain `NOLOGIN` roles and the owner needs `ADMIN OPTION` on each. Configure
+TLS (`sslmode=verify-full`) in every URL for a remote database.
+
+Backups are taken without privileges. After restoring one into an application database,
+run `migrate`, which recreates missing roles and grants the declared privileges, then
+`provision-roles`.
 
 ## Stripe
 
@@ -206,11 +336,66 @@ replacement claim email. A queued response does not mean delivery succeeded. Mon
 queue age and parked jobs; automated paging and provider acceptance remain operational
 work. Test controlled mailboxes before inviting donors.
 
+## App notifications
+
+The push worker (`make worker KIND=push`, or `push-worker` in Compose) sends donor app
+notifications through Apple Push Notification service for iOS and Firebase Cloud
+Messaging for Android. The API reads the same settings: it accepts device registrations
+only for a configured platform, answering `PUSH_UNCONFIGURED` otherwise, so no
+notification is queued for a device nothing can reach. Both refuse to start with
+incomplete or unusable settings and log which platforms are disabled. The worker runs
+without any provider and completes notifications for unconfigured platforms as
+suppressed `push_unconfigured`; notifications are queued only for donors with a
+registered device and are dropped as `expired` 24 hours after queuing, so none wait
+indefinitely.
+
+| Variable | Meaning |
+|---|---|
+| `DONOR_PUSH_APNS_KEY_FILE` | Path to the APNs authentication key (`AuthKey_<key ID>.p8`, PKCS#8 P-256). |
+| `DONOR_PUSH_APNS_KEY_ID` | The key's 10-character ID. |
+| `DONOR_PUSH_APNS_TEAM_ID` | The Apple Developer team's 10-character ID. |
+| `DONOR_PUSH_APNS_TOPIC` | The app's bundle ID. |
+| `DONOR_PUSH_FCM_KEY_FILE` | Path to the Firebase service-account JSON key; its `project_id` receives the sends. |
+
+Key material is read only from files, at most 1 MiB, like the Wallet keys: mount them
+read-only into the API and push-worker containers (readable by uid 10001), keep them
+in the deployment secret manager, and never commit them or copy them into images.
+
+APNs setup: in Apple Developer, Certificates, Identifiers & Profiles, enable Push
+Notifications on the app's identifier, then under Keys create a key with Apple Push
+Notifications service enabled and download the `.p8` file, which Apple offers once.
+Set the four APNs variables. One key serves both environments; each device reports
+whether its token is from the sandbox (development builds) or production, and the
+worker sends to the matching host. The worker signs an ES256 provider token and reuses
+it for 40 minutes. Revoking the key in Apple Developer stops delivery at once.
+
+FCM setup: in the Firebase console, add the Android app to the project, then under
+Project settings, Service accounts, generate a private key and set
+`DONOR_PUSH_FCM_KEY_FILE` to the downloaded JSON. The account needs permission to send
+Firebase Cloud Messaging messages (the default Firebase Admin SDK account has it) and
+the project must have the Firebase Cloud Messaging API enabled. The worker exchanges a
+signed assertion for an access token and caches it until five minutes before expiry.
+
+Delivery reaches each live app session holding a token once; a retry after a partial
+failure sends only to the rest. A token the provider reports unregistered or invalid is
+removed from its session without retry. Throttling, outages, and network failures retry
+with the mail backoff, doubling from two minutes up to an hour, or after the provider's
+`Retry-After` if longer, and park after five attempts. A provider refusing the
+credentials or the request (`ProviderRejected`) parks the notification at once without
+touching tokens, since every send would fail the same way: fix the key, team, topic,
+or project, and later notifications go out. The monitor counts a parked notification
+until it expires, since an expired one is never sent. Before delivery the worker
+rechecks the donor's choices and that the fact still holds, completing the
+notification as suppressed (`opted_out`, `referral_no_longer_qualifies`,
+`payment_recovered`, `streak_ended`, `no_device`, and similar) otherwise. Local tests
+use a fake provider and local HTTP servers; they do not prove acceptance by Apple or
+Google, which needs real accounts, a signed build, and physical devices.
+
 ## Staff and content
 
 Staff sign in with passkeys on the staff host. Provision the first administrator with
-`go run ./cmd/staff --email … --name …` (with the database and `DONOR_STAFF_ORIGIN`
-configured); later access uses `/staff`. Require individual accounts and retain two
+`./scripts/deploy.sh staff --email … --name …` (or `go run ./cmd/staff` with the database
+and `DONOR_STAFF_ORIGIN` configured); later access uses `/staff`. Require individual accounts and retain two
 administrators, each with their own passkey, for recovery. An administrator's recovery
 action deletes the account's passkeys, revokes its sessions and invitations, and issues a
 private invitation from which the staff member creates a new passkey.
@@ -219,8 +404,8 @@ When no administrator can sign in, an operator with database access runs break-g
 recovery for an enabled administrator:
 
 ```sh
-cd apps/donor-api
-go run ./cmd/staff --recover --email named.person@example.org
+./scripts/deploy.sh staff --recover --email named.person@example.org
+# or, with the environment loaded: cd apps/donor-api && go run ./cmd/staff --recover --email …
 ```
 
 It works like the back-office recovery action and is audited as `staff.recovery_invited`
@@ -307,7 +492,7 @@ database after the run.
 Run the API as for production, and run the projection worker alone, since projections
 expire after a day and dashboards then wait for it. Never run the message worker against
 a seeded database; with Compose, start only
-`docker compose -f docker-compose.prod.yml --profile workers up -d projection-worker`.
+`docker compose --env-file .env.production --env-file .env.database -f docker-compose.prod.yml --profile workers up -d projection-worker`.
 Every scenario but referral capture only reads, including recurring, so Stripe
 configuration does not change the result; captures insert referral touches, so the
 database grows with each run. Checkout is not in the mix because it calls Stripe.
@@ -370,7 +555,7 @@ acceptance also require explicit evidence.
 Run `./scripts/deploy.sh monitor [--max-age 10m]` (or `go run ./cmd/monitor` from
 `apps/donor-api` with the database environment loaded). It emits only aggregate JSON counts,
 parked counts, and oldest due age for Stripe, projections, financial mail, login mail,
-email changes, and subscriptions. It exits nonzero if any job is parked or a due item is
+email changes, push notifications, and subscriptions. It exits nonzero if any job is parked or a due item is
 older than five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends
 are excluded. An ongoing subscription last synced before its billing period ended is due
 a sync one day after that end, when Stripe has renewed or ended it: one still due after
@@ -390,6 +575,87 @@ possible duplicate delivery after acknowledgement loss. Escalate incorrect recog
 or money totals to the finance owner; publish corrections only after reconciliation.
 Assign primary/backup incident owners and test paging in the chosen hosting environment.
 
+## Encryption keys
+
+`DONOR_EMAIL_ENCRYPTION_KEY` protects queued sign-in links and email-change proofs
+(`donor_login_emails.encrypted_token` and `donor_email_changes.encrypted_token`), and
+`DONOR_CONTENT_ENCRYPTION_KEY` protects private source documents
+(`donor_content_sources.encrypted_data`). Each is a comma-separated list of Fernet keys,
+newest first: the first key encrypts everything written, and any key in the list
+decrypts. A single key is a list of one. The API and workers refuse to start if any key
+in a list is malformed. Session, link, and referral-visitor lookups use unkeyed SHA-256
+hashes of random tokens, so no stored hash depends on these keys and rotation re-hashes
+nothing. Wallet signing keys and staff passkeys are not data-encryption keys and are not
+rotated this way.
+
+`rekey --key email` (or `content`) re-encrypts every token of that setting still on a
+later key under the first key. It reads each table in id order in pages of `--batch`
+rows (default 500), each cut short once it passes 8 MiB of tokens, skips tokens the first key already
+decrypts, and replaces each other token with a single-row compare-and-swap. It therefore
+runs safely beside the API and workers: it holds one row lock at a time and never
+overwrites a token they wrote after it was read. An interrupted run keeps what it
+finished; run it again to resume. Before changing anything it reads every token and
+refuses if any decrypts under no key in the list, naming each such row by table and id.
+`--dry-run` changes nothing and prints, per table, the tokens found (`tokens`), those
+still needing a later key (`retired`), and those no key decrypts (`undecryptable`); it
+exits nonzero while either count is above zero. Under Compose run it as
+`./scripts/deploy.sh rekey …`; locally run `go run ./cmd/rekey …` from `apps/donor-api`
+with the environment loaded.
+
+### Rotating a key
+
+Rotate one setting at a time. For the email key:
+
+1. Generate a new key with `openssl rand -base64 32 | tr '+/' '-_'` and add it to the
+   secret store beside the current one.
+2. Put it first in the list: `DONOR_EMAIL_ENCRYPTION_KEY=<new>,<current>`.
+3. Deploy the API and every worker with the new list: `./scripts/deploy.sh up`, then
+   `./scripts/deploy.sh workers` if workers are enabled. A worker still on the old list
+   cannot read an email-change proof the new API encrypted; it retries a minute later,
+   by when it has restarted. Where processes cannot restart together, such as several
+   replicas behind a rolling deploy, first deploy the new key last in the list
+   (`<current>,<new>`), then move it first and deploy again, so that every process
+   reads the new key before any writes with it.
+4. Count what remains: `./scripts/deploy.sh rekey --key email --dry-run`. It exits
+   nonzero now, with `retired` counts. If any token is `undecryptable`, stop: it was
+   written under a key missing from the list. Find that key and add it at the end of the
+   list before going on.
+5. Re-encrypt: `./scripts/deploy.sh rekey --key email`. Its summary adds `reencrypted`
+   per table. If it is interrupted, run it again.
+6. Verify: `./scripts/deploy.sh rekey --key email --dry-run` exits zero, with `retired`
+   zero for every table.
+7. Remove the old key, `DONOR_EMAIL_ENCRYPTION_KEY=<new>`, and deploy the API and workers
+   again as in step 3. A dry run with only the new key then still exits zero.
+8. Keep the retired key in the secret store as described below.
+
+The content key rotates the same way with `--key content` and `DONOR_CONTENT_ENCRYPTION_KEY`;
+only the API uses it.
+
+### Suspected key compromise
+
+A disclosed key exposes its data only together with a copy of the database or a backup,
+but treat the database as exposed until shown otherwise and follow
+[incident response](#queue-alerts-and-incident-response).
+
+1. Preserve evidence, and rotate the database credentials too if they may have leaked.
+2. Rotate the key at once (steps 1 to 7 above). Rotation protects the live database
+   from then on; it cannot protect dumps and backups taken earlier, which remain readable
+   with the compromised key and belong in the incident's assessment.
+3. Record in the secret store that the key is compromised. Keep it only while it is needed
+   to restore backups that predate the rotation, and destroy it with them.
+4. For the email key, sign-in links and email-change proofs expire 15 minutes after they
+   are issued, so those encrypted before the rotation stop working on their own. For the
+   content key, presume the source documents stored before the rotation disclosed.
+
+### Backups and retired keys
+
+A backup holds tokens as they were when it was taken, so restoring it needs every key in
+use then. Keep each retired key in the secret store, labelled with its setting and the
+date its rekey completed, until every backup taken before that date has passed the
+retention policy; then destroy it. To restore an older backup, add the retired keys it
+needs at the end of the list (`<current>,<retired>`), restore, run `rekey`, verify with a
+dry run, and remove them again.
+
 ## Backup and restore drill
 
 With PostgreSQL running and `ENV_FILE` pointing to the Compose environment:
@@ -405,6 +671,7 @@ storage with restricted access, retention, and independent copies. The drill cre
 random disposable database, restores with fail-on-error, reads core donor/gift/identity
 tables, and drops only that temporary database. It never restores over the running app.
 A successful drill proves the dump restores, not disaster recovery time or key recovery.
-Rehearse the restored app in an isolated environment with preserved encryption keys and
+Rehearse the restored app in an isolated environment with the encryption keys in use
+when the dump was taken ([retired keys](#backups-and-retired-keys)) and
 outbound Stripe/email disabled. Establish recovery-point and recovery-time objectives,
 backup scheduling, retention, alerting, and off-host recovery ownership before launch.

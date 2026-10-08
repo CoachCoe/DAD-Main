@@ -39,9 +39,16 @@ func (s publicSite) claim(token, next string) string {
 func (s publicSite) emailChange(token string) string {
 	return string(s) + "/account/email-change#token=" + token
 }
-func (s publicSite) dashboard() string     { return string(s) + "/account/dashboard" }
+
+// Pages a push notification opens, as paths for the app to route.
+const (
+	dashboardPath     = "/account/dashboard"
+	paymentMethodPath = "/account/payment-method"
+)
+
+func (s publicSite) dashboard() string     { return string(s) + dashboardPath }
 func (s publicSite) profile() string       { return string(s) + "/account/profile" }
-func (s publicSite) paymentMethod() string { return string(s) + "/account/payment-method" }
+func (s publicSite) paymentMethod() string { return string(s) + paymentMethodPath }
 func (s publicSite) donate() string        { return string(s) + "/donate" }
 
 // checkoutReturn is where hosted checkout returns a donor; Stripe substitutes

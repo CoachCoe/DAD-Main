@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Page } from "@playwright/test";
+import { databaseAs } from "./database";
 
 /** The back office has its own host; browsers resolve every *.localhost name to loopback. */
 export const staffOrigin = process.env.DONOR_STAFF_ORIGIN ?? "http://staff.localhost:3000";
@@ -16,7 +17,7 @@ export async function addPasskeyDevice(page: Page) {
 }
 
 const staffCommand = (args: string[]) => promisify(execFile)("go", ["run", "./cmd/staff", ...args], {
-  cwd: "../donor-api", env: { ...process.env, DONOR_STAFF_ORIGIN: staffOrigin },
+  cwd: "../donor-api", env: { ...process.env, DONOR_STAFF_ORIGIN: staffOrigin, ...databaseAs("dad_staff_cli") },
 });
 
 /**

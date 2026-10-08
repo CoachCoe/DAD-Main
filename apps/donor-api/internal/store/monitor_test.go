@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -26,6 +27,14 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 		mustExec(t, tx, `INSERT INTO donor_messages(id,donor_id,kind,dedup_key,context,available_at,attempts,completed_at)
   VALUES($1,$2,'RECEIPT',$3,'{}',$4,$5,CASE WHEN $6 THEN $4::timestamptz ELSE NULL END)`, job, id, job.String(), now.Add(delta), i*5, i == 3)
 	}
+	for _, push := range []struct {
+		due, expires time.Duration
+		attempts     int
+	}{{-2 * time.Minute, time.Hour, 0}, {-time.Minute, time.Hour, 5}, {time.Hour, 2 * time.Hour, 0}, {-time.Hour, -time.Second, 5}} {
+		job := testID(t)
+		mustExec(t, tx, `INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at,attempts)
+  VALUES($1,$2,'STREAK_MILESTONE',$3,'{}',$4,$5,$6)`, job, id, job.String(), now.Add(push.due), now.Add(push.expires), push.attempts)
+	}
 	day := 24 * time.Hour
 	for _, sub := range []struct {
 		status            string
@@ -41,16 +50,22 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 		mustExec(t, tx, "INSERT INTO donor_stripe_checkouts(id,checkout_id,request_hash,request_params,stripe_subscription_id,status) VALUES($1,$2,'hash','{}',$3,'COMPLETE')", attempt, checkout, "sub_"+attempt.String())
 		mustExec(t, tx, "INSERT INTO donor_subscriptions(id,attempt_id,donor_id,status,period_end,observed_at) VALUES($1,$2,$3,$4,$5,$6)", testID(t), attempt, id, sub.status, now.Add(sub.periodEnd), now.Add(sub.synced))
 	}
+	actAs(t, tx, dbroles.Monitor)
 	rows, err := queries.New(tx).QueueHealth(ctx, timestamp(now))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 6 {
+	if len(rows) != 7 {
 		t.Fatal(rows)
 	}
 	for _, row := range rows {
 		if row.Queue == "messages" {
 			if row.Due != 2 || row.Parked != 1 || row.OldestSeconds != 3600 {
+				t.Fatal(row)
+			}
+		}
+		if row.Queue == "push" {
+			if row.Due != 2 || row.Parked != 1 || row.OldestSeconds != 120 {
 				t.Fatal(row)
 			}
 		}

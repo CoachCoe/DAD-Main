@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "description": "The ImpactGraph (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <session token>`. A request with Origin or cookies is a browser request whatever else it carries. Obtain a session by calling POST /donor/login, opening the emailed `/account/claim#token=…` link in the app, and sending the fragment's token to POST /donor/claim as a native request. Routes that admit the app list `native` in `x-clients`; giving, referral capture, partner signup, and every staff route are web-only.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"…\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `…+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
+    "description": "The ImpactGraph (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=…` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh and the push-device routes admit nothing else; giving, referral capture, partner signup, and every staff route are web-only.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"…\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `…+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
   },
   "servers": [
     {
@@ -628,7 +628,7 @@
       "post": {
         "operationId": "claim",
         "summary": "Exchange an emailed sign-in proof for a session",
-        "description": "A browser request receives an HttpOnly cookie and `{\"claimed\":true}`. A native request (`X-DAD-Client: native`, no Origin, no cookies) receives the token in the body as NativeSession and no cookie. Any session presented with the request (cookie or bearer) is revoked. 401 means the link is invalid, used, or expired.",
+        "description": "A browser request receives an HttpOnly cookie and `{\"claimed\":true}`. A native request (`X-DAD-Client: native`, no Origin, no cookies) receives NativeSession, a new access and refresh token, and no cookie; it may describe its device so the donor can recognize the session later. Any session presented with the request (cookie or bearer) is revoked. 401 means the link is invalid, used, or expired.",
         "tags": [
           "Account"
         ],
@@ -650,6 +650,19 @@
                     "description": "Proof from the emailed link fragment.",
                     "minLength": 32,
                     "maxLength": 128
+                  },
+                  "device_name": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Native requests only, optional: the device's user-visible name, shown to the donor in their session list. Control and formatting characters are removed. Ignored for browser requests."
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "IOS",
+                      "ANDROID"
+                    ],
+                    "description": "Native requests only, optional. Ignored for browser requests."
                   }
                 },
                 "required": [
@@ -682,7 +695,8 @@
                       "additionalProperties": false
                     },
                     {
-                      "$ref": "#/components/schemas/NativeSession"
+                      "$ref": "#/components/schemas/NativeSession",
+                      "description": "Native request."
                     }
                   ]
                 }
@@ -693,6 +707,75 @@
                 "description": "Browser requests only.",
                 "schema": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/refresh": {
+      "post": {
+        "operationId": "refresh",
+        "summary": "Exchange the app's refresh token for new tokens",
+        "description": "Native requests only; a browser request is 403 even from the public origin. Returns a new access token and a new refresh token, and the previous access token stops working at once. Each refresh token works once. Presenting one the session has already exchanged revokes the whole session (every token issued since that sign-in) and records a security event, because the app or someone who copied the token is using a stale one. The one exception covers a lost response: the refresh token exchanged most recently is accepted again for one minute after that exchange, and answered with yet another pair that supersedes the first. Concurrent refreshes with one token are therefore answered in turn, and only the tokens answered last keep working, so send one refresh at a time and keep only the newest tokens. 401 means the session has ended: sign in again by email.",
+        "tags": [
+          "Account"
+        ],
+        "security": [],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refresh_token": {
+                    "type": "string",
+                    "minLength": 32,
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "refresh_token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "New tokens.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeSession"
                 }
               }
             }
@@ -812,7 +895,7 @@
       "post": {
         "operationId": "logout",
         "summary": "Sign out this session",
-        "description": "Succeeds even when the session is already invalid (no 401), so a client can always discard its credential. Browser responses expire the cookie.",
+        "description": "Succeeds even when the session is already invalid (no 401), so a client can always discard its credential. Ends the whole session: for the app, its refresh token stops working too. Browser responses expire the cookie.",
         "tags": [
           "Account"
         ],
@@ -899,6 +982,154 @@
                     "signed_out"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        },
+        "description": "Ends every session of the donor, this one included."
+      }
+    },
+    "/donor/me/sessions": {
+      "get": {
+        "operationId": "sessions",
+        "summary": "Where the donor is signed in",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/sessions/{session_id}/revoke": {
+      "post": {
+        "operationId": "revokeSession",
+        "summary": "Sign out another session",
+        "description": "Ends one of the donor's other sessions at once: its cookie, access token, and refresh token stop working immediately. A session that has already ended succeeds again. 404 when the ID is not one of the donor's sessions. 409 for the session making the request; use POST /donor/logout for that.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The donor's sessions after the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/sessions/revoke-others": {
+      "post": {
+        "operationId": "revokeOtherSessions",
+        "summary": "Sign out every other session",
+        "description": "Ends every session of the donor except the one making the request, at once.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "responses": {
+          "200": {
+            "description": "The donor's sessions after the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
                 }
               }
             }
@@ -1082,7 +1313,7 @@
       "post": {
         "operationId": "savePreferences",
         "summary": "Save notification preferences",
-        "description": "409 when `version` is stale: re-read the profile and retry.",
+        "description": "Replaces every notification choice at once. 409 when `version` is stale: re-read the profile and retry.",
         "tags": [
           "Donor"
         ],
@@ -1117,12 +1348,24 @@
                   },
                   "marketing_emails": {
                     "type": "boolean"
+                  },
+                  "push_referral_converted": {
+                    "type": "boolean"
+                  },
+                  "push_streak_at_risk": {
+                    "type": "boolean"
+                  },
+                  "push_streak_milestone": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "version",
                   "referral_emails",
-                  "marketing_emails"
+                  "marketing_emails",
+                  "push_referral_converted",
+                  "push_streak_at_risk",
+                  "push_streak_milestone"
                 ],
                 "additionalProperties": false
               }
@@ -1160,6 +1403,197 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/push-device": {
+      "post": {
+        "operationId": "registerPushDevice",
+        "summary": "Register this installation for app notifications",
+        "description": "Native requests only. Records the push token of the app installation behind the calling session, replacing any token the session held. Register at every launch, since platforms rotate tokens. A token another session holds, the donor's or anyone's, moves to this session: it names one installation. The token is removed when the session is signed out, revoked, or ends, so sign-in again means registering again. Notifications carry generic text, a `category` (`REFERRAL_CONVERTED`, `STREAK_AT_RISK`, or `STREAK_MILESTONE`) and an app `path` to open, never names or amounts; fetch details through the API. 503 with `PUSH_UNCONFIGURED` when this deployment does not deliver to the platform. 401 for a browser session's credential.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "IOS",
+                      "ANDROID"
+                    ]
+                  },
+                  "token": {
+                    "type": "string",
+                    "minLength": 32,
+                    "maxLength": 1024,
+                    "description": "For iOS, the APNs device token as hex (either case); for Android, the FCM registration token."
+                  },
+                  "environment": {
+                    "type": "string",
+                    "enum": [
+                      "SANDBOX",
+                      "PRODUCTION"
+                    ],
+                    "default": "PRODUCTION",
+                    "description": "iOS only: the APNs environment that issued the token (SANDBOX for development builds). Omit for Android."
+                  }
+                },
+                "required": [
+                  "platform",
+                  "token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The session's registration after the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushRegistration"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/push-device/unregister": {
+      "post": {
+        "operationId": "unregisterPushDevice",
+        "summary": "Stop app notifications to this installation",
+        "description": "Native requests only. Removes the calling session's push token, if any; the session stays signed in.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "native"
+        ],
+        "responses": {
+          "200": {
+            "description": "The session's registration after the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushRegistration"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/conversions": {
+      "get": {
+        "operationId": "conversions",
+        "summary": "Recent referral conversions",
+        "description": "Referrals that converted: when each referred donor's first gift was paid, and its channel, newest first, at most 20. A referral whose gifts were all refunded no longer appears, matching the dashboard's counts. Nothing identifies the referred donor. Pass the newest `converted_at` already shown as `since` to fetch only newer ones, for example after a notification.",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Only conversions strictly after this RFC 3339 time.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -4196,12 +4630,12 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "dad_donor_session",
-        "description": "Web donor session: HttpOnly, Secure on HTTPS, SameSite=Lax, 30 days at most. Set by POST /donor/claim for browser requests. Mutations also require the exact configured `Origin`."
+        "description": "Web donor session: HttpOnly, Secure on HTTPS, SameSite=Lax, 30 days at most and not extended by use. Set by POST /donor/claim for browser requests. Mutations also require the exact configured `Origin`."
       },
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Donor app session (the same server-side session store, expiry, and revocation as cookieAuth). Accepted only on native requests: `X-DAD-Client: native`, no `Origin` header, and no `Cookie` header. Any request carrying Origin or cookies is treated as a browser request, its Authorization header is ignored, and its mutations need the exact Origin. Obtain the token from POST /donor/claim sent as a native request. Never accepted for staff routes."
+        "description": "Donor app access token, from POST /donor/claim or POST /donor/refresh sent as a native request. It lasts 15 minutes and stops working as soon as it is refreshed, or its session is signed out, revoked, or ends; every request checks the session, so revocation is immediate. Accepted only on native requests: `X-DAD-Client: native`, no `Origin` header, and no `Cookie` header. Any request carrying Origin or cookies is treated as a browser request, its Authorization header is ignored, and its mutations need the exact Origin. Refresh tokens are never accepted here, and access tokens are never accepted by POST /donor/refresh. Never accepted for staff routes."
       },
       "staffCookieAuth": {
         "type": "apiKey",
@@ -4262,7 +4696,7 @@
         }
       },
       "Forbidden": {
-        "description": "Browser requests: Origin is not the configured site origin, or, on staff routes, Sec-Fetch-Site is present and neither same-origin nor none. App requests: the route does not admit the app, or the request also carried Origin or cookies. Some routes also use 403 for a permission or account restriction.",
+        "description": "Browser requests: Origin is not the configured site origin, or, on staff routes, Sec-Fetch-Site is present and neither same-origin nor none. App requests: the route does not admit the app, or the request also carried Origin or cookies. Any browser request to a route that admits only the app. Some routes also use 403 for a permission or account restriction.",
         "content": {
           "application/json": {
             "schema": {
@@ -4412,25 +4846,32 @@
       },
       "NativeSession": {
         "type": "object",
-        "description": "Returned by POST /donor/claim to native requests only. Browsers receive the same session solely as an HttpOnly cookie.",
+        "description": "The donor app's tokens, returned by POST /donor/claim and POST /donor/refresh to native requests only. Browsers never receive tokens in a body: their session is solely an HttpOnly cookie. Store both tokens in the platform keychain/keystore and replace both on every refresh.",
         "properties": {
-          "claimed": {
-            "type": "boolean"
-          },
-          "session_token": {
+          "access_token": {
             "type": "string",
-            "description": "Opaque donor session token. Send it as `Authorization: Bearer <token>` together with `X-DAD-Client: native`. Store it in the platform keychain/keystore."
+            "description": "Opaque. Send it as `Authorization: Bearer <token>` together with `X-DAD-Client: native`."
           },
           "expires_in": {
             "type": "integer",
             "format": "int32",
-            "description": "Seconds until the session expires at the latest. Sign-out, sign-out everywhere, and email changes revoke it earlier."
+            "description": "Seconds until the access token expires: 900, or less when the session itself ends sooner."
+          },
+          "refresh_token": {
+            "type": "string",
+            "description": "Opaque and single-use: send it to POST /donor/refresh for the next pair. Never send it as a bearer token."
+          },
+          "refresh_expires_in": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Seconds until the session ends unless refreshed: 60 days after the latest refresh, and never more than a year after sign-in, when the donor signs in again by email."
           }
         },
         "required": [
-          "claimed",
-          "session_token",
-          "expires_in"
+          "access_token",
+          "expires_in",
+          "refresh_token",
+          "refresh_expires_in"
         ],
         "additionalProperties": false
       },
@@ -4447,18 +4888,16 @@
           "initiatives": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": true
+              "$ref": "#/components/schemas/Initiative"
             },
-            "description": "Published initiative rows keyed by spreadsheet column."
+            "description": "Published initiatives, in spreadsheet order."
           },
           "ledger": {
             "type": "array",
             "items": {
-              "type": "object",
-              "additionalProperties": true
+              "$ref": "#/components/schemas/LedgerFigure"
             },
-            "description": "Published impact ledger rows keyed by spreadsheet column."
+            "description": "Published impact ledger figures, in spreadsheet order."
           },
           "ledger_as_of": {
             "type": [
@@ -4490,6 +4929,73 @@
           "ledger",
           "ledger_as_of",
           "state"
+        ],
+        "additionalProperties": false
+      },
+      "Initiative": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "partner": {
+            "type": "string"
+          },
+          "planned_start": {
+            "type": "string",
+            "format": "date"
+          }
+        },
+        "required": [
+          "slug",
+          "title",
+          "summary",
+          "partner",
+          "planned_start"
+        ],
+        "additionalProperties": false
+      },
+      "LedgerFigure": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique within the publication."
+          },
+          "metric": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64",
+            "description": "In `unit`; USD_CENTS is integer cents."
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "USD_CENTS",
+              "PEOPLE",
+              "INITIATIVES",
+              "PARTNERS"
+            ]
+          },
+          "illustrative": {
+            "type": "boolean",
+            "description": "An illustrative example, not a reported outcome."
+          }
+        },
+        "required": [
+          "id",
+          "metric",
+          "value",
+          "unit",
+          "illustrative"
         ],
         "additionalProperties": false
       },
@@ -4565,56 +5071,82 @@
         "additionalProperties": false
       },
       "DonorDashboard": {
-        "type": "object",
-        "description": "While `state` is `preparing` only `mode` and `state` are present. A null `referrals` or `streak` means the figure is not currently known; never show it as zero.",
-        "properties": {
-          "computed_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "founding_donor": {
-            "type": "boolean"
-          },
-          "mode": {
-            "type": "string",
-            "description": "Always `test`: R1 accepts Stripe test payments only.",
-            "enum": [
-              "test"
-            ]
-          },
-          "referrals": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReferralSummary"
+        "description": "A null `referrals` or `streak` means the figure is not currently known; never show it as zero.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "description": "Always `test`: R1 accepts Stripe test payments only.",
+                "enum": [
+                  "test"
+                ]
               },
-              {
-                "type": "null"
+              "state": {
+                "type": "string",
+                "const": "preparing"
               }
-            ]
+            },
+            "required": [
+              "mode",
+              "state"
+            ],
+            "additionalProperties": false
           },
-          "state": {
-            "type": "string",
-            "enum": [
-              "preparing",
-              "ready"
-            ]
-          },
-          "streak": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/StreakSummary"
+          {
+            "type": "object",
+            "properties": {
+              "computed_at": {
+                "type": "string",
+                "format": "date-time"
               },
-              {
-                "type": "null"
+              "founding_donor": {
+                "type": "boolean"
+              },
+              "mode": {
+                "type": "string",
+                "description": "Always `test`: R1 accepts Stripe test payments only.",
+                "enum": [
+                  "test"
+                ]
+              },
+              "referrals": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReferralSummary"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "const": "ready"
+              },
+              "streak": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/StreakSummary"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
-            ]
+            },
+            "required": [
+              "computed_at",
+              "founding_donor",
+              "mode",
+              "referrals",
+              "state",
+              "streak"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "mode",
-          "state"
-        ],
-        "additionalProperties": false
+        ]
       },
       "Profile": {
         "type": "object",
@@ -4635,6 +5167,18 @@
           "marketing_emails": {
             "type": "boolean"
           },
+          "push_referral_converted": {
+            "type": "boolean",
+            "description": "App notification when someone the donor invited makes their first gift. Starts on: the device's notification permission is the opt-in."
+          },
+          "push_streak_at_risk": {
+            "type": "boolean",
+            "description": "App notification when a declined monthly payment puts the donor's giving streak at risk. Starts on."
+          },
+          "push_streak_milestone": {
+            "type": "boolean",
+            "description": "App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on."
+          },
           "version": {
             "type": "integer",
             "format": "int32",
@@ -4649,8 +5193,165 @@
           "public_name",
           "referral_emails",
           "marketing_emails",
+          "push_referral_converted",
+          "push_streak_at_risk",
+          "push_streak_milestone",
           "version",
           "consent_version"
+        ],
+        "additionalProperties": false
+      },
+      "PushRegistration": {
+        "type": "object",
+        "description": "The calling session's push registration.",
+        "properties": {
+          "registered": {
+            "type": "boolean"
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "IOS",
+              "ANDROID",
+              null
+            ]
+          },
+          "environment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SANDBOX",
+              "PRODUCTION",
+              null
+            ],
+            "description": "The APNs environment for iOS; null for Android."
+          }
+        },
+        "required": [
+          "registered",
+          "platform",
+          "environment"
+        ],
+        "additionalProperties": false
+      },
+      "ConversionList": {
+        "type": "object",
+        "properties": {
+          "conversions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Conversion"
+            }
+          },
+          "more": {
+            "type": "boolean",
+            "description": "Whether older conversions after `since` were left out."
+          }
+        },
+        "required": [
+          "conversions",
+          "more"
+        ],
+        "additionalProperties": false
+      },
+      "Conversion": {
+        "type": "object",
+        "description": "A referral's first gift. It carries nothing about the referred donor.",
+        "properties": {
+          "converted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "LINK",
+              "IRL"
+            ]
+          }
+        },
+        "required": [
+          "converted_at",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "DeviceSession": {
+        "type": "object",
+        "description": "One place the donor is signed in: a web browser (one per cookie) or an installation of the app.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Opaque session ID for POST /donor/me/sessions/{session_id}/revoke. It reveals nothing about any token."
+          },
+          "client": {
+            "type": "string",
+            "enum": [
+              "BROWSER",
+              "APP"
+            ]
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "IOS",
+              "ANDROID",
+              null
+            ],
+            "description": "As reported by the app at sign-in; always null for browsers."
+          },
+          "label": {
+            "type": "string",
+            "description": "A name the donor can recognize, safe to display as plain text: the device name the app reported, otherwise “iOS device”, “Android device”, or “Mobile device”; every browser is “Web browser”."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the donor signed in."
+          },
+          "last_used_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The latest recorded use, recorded at most every five minutes and on every refresh, so it may trail the true last use by that much."
+          },
+          "current": {
+            "type": "boolean",
+            "description": "Whether this is the session making the request."
+          }
+        },
+        "required": [
+          "id",
+          "client",
+          "platform",
+          "label",
+          "created_at",
+          "last_used_at",
+          "current"
+        ],
+        "additionalProperties": false
+      },
+      "SessionList": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "description": "Sessions that can still be used, including app sessions whose access token has expired but can be refreshed: the current session first, then by latest use, at most 50.",
+            "items": {
+              "$ref": "#/components/schemas/DeviceSession"
+            }
+          }
+        },
+        "required": [
+          "sessions"
         ],
         "additionalProperties": false
       },
@@ -4713,10 +5414,7 @@
             ]
           },
           "paid_at": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "format": "date-time"
           },
           "refunded_minor": {
@@ -5056,7 +5754,11 @@
             "format": "date-time"
           },
           "state": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "preparing",
+              "ready"
+            ]
           },
           "subscription": {
             "anyOf": [
@@ -5110,40 +5812,61 @@
         "additionalProperties": false
       },
       "AmountOptions": {
-        "type": "object",
-        "description": "Unless `state` is `ready`, only `state` is present.",
-        "properties": {
-          "amount_minor": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Amount of the next renewal."
-          },
-          "change": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AmountChange"
-              },
-              {
-                "type": "null"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "const": "unavailable"
               }
-            ]
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
           },
-          "effective_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "state": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string",
-            "format": "uuid"
+          {
+            "type": "object",
+            "properties": {
+              "amount_minor": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Amount of the next renewal."
+              },
+              "change": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AmountChange"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "effective_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "state": {
+                "type": "string",
+                "const": "ready"
+              },
+              "subscription_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "amount_minor",
+              "change",
+              "effective_at",
+              "state",
+              "subscription_id"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "state"
-        ],
-        "additionalProperties": false
+        ]
       },
       "PauseOption": {
         "type": "object",
@@ -5237,36 +5960,83 @@
         "additionalProperties": false
       },
       "ResumeOptions": {
-        "type": "object",
-        "description": "Each state carries only its own fields.",
-        "properties": {
-          "confirmed": {
-            "type": "boolean"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "const": "unavailable"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
           },
-          "next_renewal": {
-            "type": "string",
-            "format": "date-time"
+          {
+            "type": "object",
+            "properties": {
+              "next_renewal": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "original_resume": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "pause_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "const": "ready",
+                "description": "An offer to resume at the next renewal."
+              }
+            },
+            "required": [
+              "next_renewal",
+              "original_resume",
+              "pause_id",
+              "state"
+            ],
+            "additionalProperties": false
           },
-          "original_resume": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "pause_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "request_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "state": {
-            "type": "string"
+          {
+            "type": "object",
+            "properties": {
+              "confirmed": {
+                "type": "boolean"
+              },
+              "next_renewal": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "pause_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "request_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "const": "saved",
+                "description": "A resumption already requested."
+              }
+            },
+            "required": [
+              "confirmed",
+              "next_renewal",
+              "pause_id",
+              "request_id",
+              "state"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "state"
-        ],
-        "additionalProperties": false
+        ]
       },
       "PaymentMethodStatus": {
         "type": "object",
@@ -5286,7 +6056,15 @@
             ]
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "NONE",
+              "PENDING",
+              "OPEN",
+              "APPLIED",
+              "EXPIRED",
+              "CANCELLED"
+            ]
           }
         },
         "required": [
@@ -5336,31 +6114,51 @@
         "additionalProperties": false
       },
       "PaymentUpdate": {
-        "type": "object",
-        "properties": {
-          "completed_at": {
-            "type": [
-              "string",
-              "null"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "Stripe-hosted card setup page. Open it in the system browser.",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "url"
             ],
-            "format": "date-time"
+            "additionalProperties": false
           },
-          "status": {
-            "type": "string"
-          },
-          "url": {
-            "type": [
-              "string",
-              "null"
+          {
+            "type": "object",
+            "properties": {
+              "completed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "APPLIED",
+                  "CANCELLED"
+                ]
+              },
+              "url": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "completed_at",
+              "status",
+              "url"
             ],
-            "description": "Stripe-hosted card setup page. Open it in the system browser.",
-            "format": "uri"
+            "additionalProperties": false,
+            "description": "An update that finished before a new one could begin."
           }
-        },
-        "required": [
-          "url"
-        ],
-        "additionalProperties": false
+        ]
       },
       "CheckoutResult": {
         "type": "object",
@@ -5622,10 +6420,7 @@
             "format": "int32"
           },
           "computed_at": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "format": "date-time"
           },
           "current": {
@@ -6028,7 +6823,9 @@
             ]
           }
         },
-        "required": [],
+        "required": [
+          "action"
+        ],
         "additionalProperties": false
       },
       "Enrolments": {

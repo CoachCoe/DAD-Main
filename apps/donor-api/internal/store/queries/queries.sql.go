@@ -11,32 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const authenticatedDonor = `-- name: AuthenticatedDonor :one
-SELECT d.email, d.claimed_at, d.disabled, d.public_name, d.referral_code, d.id, d.created_at FROM donors d JOIN donor_sessions s ON s.donor_id = d.id
-WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2
-AND d.disabled = false AND d.claimed_at IS NOT NULL
-`
-
-type AuthenticatedDonorParams struct {
-	TokenHash string             `json:"token_hash"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
-}
-
-func (q *Queries) AuthenticatedDonor(ctx context.Context, arg AuthenticatedDonorParams) (Donor, error) {
-	row := q.db.QueryRow(ctx, authenticatedDonor, arg.TokenHash, arg.ExpiresAt)
-	var i Donor
-	err := row.Scan(
-		&i.Email,
-		&i.ClaimedAt,
-		&i.Disabled,
-		&i.PublicName,
-		&i.ReferralCode,
-		&i.ID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const consumeDonorLinks = `-- name: ConsumeDonorLinks :exec
 UPDATE donor_login_links SET consumed_at = $2 WHERE donor_id = $1 AND consumed_at IS NULL
 `
@@ -81,27 +55,6 @@ type InsertGuestParams struct {
 
 func (q *Queries) InsertGuest(ctx context.Context, arg InsertGuestParams) error {
 	_, err := q.db.Exec(ctx, insertGuest, arg.ID, arg.Email)
-	return err
-}
-
-const insertSession = `-- name: InsertSession :exec
-INSERT INTO donor_sessions (id, donor_id, token_hash, expires_at) VALUES ($1, $2, $3, $4)
-`
-
-type InsertSessionParams struct {
-	ID        pgtype.UUID        `json:"id"`
-	DonorID   pgtype.UUID        `json:"donor_id"`
-	TokenHash string             `json:"token_hash"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
-}
-
-func (q *Queries) InsertSession(ctx context.Context, arg InsertSessionParams) error {
-	_, err := q.db.Exec(ctx, insertSession,
-		arg.ID,
-		arg.DonorID,
-		arg.TokenHash,
-		arg.ExpiresAt,
-	)
 	return err
 }
 
@@ -215,18 +168,4 @@ func (q *Queries) RedeemLoginLink(ctx context.Context, arg RedeemLoginLinkParams
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
-}
-
-const revokeSession = `-- name: RevokeSession :exec
-UPDATE donor_sessions SET revoked_at = $2 WHERE token_hash = $1 AND revoked_at IS NULL
-`
-
-type RevokeSessionParams struct {
-	TokenHash string             `json:"token_hash"`
-	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
-}
-
-func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) error {
-	_, err := q.db.Exec(ctx, revokeSession, arg.TokenHash, arg.RevokedAt)
-	return err
 }

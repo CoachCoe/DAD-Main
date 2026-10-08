@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -17,7 +18,7 @@ func changeFixture(t *testing.T) (EmailChangeService, EmailChangeWorker, pgtype.
 	pool := database(t)
 	id, email := donor(t, pool)
 	accountCleanup(t, pool, id)
-	session := claimProof(t, pool, link(t, pool, id, time.Now()))
+	session := claimProof(t, link(t, pool, id, time.Now()))
 	t.Cleanup(func() {
 		for _, sql := range []string{"DELETE FROM donor_identity_events WHERE donor_id=$1", "DELETE FROM donor_email_changes WHERE donor_id=$1"} {
 			if _, err := pool.Exec(context.Background(), sql, id); err != nil {
@@ -26,15 +27,31 @@ func changeFixture(t *testing.T) (EmailChangeService, EmailChangeWorker, pgtype.
 		}
 	})
 	transport := &recordingMail{}
-	w := EmailChangeWorker{DB: pool, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: emailTestKey}, Origin: "https://donor.example.org", Transport: transport}
-	return EmailChangeService{DB: pool, EncryptionKey: emailTestKey}, w, id, email, session, transport
+	w := EmailChangeWorker{DB: as(t, dbroles.EmailChangeWorker), Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys}, Origin: "https://donor.example.org", Transport: transport}
+	return EmailChangeService{DB: as(t, dbroles.API), EncryptionKeys: emailTestKeys}, w, id, email, session, transport
+}
+
+func TestEmailChangeRequestedBeforeAKeyRotationIsStillSent(t *testing.T) {
+	s, w, id, _, session, transport := changeFixture(t)
+	ctx := context.Background()
+	if err := s.Request(ctx, session, "rotated-"+id.String()+"@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	w.Settings.EncryptionKeys = rotatedTestKeys(t)
+	if worked, err := w.DeliverNext(ctx, time.Now()); err != nil || !worked || len(transport.messages) != 1 {
+		t.Fatal("proof encrypted under the previous key was not sent", worked, err)
+	}
+	if stage, err := s.Confirm(ctx, tokenFromMail(t, transport.messages[0])); err != nil || stage != "NEW" {
+		t.Fatal("sent proof does not confirm", stage, err)
+	}
 }
 
 func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {
 	s, w, id, old, session, transport := changeFixture(t)
+	pool := database(t)
 	ctx := context.Background()
 	newEmail := "new-" + id.String() + "@example.org"
-	unusedLogin := link(t, s.DB, id, time.Now())
+	unusedLogin := link(t, pool, id, time.Now())
 	if err := s.Request(ctx, session, newEmail); err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +68,8 @@ func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {
 	if _, err := s.Confirm(ctx, first); !errors.Is(err, ErrDenied) {
 		t.Fatal("current proof replay accepted", err)
 	}
-	donor, err := authenticate(ctx, queries.New(s.DB), session, time.Now())
-	if err != nil || donor.Email != old {
+	user, err := authenticate(ctx, queries.New(s.DB), session, time.Now())
+	if err != nil || user.Email != old {
 		t.Fatal("identity changed before second confirmation", err)
 	}
 	if worked, err := w.DeliverNext(ctx, time.Now()); err != nil || !worked {
@@ -85,24 +102,25 @@ func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {
 	if _, err = authenticate(ctx, queries.New(s.DB), session, time.Now()); !errors.Is(err, ErrDenied) {
 		t.Fatal("old session survived", err)
 	}
-	login, err := queries.New(s.DB).LoginLink(ctx, HashToken(unusedLogin))
+	login, err := queries.New(pool).LoginLink(ctx, HashToken(unusedLogin))
 	if err != nil || !login.ConsumedAt.Valid {
 		t.Fatal("old sign-in proof survived", err)
 	}
-	donor, err = queries.New(s.DB).DonorByEmail(ctx, newEmail)
+	donor, err := queries.New(pool).DonorByEmail(ctx, newEmail)
 	if err != nil || donor.ID != id {
 		t.Fatal("identity not preserved", err)
 	}
 	var events int
-	if err = s.DB.QueryRow(ctx, "SELECT count(*) FROM donor_identity_events WHERE donor_id=$1", id).Scan(&events); err != nil || events != 3 {
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_identity_events WHERE donor_id=$1", id).Scan(&events); err != nil || events != 3 {
 		t.Fatal("identity audit incomplete", err)
 	}
 }
 
 func TestEmailChangeConflictsExpiryReplacementAndDeliveryRetry(t *testing.T) {
 	s, w, id, old, session, transport := changeFixture(t)
+	pool := database(t)
 	ctx := context.Background()
-	_, occupied := donor(t, s.DB)
+	_, occupied := donor(t, pool)
 	if err := s.Request(ctx, "invalid", occupied); !errors.Is(err, ErrDenied) {
 		t.Fatal("anonymous change allowed", err)
 	}
@@ -144,7 +162,7 @@ func TestEmailChangeConflictsExpiryReplacementAndDeliveryRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	last := tokenFromMail(t, transport.messages[len(transport.messages)-1])
-	if _, err = s.DB.Exec(ctx, "UPDATE donor_email_changes SET expires_at=now()-interval '1 second' WHERE donor_id=$1", id); err != nil {
+	if _, err = pool.Exec(ctx, "UPDATE donor_email_changes SET expires_at=now()-interval '1 second' WHERE donor_id=$1", id); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Confirm(ctx, last); !errors.Is(err, ErrDenied) {

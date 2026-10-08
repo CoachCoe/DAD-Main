@@ -4,14 +4,13 @@ import { useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
-import { api, ApiError, unconfirmedMessage } from "@/lib/api";
+import { api, ApiError, type RequestBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { formatMoney, MAX_GIFT_MINOR, MIN_GIFT_MINOR, monthlyFraming, parseDollars } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
 import { formatDate } from "@/lib/dates";
 
-type Change = { request_id: string; amount_minor: number; previous_minor: number; effective_at: string; confirmed: boolean };
-type Options = { state: "unavailable" } | { state: "ready"; subscription_id: string; amount_minor: number; effective_at: string; change: Change | null };
+type Change = Schema<"AmountChange">;
 
 const confirmedCopy = (change: Change) => `Last amount change confirmed: ${formatMoney(change.amount_minor)}/month from ${formatDate(change.effective_at)}.`;
 
@@ -20,7 +19,7 @@ export default function Amount() {
   const [confirmation, setConfirmation] = useState<Change | null>(null);
   const [requestKey, setRequestKey] = useState<string | null>(null);
   const [signedOut, setSignedOut] = useState(false);
-  const { resource, data, failed, reload, setData } = useApiResource<Options>(signedOut ? null : "/donor/me/recurring/amount", {
+  const { resource, data, failed, reload, setData } = useApiResource<Schema<"AmountOptions">>(signedOut ? null : "/donor/me/recurring/amount", {
     onLoad: (value) => {
       setRequestKey(null); setConfirmation(null); setError(""); setAmountInvalid(false);
       if (value.state !== "ready") return;
@@ -55,8 +54,8 @@ export default function Amount() {
     setRequestKey(key); setBusy(true); setError("");
     try {
       const result = await api<Change>("/donor/me/recurring/amount", { method: "POST",
-        headers: { "Idempotency-Key": key }, body: JSON.stringify({ subscription_id: data.subscription_id,
-          amount_minor: confirmation.amount_minor, previous_minor: confirmation.previous_minor, effective_at: confirmation.effective_at }) });
+        headers: { "Idempotency-Key": key }, body: JSON.stringify({ subscription_id: data.subscription_id, amount_minor: confirmation.amount_minor,
+          previous_minor: confirmation.previous_minor, effective_at: confirmation.effective_at } satisfies RequestBody<"/donor/me/recurring/amount", "post">) });
       setData({ ...data, amount_minor: result.amount_minor, change: result }); setConfirmation(null); setRequestKey(null);
       setAmount((result.amount_minor / 100).toFixed(2));
       if (result.confirmed) setMessage(confirmedCopy(result));

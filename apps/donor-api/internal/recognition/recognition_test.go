@@ -133,3 +133,15 @@ func TestFoundingQualifiedAtUsesEarliestQualifyingGift(t *testing.T) {
 		t.Fatal("future gift qualified", err)
 	}
 }
+
+func TestMilestonesAreThreeAndSixMonthsThenEveryYear(t *testing.T) {
+	var got []int64
+	for months := int64(0); months <= 48; months++ {
+		if Milestone(months) {
+			got = append(got, months)
+		}
+	}
+	if want := []int64{3, 6, 12, 24, 36, 48}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got milestones %v, want %v", got, want)
+	}
+}

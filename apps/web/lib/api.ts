@@ -1,4 +1,20 @@
-export type FieldError = { sheet?: string; row: number; column: string; reason: string };
+import type { components, paths } from "./openapi";
+
+/** A named schema from the API contract. */
+export type Schema<Name extends keyof components["schemas"]> = components["schemas"][Name];
+
+type HttpMethod = "get" | "post";
+type Json<Content> = Content extends { content: { "application/json": infer Body } } ? Body : never;
+
+/** The JSON body an operation takes. */
+export type RequestBody<Path extends keyof paths, Method extends HttpMethod> =
+  paths[Path][Method] extends { requestBody?: infer Body } ? Json<Body> : never;
+
+/** The JSON a successful call to an operation returns. */
+export type ResponseBody<Path extends keyof paths, Method extends HttpMethod> =
+  paths[Path][Method] extends { responses: infer Responses } ? Json<Responses[keyof Responses & (200 | 201 | 202)]> : never;
+
+export type FieldError = Schema<"PublicationProblem">;
 
 export class ApiError extends Error {
   constructor(

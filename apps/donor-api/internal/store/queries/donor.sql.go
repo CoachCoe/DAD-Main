@@ -161,16 +161,21 @@ func (q *Queries) PurgeReferralTouches(ctx context.Context, arg PurgeReferralTou
 }
 
 const recordPreferenceConsent = `-- name: RecordPreferenceConsent :exec
-INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,consent_version,source)
-VALUES($1,$2,$3,$4,$5,'r1-notifications-v1','account')
+INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,
+ push_referral_converted,push_streak_at_risk,push_streak_milestone,consent_version,source)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'account')
 `
 
 type RecordPreferenceConsentParams struct {
-	ID              pgtype.UUID `json:"id"`
-	DonorID         pgtype.UUID `json:"donor_id"`
-	Version         int32       `json:"version"`
-	ReferralEmails  bool        `json:"referral_emails"`
-	MarketingEmails bool        `json:"marketing_emails"`
+	ID                    pgtype.UUID `json:"id"`
+	DonorID               pgtype.UUID `json:"donor_id"`
+	Version               int32       `json:"version"`
+	ReferralEmails        bool        `json:"referral_emails"`
+	MarketingEmails       bool        `json:"marketing_emails"`
+	PushReferralConverted pgtype.Bool `json:"push_referral_converted"`
+	PushStreakAtRisk      pgtype.Bool `json:"push_streak_at_risk"`
+	PushStreakMilestone   pgtype.Bool `json:"push_streak_milestone"`
+	ConsentVersion        string      `json:"consent_version"`
 }
 
 func (q *Queries) RecordPreferenceConsent(ctx context.Context, arg RecordPreferenceConsentParams) error {
@@ -180,6 +185,10 @@ func (q *Queries) RecordPreferenceConsent(ctx context.Context, arg RecordPrefere
 		arg.Version,
 		arg.ReferralEmails,
 		arg.MarketingEmails,
+		arg.PushReferralConverted,
+		arg.PushStreakAtRisk,
+		arg.PushStreakMilestone,
+		arg.ConsentVersion,
 	)
 	return err
 }
@@ -222,32 +231,24 @@ func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) 
 	return i, err
 }
 
-const revokeAllSessions = `-- name: RevokeAllSessions :exec
-UPDATE donor_sessions SET revoked_at=$2 WHERE donor_id=$1 AND revoked_at IS NULL
-`
-
-type RevokeAllSessionsParams struct {
-	DonorID   pgtype.UUID        `json:"donor_id"`
-	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
-}
-
-func (q *Queries) RevokeAllSessions(ctx context.Context, arg RevokeAllSessionsParams) error {
-	_, err := q.db.Exec(ctx, revokeAllSessions, arg.DonorID, arg.RevokedAt)
-	return err
-}
-
 const savePreference = `-- name: SavePreference :exec
-INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails)
-VALUES ($1,$2,$3,$4,$5) ON CONFLICT(donor_id) DO UPDATE
-SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_emails=EXCLUDED.marketing_emails
+INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,
+ push_referral_converted,push_streak_at_risk,push_streak_milestone)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(donor_id) DO UPDATE
+SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_emails=EXCLUDED.marketing_emails,
+ push_referral_converted=EXCLUDED.push_referral_converted,push_streak_at_risk=EXCLUDED.push_streak_at_risk,
+ push_streak_milestone=EXCLUDED.push_streak_milestone
 `
 
 type SavePreferenceParams struct {
-	ID              pgtype.UUID `json:"id"`
-	DonorID         pgtype.UUID `json:"donor_id"`
-	Version         int32       `json:"version"`
-	ReferralEmails  bool        `json:"referral_emails"`
-	MarketingEmails bool        `json:"marketing_emails"`
+	ID                    pgtype.UUID `json:"id"`
+	DonorID               pgtype.UUID `json:"donor_id"`
+	Version               int32       `json:"version"`
+	ReferralEmails        bool        `json:"referral_emails"`
+	MarketingEmails       bool        `json:"marketing_emails"`
+	PushReferralConverted bool        `json:"push_referral_converted"`
+	PushStreakAtRisk      bool        `json:"push_streak_at_risk"`
+	PushStreakMilestone   bool        `json:"push_streak_milestone"`
 }
 
 func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) error {
@@ -257,6 +258,9 @@ func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) 
 		arg.Version,
 		arg.ReferralEmails,
 		arg.MarketingEmails,
+		arg.PushReferralConverted,
+		arg.PushStreakAtRisk,
+		arg.PushStreakMilestone,
 	)
 	return err
 }

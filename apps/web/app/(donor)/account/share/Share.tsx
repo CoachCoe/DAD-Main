@@ -5,18 +5,16 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
-import { api, ApiError, failureMessage } from "@/lib/api";
+import { api, ApiError, failureMessage, type RequestBody, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
-
-type Sharing = { public_name: string | null; link: string | null; irl_link: string | null };
 
 const text = "Join me in DAD’s sandbox preview. DAD launches in April 2027. About a dollar a day means $30/month. No real donation is collected in this preview.";
 
 export default function Share() {
   const [name, setName] = useState("");
   const [signedOut, setSignedOut] = useState(false);
-  const { resource, data: sharing, failed, reload, setData } = useApiResource<Sharing>(signedOut ? null : "/donor/me/sharing",
+  const { resource, data: sharing, failed, reload, setData } = useApiResource<Schema<"Sharing">>(signedOut ? null : "/donor/me/sharing",
     { onLoad: (result) => setName(result.public_name ?? "") });
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -29,7 +27,8 @@ export default function Share() {
   async function save(replace: boolean) {
     setBusy(true); setError(""); setMessage("");
     try {
-      setData(await api<Sharing>("/donor/me/sharing", { method: "POST", body: JSON.stringify({ public_name: name, replace_code: replace }) }));
+      setData(await api<Schema<"Sharing">>("/donor/me/sharing", { method: "POST",
+        body: JSON.stringify({ public_name: name, replace_code: replace } satisfies RequestBody<"/donor/me/sharing", "post">) }));
       setReplacing(false); setMessage("Your sharing details are saved.");
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) setSignedOut(true);

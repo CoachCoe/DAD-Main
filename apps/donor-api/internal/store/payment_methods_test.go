@@ -27,10 +27,10 @@ func newPaymentUpdateFixture(t *testing.T) paymentUpdateFixture {
 	session := "cs_test_setup_" + id.String()
 	setupID := "seti_" + id.String()
 	var attempt pgtype.UUID
-	if err := f.service.DB.QueryRow(ctx, "UPDATE donor_stripe_checkouts SET stripe_subscription_id=$2 WHERE checkout_id=$1 RETURNING id", result.CheckoutID, "sub_"+result.CheckoutID).Scan(&attempt); err != nil {
+	if err := f.db.QueryRow(ctx, "UPDATE donor_stripe_checkouts SET stripe_subscription_id=$2 WHERE checkout_id=$1 RETURNING id", result.CheckoutID, "sub_"+result.CheckoutID).Scan(&attempt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.service.DB.Exec(ctx, `INSERT INTO donor_payment_updates(id,donor_id,attempt_id,customer_id,request_params,stripe_session_id,hosted_url,status) VALUES($1,$2,$3,'cus_fixture','{}',$4,'https://checkout.stripe.com/c/test','OPEN')`, id, f.donorID, attempt, session); err != nil {
+	if _, err := f.db.Exec(ctx, `INSERT INTO donor_payment_updates(id,donor_id,attempt_id,customer_id,request_params,stripe_session_id,hosted_url,status) VALUES($1,$2,$3,'cus_fixture','{}',$4,'https://checkout.stripe.com/c/test','OPEN')`, id, f.donorID, attempt, session); err != nil {
 		t.Fatal(err)
 	}
 	remote := map[string]any{"id": session, "livemode": false, "mode": "setup", "customer": "cus_fixture", "status": "complete", "setup_intent": setupID, "metadata": map[string]any{"dad_payment_update_id": id.String()}}
@@ -50,13 +50,13 @@ func (p paymentUpdateFixture) assertState(t *testing.T, status string) {
 	var got string
 	var completed, url bool
 	var gifts int
-	if err := p.f.service.DB.QueryRow(context.Background(), "SELECT status,completed_at IS NOT NULL,hosted_url IS NOT NULL FROM donor_payment_updates WHERE id=$1", p.id).Scan(&got, &completed, &url); err != nil {
+	if err := p.f.db.QueryRow(context.Background(), "SELECT status,completed_at IS NOT NULL,hosted_url IS NOT NULL FROM donor_payment_updates WHERE id=$1", p.id).Scan(&got, &completed, &url); err != nil {
 		t.Fatal(err)
 	}
 	if got != status || completed != (status == "APPLIED") || url == terminalPaymentUpdate(status) {
 		t.Fatalf("unexpected update state %s completed=%v url=%v", got, completed, url)
 	}
-	if err := p.f.service.DB.QueryRow(context.Background(), "SELECT count(*) FROM donor_gifts WHERE donor_id=$1", p.f.donorID).Scan(&gifts); err != nil || gifts != 0 {
+	if err := p.f.db.QueryRow(context.Background(), "SELECT count(*) FROM donor_gifts WHERE donor_id=$1", p.f.donorID).Scan(&gifts); err != nil || gifts != 0 {
 		t.Fatal("card setup generated a gift", err)
 	}
 }
@@ -125,7 +125,7 @@ func TestPaymentUpdateExpiryCancellationAndIdempotencyAge(t *testing.T) {
 				p.sub["status"] = "canceled"
 				want = "CANCELLED"
 			default:
-				if _, err := p.f.service.DB.Exec(context.Background(), "UPDATE donor_payment_updates SET created_at=$2 WHERE id=$1", p.id, time.Now().Add(-24*time.Hour)); err != nil {
+				if _, err := p.f.db.Exec(context.Background(), "UPDATE donor_payment_updates SET created_at=$2 WHERE id=$1", p.id, time.Now().Add(-24*time.Hour)); err != nil {
 					t.Fatal(err)
 				}
 				if mode == "old already applied" {

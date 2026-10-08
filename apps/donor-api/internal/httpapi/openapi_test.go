@@ -177,6 +177,12 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/me/dashboard":                                    store.DonorDashboard{},
 		"GET /donor/me/profile":                                      store.Profile{},
 		"POST /donor/me/preferences":                                 store.Profile{},
+		"POST /donor/me/push-device":                                 store.PushRegistration{},
+		"POST /donor/me/push-device/unregister":                      store.PushRegistration{},
+		"GET /donor/me/conversions":                                  store.Conversions{},
+		"GET /donor/me/sessions":                                     store.Sessions{},
+		"POST /donor/me/sessions/{session_id}/revoke":                store.Sessions{},
+		"POST /donor/me/sessions/revoke-others":                      store.Sessions{},
 		"GET /donor/me/sharing":                                      store.Sharing{},
 		"POST /donor/me/sharing":                                     store.Sharing{},
 		"GET /donor/me/gifts":                                        store.GiftsPage{},
@@ -241,13 +247,13 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 				schema = response.Content["application/json"].Schema
 			}
 		}
-		c.checkShape(t, pattern+" response", reflect.TypeOf(value), schema)
+		c.checkShape(t, pattern+" response", reflect.TypeOf(value), schema, true)
 	}
 	for pattern, value := range requests {
-		c.checkShape(t, pattern+" request", reflect.TypeOf(value), ops[pattern].RequestBody.Content["application/json"].Schema)
+		c.checkShape(t, pattern+" request", reflect.TypeOf(value), ops[pattern].RequestBody.Content["application/json"].Schema, false)
 	}
-	c.checkShape(t, "NativeSession", reflect.TypeOf(nativeSession{}), c.Components.Schemas["NativeSession"])
-	c.checkShape(t, "Problem", reflect.TypeOf(problem{}), c.Components.Schemas["Problem"])
+	c.checkShape(t, "NativeSession", reflect.TypeOf(nativeSession{}), c.Components.Schemas["NativeSession"], true)
+	c.checkShape(t, "Problem", reflect.TypeOf(problem{}), c.Components.Schemas["Problem"], true)
 }
 
 // resolve follows $ref and the non-null branch of a nullable anyOf.
@@ -277,7 +283,9 @@ func opaque(t reflect.Type) bool {
 	return t.Kind() == reflect.Map || t.Kind() == reflect.Interface || (t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.Uint8)
 }
 
-func (c *contract) checkShape(t *testing.T, where string, typ reflect.Type, schema map[string]any) {
+// For an encoded type, a property is also required exactly when its field is never
+// omitted. A decoded field may be optional either way, since absence leaves it zero.
+func (c *contract) checkShape(t *testing.T, where string, typ reflect.Type, schema map[string]any, encoded bool) {
 	t.Helper()
 	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
@@ -292,26 +300,43 @@ func (c *contract) checkShape(t *testing.T, where string, typ reflect.Type, sche
 	schema = c.resolve(schema)
 	if typ.Kind() == reflect.Slice {
 		items, _ := schema["items"].(map[string]any)
-		c.checkShape(t, where+"[]", typ.Elem(), items)
+		c.checkShape(t, where+"[]", typ.Elem(), items, encoded)
 		return
 	}
-	properties, _ := schema["properties"].(map[string]any)
-	fields := map[string]reflect.Type{}
+	// A type that encodes differently per state documents each state as a oneOf
+	// variant; together the variants must cover exactly its fields.
+	properties := map[string]any{}
+	variants, _ := schema["oneOf"].([]any)
+	for _, variant := range append([]any{schema}, variants...) {
+		documented, _ := c.resolve(variant.(map[string]any))["properties"].(map[string]any)
+		maps.Copy(properties, documented)
+	}
+	fields, omitted := map[string]reflect.Type{}, map[string]bool{}
 	for _, field := range reflect.VisibleFields(typ) {
-		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		name, options, _ := strings.Cut(field.Tag.Get("json"), ",")
 		// encoding/json promotes the fields of an untagged embedded struct.
 		if !field.IsExported() || name == "-" || (field.Anonymous && name == "" && field.Type.Kind() == reflect.Struct) {
 			continue
 		}
-		fields[cmp.Or(name, field.Name)] = field.Type
+		name = cmp.Or(name, field.Name)
+		fields[name] = field.Type
+		omitted[name] = slices.Contains(strings.Split(options, ","), "omitempty")
 	}
 	got, want := slices.Sorted(maps.Keys(properties)), slices.Sorted(maps.Keys(fields))
 	if !slices.Equal(got, want) {
 		t.Errorf("%s: documented properties %v, %s encodes %v", where, got, typ, want)
 		return
 	}
+	// Variants document which fields each state carries, so only they say what is required.
+	if required, _ := schema["required"].([]any); encoded && variants == nil {
+		for name := range fields {
+			if documented := slices.Contains(required, any(name)); documented == omitted[name] {
+				t.Errorf("%s.%s: documented required is %v, but omitempty is %v", where, name, documented, omitted[name])
+			}
+		}
+	}
 	for name, fieldType := range fields {
 		property, _ := properties[name].(map[string]any)
-		c.checkShape(t, where+"."+name, fieldType, property)
+		c.checkShape(t, where+"."+name, fieldType, property, encoded)
 	}
 }

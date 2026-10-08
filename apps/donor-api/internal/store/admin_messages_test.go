@@ -9,17 +9,19 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
 func TestStaffResendIsIdempotentLimitedAndAudited(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	support, supportToken := staffFixture(t, pool, "SUPPORT")
 	_, adminToken := staffFixture(t, pool, "ADMIN")
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
-	s := &StaffService{DB: pool}
+	s := &StaffService{DB: api}
 	message := func(kind string, completed bool, suppressed string) pgtype.UUID {
 		t.Helper()
 		job := testID(t)
@@ -81,11 +83,12 @@ VALUES($1,$2,$3,$4,'{"gift_id":"g"}',now()-interval '2 minutes',CASE WHEN $5 THE
 
 func TestStaffClaimRequestQueuesLoginEmail(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	support, token := staffFixture(t, pool, "SUPPORT")
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
-	s := &StaffService{DB: pool}
+	s := &StaffService{DB: api}
 	if err := s.RequestClaim(ctx, token, testID(t)); err == nil {
 		t.Fatal("claim requested for unknown donor")
 	}
@@ -100,6 +103,7 @@ func TestStaffClaimRequestQueuesLoginEmail(t *testing.T) {
 
 func TestStaffDonorDetailShowsUncomputedStreakAsUpdating(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	_, token := staffFixture(t, pool, "SUPPORT")
 	id, _ := donor(t, pool)
@@ -108,12 +112,12 @@ func TestStaffDonorDetailShowsUncomputedStreakAsUpdating(t *testing.T) {
 	if err := q.SeedProjection(ctx, queries.SeedProjectionParams{ID: testID(t), DonorID: id, ComputedAt: timestamp(now)}); err != nil {
 		t.Fatal(err)
 	}
-	s := &StaffService{DB: pool}
+	s := &StaffService{DB: api}
 	detail, err := s.DonorDetail(ctx, token, id, 0, 0)
 	if err != nil || detail.Streak != nil {
 		t.Fatalf("seeded projection reported a streak: %+v, %v", detail.Streak, err)
 	}
-	tx, err := pool.Begin(ctx)
+	tx, err := as(t, dbroles.ProjectionWorker).Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +135,7 @@ func TestStaffDonorDetailShowsUncomputedStreakAsUpdating(t *testing.T) {
 
 func TestStaffActionHistoryPagesNewestFirst(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	actor, token := staffFixture(t, pool, "SUPPORT")
 	id, _ := donor(t, pool)
@@ -147,7 +152,7 @@ func TestStaffActionHistoryPagesNewestFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	s := &StaffService{DB: pool}
+	s := &StaffService{DB: api}
 	first, err := s.DonorActions(ctx, token, id, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -185,6 +190,7 @@ func TestStaffActionHistoryPagesNewestFirst(t *testing.T) {
 
 func TestPendingActionIsScopedAndIndependentOfHistoryPages(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	actor, token := staffFixture(t, pool, "FINANCE")
 	otherActor, otherToken := staffFixture(t, pool, "FINANCE")
@@ -220,7 +226,7 @@ func TestPendingActionIsScopedAndIndependentOfHistoryPages(t *testing.T) {
 	insert(actor, otherDonor, target, "REFUND", "AUTHORIZED", base.Add(time.Minute))
 	insert(actor, donorID, testID(t), "REFUND", "AUTHORIZED", base.Add(time.Minute))
 	cancellation := insert(actor, donorID, target, "CANCEL", "AUTHORIZED", base.Add(time.Minute))
-	s := &StaffService{DB: pool}
+	s := &StaffService{DB: api}
 	for _, tc := range []struct {
 		token, kind string
 		want        pgtype.UUID

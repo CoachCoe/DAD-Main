@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, failureMessage } from "@/lib/api";
+import { api, failureMessage, type RequestBody, type ResponseBody } from "@/lib/api";
 import { useHashToken } from "@/lib/useHashToken";
 
 const outcomes: Record<string, string> = {
@@ -18,10 +18,11 @@ export default function EmailChange() {
   const [stage, setStage] = useState("");
   const [error, setError] = useState("");
   async function confirm() {
-    if (busy) return;
+    if (busy || !proof) return;
     setBusy(true); setError("");
     try {
-      const result = await api<{ stage: string }>("/donor/email-change/confirm", { method: "POST", body: JSON.stringify({ token: proof }) });
+      const result = await api<ResponseBody<"/donor/email-change/confirm", "post">>("/donor/email-change/confirm", { method: "POST",
+        body: JSON.stringify({ token: proof } satisfies RequestBody<"/donor/email-change/confirm", "post">) });
       clear(); setStage(result.stage);
     } catch (cause) { setError(failureMessage(cause, "The change was not confirmed. Please retry in a moment.")); }
     finally { setBusy(false); }

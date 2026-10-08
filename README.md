@@ -33,6 +33,10 @@ make api                      # terminal 1
 make web                      # terminal 2, with the same environment loaded
 ```
 
+Locally every process connects as the database owner, which `.env.example` allows with
+`DONOR_ALLOW_OWNER_CONNECTION=true`; deployed processes each use their own login and refuse
+the owner ([database roles](docs/operations.md#database-roles)).
+
 Open http://localhost:3000. Without Stripe, SMTP, and encryption configuration, public
 pages and empty states work; giving and account email are unavailable. The staff back
 office runs only on its own host, `DONOR_STAFF_ORIGIN`: locally
@@ -45,6 +49,9 @@ Use two independently generated encryption keys, for email and for content:
 ```sh
 openssl rand -base64 32 | tr '+/' '-_'
 ```
+
+Each setting also accepts a comma-separated list, newest key first, which is how keys
+are rotated ([operations](docs/operations.md#encryption-keys)).
 
 Staff sign in with passkeys. With `DONOR_STAFF_ORIGIN` set, provision the first named
 administrator:
@@ -76,7 +83,12 @@ make worker KIND=projections
 make worker KIND=login-email
 make worker KIND=email-changes
 make worker KIND=messages
+make worker KIND=push
 ```
+
+The push worker runs without provider keys, discarding app notifications it cannot
+deliver; with APNs or FCM keys it sends real notifications to registered devices
+([operations](docs/operations.md#app-notifications)).
 
 SMTP delivery requires STARTTLS and the configured encryption key. Workers send real
 email to the configured addresses, even while gifts are test payments. Local tests use
@@ -84,9 +96,11 @@ injected transports. Never point synthetic test data at a real mail provider.
 
 ## Checks
 
-Integration tests require a dedicated synthetic database named `donor_go` and a test
-role with `CREATEDB` permission. Migration tests create and remove isolated databases.
-Tests must never run against the application database.
+Integration tests require a dedicated synthetic database named `donor_go` and a superuser
+test role: migration tests create and remove isolated databases, and the tests run each
+process's code as that process's [database role](docs/operations.md#database-roles), so a
+privilege the process lacks fails a test. Tests must never run against the application
+database.
 
 ```sh
 docker run -d --name impactgraph-go-test-postgres -p 127.0.0.1:55440:5432 \
@@ -124,8 +138,9 @@ the standalone build and copies its static assets first, matching the container'
 For a local production preview, run `HOSTNAME=127.0.0.1 PORT=3000 npm start` from
 `apps/web` after building.
 
-SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc; commit SQL and its
-generated Go query code together. `make check-generated` fails if they have drifted.
+SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc and regenerates the web
+app's API types from the OpenAPI contract; commit each source with its generated code.
+`make check-generated` fails if either has drifted.
 Applied migrations are immutable and checksum-checked.
 
 Capacity is measured against a seeded, disposable deployment: `make seed` fills a
@@ -148,14 +163,15 @@ from an empty database do not establish capacity.
 ## Containers and deployment
 
 See [operations](docs/operations.md) and [edge and ingress](docs/edge.md). Docker images
-run as non-root users. Only nginx publishes ports: it terminates HTTPS in front of the web
+run as non-root users, and each process connects to PostgreSQL with its own login, holding
+only the privileges that process needs. Only nginx publishes ports: it terminates HTTPS in front of the web
 service, behind Cloudflare or on its own, and the API binds to loopback. No command
 enables workers or deletes database volumes implicitly. Test-only readiness is not approval to solicit live donations.
 
 ## Layout
 
-- `apps/donor-api/cmd`: API, workers, migrations, administrator bootstrap, monitoring, load testing.
-- `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, credentials.
+- `apps/donor-api/cmd`: API, workers, migrations, database login provisioning, administrator bootstrap, monitoring, key rotation, load testing.
+- `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, push, credentials.
 - `apps/donor-api/db`: versioned SQL migrations and sqlc queries.
 - `apps/donor-api/api`: the OpenAPI contract for web and native clients, checked by tests.
 - `apps/web`: public website, donor account, staff interface, browser and unit tests.

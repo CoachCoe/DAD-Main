@@ -46,11 +46,11 @@ func TestBillingHistoryPreservesFailuresRecoveryAndReplay(t *testing.T) {
 				success()
 			}
 			// Reprocessing the same verified event cannot mint another observation.
-			if _, err := f.service.DB.Exec(ctx, "UPDATE donor_stripe_events SET processed_at=NULL,available_at=now() WHERE stripe_event_id=$1", paidEvent); err != nil {
+			if _, err := f.db.Exec(ctx, "UPDATE donor_stripe_events SET processed_at=NULL,available_at=now() WHERE stripe_event_id=$1", paidEvent); err != nil {
 				t.Fatal(err)
 			}
 			f.process(t)
-			rows, err := f.service.DB.Query(ctx, `SELECT o.status,o.amount_minor,o.currency,o.billing_reason,o.occurred_at,o.event_created_at,o.recorded_at,p.status
+			rows, err := f.db.Query(ctx, `SELECT o.status,o.amount_minor,o.currency,o.billing_reason,o.occurred_at,o.event_created_at,o.recorded_at,p.status
 				FROM donor_billing_observations o JOIN donor_billing_periods p ON p.id=o.period_id
 				WHERE p.donor_id=$1 ORDER BY o.occurred_at`, f.donorID)
 			if err != nil {
@@ -90,8 +90,8 @@ func TestBillingHistoryExportsVerifiedFactsWithFinancialPermission(t *testing.T)
 	start := time.Now().UTC().Add(-24 * time.Hour)
 	f.receiveAt(t, "invoice.payment_failed", invoice(checkout.CheckoutID, "in_export_"+f.donorID.String(), start, false), start)
 	f.process(t)
-	_, finance := staffFixture(t, f.service.DB, "FINANCE")
-	_, support := staffFixture(t, f.service.DB, "SUPPORT")
+	_, finance := staffFixture(t, f.db, "FINANCE")
+	_, support := staffFixture(t, f.db, "SUPPORT")
 	s := &StaffService{DB: f.service.DB}
 	if err := s.Export(ctx, support, "billing-history", io.Discard); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatalf("support exported billing history: %v", err)
@@ -111,7 +111,7 @@ func TestBillingHistoryExportsVerifiedFactsWithFinancialPermission(t *testing.T)
 		}
 	}
 	var period string
-	if err := f.service.DB.QueryRow(ctx, "SELECT id::text FROM donor_billing_periods WHERE donor_id=$1", f.donorID).Scan(&period); err != nil {
+	if err := f.db.QueryRow(ctx, "SELECT id::text FROM donor_billing_periods WHERE donor_id=$1", f.donorID).Scan(&period); err != nil {
 		t.Fatal(err)
 	}
 	found := false

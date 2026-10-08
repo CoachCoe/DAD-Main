@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
 	"slices"
@@ -14,9 +15,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/payments"
+	"impactgraph/donor-api/internal/push"
 	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/store/queries"
 	"impactgraph/donor-api/internal/workers"
@@ -27,18 +30,18 @@ type configError string
 
 func (e configError) Error() string { return string(e) }
 
-var kinds = []string{"stripe", "projections", "login-email", "email-changes", "messages"}
-
 func run(ctx context.Context, args []string, getenv func(string) string) error {
 	flags := flag.NewFlagSet("donor-worker", flag.ContinueOnError)
-	kind := flags.String("kind", "", strings.Join(kinds, ", "))
+	kinds := strings.Join(slices.Sorted(maps.Keys(dbroles.Workers)), ", ")
+	kind := flags.String("kind", "", kinds)
 	once := flags.Bool("once", false, "process at most one item")
 	retry := flags.String("retry-event", "", "reset an unprocessed Stripe event's attempt budget")
 	if err := flags.Parse(args); err != nil {
 		return configError("invalid worker arguments")
 	}
-	if flags.NArg() != 0 || !slices.Contains(kinds, *kind) {
-		return configError("--kind must be one of " + strings.Join(kinds, ", "))
+	role, known := dbroles.Workers[*kind]
+	if flags.NArg() != 0 || !known {
+		return configError("--kind must be one of " + kinds)
 	}
 	if *retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_")) {
 		return configError("--retry-event requires --kind stripe and an evt_ identifier")
@@ -46,22 +49,24 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	if getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
 		return configError("workers require DONOR_GO_WORKERS_ENABLED=true")
 	}
-	dsn := getenv("DONOR_GO_DATABASE_URL")
+	dsn := role.URL(getenv)
 	if dsn == "" {
-		return configError("DONOR_GO_DATABASE_URL is required")
+		return configError(role.Variable() + " is required")
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
-	pool, err := store.Open(startup, dsn, 2)
+	pool, err := store.Open(startup, dsn, role.Pool)
 	cancel()
 	if err != nil {
 		return configError("worker database is unreachable")
 	}
 	defer pool.Close()
 	check, finish := context.WithTimeout(ctx, 10*time.Second)
-	err = migrations.Verify(check, pool)
-	finish()
-	if err != nil {
+	defer finish()
+	if err = migrations.Verify(check, pool); err != nil {
 		return configError("donor schema is not current; run migrations before starting workers")
+	}
+	if err = role.Check(check, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
+		return configError(err.Error())
 	}
 	if *retry != "" {
 		retryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -109,6 +114,22 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 			refreshed, err := store.RefreshNextProjection(ctx, pool, now)
 			return purged || refreshed, err
 		}, nil
+	case "push":
+		config, err := push.FromEnvironment(getenv)
+		if err != nil {
+			return nil, configError(err.Error())
+		}
+		// Without a provider the worker still runs, so a deployment can start
+		// every worker: it completes notifications for unconfigured platforms
+		// as suppressed instead of letting them wait.
+		providers := config.Providers()
+		for platform, feature := range map[string]string{push.IOS: "iOS app notifications (DONOR_PUSH_APNS_*)", push.Android: "Android app notifications (DONOR_PUSH_FCM_KEY_FILE)"} {
+			if providers[platform] == nil {
+				slog.Info("feature disabled until configured", "feature", feature)
+			}
+		}
+		worker := store.PushWorker{DB: pool, Providers: providers}
+		return func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }, nil
 	}
 	settings, err := mail.FromEnvironment(getenv)
 	if err != nil || settings == nil {
