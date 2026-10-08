@@ -12,12 +12,18 @@ const profiles = {
   "/account/share": { endpoint: "sharing", data: { public_name: "Alex", link: "https://dad.example/r/browser-test", irl_link: "https://dad.example/r/browser-test?via=irl" } },
 };
 
+const thisBrowser = { id: "0b8e7c52-3f0e-4c8a-9d51-2f1e6a7b8c9d", client: "BROWSER", platform: null, label: "Web browser",
+  created_at: "2026-10-01T12:00:00Z", last_used_at: "2026-10-08T12:00:00Z", current: true };
+const phone = { id: "5d2c1b0a-9e8f-4a7b-8c6d-5e4f3a2b1c0d", client: "APP", platform: "IOS", label: "Alex’s iPhone",
+  created_at: "2026-09-20T12:00:00Z", last_used_at: "2026-10-07T09:30:00Z", current: false };
+
 // These isolate authenticated rendering; Go journey tests exercise real session authorization.
 for (const [path, fixture] of Object.entries(profiles)) {
   test(`authenticated accessible surface: ${path}`, async ({ page }) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route(`**/api/donor/me/${fixture.endpoint}`, (route) => route.fulfill({ json: fixture.data }));
+    await page.route("**/api/donor/me/sessions", (route) => route.fulfill({ json: { sessions: [thisBrowser, phone] } }));
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText(/Loading (your dashboard|profile|your sharing details)/)).toHaveCount(0);
@@ -38,6 +44,34 @@ for (const [path, fixture] of Object.entries(profiles)) {
     expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
   });
 }
+
+test("the profile lists where the donor is signed in and signs out another device by keyboard", async ({ page }) => {
+  let revoked = 0;
+  await page.route("**/api/donor/me/profile", (route) => route.fulfill({ json: profiles["/account/profile"].data }));
+  await page.route("**/api/donor/me/sessions", (route) => route.fulfill({ json: { sessions: [thisBrowser, phone] } }));
+  await page.route(`**/api/donor/me/sessions/${phone.id}/revoke`, async (route) => {
+    expect(route.request().method()).toBe("POST");
+    revoked += 1;
+    await route.fulfill({ json: { sessions: [thisBrowser] } });
+  });
+  await page.goto("/account/profile");
+  const section = page.getByRole("region", { name: "Where you’re signed in" });
+  await expect(section.getByRole("listitem")).toHaveCount(2);
+  await expect(section.getByRole("listitem").first()).toContainText("This device");
+  await expect(section.getByRole("listitem").nth(1)).toContainText("iOS app · Signed in Sep 20, 2026 · Last active Oct 7, 2026");
+  const accessibility = () => new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect((await accessibility()).violations).toEqual([]);
+  const signOut = section.getByRole("button", { name: /^Sign out Alex’s iPhone, last active / });
+  await signOut.focus();
+  await page.keyboard.press("Enter");
+  await expect(section.getByRole("status")).toHaveText("Signed out of Alex’s iPhone.");
+  await expect(section.getByRole("heading", { name: "Where you’re signed in" })).toBeFocused();
+  await expect(section.getByRole("listitem")).toHaveCount(1);
+  await expect(section.getByText("You’re not signed in anywhere else.")).toBeVisible();
+  expect(revoked).toBe(1);
+  expect((await accessibility()).violations).toEqual([]);
+  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
+});
 
 const subscription = { id: "6f1c2b9e-0d7a-4e55-9b0c-1a2b3c4d5e6f", amount_minor: 3000, currency: "USD", status: "active",
   period_end: "2026-11-01T14:00:00Z", pause: null, stops_at: null };

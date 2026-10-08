@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, ApiError, failureMessage, type RequestBody, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { Sessions } from "./Sessions";
 
 export default function Profile() {
   const [signedOut, setSignedOut] = useState(false);
@@ -15,6 +16,7 @@ export default function Profile() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [newEmail, setNewEmail] = useState("");
+  const markSignedOut = useCallback(() => setSignedOut(true), []);
   const messages = resourceMessages(resource, { loading: "Loading profile…",
     failure: "Your profile could not be loaded right now. Please retry in a moment." });
   async function run(work: () => Promise<void>, fallback: string) {
@@ -67,6 +69,7 @@ export default function Profile() {
           <form onSubmit={changeEmail}><label>New email address<input type="email" autoComplete="email" maxLength={320} required value={newEmail} onChange={(event) => setNewEmail(event.target.value)} disabled={busy} /></label>
             <button type="submit" className="secondary" disabled={busy}>Send confirmation to current address</button></form>
         </details>
+        <Sessions onSignedOut={markSignedOut} />
         <details><summary>Sign out on every device</summary>
           <p>This ends all existing donor sessions, including this one. You can sign in again with a new email link.</p>
           <button type="button" className="secondary danger" disabled={busy} onClick={logoutAll}>Confirm sign out everywhere</button>
