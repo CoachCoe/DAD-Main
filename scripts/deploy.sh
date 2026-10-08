@@ -6,7 +6,7 @@ ENV_FILE="${ENV_FILE:-$root/.env.production}"
 export ENV_FILE
 cd "$root"
 compose() { docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml "$@"; }
-usage() { printf '%s\n' 'Usage: scripts/deploy.sh {build|migrate|adopt|up|workers|monitor [--max-age DURATION]|reload-ingress|down|logs [SERVICE...]|smoke}'; }
+usage() { printf '%s\n' 'Usage: scripts/deploy.sh {build|migrate|adopt|up|workers|monitor [--max-age DURATION]|rekey --key KEY [--dry-run]|reload-ingress|down|logs [SERVICE...]|smoke}'; }
 # nginx reads its bind-mounted files and renders its templates only at start, and a
 # replaced single-file mount keeps showing the old file, so a reload can mix old and new
 # configuration. Labelling nginx with a hash of what it mounts (certificates aside, which a
@@ -38,6 +38,7 @@ case "${1:-help}" in
     compose --profile workers up -d stripe-worker projection-worker login-email-worker email-change-worker message-worker
     ;;
   monitor) shift; compose run --rm --no-deps api monitor "$@" ;;
+  rekey) shift; compose run --rm --no-deps api rekey "$@" ;;
   # Recreates nginx if its configuration changed, then reloads it for renewed certificates.
   reload-ingress)
     ingress_config

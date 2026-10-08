@@ -8,7 +8,8 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/api ./cmd/api && \
     CGO_ENABLED=0 go build -trimpath -o /out/worker ./cmd/worker && \
     CGO_ENABLED=0 go build -trimpath -o /out/migrate ./cmd/migrate && \
     CGO_ENABLED=0 go build -trimpath -o /out/monitor ./cmd/monitor && \
-    CGO_ENABLED=0 go build -trimpath -o /out/staff ./cmd/staff
+    CGO_ENABLED=0 go build -trimpath -o /out/staff ./cmd/staff && \
+    CGO_ENABLED=0 go build -trimpath -o /out/rekey ./cmd/rekey
 
 FROM alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8 AS runtime
 RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 10001 donor
