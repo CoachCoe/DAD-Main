@@ -97,6 +97,15 @@ Firebase service-account key are read from private files at startup, sign provid
 tokens locally, and never leave the process or reach logs; provider responses, which
 can echo tokens, are not logged.
 
+Each process connects to PostgreSQL with its own login, a member of one role that holds
+only the privileges its statements need ([database roles](operations.md#database-roles)):
+no process can change the schema, the monitor reads only queue status, `rekey` only the
+encrypted columns, and workers that merely lock a donor cannot change one. A process refuses
+to start as the schema owner or a superuser, or without its role. Credentials reach only
+their own container, and migrations restore the declared privileges on every run, so a
+manual grant does not persist. Provisioning sends the database only a SCRAM verifier of
+each password. Group roles span the PostgreSQL cluster, so each environment needs its own.
+
 Named permissions are checked server-side against current staff state. Ownership comes
 from the session and database, never an email or customer ID supplied by the browser.
 Financial mutations record their actor, target, reason, immutable command, and result.

@@ -128,6 +128,9 @@ Publishing is manual; there is no CMS or live outcome pipeline.
 
 Embedded SQL migrations are applied under a transaction advisory lock and recorded with
 SHA-256 checksums. The API and workers require the complete known migration history.
+Each process connects as its own database role; `internal/dbroles` declares what each role
+may do to each table, and every migration run brings the roles' privileges to that
+declaration in the same transaction ([database roles](operations.md#database-roles)).
 `migrate --adopt-existing` supports a database at the former `0030_donor_public_content`
 revision only after comparing the donor schema to the embedded baseline. It preserves all
 existing records and leaves unrelated legacy tables untouched. Back up and restore-test

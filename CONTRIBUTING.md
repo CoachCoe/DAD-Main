@@ -19,7 +19,9 @@ files or `apps/web/lib/openapi.d.ts`; CI's `make check-generated` fails on drift
 `apps/donor-api/api/openapi.json` with any API shape and regenerate; web code names API
 shapes through the generated types rather than declaring its own, and native apps
 generate their clients from the same contract. Add a new forward migration for schema
-changes. Existing migration checksums must remain stable. Review transaction boundaries,
+changes, and declare a new table's privileges in `apps/donor-api/internal/dbroles` in the
+same change ([database roles](docs/operations.md#database-roles)). Existing migration
+checksums must remain stable. Review transaction boundaries,
 authorization, idempotency, refund effects, and out-of-order provider events in every
 financial change.
 
