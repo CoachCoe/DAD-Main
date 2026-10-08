@@ -82,6 +82,21 @@ one refresh at a time. The Next proxy does not forward `Authorization` or
 web hosts; an API host needs its own ingress, listed in `DONOR_TRUSTED_PROXY_CIDRS`, that
 overwrites `X-Real-IP`.
 
+Push tokens are stored on the app session that registered them and serve only to
+address notifications; they are not credentials. Every revocation clears the session's
+token, which a database check constraint requires of any revocation, and delivery
+skips sessions that have lapsed, so a signed-out or expired installation receives
+nothing more. Registration is app-only, validates the token's form for its platform,
+and moves a token held by another session, since a token names one installation.
+Notification text names no one and no amount: it transits Apple's and Google's servers
+and shows on lock screens, so the app fetches detail through the API, which shows a
+referral conversion only as a time and a channel. A token is dropped only when the
+provider says it is invalid; a refused configuration parks the notification instead,
+so a wrong key or topic cannot erase every registration. The APNs `.p8` key and the
+Firebase service-account key are read from private files at startup, sign provider
+tokens locally, and never leave the process or reach logs; provider responses, which
+can echo tokens, are not logged.
+
 Named permissions are checked server-side against current staff state. Ownership comes
 from the session and database, never an email or customer ID supplied by the browser.
 Financial mutations record their actor, target, reason, immutable command, and result.

@@ -8,7 +8,7 @@ these with a later production database or describe sandbox awards as real recogn
 Use a distinct PostgreSQL database and least-privilege credentials for each environment.
 Each process's database pool is sized for its role: the API opens up to 40 connections,
 and each worker, the monitor, migrations, the staff command, and `rekey` up to 2. A full
-deployment therefore needs about 54 of PostgreSQL's default 100 `max_connections`. When
+deployment therefore needs about 56 of PostgreSQL's default 100 `max_connections`. When
 adding API replicas, raise `max_connections` (or put a pooler such as PgBouncer in front)
 so the total stays below it; `pool_max_conns=N` in `DONOR_GO_DATABASE_URL` overrides every
 process's size at once.
@@ -92,7 +92,7 @@ through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is inte
 unconfigured. Readiness is not payment-provider acceptance or live-release authorization.
 
 Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURED`,
-`EMAIL_UNCONFIGURED`, or `SOURCE_STORAGE_UNCONFIGURED`) and are not logged as errors; a
+`EMAIL_UNCONFIGURED`, `SOURCE_STORAGE_UNCONFIGURED`, or `PUSH_UNCONFIGURED`) and are not logged as errors; a
 503 without a code is a transient failure and is logged.
 
 ### Upgrading an existing deployment
@@ -207,6 +207,61 @@ Staff can inspect delivery history and request audited receipt/summary resends o
 replacement claim email. A queued response does not mean delivery succeeded. Monitor
 queue age and parked jobs; automated paging and provider acceptance remain operational
 work. Test controlled mailboxes before inviting donors.
+
+## App notifications
+
+The push worker (`make worker KIND=push`, or `push-worker` in Compose) sends donor app
+notifications through Apple Push Notification service for iOS and Firebase Cloud
+Messaging for Android. The API reads the same settings: it accepts device registrations
+only for a configured platform, answering `PUSH_UNCONFIGURED` otherwise, so no
+notification is queued for a device nothing can reach. Both refuse to start with
+incomplete or unusable settings and log which platforms are disabled. The worker runs
+without any provider and completes notifications for unconfigured platforms as
+suppressed `push_unconfigured`; notifications are queued only for donors with a
+registered device and are dropped as `expired` 24 hours after queuing, so none wait
+indefinitely.
+
+| Variable | Meaning |
+|---|---|
+| `DONOR_PUSH_APNS_KEY_FILE` | Path to the APNs authentication key (`AuthKey_<key ID>.p8`, PKCS#8 P-256). |
+| `DONOR_PUSH_APNS_KEY_ID` | The key's 10-character ID. |
+| `DONOR_PUSH_APNS_TEAM_ID` | The Apple Developer team's 10-character ID. |
+| `DONOR_PUSH_APNS_TOPIC` | The app's bundle ID. |
+| `DONOR_PUSH_FCM_KEY_FILE` | Path to the Firebase service-account JSON key; its `project_id` receives the sends. |
+
+Key material is read only from files, at most 1 MiB, like the Wallet keys: mount them
+read-only into the API and push-worker containers (readable by uid 10001), keep them
+in the deployment secret manager, and never commit them or copy them into images.
+
+APNs setup: in Apple Developer, Certificates, Identifiers & Profiles, enable Push
+Notifications on the app's identifier, then under Keys create a key with Apple Push
+Notifications service enabled and download the `.p8` file, which Apple offers once.
+Set the four APNs variables. One key serves both environments; each device reports
+whether its token is from the sandbox (development builds) or production, and the
+worker sends to the matching host. The worker signs an ES256 provider token and reuses
+it for 40 minutes. Revoking the key in Apple Developer stops delivery at once.
+
+FCM setup: in the Firebase console, add the Android app to the project, then under
+Project settings, Service accounts, generate a private key and set
+`DONOR_PUSH_FCM_KEY_FILE` to the downloaded JSON. The account needs permission to send
+Firebase Cloud Messaging messages (the default Firebase Admin SDK account has it) and
+the project must have the Firebase Cloud Messaging API enabled. The worker exchanges a
+signed assertion for an access token and caches it until five minutes before expiry.
+
+Delivery reaches each live app session holding a token once; a retry after a partial
+failure sends only to the rest. A token the provider reports unregistered or invalid is
+removed from its session without retry. Throttling, outages, and network failures retry
+with the mail backoff, doubling from two minutes up to an hour, or after the provider's
+`Retry-After` if longer, and park after five attempts. A provider refusing the
+credentials or the request (`ProviderRejected`) parks the notification at once without
+touching tokens, since every send would fail the same way: fix the key, team, topic,
+or project, and later notifications go out. The monitor counts a parked notification
+until it expires, since an expired one is never sent. Before delivery the worker
+rechecks the donor's choices and that the fact still holds, completing the
+notification as suppressed (`opted_out`, `referral_no_longer_qualifies`,
+`payment_recovered`, `streak_ended`, `no_device`, and similar) otherwise. Local tests
+use a fake provider and local HTTP servers; they do not prove acceptance by Apple or
+Google, which needs real accounts, a signed build, and physical devices.
 
 ## Staff and content
 
@@ -372,7 +427,7 @@ acceptance also require explicit evidence.
 Run `./scripts/deploy.sh monitor [--max-age 10m]` (or `go run ./cmd/monitor` from
 `apps/donor-api` with the database environment loaded). It emits only aggregate JSON counts,
 parked counts, and oldest due age for Stripe, projections, financial mail, login mail,
-email changes, and subscriptions. It exits nonzero if any job is parked or a due item is
+email changes, push notifications, and subscriptions. It exits nonzero if any job is parked or a due item is
 older than five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends
 are excluded. An ongoing subscription last synced before its billing period ended is due
 a sync one day after that end, when Stripe has renewed or ended it: one still due after

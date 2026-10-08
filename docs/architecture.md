@@ -3,14 +3,14 @@
 The R1 application is a Next.js TypeScript web client backed by a Go HTTP service and
 PostgreSQL 16. Hosted Stripe Checkout handles USD test payments and card setup. Separate
 Go workers reconcile signed Stripe events, refresh donor projections, apply referral-touch
-retention, and deliver email.
+retention, deliver email, and send donor app notifications.
 
 ```text
 Browser → Next.js /api/donor/* → Go HTTP API → PostgreSQL
              ↓                     ↓               ↑
        Stripe-hosted UI        Stripe API      Go workers
                                                 ↓
-                                          SMTP with STARTTLS
+                                SMTP with STARTTLS, APNs and FCM
 ```
 
 The browser uses the same origin for API requests. In production it reaches Next.js
@@ -55,8 +55,26 @@ which the web profile page shows. Only donor account routes admit the app; givin
 on the web.
 Every donor-facing URL is built in `internal/store/links.go`, which is the starting list
 for app/universal links (`/account/claim`, `/account/email-change`,
-`/account/payment-method`, `/r/{code}`). Donor passkeys and push-notification device
-registration are not built yet and need new store work.
+`/account/payment-method`, `/r/{code}`). Donor passkeys are not built yet.
+
+## App notifications
+
+The app registers its installation's push token on its own session with `POST
+/donor/me/push-device`; the token is a column of that session, so it lasts exactly as
+long as the sign-in, and a token registered by another session moves to the new one.
+Each projection refresh queues push intents in the same transaction as the facts
+behind them, next to the email outbox: a referral conversion (the referral email's own
+condition), a failed latest renewal while the streak is at risk (the decision behind the
+recovery email's "your streak is at risk"), and a streak milestone. Stable keys make
+each intent once: `push:referral:<referred donor>`, `push:streak-at-risk:<period>`,
+and `push:streak-milestone:<donor>:<run start>:<months>`. Only donors with a live
+registered device get intents. The push worker delivers each to every live device of the
+donor through APNs or FCM (`internal/push`), rechecking preferences and facts first,
+and records the sessions reached so a retry after a partial failure reaches only the
+rest. Notifications carry generic copy, a category and an app path, and a collapse ID,
+so a resend replaces the notification on the device instead of repeating it. `GET
+/donor/me/conversions` lists recent conversions with their time and channel for the
+app's conversion moment.
 
 ## Financial consistency
 

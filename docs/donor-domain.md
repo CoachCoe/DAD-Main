@@ -83,6 +83,11 @@ the period if recurring funds remain; full refunds disqualify it unless another 
 recurring payment covers it. Recalculate subsequent continuity rather than erasing every
 later month. Staff corrections are for documented system errors and must be audited.
 
+A streak milestone is reached at 3 and 6 consecutive months, at a year, and at every
+further year. The product requirements name milestones without defining them, so this
+set is a product judgment. Each milestone is congratulated once per streak run, a run
+being identified by its first period: a streak that resets and is rebuilt is a new run.
+
 Any successful first gift before 2027-04-22 00:00 America/New_York earns Founding Donor
 status, including one-time gifts. Use the processor's successful-payment timestamp,
 not checkout start or webhook arrival. Claiming after cutoff is allowed. The badge is
@@ -102,6 +107,11 @@ adjustments. Send failed-payment recovery at failure, around day 7, and before t
 14-day deadline; stop on resolution or cancellation. Optional referral-converted emails
 identify the channel without the referred donor's name or amount. Send the initial
 account-claim email with replacement-link access, without promotional reminders.
+The donor app's notifications follow the same facts: a referral converted (with its
+channel, not the referred donor's name or amount), a failed renewal putting a streak at
+risk (once per failed period), and a streak milestone. Each is optional and starts on
+once the app is allowed to notify, since the device's permission prompt is the opt-in;
+preferences are rechecked before sending.
 Marketing consent is separate. Receipts/security/essential payment notices are distinct
 from optional messages, subject to approved legal classification. Prepare the enrolment
 template at R1 and activate it with R2 enrolment. Finance approves summary treatment;

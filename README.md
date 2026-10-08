@@ -79,7 +79,12 @@ make worker KIND=projections
 make worker KIND=login-email
 make worker KIND=email-changes
 make worker KIND=messages
+make worker KIND=push
 ```
+
+The push worker runs without provider keys, discarding app notifications it cannot
+deliver; with APNs or FCM keys it sends real notifications to registered devices
+([operations](docs/operations.md#app-notifications)).
 
 SMTP delivery requires STARTTLS and the configured encryption key. Workers send real
 email to the configured addresses, even while gifts are test payments. Local tests use
@@ -159,7 +164,7 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 ## Layout
 
 - `apps/donor-api/cmd`: API, workers, migrations, administrator bootstrap, monitoring, key rotation, load testing.
-- `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, credentials.
+- `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, push, credentials.
 - `apps/donor-api/db`: versioned SQL migrations and sqlc queries.
 - `apps/donor-api/api`: the OpenAPI contract for web and native clients, checked by tests.
 - `apps/web`: public website, donor account, staff interface, browser and unit tests.
