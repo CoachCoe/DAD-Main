@@ -43,10 +43,10 @@ it("signs out one other session and keeps keyboard focus in the list", async () 
   fireEvent.click(await screen.findByRole("button", { name: /^Sign out Alex’s iPhone/ }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Signed out of Alex’s iPhone."));
   expect(screen.queryByText("Alex’s iPhone")).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /^Sign out Mobile device/ })).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole("button", { name: /^Sign out Mobile device/ })).toHaveFocus());
   fireEvent.click(screen.getByRole("button", { name: /^Sign out Mobile device/ }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Signed out of Mobile device."));
-  expect(screen.getByRole("heading", { name: "Where you’re signed in" })).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Where you’re signed in" })).toHaveFocus());
   expect(screen.getByText("You’re not signed in anywhere else.")).toBeVisible();
   expect(fetch).toHaveBeenCalledWith("/api/donor/me/sessions/p1/revoke", expect.objectContaining({ method: "POST", credentials: "include" }));
 });
@@ -61,7 +61,7 @@ it("signs out every other device at once", async () => {
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Signed out of every other device."));
   expect(screen.getAllByRole("listitem")).toHaveLength(1);
   expect(screen.queryByRole("button", { name: "Sign out of all other devices" })).not.toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Where you’re signed in" })).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Where you’re signed in" })).toHaveFocus());
 });
 
 it("keeps the list and offers a refresh when a sign-out is not confirmed", async () => {
