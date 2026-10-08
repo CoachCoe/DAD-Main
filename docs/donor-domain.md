@@ -30,8 +30,8 @@ Amount changes apply at the next renewal without proration. Cancellation stops f
 renewals without refunding past gifts. Pausing skips 1, 2, or 3 renewals, with the exact
 automatic-resume date shown before confirmation. Donors see their monthly gift as last
 synced from Stripe, with the time of that sync; confirming a change checks Stripe's
-current state and refuses the change, showing the current state, if it no longer
-matches what the donor confirmed.
+current state and refuses the change if it no longer matches what the donor confirmed,
+saving that state so the donor sees it on refreshing.
 
 ## Referrals
 
