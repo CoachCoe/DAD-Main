@@ -122,6 +122,16 @@ Do not publish exports or treat a source document's existence as proof of its ac
 Referral touches store only a hash of the visitor token; touches that led to no
 attributed gift are deleted 13 months after capture.
 
+Queued sign-in links and email-change proofs are encrypted with the email key, and source
+documents with the content key, as Fernet tokens (AES-128-CBC with HMAC-SHA256). Each
+setting is an ordered key list: the first key encrypts and any listed key decrypts, so a
+key is rotated without downtime by putting a new key first, re-encrypting stored tokens
+with `rekey`, and then removing the old key ([operations](operations.md#encryption-keys)).
+Every key in a list is validated at startup, and errors name the variable and position,
+never the key. A retired key still opens backups taken before its rotation, so it is kept
+in the secret store only as long as those backups and destroyed with them. No lookup uses
+a keyed hash; stored token hashes are unkeyed SHA-256 of random secrets.
+
 The frontend restricts connections to its own origin, denies framing, uses no-referrer,
 and disables camera, microphone, and geolocation. Production CSP excludes unsafe-eval.
 Account and staff pages render per request with a nonce-based `'strict-dynamic'` script

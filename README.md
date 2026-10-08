@@ -46,6 +46,9 @@ Use two independently generated encryption keys, for email and for content:
 openssl rand -base64 32 | tr '+/' '-_'
 ```
 
+Each setting also accepts a comma-separated list, newest key first, which is how keys
+are rotated ([operations](docs/operations.md#encryption-keys)).
+
 Staff sign in with passkeys. With `DONOR_STAFF_ORIGIN` set, provision the first named
 administrator:
 
@@ -155,7 +158,7 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 
 ## Layout
 
-- `apps/donor-api/cmd`: API, workers, migrations, administrator bootstrap, monitoring, load testing.
+- `apps/donor-api/cmd`: API, workers, migrations, administrator bootstrap, monitoring, key rotation, load testing.
 - `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, credentials.
 - `apps/donor-api/db`: versioned SQL migrations and sqlc queries.
 - `apps/donor-api/api`: the OpenAPI contract for web and native clients, checked by tests.

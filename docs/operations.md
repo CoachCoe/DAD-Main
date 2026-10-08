@@ -7,7 +7,7 @@ these with a later production database or describe sandbox awards as real recogn
 
 Use a distinct PostgreSQL database and least-privilege credentials for each environment.
 Each process's database pool is sized for its role: the API opens up to 40 connections,
-and each worker, the monitor, migrations, and the staff command up to 2. A full
+and each worker, the monitor, migrations, the staff command, and `rekey` up to 2. A full
 deployment therefore needs about 54 of PostgreSQL's default 100 `max_connections`. When
 adding API replicas, raise `max_connections` (or put a pooler such as PgBouncer in front)
 so the total stays below it; `pool_max_conns=N` in `DONOR_GO_DATABASE_URL` overrides every
@@ -15,7 +15,8 @@ process's size at once.
 
 Back up the database together with its separately stored encryption keys, then verify a
 restore. Losing the email or content encryption key makes its encrypted records
-unreadable. No automatic key-rotation or backup service is included.
+unreadable. No automatic backup service is included, and keys are rotated by hand
+([encryption keys](#encryption-keys)).
 
 ```sh
 cp .env.production.example .env.production
@@ -49,7 +50,8 @@ configuration has changed ([edge](edge.md#modes)), and `reload-ingress` makes it
 renewed certificates without dropping connections.
 
 The API refuses to start with only one of `STRIPE_SECRET_KEY` and
-`STRIPE_WEBHOOK_SECRET`, with a malformed encryption key, with a trusted proxy range
+`STRIPE_WEBHOOK_SECRET`, with a malformed key in an encryption key list (the error names
+the variable and the key's position, never the key), with a trusted proxy range
 broader than an IPv4 /8 or IPv6 /32, with a `DONOR_STAFF_ORIGIN` that is not an exact
 HTTPS origin or that is the public host or a parent domain of it, or with the retired
 `DONOR_STAFF_ENCRYPTION_KEY` set but no staff origin. Both origins must be written as
@@ -390,6 +392,87 @@ possible duplicate delivery after acknowledgement loss. Escalate incorrect recog
 or money totals to the finance owner; publish corrections only after reconciliation.
 Assign primary/backup incident owners and test paging in the chosen hosting environment.
 
+## Encryption keys
+
+`DONOR_EMAIL_ENCRYPTION_KEY` protects queued sign-in links and email-change proofs
+(`donor_login_emails.encrypted_token` and `donor_email_changes.encrypted_token`), and
+`DONOR_CONTENT_ENCRYPTION_KEY` protects private source documents
+(`donor_content_sources.encrypted_data`). Each is a comma-separated list of Fernet keys,
+newest first: the first key encrypts everything written, and any key in the list
+decrypts. A single key is a list of one. The API and workers refuse to start if any key
+in a list is malformed. Session, link, and referral-visitor lookups use unkeyed SHA-256
+hashes of random tokens, so no stored hash depends on these keys and rotation re-hashes
+nothing. Wallet signing keys and staff passkeys are not data-encryption keys and are not
+rotated this way.
+
+`rekey --key email` (or `content`) re-encrypts every token of that setting still on a
+later key under the first key. It reads each table in id order in pages of `--batch`
+rows (default 500), each cut short once it passes 8 MiB of tokens, skips tokens the first key already
+decrypts, and replaces each other token with a single-row compare-and-swap. It therefore
+runs safely beside the API and workers: it holds one row lock at a time and never
+overwrites a token they wrote after it was read. An interrupted run keeps what it
+finished; run it again to resume. Before changing anything it reads every token and
+refuses if any decrypts under no key in the list, naming each such row by table and id.
+`--dry-run` changes nothing and prints, per table, the tokens found (`tokens`), those
+still needing a later key (`retired`), and those no key decrypts (`undecryptable`); it
+exits nonzero while either count is above zero. Under Compose run it as
+`./scripts/deploy.sh rekey …`; locally run `go run ./cmd/rekey …` from `apps/donor-api`
+with the environment loaded.
+
+### Rotating a key
+
+Rotate one setting at a time. For the email key:
+
+1. Generate a new key with `openssl rand -base64 32 | tr '+/' '-_'` and add it to the
+   secret store beside the current one.
+2. Put it first in the list: `DONOR_EMAIL_ENCRYPTION_KEY=<new>,<current>`.
+3. Deploy the API and every worker with the new list: `./scripts/deploy.sh up`, then
+   `./scripts/deploy.sh workers` if workers are enabled. A worker still on the old list
+   cannot read an email-change proof the new API encrypted; it retries a minute later,
+   by when it has restarted. Where processes cannot restart together, such as several
+   replicas behind a rolling deploy, first deploy the new key last in the list
+   (`<current>,<new>`), then move it first and deploy again, so that every process
+   reads the new key before any writes with it.
+4. Count what remains: `./scripts/deploy.sh rekey --key email --dry-run`. It exits
+   nonzero now, with `retired` counts. If any token is `undecryptable`, stop: it was
+   written under a key missing from the list. Find that key and add it at the end of the
+   list before going on.
+5. Re-encrypt: `./scripts/deploy.sh rekey --key email`. Its summary adds `reencrypted`
+   per table. If it is interrupted, run it again.
+6. Verify: `./scripts/deploy.sh rekey --key email --dry-run` exits zero, with `retired`
+   zero for every table.
+7. Remove the old key, `DONOR_EMAIL_ENCRYPTION_KEY=<new>`, and deploy the API and workers
+   again as in step 3. A dry run with only the new key then still exits zero.
+8. Keep the retired key in the secret store as described below.
+
+The content key rotates the same way with `--key content` and `DONOR_CONTENT_ENCRYPTION_KEY`;
+only the API uses it.
+
+### Suspected key compromise
+
+A disclosed key exposes its data only together with a copy of the database or a backup,
+but treat the database as exposed until shown otherwise and follow
+[incident response](#queue-alerts-and-incident-response).
+
+1. Preserve evidence, and rotate the database credentials too if they may have leaked.
+2. Rotate the key at once (steps 1 to 7 above). Rotation protects the live database
+   from then on; it cannot protect dumps and backups taken earlier, which remain readable
+   with the compromised key and belong in the incident's assessment.
+3. Record in the secret store that the key is compromised. Keep it only while it is needed
+   to restore backups that predate the rotation, and destroy it with them.
+4. For the email key, sign-in links and email-change proofs expire 15 minutes after they
+   are issued, so those encrypted before the rotation stop working on their own. For the
+   content key, presume the source documents stored before the rotation disclosed.
+
+### Backups and retired keys
+
+A backup holds tokens as they were when it was taken, so restoring it needs every key in
+use then. Keep each retired key in the secret store, labelled with its setting and the
+date its rekey completed, until every backup taken before that date has passed the
+retention policy; then destroy it. To restore an older backup, add the retired keys it
+needs at the end of the list (`<current>,<retired>`), restore, run `rekey`, verify with a
+dry run, and remove them again.
+
 ## Backup and restore drill
 
 With PostgreSQL running and `ENV_FILE` pointing to the Compose environment:
@@ -405,6 +488,7 @@ storage with restricted access, retention, and independent copies. The drill cre
 random disposable database, restores with fail-on-error, reads core donor/gift/identity
 tables, and drops only that temporary database. It never restores over the running app.
 A successful drill proves the dump restores, not disaster recovery time or key recovery.
-Rehearse the restored app in an isolated environment with preserved encryption keys and
+Rehearse the restored app in an isolated environment with the encryption keys in use
+when the dump was taken ([retired keys](#backups-and-retired-keys)) and
 outbound Stripe/email disabled. Establish recovery-point and recovery-time objectives,
 backup scheduling, retention, alerting, and off-host recovery ownership before launch.
