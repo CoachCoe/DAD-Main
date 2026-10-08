@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { databaseAs } from "./e2e/database";
 import { staffOrigin } from "./e2e/staff";
 
 // E2E_PRODUCTION=1 runs the suite against an optimized build instead of the dev server,
@@ -25,7 +26,7 @@ export default defineConfig({
   webServer: [
     {
       command: "cd ../donor-api && go run ./cmd/api",
-      env: { DONOR_STAFF_ORIGIN: staffOrigin },
+      env: { DONOR_STAFF_ORIGIN: staffOrigin, ...databaseAs("dad_api") },
       url: "http://127.0.0.1:8002/health/live",
       reuseExistingServer: true,
       timeout: 30_000,
