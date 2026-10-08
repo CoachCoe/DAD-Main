@@ -41,7 +41,6 @@ test("an invited administrator creates a passkey, then signs out and back in wit
 });
 
 test("the staff host serves only the back office, and the public host none of it", async ({ page }) => {
-  const production = process.env.E2E_PRODUCTION === "1";
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
@@ -50,8 +49,7 @@ test("the staff host serves only the back office, and the public host none of it
   const signIn = await page.goto(staffURL("/staff/sign-in"));
   expect(signIn?.status()).toBe(200);
   expect(signIn?.headers()["x-robots-tag"]).toBe("noindex, nofollow");
-  // A dynamic page is marked no-store by Next's production server; its dev server revalidates.
-  expect(signIn?.headers()["cache-control"]).toContain(production ? "no-store" : "no-cache");
+  expect(signIn?.headers()["cache-control"]).toContain("no-store");
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);
   await expect(page.getByRole("contentinfo")).toHaveCount(0);
 
