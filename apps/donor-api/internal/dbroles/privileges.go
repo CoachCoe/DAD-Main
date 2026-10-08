@@ -160,14 +160,14 @@ func catalog(ctx context.Context, db querier) (relations, schemas map[string]map
 	relations, schemas = map[string]map[string]privileges{}, map[string]map[string]privileges{}
 	rows, err := db.Query(ctx, `
 WITH relations AS (
- SELECT c.oid,c.relowner,CASE n.nspname WHEN 'public' THEN '' ELSE n.nspname||'.' END||c.relname AS name
+ SELECT c.oid,c.relowner,c.relacl,CASE n.nspname WHEN 'public' THEN '' ELSE n.nspname||'.' END||c.relname AS name
  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
  WHERE `+appSchemas+` AND c.relkind IN ('r','p','v','m','S','f')
  AND NOT EXISTS(SELECT FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='e')
 )
 SELECT r.name,'','' FROM relations r
 UNION ALL
-SELECT r.name,`+grantee+`,a.privilege_type FROM relations r JOIN pg_class c ON c.oid=r.oid, aclexplode(c.relacl) a
+SELECT r.name,`+grantee+`,a.privilege_type FROM relations r, aclexplode(r.relacl) a
 WHERE a.grantee<>r.relowner
 UNION ALL
 SELECT r.name,`+grantee+`,a.privilege_type||' ('||t.attname||')'
@@ -213,9 +213,12 @@ func add(objects map[string]map[string]privileges, name, role, privilege string,
 }
 
 // Undeclared lists the relations in the database that have no declared
-// privileges, such as a table whose migration left grants out.
+// privileges, such as a new table nobody has declared yet.
 func Undeclared(ctx context.Context, db querier) ([]string, error) {
 	relations, _, err := catalog(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	var names []string
 	for name := range relations {
 		if _, ok := grants[name]; !ok {
@@ -223,7 +226,7 @@ func Undeclared(ctx context.Context, db querier) ([]string, error) {
 		}
 	}
 	slices.Sort(names)
-	return names, err
+	return names, nil
 }
 
 // Drift returns the statements that would bring the privileges of PUBLIC and
@@ -235,6 +238,7 @@ func Drift(ctx context.Context, db querier) ([]string, error) {
 	}
 	var statements []string
 	usage := map[string]map[string]privileges{}
+	grantees := append(slices.Clone(Roles), Role{Name: "PUBLIC"})
 	for _, name := range slices.Sorted(maps.Keys(grants)) {
 		actual, ok := relations[name]
 		if !ok {
@@ -247,7 +251,7 @@ func Drift(ctx context.Context, db querier) ([]string, error) {
 		if usage[schema] == nil {
 			usage[schema] = map[string]privileges{}
 		}
-		for _, role := range append(slices.Clone(Roles), Role{Name: "PUBLIC"}) {
+		for _, role := range grantees {
 			want := parsePrivileges(grants[name][role])
 			if len(want) > 0 {
 				usage[schema][role.Name] = privileges{"USAGE"}
