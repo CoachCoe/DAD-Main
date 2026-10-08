@@ -212,9 +212,11 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 	if r.Rows["donors"] != 200 || r.Rows["donor_gifts"] == 0 || r.SuppressedMessages == 0 {
 		t.Fatalf("unexpected seed report: %+v", r)
 	}
-	var due, pending int
-	if err = pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM donor_metric_projections WHERE next_refresh_at<=now()), (SELECT count(*) FROM donor_messages WHERE completed_at IS NULL)").Scan(&due, &pending); err != nil || due != 0 || pending != 0 {
-		t.Fatalf("seeding left %d projections due and %d messages to send: %v", due, pending, err)
+	var due, pending, early int
+	if err = pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM donor_metric_projections WHERE next_refresh_at<=now()),
+(SELECT count(*) FROM donor_messages WHERE completed_at IS NULL),
+(SELECT count(*) FROM donor_billing_observations o JOIN donor_billing_periods p ON p.id=o.period_id WHERE o.occurred_at<p.created_at)`).Scan(&due, &pending, &early); err != nil || due != 0 || pending != 0 || early != 0 {
+		t.Fatalf("seeding left %d projections due, %d messages to send and %d periods recorded after their first observation: %v", due, pending, early, err)
 	}
 
 	sessions, err := pop.sessions(ctx, pool, len(pop.donors))

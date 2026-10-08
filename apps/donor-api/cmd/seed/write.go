@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"math"
 	"slices"
 	"strings"
@@ -18,18 +20,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"impactgraph/donor-api/internal/credentials"
 	"impactgraph/donor-api/internal/store"
 )
 
-// table is one COPY target: its columns and rows in that order.
+// table is one COPY target. Its rows are produced from the population as
+// they are written, so no table is held in memory.
 type table struct {
-	name    string
-	columns []string
-	rows    [][]any
+	name, columns string
+	rows          func(emit func(...any))
 }
-
-func (t *table) add(values ...any) { t.rows = append(t.rows, values) }
 
 func timeOrNull(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t, Valid: !t.IsZero()}
@@ -44,186 +43,212 @@ func donorID(d *donor) pgtype.UUID {
 	return d.id
 }
 
-// tables lays the population out as the rows the checkout, webhook and
-// worker paths store, in foreign-key order. Each processor fact carries the
-// processed Stripe event it would have arrived in, holding the allowlisted
-// fields the webhook keeps.
-func (p *population) tables() ([]*table, error) {
-	donors := &table{name: "donors", columns: []string{"id", "email", "claimed_at", "public_name", "referral_code", "created_at"}}
-	preferences := &table{name: "donor_preferences", columns: []string{"id", "donor_id", "version", "referral_emails", "marketing_emails", "created_at"}}
-	consents := &table{name: "donor_preference_events", columns: []string{"id", "donor_id", "version", "referral_emails", "marketing_emails", "consent_version", "source", "created_at"}}
-	touches := &table{name: "donor_referral_touches", columns: []string{"id", "token_hash", "referrer_id", "kind", "touched_at", "expires_at", "created_at"}}
-	checkouts := &table{name: "donor_checkouts", columns: []string{"id", "donor_id", "amount_minor", "currency", "frequency", "referrer_id", "referral_kind", "referral_expires_at", "created_at"}}
-	attempts := &table{name: "donor_stripe_checkouts", columns: []string{"id", "checkout_id", "request_hash", "request_params", "stripe_session_id", "stripe_subscription_id", "status", "created_at"}}
-	reservations := &table{name: "donor_recurring_reservations", columns: []string{"id", "donor_id", "attempt_id", "created_at"}}
-	subscriptions := &table{name: "donor_subscriptions", columns: []string{"id", "attempt_id", "donor_id", "status", "period_end", "stops_at", "billing_anchor", "observed_at", "created_at"}}
-	cancellations := &table{name: "donor_cancellations", columns: []string{"id", "donor_id", "attempt_id", "confirmed_period_end", "completed_at", "created_at"}}
-	pauses := &table{name: "donor_pauses", columns: []string{"id", "donor_id", "attempt_id", "months", "starts_at", "resumes_at", "confirmed_at", "created_at"}}
-	events := &table{name: "donor_stripe_events", columns: []string{"id", "stripe_event_id", "event_type", "occurred_at", "data", "processed_at", "attempts", "available_at", "created_at"}}
-	periods := &table{name: "donor_billing_periods", columns: []string{"id", "donor_id", "checkout_id", "stripe_invoice_id", "stripe_subscription_id", "due_at", "ends_at", "status", "created_at"}}
-	observations := &table{name: "donor_billing_observations", columns: []string{"id", "period_id", "source_event_id", "status", "amount_minor", "currency", "billing_reason", "occurred_at", "event_created_at", "recorded_at"}}
-	gifts := &table{name: "donor_gifts", columns: []string{"id", "donor_id", "checkout_id", "stripe_object_id", "amount_minor", "currency", "frequency", "paid_at", "stripe_payment_intent_id", "period_id", "referrer_id", "referral_kind", "created_at"}}
-	refunds := &table{name: "donor_refunds", columns: []string{"id", "gift_id", "stripe_refund_id", "amount_minor", "currency", "status", "observed_at", "created_at"}}
-	refundObservations := &table{name: "donor_refund_observations", columns: []string{"id", "refund_id", "source_event_id", "status", "observed_at", "created_at"}}
-	projections := &table{name: "donor_metric_projections", columns: []string{"id", "donor_id", "computed_at", "next_refresh_at"}}
+// derived identifies a row the model does not track by the row it belongs
+// to. Only the last byte changes, keeping the UUID's version and variant.
+func derived(id pgtype.UUID, tag byte) pgtype.UUID {
+	id.Bytes[15] ^= tag
+	return id
+}
 
-	ids := &generator{r: p.ids}
-	event := func(kind string, at time.Time, data map[string]any) (pgtype.UUID, error) {
-		encoded, err := json.Marshal(data)
-		if err != nil {
-			return pgtype.UUID{}, err
-		}
-		id := ids.uuid()
-		events.add(id, "evt_"+fmt.Sprintf("%x", id.Bytes[:12]), kind, at, encoded, at.Add(2*time.Second), int32(1), at, at)
-		return id, nil
+// event is a processor fact with the processed Stripe event it arrived in.
+// Events are written only where an observation cites them, with no payload:
+// the worker reads payloads of unprocessed events alone.
+type event struct {
+	id           pgtype.UUID
+	kind, status string
+	at           time.Time
+}
+
+func (pd *period) events() []event {
+	var out []event
+	if !pd.failedAt.IsZero() {
+		out = append(out, event{derived(pd.id, 1), "invoice.payment_failed", "FAILED", pd.failedAt})
 	}
+	if pd.paid {
+		out = append(out, event{derived(pd.id, 2), "invoice.payment_succeeded", "PAID", pd.paidAt})
+	}
+	return out
+}
+
+func (r *refund) events() []event {
+	out := make([]event, len(r.observations))
+	for i, o := range r.observations {
+		out[i] = event{derived(r.id, byte(i+1)), "refund.updated", o.status, o.at}
+	}
+	out[0].kind = "refund.created"
+	return out
+}
+
+func (p *population) checkouts(yield func(*checkout) bool) {
 	for _, d := range p.donors {
-		donors.add(d.id, d.email, timeOrNull(d.claimedAt), textOrNull(d.publicName), textOrNull(d.code), d.createdAt)
-		projections.add(ids.uuid(), d.id, p.now, p.now)
-		if d.preference {
-			referral, marketing := d.index%3 != 0, d.index%4 == 0
-			preferences.add(ids.uuid(), d.id, int32(1), referral, marketing, d.claimedAt)
-			consents.add(ids.uuid(), d.id, int32(1), referral, marketing, "r1-notifications-v1", "account", d.claimedAt)
-		}
 		for _, c := range d.checkouts {
-			var expires pgtype.Timestamptz
-			if c.referrer != nil {
-				expires = timeOrNull(c.expiresAt)
-			}
-			checkouts.add(c.id, d.id, c.amount, "USD", c.frequency, donorID(c.referrer), textOrNull(c.kind), expires, c.createdAt)
-			hash, params, err := checkoutRequest(d, c)
-			if err != nil {
-				return nil, err
-			}
-			attempts.add(c.attempt, c.id, hash, params, textOrNull(c.session), textOrNull(c.subscription), c.status, c.createdAt)
-			if c.frequency == "MONTHLY" && c.status != "EXPIRED" && c.status != "CANCELLED" {
-				reservations.add(ids.uuid(), d.id, c.attempt, c.createdAt)
-			}
-			if s := c.sub; s != nil {
-				subscriptions.add(s.id, c.attempt, d.id, s.status, s.periodEnd, timeOrNull(s.stopsAt), s.anchor, s.observed, c.createdAt)
-			}
-			if x := c.cancellation; x != nil {
-				cancellations.add(x.id, d.id, c.attempt, x.periodEnd, x.completed, x.created)
-			}
-			if x := c.pause; x != nil {
-				pauses.add(x.id, d.id, c.attempt, int32(x.months), x.starts, x.resumes, x.confirmed, x.created)
-			}
-			for _, pd := range c.periods {
-				status := "FAILED"
-				if pd.paid {
-					status = "PAID"
-				}
-				periods.add(pd.id, d.id, c.id, pd.invoice, c.subscription, pd.due, pd.ends, status, pd.recordedAt)
-				reason := "subscription_cycle"
-				if pd == c.periods[0] {
-					reason = "subscription_create"
-				}
-				if !pd.failedAt.IsZero() {
-					id, err := event("invoice.payment_failed", pd.failedAt, invoiceData(c, pd, reason, "open"))
-					if err != nil {
-						return nil, err
-					}
-					observations.add(ids.uuid(), pd.id, id, "FAILED", c.amount, "USD", reason, pd.failedAt, pd.failedAt, pd.failedAt.Add(2*time.Second))
-				}
-				if pd.paid {
-					id, err := event("invoice.payment_succeeded", pd.paidAt, invoiceData(c, pd, reason, "paid"))
-					if err != nil {
-						return nil, err
-					}
-					observations.add(ids.uuid(), pd.id, id, "PAID", c.amount, "USD", reason, pd.paidAt, pd.paidAt, pd.paidAt.Add(2*time.Second))
-				}
-			}
-			for _, g := range c.gifts {
-				var period pgtype.UUID
-				if g.period != nil {
-					period = g.period.id
-				} else if _, err := event("payment_intent.succeeded", g.paidAt, map[string]any{"id": g.object, "checkout_id": c.id.String(), "subscription": nil,
-					"status": "succeeded", "currency": "usd", "amount_received": g.amount}); err != nil {
-					return nil, err
-				}
-				gifts.add(g.id, d.id, c.id, g.object, g.amount, "USD", g.frequency, g.paidAt, g.paymentIntent, period, donorID(g.referrer), textOrNull(g.kind), g.paidAt.Add(2*time.Second))
-				r := g.refund
-				if r == nil {
-					continue
-				}
-				last := r.observations[len(r.observations)-1]
-				refunds.add(r.id, g.id, r.stripeID, r.amount, "USD", r.status, last.at, r.observations[0].at)
-				for i, o := range r.observations {
-					kind := "refund.created"
-					if i > 0 {
-						kind = "refund.updated"
-					}
-					id, err := event(kind, o.at, map[string]any{"id": r.stripeID, "payment_intent": g.paymentIntent, "amount": r.amount, "currency": "usd", "status": strings.ToLower(o.status)})
-					if err != nil {
-						return nil, err
-					}
-					refundObservations.add(ids.uuid(), r.id, id, o.status, o.at, o.at.Add(2*time.Second))
-				}
+			if !yield(c) {
+				return
 			}
 		}
 	}
-	for _, t := range p.touches {
-		touches.add(t.id, t.tokenHash, t.referrer.id, t.kind, t.at, t.at.Add(referralWindow), t.at)
-	}
-	return []*table{donors, preferences, consents, touches, checkouts, attempts, reservations, subscriptions, cancellations,
-		pauses, events, periods, observations, gifts, refunds, refundObservations, projections}, nil
 }
 
-// invoiceData is the minimal invoice the webhook would have stored.
-func invoiceData(c *checkout, p *period, reason, status string) map[string]any {
-	data := map[string]any{"id": p.invoice, "checkout_id": c.id.String(), "subscription": c.subscription, "status": status, "currency": "usd",
-		"amount_due": c.amount, "total": c.amount, "billing_reason": reason, "starting_balance": 0, "ending_balance": 0,
-		"lines_complete": true, "lines": []any{map[string]any{"amount": c.amount, "currency": "usd", "period": map[string]any{"start": p.due.Unix(), "end": p.ends.Unix()},
-			"parent_type": "subscription_item_details", "subscription": c.subscription, "proration": false}},
-		"payments_complete": true, "payments": []any{}, "paid_at": nil}
-	if status == "paid" {
-		data["amount_paid"] = c.amount
-		data["paid_at"] = p.paidAt.Unix()
+func (p *population) refunds(yield func(*gift) bool) {
+	for c := range p.checkouts {
 		for _, g := range c.gifts {
-			if g.period == p {
-				data["payments"] = []any{map[string]any{"status": "paid", "amount_paid": c.amount, "currency": "usd", "invoice": p.invoice,
-					"livemode": false, "type": "payment_intent", "payment_intent": g.paymentIntent}}
+			if g.refund != nil && !yield(g) {
+				return
 			}
 		}
 	}
-	return data
 }
 
-// checkoutRequest is the attempt's frozen request hash and hosted checkout
-// parameters, in the shape checkout preparation records.
-func checkoutRequest(d *donor, c *checkout) (string, []byte, error) {
-	var visitor *string
-	if c.referrer != nil {
-		token := c.id.String()
-		visitor = &token
+// tables lays the population out as the rows the checkout, webhook and
+// worker paths store, in foreign-key order. A finished checkout attempt's
+// request is never read again, so it is stored as an empty object with a
+// unique hash.
+func (p *population) tables() []table {
+	return []table{
+		{"donors", "id email claimed_at public_name referral_code created_at", func(emit func(...any)) {
+			for _, d := range p.donors {
+				emit(d.id, d.email, timeOrNull(d.claimedAt), textOrNull(d.publicName), textOrNull(d.code), d.createdAt)
+			}
+		}},
+		{"donor_preferences", "id donor_id version referral_emails marketing_emails created_at", func(emit func(...any)) {
+			for _, d := range p.donors {
+				if d.preference {
+					referral, marketing := d.emails()
+					emit(derived(d.id, 1), d.id, int32(1), referral, marketing, d.claimedAt)
+				}
+			}
+		}},
+		{"donor_preference_events", "id donor_id version referral_emails marketing_emails consent_version source created_at", func(emit func(...any)) {
+			for _, d := range p.donors {
+				if d.preference {
+					referral, marketing := d.emails()
+					emit(derived(d.id, 2), d.id, int32(1), referral, marketing, "r1-notifications-v1", "account", d.claimedAt)
+				}
+			}
+		}},
+		{"donor_referral_touches", "id token_hash referrer_id kind touched_at expires_at created_at", func(emit func(...any)) {
+			for _, t := range p.touches {
+				emit(t.id, t.tokenHash, t.referrer.id, t.kind, t.at, t.at.Add(referralWindow), t.at)
+			}
+		}},
+		{"donor_checkouts", "id donor_id amount_minor currency frequency referrer_id referral_kind referral_expires_at created_at", func(emit func(...any)) {
+			for c := range p.checkouts {
+				var expires pgtype.Timestamptz
+				if c.referrer != nil {
+					expires = timeOrNull(c.expiresAt)
+				}
+				emit(c.id, c.donor.id, c.amount, "USD", c.frequency, donorID(c.referrer), textOrNull(c.kind), expires, c.createdAt)
+			}
+		}},
+		{"donor_stripe_checkouts", "id checkout_id request_hash request_params stripe_session_id stripe_subscription_id status created_at", func(emit func(...any)) {
+			for c := range p.checkouts {
+				emit(c.attempt, c.id, hex.EncodeToString(c.attempt.Bytes[:]), "{}", textOrNull(c.session), textOrNull(c.subscription), c.status, c.createdAt)
+			}
+		}},
+		{"donor_recurring_reservations", "id donor_id attempt_id created_at", func(emit func(...any)) {
+			for c := range p.checkouts {
+				if c.frequency == "MONTHLY" && c.status != "EXPIRED" && c.status != "CANCELLED" {
+					emit(derived(c.attempt, 1), c.donor.id, c.attempt, c.createdAt)
+				}
+			}
+		}},
+		{"donor_subscriptions", "id attempt_id donor_id status period_end stops_at billing_anchor observed_at created_at", func(emit func(...any)) {
+			for c := range p.checkouts {
+				if s := c.sub; s != nil {
+					emit(s.id, c.attempt, c.donor.id, s.status, s.periodEnd, timeOrNull(s.stopsAt), s.anchor, s.observed, c.createdAt)
+				}
+			}
+		}},
+		{"donor_cancellations", "id donor_id attempt_id confirmed_period_end completed_at created_at", func(emit func(...any)) {
+			for c := range p.checkouts {
+				if x := c.cancellation; x != nil {
+					emit(x.id, c.donor.id, c.attempt, x.periodEnd, x.completed, x.created)
+				}
+			}
+		}},
+		{"donor_pauses", "id donor_id attempt_id months starts_at resumes_at confirmed_at created_at", func(emit func(...any)) {
+			for c := range p.checkouts {
+				if x := c.pause; x != nil {
+					emit(x.id, c.donor.id, c.attempt, int32(x.months), x.starts, x.resumes, x.confirmed, x.created)
+				}
+			}
+		}},
+		{"donor_stripe_events", "id stripe_event_id event_type occurred_at data processed_at attempts available_at created_at", func(emit func(...any)) {
+			write := func(e event) {
+				emit(e.id, "evt_"+hex.EncodeToString(e.id.Bytes[:]), e.kind, e.at, "{}", e.at.Add(2*time.Second), int32(1), e.at, e.at)
+			}
+			for c := range p.checkouts {
+				for _, pd := range c.periods {
+					for _, e := range pd.events() {
+						write(e)
+					}
+				}
+			}
+			for g := range p.refunds {
+				for _, e := range g.refund.events() {
+					write(e)
+				}
+			}
+		}},
+		{"donor_billing_periods", "id donor_id checkout_id stripe_invoice_id stripe_subscription_id due_at ends_at status created_at", func(emit func(...any)) {
+			for c := range p.checkouts {
+				for _, pd := range c.periods {
+					status := "FAILED"
+					if pd.paid {
+						status = "PAID"
+					}
+					emit(pd.id, c.donor.id, c.id, pd.invoice, c.subscription, pd.due, pd.ends, status, pd.events()[0].at)
+				}
+			}
+		}},
+		{"donor_billing_observations", "id period_id source_event_id status amount_minor currency billing_reason occurred_at event_created_at recorded_at", func(emit func(...any)) {
+			for c := range p.checkouts {
+				for i, pd := range c.periods {
+					reason := "subscription_cycle"
+					if i == 0 {
+						reason = "subscription_create"
+					}
+					for _, e := range pd.events() {
+						emit(e.id, pd.id, e.id, e.status, c.amount, "USD", reason, e.at, e.at, e.at.Add(2*time.Second))
+					}
+				}
+			}
+		}},
+		{"donor_gifts", "id donor_id checkout_id stripe_object_id amount_minor currency frequency paid_at stripe_payment_intent_id period_id referrer_id referral_kind created_at", func(emit func(...any)) {
+			for c := range p.checkouts {
+				for _, g := range c.gifts {
+					var period pgtype.UUID
+					if g.period != nil {
+						period = g.period.id
+					}
+					emit(g.id, c.donor.id, c.id, g.object, g.amount, "USD", g.frequency, g.paidAt, g.paymentIntent, period, donorID(g.referrer), textOrNull(g.kind), g.paidAt.Add(2*time.Second))
+				}
+			}
+		}},
+		{"donor_refunds", "id gift_id stripe_refund_id amount_minor currency status observed_at created_at", func(emit func(...any)) {
+			for g := range p.refunds {
+				r := g.refund
+				emit(r.id, g.id, r.stripeID, r.amount, "USD", r.status, r.observations[len(r.observations)-1].at, r.observations[0].at)
+			}
+		}},
+		{"donor_refund_observations", "id refund_id source_event_id status observed_at created_at", func(emit func(...any)) {
+			for g := range p.refunds {
+				for _, e := range g.refund.events() {
+					emit(e.id, g.refund.id, e.id, e.status, e.at, e.at.Add(2*time.Second))
+				}
+			}
+		}},
+		{"donor_metric_projections", "id donor_id computed_at next_refresh_at", func(emit func(...any)) {
+			for _, d := range p.donors {
+				emit(derived(d.id, 3), d.id, p.now, p.now)
+			}
+		}},
 	}
-	preimage, err := credentials.CheckoutPreimage(d.email, c.amount, c.frequency, visitor)
-	if err != nil {
-		return "", nil, err
-	}
-	metadata := map[string]string{"dad_checkout_id": c.id.String()}
-	if c.referrer != nil {
-		metadata["dad_referrer_id"], metadata["dad_referral_kind"] = c.referrer.id.String(), c.kind
-	}
-	mode, name := "payment", "DAD one-time gift"
-	price := map[string]any{"currency": "usd", "unit_amount": c.amount, "product_data": map[string]string{"name": name}}
-	params := map[string]any{"mode": mode, "customer_email": d.email, "client_reference_id": c.id.String(), "metadata": metadata,
-		"line_items": []any{map[string]any{"price_data": price, "quantity": 1}}, "allowed_payment_method_types": []string{"card"}}
-	if c.frequency == "MONTHLY" {
-		params["mode"] = "subscription"
-		price["product_data"] = map[string]string{"name": "DAD monthly giving"}
-		price["recurring"] = map[string]string{"interval": "month"}
-		params["subscription_data"] = map[string]any{"metadata": metadata}
-	} else {
-		params["payment_intent_data"] = map[string]any{"metadata": metadata}
-	}
-	encoded, err := json.Marshal(params)
-	return store.HashToken(preimage), encoded, err
 }
 
 // copyAll writes every table and the seed marker in one transaction, so a
 // failed copy leaves nothing behind.
-func copyAll(ctx context.Context, pool *pgxpool.Pool, tables []*table) (map[string]int64, error) {
+func copyAll(ctx context.Context, pool *pgxpool.Pool, tables []table) (map[string]int64, error) {
 	counts := map[string]int64{}
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		name := pgx.Identifier{pool.Config().ConnConfig.Database}.Sanitize()
@@ -231,7 +256,13 @@ func copyAll(ctx context.Context, pool *pgxpool.Pool, tables []*table) (map[stri
 			return fmt.Errorf("mark database: %w", err)
 		}
 		for _, t := range tables {
-			n, err := tx.CopyFrom(ctx, pgx.Identifier{t.name}, t.columns, pgx.CopyFromRows(t.rows))
+			// A COPY that fails stops pulling; the rows still produced go nowhere.
+			next, stop := iter.Pull(func(yield func([]any) bool) { t.rows(func(row ...any) { yield(row) }) })
+			n, err := tx.CopyFrom(ctx, pgx.Identifier{t.name}, strings.Fields(t.columns), pgx.CopyFromFunc(func() ([]any, error) {
+				row, _ := next()
+				return row, nil
+			}))
+			stop()
 			if err != nil {
 				return fmt.Errorf("copy %s: %w", t.name, err)
 			}

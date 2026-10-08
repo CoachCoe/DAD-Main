@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"container/heap"
 	"encoding/base64"
 	"encoding/hex"
@@ -119,13 +120,12 @@ type checkout struct {
 }
 
 type period struct {
-	id         pgtype.UUID
-	invoice    string
-	due, ends  time.Time
-	paid       bool
-	failedAt   time.Time // zero unless a renewal attempt failed
-	paidAt     time.Time
-	recordedAt time.Time
+	id        pgtype.UUID
+	invoice   string
+	due, ends time.Time
+	paid      bool
+	failedAt  time.Time // zero unless a renewal attempt failed
+	paidAt    time.Time
 }
 
 type gift struct {
@@ -190,7 +190,6 @@ type population struct {
 	now     time.Time
 	donors  []*donor
 	touches []touch
-	ids     *rand.Rand // identifiers for rows the model does not track
 }
 
 type generator struct {
@@ -205,7 +204,7 @@ type generator struct {
 func generate(n, offset int, seed uint64, now time.Time) *population {
 	now = now.UTC().Truncate(time.Second)
 	g := &generator{r: rand.New(rand.NewPCG(seed, uint64(offset))), now: now}
-	g.pop = &population{now: now, ids: rand.New(rand.NewPCG(seed, ^uint64(offset)))}
+	g.pop = &population{now: now}
 	ages := make([]time.Duration, n)
 	for i := range ages {
 		// Squaring skews signups toward the present, as referral growth compounds.
@@ -367,10 +366,6 @@ func (g *generator) monthly(c *checkout) {
 		if !p.paid && p.failedAt.IsZero() {
 			break // the processor has reported neither outcome yet
 		}
-		p.recordedAt = p.failedAt
-		if p.paid {
-			p.recordedAt = p.paidAt
-		}
 		c.periods = append(c.periods, p)
 		if !due.Equal(lastEnds) {
 			run = 0
@@ -393,7 +388,7 @@ func (g *generator) monthly(c *checkout) {
 		}
 	}
 	last := c.periods[len(c.periods)-1]
-	c.sub.periodEnd, c.sub.observed = last.ends, last.recordedAt
+	c.sub.periodEnd, c.sub.observed = last.ends, cmp.Or(last.paidAt, last.failedAt)
 	if c.sub.status == "active" && !last.paid {
 		c.sub.status = "past_due"
 	}
@@ -491,6 +486,9 @@ func (g *generator) expectReferrals() {
 		}
 	}
 }
+
+// emails are the notification choices a donor with a preference saved.
+func (d *donor) emails() (referral, marketing bool) { return d.index%3 != 0, d.index%4 == 0 }
 
 func (d *donor) gifts() []*gift {
 	var out []*gift
