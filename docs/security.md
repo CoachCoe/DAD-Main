@@ -23,11 +23,16 @@ Staff sign-in is usernameless. The browser offers a discoverable passkey for the
 host, so there is no email field, no account enumeration, and no password to guess or
 lock out. Every challenge is random, held server-side in a single-use ceremony that
 expires after five minutes, and deleted when answered. The API verifies the challenge,
-origin, relying party, user verification (required), signature, and signature counter;
-a counter that fails to advance is treated as a cloned passkey and refused. A disabled
-account or an unknown passkey cannot sign in; failures with a known passkey are audited.
-Invitations expire after 24 hours, allow five attempts, and register a passkey bound to
-that account. Recovery deletes every passkey of the account, revokes its sessions and
+origin, relying party, user verification (required), signature, and signature counter.
+Synced passkeys always report a counter of zero, which is accepted; any other counter
+that fails to advance is treated as a cloned passkey and refused. A disabled account or an
+unknown passkey cannot sign in, and an unknown passkey still spends its challenge. Failed
+sign-ins with a known passkey are audited as `staff.sign_in_failed` with the reason:
+`invalid`, `counter`, or `disabled`. Invitations expire after 24 hours, allow five
+attempts, and register a passkey bound to that account; a rejected attestation or a
+passkey already registered to an account counts as an attempt and is audited as
+`staff.activation_failed` (`invalid` or `credential_in_use`). Only the transports WebAuthn
+defines are stored with a passkey. Recovery deletes every passkey of the account, revokes its sessions and
 invitations, and issues a new invitation. Attestation is not requested, so the passkey
 provider (device, platform, or password manager) is not verified; passkeys are
 stored as public keys and need no encryption key.
