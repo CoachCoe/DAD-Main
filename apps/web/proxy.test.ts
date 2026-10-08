@@ -77,6 +77,9 @@ describe("hosts", () => {
     [`${staff}/api/donor/me`, "404"], [`${staff}/api/donor/stripe/webhook`, "404"],
     [`${site}/`, "served"], [`${site}/account/dashboard`, "served"], [`${site}/api/donor/me`, "served"],
     [`${site}/staff`, "public not found"], [`${site}/Staff/sign-in`, "public not found"], [`${site}/api/donor/staff/me`, "404"], [`${site}/api/donor/staff/sign-in`, "404"],
+    [`${site}/api/donor/%73taff/me`, "404"], [`${site}/api/donor/%53tAfF/me`, "404"], [`${site}/api/%64onor/staff/me`, "404"],
+    [`${site}/%73taff/sign-in`, "public not found"], [`${site}/api/donor/%zz`, "404"],
+    [`${staff}/api/donor/%73taff/me`, "served"], [`${staff}/api/donor/%6De`, "404"], [`${staff}/%6Cedger`, "staff not found"],
   ])("answers %s with %s", (url, expected) => {
     vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
     expect(answer(visit(url))).toBe(expected);

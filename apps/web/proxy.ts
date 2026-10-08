@@ -12,10 +12,16 @@ const staffSurfaceSpelled = new RegExp(staffSurface.source, "i");
 // What a staff page loads from Next besides the static assets the matcher already skips.
 const framework = /^\/(?:_next|__nextjs)/;
 
+const decoded = (pathname: string) => {
+  try { return decodeURIComponent(pathname); } catch { return null; }
+};
+
 /**
  * Splits the site by host. The staff host (DONOR_STAFF_ORIGIN) serves only the back office
- * and its API; the public host serves everything else. Both are fixed at build time. An
- * unserved page keeps its address but renders the answering host's not-found page, in that host's frame.
+ * and its API; the public host serves everything else. Both are fixed at build time. The
+ * split is decided on the decoded path, as the pages and the API proxy receive it, so an
+ * encoded /api/donor/%73taff cannot pass for a public path. An unserved page keeps its
+ * address but renders the answering host's not-found page, in that host's frame.
  *
  * It also gives the signed-in surfaces a per-request nonce policy. Next reads the nonce from
  * the request's CSP header and puts it on its own scripts, so these routes render dynamically.
@@ -23,7 +29,8 @@ const framework = /^\/(?:_next|__nextjs)/;
 export function proxy(request: NextRequest) {
   const staffOrigin = process.env.DONOR_STAFF_ORIGIN;
   const onStaffHost = isStaffHost(request.headers.get("host") ?? request.nextUrl.host);
-  const { pathname } = request.nextUrl;
+  const pathname = decoded(request.nextUrl.pathname);
+  if (pathname === null) return NextResponse.json({ detail: "Not found" }, { status: 404 });
   if (onStaffHost && pathname === "/") return NextResponse.redirect(`${staffOrigin}/staff`);
   if (onStaffHost && pathname === "/robots.txt") {
     return new NextResponse("User-agent: *\nDisallow: /\n", { headers: { "Content-Type": "text/plain", "X-Robots-Tag": "noindex, nofollow" } });
