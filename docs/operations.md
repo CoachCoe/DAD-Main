@@ -391,6 +391,26 @@ notification as suppressed (`opted_out`, `referral_no_longer_qualifies`,
 use a fake provider and local HTTP servers; they do not prove acceptance by Apple or
 Google, which needs real accounts, a signed build, and physical devices.
 
+## App associations
+
+The web app serves `/.well-known/apple-app-site-association` and
+`/.well-known/assetlinks.json` on the public host, so the donor app opens the account
+pages donors reach from emails and referral links, and passkeys donors add on the site
+also sign the app in. Both files are prerendered from build arguments; with none set
+they answer 404, and a malformed value fails the build rather than publish an
+association Apple or Google would reject and cache.
+
+| Variable | Meaning |
+|---|---|
+| `DONOR_IOS_APP_ID` | `<team ID>.<bundle ID>`, the same values as `DONOR_PUSH_APNS_TEAM_ID` and `DONOR_PUSH_APNS_TOPIC`. |
+| `DONOR_ANDROID_APP_PACKAGE` | The Android app's package name. |
+| `DONOR_ANDROID_APP_CERT_SHA256` | Comma-separated SHA-256 fingerprints of the app's signing certificates, colon-separated hex, from Play Console, App integrity. Include the upload key's while testing sideloaded builds. |
+
+Set them in the deployment environment before building the web image, and rebuild it
+when they change. Apple's CDN caches the iOS file for up to a day, so allow that long
+after a change before testing on a device. The iOS app needs the Associated Domains
+entitlement with `applinks:` and `webcredentials:` entries for the public host.
+
 ## Staff and content
 
 Staff sign in with passkeys on the staff host. Provision the first administrator with

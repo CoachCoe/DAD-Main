@@ -11,6 +11,10 @@ COPY apps/web ./
 # Security headers and the split between the public and staff hosts are fixed at build time.
 ARG DONOR_PUBLIC_ORIGIN
 ARG DONOR_STAFF_ORIGIN
+# So are the donor app associations in /.well-known, which are prerendered.
+ARG DONOR_IOS_APP_ID
+ARG DONOR_ANDROID_APP_PACKAGE
+ARG DONOR_ANDROID_APP_CERT_SHA256
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
