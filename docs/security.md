@@ -1,7 +1,7 @@
 # R1 security controls
 
 Donors authenticate through single-use, 15-minute email proof and hashed, revocable
-30-day sessions. Staff sign in with individual passkeys (WebAuthn, verified by
+sessions: a 30-day cookie in browsers, a rotating token pair in the app. Staff sign in with individual passkeys (WebAuthn, verified by
 go-webauthn) and receive eight-hour hashed sessions. Donor and staff cookies are
 separate, HttpOnly, and Secure on HTTPS. Staff cookies use SameSite=Strict; donor cookies
 use Lax. Anonymous login responses do not reveal whether an address exists.
@@ -38,19 +38,46 @@ provider (device, platform, or password manager) is not verified; passkeys are
 stored as public keys and need no encryption key.
 
 The R2 donor app uses neither cookies nor Origin. It sends `X-DAD-Client: native` on
-every request and authenticates with `Authorization: Bearer <session token>`. A request
+every request and authenticates with `Authorization: Bearer <access token>`. A request
 is native only when it has that header and neither an `Origin` nor a `Cookie` header;
 any other request is a browser request, whose Authorization header is ignored and whose
 mutations need the exact Origin. Browsers cannot add a custom header to a cross-origin
 request without a CORS preflight, and the API grants none, so another site cannot forge
-a native request. Bearer tokens are the same hashed, revocable 30-day donor sessions,
-ended by expiry, sign-out, sign-out everywhere, and email changes, and native requests
-are rate limited in the same classes. `POST /donor/claim` returns the token in the body
-only to a native request and then sets no cookie. Only donor account routes admit the
-app (sign-in, claim, email-change confirmation, sign-out, `/donor/me/*`); giving,
-referral capture, partner signup, and all staff routes stay browser-only, and staff
-sessions are never accepted as bearer tokens. The app must keep its token in the
-platform keychain/keystore. The Next proxy does not forward `Authorization` or
+a native request.
+
+`POST /donor/claim` returns tokens in the body only to a native request and then sets no
+cookie: a 15-minute access token and a refresh token, `<family>.<secret>`. Each part is
+256 random bits, and only SHA-256 hashes are stored, so lookups by hash leave no secret
+to compare in variable time. The family part is constant for the session and finds it;
+it reveals nothing about the access token or the session ID. `POST /donor/refresh`
+refuses every browser request, even from the public origin, and exchanges the refresh
+token for a new pair, retiring the previous access token at once. A refresh token works
+once: presenting one its session has already exchanged revokes the whole session and
+records `REFRESH_REUSED`, because either the app or a copy of the token is stale. The one
+exception is the token exchanged most recently, accepted again for one minute after the
+exchange and answered with a pair that supersedes the first, so a response lost on a
+mobile connection does not sign the donor out; a stolen token used within that minute
+still exposes itself when the app next refreshes with the superseded pair. Concurrent
+refreshes are serialized by a lock on the session row, and the later answer wins. Each
+refresh extends the session to 60 days after it, never past a year after sign-in. Access
+and refresh tokens are looked up in different columns, so neither is accepted as the
+other.
+
+Every request checks its session in the database, so sign-out, signing out another
+session or every other session, sign-out everywhere, refresh-token reuse, and email
+changes end a session at once; the access lifetime only bounds the use of a token that
+leaks. Donors see each session at `GET /donor/me/sessions`, as a browser, which is not
+fingerprinted, or the app with the device name it reports (stripped of control and
+formatting characters and capped at 64 characters) and platform, with sign-in and last
+use recorded at most every five minutes. They end one by its random session ID, which is
+unrelated to any token, and an ID that is not theirs is not found. Sign-ins and
+sign-outs of other sessions are recorded in `donor_session_events`. Native requests are
+rate limited in the same classes, refreshes in the account class rather than the
+sign-in budget. Only donor account routes admit the app (sign-in, claim, refresh,
+email-change confirmation, sign-out, `/donor/me/*`); giving, referral capture, partner
+signup, and all staff routes stay browser-only, and staff sessions are never accepted as
+bearer tokens. The app must keep its tokens in the platform keychain/keystore and send
+one refresh at a time. The Next proxy does not forward `Authorization` or
 `X-DAD-Client`, so the app calls the API host directly. The bundled nginx serves only the
 web hosts; an API host needs its own ingress, listed in `DONOR_TRUSTED_PROXY_CIDRS`, that
 overwrites `X-Real-IP`.

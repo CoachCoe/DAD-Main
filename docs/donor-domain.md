@@ -19,8 +19,10 @@ remove dots or plus tags. Different addresses are separate identities until an e
 merge verifies both. Never infer identity from a shared card, device, or postal address.
 The initial implementation accepts ASCII mailbox names and IDNA domains.
 
-Email claim and sign-in links last 15 minutes and are single-use. Sessions last at most
-30 days and can be revoked. Credentials are stored hashed; the email delivery queue temporarily holds an encrypted
+Email claim and sign-in links last 15 minutes and are single-use. A browser session lasts
+at most 30 days; an app session lasts while the app refreshes it at least every 60 days,
+and at most a year. Donors can see where they are signed in and sign out of any other
+session. Credentials are stored hashed; the email delivery queue temporarily holds an encrypted
 copy of the login token until delivery or expiry. Changing email requires fresh
 authentication through the existing address and verification of the new address.
 Knowing an email or checkout ID never grants access to giving history.

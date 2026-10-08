@@ -47,8 +47,12 @@ sets the staff cookie. Activation is the same pair under `/donor/staff/activate`
 with the invitation token, and also signs the new staff member in. Options and
 credentials use the WebAuthn JSON forms, with binary fields in base64url.
 
-The R2 app calls the API host directly with a bearer session instead of cookies (see
-[security](security.md)). Only donor account routes admit it; giving stays on the web.
+The R2 app calls the API host directly with a 15-minute bearer access token instead of
+cookies, and renews it with a rotating refresh token at `POST /donor/refresh`, a route
+that admits only the app (see [security](security.md)). Every sign-in, in a browser or
+the app, is a donor session the donor can list and end through `/donor/me/sessions`,
+which the web profile page shows. Only donor account routes admit the app; giving stays
+on the web.
 Every donor-facing URL is built in `internal/store/links.go`, which is the starting list
 for app/universal links (`/account/claim`, `/account/email-change`,
 `/account/payment-method`, `/r/{code}`). Donor passkeys and push-notification device
