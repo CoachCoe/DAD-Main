@@ -6,7 +6,9 @@ SQLC := sqlc/sqlc:1.31.1@sha256:70f53171d27b2424e9358869975455a6e955a5aa8e58a998
 SEED_DONORS ?= 50000
 LOAD_API ?= http://127.0.0.1:8002
 LOAD_MIX ?=
-LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -client-ips
+# Must equal the API's DONOR_PUBLIC_ORIGIN, or referral captures get 403.
+LOAD_ORIGIN ?= http://localhost:3000
+LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -origin "$(LOAD_ORIGIN)" -client-ips
 
 .PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 

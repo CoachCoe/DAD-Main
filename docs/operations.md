@@ -261,10 +261,15 @@ referral-spike mix at an API serving it. Use the intended database size, network
 and process sizes; never point either command at production.
 
 The seeder writes only to a database it can show is disposable. The URL comes from
-`-database-url`, never from `DONOR_GO_DATABASE_URL`; `-confirm` must repeat the database
-name; and it refuses a database holding any donor whose address is not
-`@loadtest.invalid`, or one already seeded unless `-append` is set. Create a dedicated
-database, migrate it, then seed it from the repository root:
+`-database-url`, never from `DONOR_GO_DATABASE_URL`, and must itself name the host and
+database (and the port, unless it is 5432): pgx would otherwise fill them from `PG*`
+variables or a service file, so such URLs are refused. `-confirm` must repeat the
+database name. The seeder refuses a database holding any donor whose address is not
+`@loadtest.invalid`, and a first seed refuses one with staff accounts or Stripe events,
+as a freshly launched database would have. A seed records itself in the database's
+comment, so the seeding role must own the database, and `-append` adds to a database
+only when that marker is present. Create a dedicated database, migrate it, then seed it
+from the repository root:
 
 ```sh
 (cd apps/donor-api && DONOR_GO_DATABASE_URL=postgresql://user:pass@db:5432/dad_load go run ./cmd/migrate)
@@ -272,43 +277,62 @@ make seed SEED_DATABASE_URL=postgresql://user:pass@db:5432/dad_load SEED_CONFIRM
   LOAD_FIXTURE=/secure/dad-load.json
 ```
 
-`SEED_DONORS` (default 50,000) donors are generated deterministically from `-seed`:
-mostly monthly gifts at $30, some at $10, $50, $100 or custom amounts, one-time gifts,
-abandoned checkouts, up to two years of anniversary renewals with failures recovered
-within and after the 14-day grace, unrecovered failures, pauses, cancellations, refunds,
-and referral trees in which most donors refer nobody and a few refer hundreds, with Link
-and IRL visits that did and did not convert. Rows are written as checkout and webhook
-processing store them, including processed Stripe events, and the projection worker's
-code then derives every projection. Before the Founding Donor cutoff every giver earns
-the badge. Messages queued for seeded history are marked suppressed so no mail worker
-sends them, and seeded addresses use the reserved `.invalid` domain.
+`SEED_DONORS` (default 50,000, at most 200,000) donors are generated deterministically
+from `-seed` and held in memory, about 8 KB of RSS per donor (400 MB at 50,000): mostly
+monthly gifts at the preselected $30, some at the $90 and $150 presets or at custom
+amounts such as $10, $50 and $100, one-time gifts, abandoned checkouts, up to two years of
+anniversary renewals with failures recovered within and after the 14-day grace,
+unrecovered failures, pauses, cancellations, refunds, and referral trees in which most
+donors refer nobody and a few refer hundreds, with Link and IRL visits that did and did
+not convert. Rows are written as checkout and webhook processing store them, including
+the processed Stripe events that billing and refund observations cite, and the
+projection worker's code then derives every projection. Givers whose first gift precedes
+the Founding Donor cutoff earn the badge. Seeded addresses use the reserved `.invalid`
+domain, and the messages projections queue for seeded history are marked suppressed
+however the projection pass ends. A seed that fails or is interrupted after its copy
+leaves its donors in place; drop the database and start again.
 
-The fixture is a new mode-0600 file, refused inside a git working tree, holding
-`-sessions` (default 2,000) live session tokens that favour active referrers, and
-referral codes repeated in proportion to how often each would be visited. Treat it as a
-credential. The sessions last 30 days; delete the fixture and drop the database after
-the run.
+The fixture is a new mode-0600 file, refused inside a git working tree (symlinks
+included), holding `-sessions` (default 2,000) live session tokens that favour active
+referrers, and referral codes repeated in proportion to how often each would be visited.
+Treat it as a credential. The sessions last 30 days; delete the fixture and drop the
+database after the run.
 
-Run the API as for production, and run the projection worker, since projections expire
-after a day and dashboards then wait for it. Every scenario reads only the database,
-including recurring, so Stripe configuration does not change the result. Checkout is not
-in the mix because it calls Stripe.
+Run the API as for production, and run the projection worker alone, since projections
+expire after a day and dashboards then wait for it. Never run the message worker against
+a seeded database; with Compose, start only
+`docker compose -f docker-compose.prod.yml --profile workers up -d projection-worker`.
+Every scenario but referral capture only reads, including recurring, so Stripe
+configuration does not change the result; captures insert referral touches, so the
+database grows with each run. Checkout is not in the mix because it calls Stripe.
+
+An API run outside Compose needs `DONOR_GO_LISTEN` on an address the load host can
+reach (the default, `127.0.0.1:8002`, admits only local clients), `DONOR_PUBLIC_ORIGIN`
+equal to the generator's `LOAD_ORIGIN`, which captures send as their `Origin` and are
+refused with 403 otherwise, and `DONOR_TRUSTED_PROXY_CIDRS` including the load host.
 
 Referral captures are rate limited per client, and one generator is one client. With
 `-client-ips` it sends each user, and each captured visitor, its own `X-Real-IP` from the
 198.18.0.0/15 benchmarking range, as the ingress does for real visitors. The API accepts
-that header only from `DONOR_TRUSTED_PROXY_CIDRS`, so add the load host's address to the
-staging API's list and have it reach the API directly, not through the ingress, which
-overwrites the header. Otherwise captures fail with 429.
+that header only from `DONOR_TRUSTED_PROXY_CIDRS`, so have the generator reach the API
+directly, not through the ingress, which overwrites the header. Otherwise captures fail
+with 429. The Compose API publishes its port on host loopback only, and connections
+through it arrive from the `default` network's gateway, not from the load host. Docker 28
+takes the gateway from the start of the network's `ip_range`, 172.30.42.128; older
+releases use 172.30.42.1. Either add that address to the staging API's list for the
+run, which lets any local process choose its client address, or run the generator in a
+container on that network with `LOAD_API=http://api:8002`.
 
 ```sh
-make loadtest-seeded LOAD_API=http://api.staging.internal:8002 LOAD_FIXTURE=/secure/dad-load.json
+make loadtest-seeded LOAD_API=http://api.staging.internal:8002 LOAD_ORIGIN=https://staging.example.org \
+  LOAD_FIXTURE=/secure/dad-load.json
 ```
 
 This runs a 60-second burst at 256 users with a 250 ms p99 budget for every scenario,
 then a five-minute soak at 32 users with 100 ms, and exits nonzero on any failed request
-or exceeded budget. For other shapes run `go run ./cmd/loadtest` with `-duration`,
-`-concurrency` (up to 2,048), `-mix name=weight,...` and `-max-p99 250ms,dashboard=400ms`.
+or exceeded budget; an interrupted run writes the result so far and exits nonzero. For
+other shapes run `go run ./cmd/loadtest` with `-duration`, `-concurrency` (up to 2,048),
+`-mix name=weight,...` and `-max-p99 250ms,dashboard=400ms`.
 The default weights are referral-lookup 30, referral-capture 12, referral-missing 3 (an
 unknown code, expecting 404), content 15, dashboard 18, gifts 7, sharing 5, profile 4,
 recurring 4 and annual-summary 2. Each signed-in read uses a donor drawn from the fixture;
