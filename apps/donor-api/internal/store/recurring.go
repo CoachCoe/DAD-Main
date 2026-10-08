@@ -47,10 +47,8 @@ type AmountRequest struct {
 // a staff quote for a donor without one.
 type RecurringDetails struct {
 	Mode string `json:"mode"`
-	// ObservedAt and Stale mark details shown from stored state because the
-	// processor could not be read.
+	// ObservedAt is when the subscription was last synced from the processor.
 	ObservedAt   *time.Time    `json:"observed_at,omitempty"`
-	Stale        bool          `json:"stale,omitempty"`
 	State        string        `json:"state,omitempty"`
 	Subscription *Subscription `json:"subscription"`
 }
@@ -113,7 +111,42 @@ func subscriptionView(ctx context.Context, q *queries.Queries, attempt queries.D
 	if row.StopsAt.Valid {
 		sub.StopsAt = &row.StopsAt.Time
 	}
-	return RecurringDetails{Mode: "test", State: "ready", Subscription: sub}, nil
+	return RecurringDetails{Mode: "test", ObservedAt: &row.ObservedAt.Time, State: "ready", Subscription: sub}, nil
+}
+
+// syncedSubscription returns the donor's latest monthly attempt and its
+// subscription as last synced from the processor, which is nil until the
+// attempt has a subscription and that has been synced.
+func syncedSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (queries.DonorStripeCheckout, *queries.DonorSubscription, error) {
+	attempt, err := q.LatestMonthlyAttemptSnapshot(ctx, donor)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !attempt.StripeSubscriptionID.Valid) {
+		return attempt, nil, nil
+	}
+	if err != nil {
+		return attempt, nil, err
+	}
+	row, err := q.SubscriptionForCheckout(ctx, attempt.CheckoutID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return attempt, nil, nil
+	}
+	return attempt, &row, err
+}
+
+// storedDetails describes the donor's monthly gift as last synced. A started
+// monthly gift is preparing until its subscription is first synced.
+func storedDetails(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (RecurringDetails, error) {
+	attempt, row, err := syncedSubscription(ctx, q, donor)
+	if err != nil {
+		return RecurringDetails{}, err
+	}
+	if row == nil {
+		state := "preparing"
+		if !attempt.ID.Valid {
+			state = "ready"
+		}
+		return RecurringDetails{Mode: "test", State: state}, nil
+	}
+	return subscriptionView(ctx, q, attempt, *row)
 }
 
 // prefetchSubscription reads the donor's latest subscription from the processor
@@ -130,19 +163,38 @@ func (s RecurringService) prefetchSubscription(ctx context.Context, donor pgtype
 	return fetchSubscription(ctx, q, s.Gateway, attempt.ID, attempt.StripeSubscriptionID.String)
 }
 
-// viewSnapshot is donorSnapshot for a view, which falls back to stored state
-// when live is false.
-func (s RecurringService) viewSnapshot(ctx context.Context, token string) (*subscriptionSnapshot, bool, error) {
-	return liveRead(ctx, func(ctx context.Context) (*subscriptionSnapshot, error) { return s.donorSnapshot(ctx, token) })
+// refresh syncs the latest subscription of owner's donor before a command,
+// reading the processor with no lock held. The sync commits on its own, so a
+// command refused because the stored state was behind still leaves the next
+// view current. The snapshot returned is the state saved.
+func (s RecurringService) refresh(ctx context.Context, owner ownerResolver, donor pgtype.UUID) (*subscriptionSnapshot, error) {
+	snapshot, err := s.prefetchSubscription(ctx, donor)
+	if err != nil || snapshot == nil {
+		return nil, err
+	}
+	return donorWrite(ctx, s.DB, owner, func(tx pgx.Tx, d queries.Donor, now time.Time) (*subscriptionSnapshot, error) {
+		attempt, ok, err := latestSubscription(ctx, queries.New(tx), d.ID)
+		if err != nil || !ok {
+			return nil, err
+		}
+		row, remote, err := s.read(ctx, tx, attempt, now, viewOnly, snapshot)
+		if err != nil {
+			return nil, err
+		}
+		if _, err = refreshProjection(ctx, tx, d.ID, now); err != nil {
+			return nil, err
+		}
+		return &subscriptionSnapshot{attempt: attempt.ID, id: attempt.StripeSubscriptionID.String, observed: row.ObservedAt, remote: remote}, nil
+	})
 }
 
-// donorSnapshot is prefetchSubscription for the donor signed in with token.
-func (s RecurringService) donorSnapshot(ctx context.Context, token string) (*subscriptionSnapshot, error) {
+// donorRefresh is refresh for the donor signed in with token.
+func (s RecurringService) donorRefresh(ctx context.Context, token string) (*subscriptionSnapshot, error) {
 	d, err := authenticate(ctx, queries.New(s.DB), token, time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
-	return s.prefetchSubscription(ctx, d.ID)
+	return s.refresh(ctx, donorOwner(token), d.ID)
 }
 
 // Recurring commands lease their subscription while a processor request is
@@ -232,8 +284,7 @@ const (
 	// forAmount requires no schedule, pending update or pause, which a new
 	// amount could conflict with.
 	forAmount
-	// forPause requires no schedule or pending update, and a billing anchor to
-	// date renewals from.
+	// forPause requires no schedule or pending update.
 	forPause
 )
 
@@ -253,59 +304,26 @@ func (s RecurringService) read(ctx context.Context, tx pgx.Tx, attempt queries.D
 	if err != nil {
 		return queries.DonorSubscription{}, nil, err
 	}
-	if use != viewOnly && (!remote.Absent("schedule") || !remote.Absent("pending_update")) {
+	if use != viewOnly && row.ExternalChange {
 		return queries.DonorSubscription{}, nil, ErrSubscriptionConflict
 	}
 	if use == forAmount && !remote.Absent("pause_collection") {
 		return queries.DonorSubscription{}, nil, ErrSubscriptionConflict
 	}
-	if use == forPause {
-		if _, err = remote.Unix("billing_cycle_anchor"); err != nil {
-			return queries.DonorSubscription{}, nil, err
-		}
-	}
 	return row, remote, nil
 }
 
-// Details describes the donor's monthly gift as the processor reports it now,
-// or as last observed if the processor cannot be read.
+// Details describes the donor's monthly gift as last synced from the processor.
 func (s RecurringService) Details(ctx context.Context, token string) (RecurringDetails, error) {
-	snapshot, live, err := s.viewSnapshot(ctx, token)
-	if err != nil {
-		return RecurringDetails{}, err
-	}
-	if !live {
-		return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (RecurringDetails, error) {
-			return storedDetails(ctx, q, d.ID)
-		})
-	}
-	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (RecurringDetails, error) {
-		q := queries.New(tx)
-		attempt, err := q.LatestMonthlyAttempt(ctx, d.ID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return RecurringDetails{Mode: "test", State: "ready"}, nil
-		}
-		if err != nil {
-			return RecurringDetails{}, err
-		}
-		if !attempt.StripeSubscriptionID.Valid {
-			return RecurringDetails{Mode: "test", State: "preparing"}, nil
-		}
-		row, _, err := s.read(ctx, tx, attempt, now, viewOnly, snapshot)
-		if err != nil {
-			return RecurringDetails{}, err
-		}
-		if _, err = refreshProjection(ctx, tx, d.ID, now); err != nil {
-			return RecurringDetails{}, err
-		}
-		return subscriptionView(ctx, q, attempt, row)
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (RecurringDetails, error) {
+		return storedDetails(ctx, q, d.ID)
 	})
 }
 func (s RecurringService) Cancel(ctx context.Context, token string, r CancellationRequest) (RecurringDetails, error) {
 	if !ValidRequestID(r.RequestID) || r.PeriodEnd.IsZero() {
 		return RecurringDetails{}, payments.ErrFacts
 	}
-	snapshot, err := s.donorSnapshot(ctx, token)
+	snapshot, err := s.donorRefresh(ctx, token)
 	if err != nil {
 		return RecurringDetails{}, err
 	}

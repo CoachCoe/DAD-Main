@@ -32,14 +32,15 @@ func recurringStatus(err error) (int, string) {
 	return donorStatus(err)
 }
 
-// Recurring requests reconcile with the processor, so they get its time budget.
-func (a *api) recurring() service {
-	return service{a.Recurring != nil, "Recurring giving is temporarily unavailable", providerTimeout, recurringStatus}
+// Recurring views read stored state; commands call the processor, so they get
+// its time budget.
+func (a *api) recurring(timeout time.Duration) service {
+	return service{a.Recurring != nil, "Recurring giving is temporarily unavailable", timeout, recurringStatus}
 }
 
 func recurringRead[R any](a *api, read func(RecurringSource, context.Context, string) (R, error)) sessionHandler {
 	return func(w http.ResponseWriter, r *http.Request, session string) {
-		a.recurring().serve(w, r, func(ctx context.Context) (any, error) { return read(a.Recurring, ctx, session) })
+		a.recurring(readTimeout).serve(w, r, func(ctx context.Context) (any, error) { return read(a.Recurring, ctx, session) })
 	}
 }
 
@@ -54,7 +55,7 @@ func recurringCommand[T requestBody, R any](a *api, run func(RecurringSource, co
 		if !ok {
 			return
 		}
-		a.recurring().serve(w, r, func(ctx context.Context) (any, error) { return run(a.Recurring, ctx, session, key, body) })
+		a.recurring(providerTimeout).serve(w, r, func(ctx context.Context) (any, error) { return run(a.Recurring, ctx, session, key, body) })
 	}
 }
 
@@ -112,6 +113,6 @@ func changeAmount(s RecurringSource, ctx context.Context, session string, key pg
 
 func (a *api) beginPaymentUpdate(w http.ResponseWriter, r *http.Request, session string) {
 	if key, ok := idempotencyKey(w, r); ok {
-		a.recurring().serve(w, r, func(ctx context.Context) (any, error) { return a.Recurring.BeginPaymentUpdate(ctx, session, key) })
+		a.recurring(providerTimeout).serve(w, r, func(ctx context.Context) (any, error) { return a.Recurring.BeginPaymentUpdate(ctx, session, key) })
 	}
 }

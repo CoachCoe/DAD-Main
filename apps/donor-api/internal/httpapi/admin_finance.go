@@ -32,9 +32,10 @@ func validReason(reason string) bool {
 	return n >= 5 && n <= 500
 }
 
-// finance requests call the processor, so they get the provider budget.
-func (a *api) finance() service {
-	return service{a.StaffFinance != nil, "Financial actions are temporarily unavailable", providerTimeout, financeStatus}
+// Financial previews read stored state; actions call the processor, so they
+// get its time budget.
+func (a *api) finance(timeout time.Duration) service {
+	return service{a.StaffFinance != nil, "Financial actions are temporarily unavailable", timeout, financeStatus}
 }
 
 func (a *api) refundQuote(w http.ResponseWriter, r *http.Request, session string) {
@@ -46,7 +47,7 @@ func (a *api) refundQuote(w http.ResponseWriter, r *http.Request, session string
 	if !ok {
 		return
 	}
-	a.finance().serve(w, r, func(ctx context.Context) (any, error) {
+	a.finance(readTimeout).serve(w, r, func(ctx context.Context) (any, error) {
 		return a.StaffFinance.RefundQuote(ctx, session, donorID, giftID)
 	})
 }
@@ -56,7 +57,7 @@ func (a *api) cancellationQuote(w http.ResponseWriter, r *http.Request, session 
 	if !ok {
 		return
 	}
-	a.finance().serve(w, r, func(ctx context.Context) (any, error) {
+	a.finance(readTimeout).serve(w, r, func(ctx context.Context) (any, error) {
 		return a.StaffFinance.CancellationQuote(ctx, session, donorID)
 	})
 }
@@ -88,7 +89,7 @@ func (a *api) refund(w http.ResponseWriter, r *http.Request, session string) {
 		return
 	}
 	request := store.StaffFinancialRequest{RequestID: key, DonorID: donorID, TargetID: giftID, Amount: body.Amount, Reason: body.Reason}
-	a.finance().serve(w, r, func(ctx context.Context) (any, error) { return a.StaffFinance.Refund(ctx, session, request) })
+	a.finance(providerTimeout).serve(w, r, func(ctx context.Context) (any, error) { return a.StaffFinance.Refund(ctx, session, request) })
 }
 
 type staffCancelBody struct {
@@ -113,5 +114,5 @@ func (a *api) cancelSubscription(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 	request := store.StaffFinancialRequest{RequestID: key, DonorID: donorID, TargetID: body.ID, PeriodEnd: body.End.Truncate(time.Microsecond), Reason: body.Reason}
-	a.finance().serve(w, r, func(ctx context.Context) (any, error) { return a.StaffFinance.Cancel(ctx, session, request) })
+	a.finance(providerTimeout).serve(w, r, func(ctx context.Context) (any, error) { return a.StaffFinance.Cancel(ctx, session, request) })
 }

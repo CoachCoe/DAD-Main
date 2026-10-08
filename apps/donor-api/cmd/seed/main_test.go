@@ -107,8 +107,9 @@ func isolatedDatabase(t *testing.T) (*pgxpool.Pool, string) {
 }
 
 // TestSeededDonorsAreServedFromTheirFacts seeds a small population and reads
-// every claimed donor's dashboard through the API, comparing the projections
-// the worker derived with what the generator meant the facts to say.
+// every claimed donor's dashboard and monthly gift through the API, comparing
+// the projections the worker derived with what the generator meant the facts
+// to say. The API has no processor: donor reads must not need one.
 func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 	pool, location := isolatedDatabase(t)
 	ctx := context.Background()
@@ -130,7 +131,7 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 		t.Fatalf("%d sessions: %v", len(sessions), err)
 	}
 	const origin = "https://donor.example.org"
-	server := httpapi.NewServer("", httpapi.Services{Origin: origin, Dashboard: store.DashboardReader{DB: pool}, Donor: store.DonorService{DB: pool, Origin: origin}})
+	server := httpapi.NewServer("", httpapi.Services{Origin: origin, Dashboard: store.DashboardReader{DB: pool}, Donor: store.DonorService{DB: pool, Origin: origin}, Recurring: store.RecurringService{DB: pool, Origin: origin}})
 	get := func(path, token string, native bool, into any) int {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodGet, path, nil)
@@ -149,7 +150,7 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 		}
 		return response.Code
 	}
-	checkedStreaks, referrers := 0, 0
+	checkedStreaks, referrers, subscriptions := 0, 0, 0
 	for i, s := range sessions {
 		d := s.donor
 		var dashboard store.DonorDashboard
@@ -179,6 +180,26 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 		if status := get("/donor/me/gifts?offset=0", s.token, false, &gifts); status != http.StatusOK || len(gifts.Gifts) != min(50, len(d.gifts())) {
 			t.Errorf("donor %d gift history: %d with %d gifts, want %d", d.index, status, len(gifts.Gifts), len(d.gifts()))
 		}
+		var latest *checkout
+		for _, c := range d.checkouts {
+			if c.frequency == "MONTHLY" && c.status != "EXPIRED" && (latest == nil || c.createdAt.After(latest.createdAt)) {
+				latest = c
+			}
+		}
+		var recurring store.RecurringDetails
+		if status := get("/donor/me/recurring", s.token, i%2 == 1, &recurring); status != http.StatusOK {
+			t.Fatalf("donor %d monthly gift: %d", d.index, status)
+		}
+		if got := recurring.Subscription; latest == nil || latest.sub == nil {
+			if got != nil {
+				t.Errorf("donor %d shows a monthly gift it never had: %+v", d.index, got)
+			}
+		} else {
+			subscriptions++
+			if got == nil || recurring.ObservedAt == nil || got.Status != latest.sub.status || !got.PeriodEnd.Equal(latest.sub.periodEnd) || (got.StopsAt != nil) != !latest.sub.stopsAt.IsZero() {
+				t.Errorf("donor %d monthly gift %+v, want %+v", d.index, got, *latest.sub)
+			}
+		}
 		if d.code != "" {
 			var referrer map[string]string
 			if status := get("/donor/referrals/"+d.code, "", false, &referrer); status != http.StatusOK || referrer["public_name"] != d.publicName {
@@ -186,8 +207,8 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 			}
 		}
 	}
-	if checkedStreaks < len(sessions)*9/10 || referrers == 0 {
-		t.Fatalf("too little coverage: %d streaks and %d referrers among %d donors", checkedStreaks, referrers, len(sessions))
+	if checkedStreaks < len(sessions)*9/10 || referrers == 0 || subscriptions == 0 {
+		t.Fatalf("too little coverage: %d streaks, %d referrers and %d monthly gifts among %d donors", checkedStreaks, referrers, subscriptions, len(sessions))
 	}
 
 	name := pool.Config().ConnConfig.Database

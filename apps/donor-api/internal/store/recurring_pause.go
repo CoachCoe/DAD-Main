@@ -17,7 +17,7 @@ func (s RecurringService) Pause(ctx context.Context, token string, r PauseReques
 	if !ValidRequestID(r.RequestID) || r.Months < 1 || r.Months > 3 || r.StartsAt.IsZero() || r.ResumesAt.IsZero() {
 		return PauseResult{}, payments.ErrFacts
 	}
-	snapshot, err := s.donorSnapshot(ctx, token)
+	snapshot, err := s.donorRefresh(ctx, token)
 	if err != nil {
 		return PauseResult{}, err
 	}
@@ -109,11 +109,7 @@ func requireNoActivePause(ctx context.Context, q *queries.Queries, attempt pgtyp
 // insertPause records r once the subscription shows it is still the pause
 // that was offered: from the next renewal, resuming the chosen months later.
 func insertPause(ctx context.Context, q *queries.Queries, donor, attempt pgtype.UUID, schedule queries.DonorSubscription, remote payments.Object, r PauseRequest, now time.Time) error {
-	anchor, err := remote.Unix("billing_cycle_anchor")
-	if err != nil {
-		return err
-	}
-	until, err := renewalAfter(r.StartsAt, r.Months, anchor)
+	until, err := renewalAfter(r.StartsAt, r.Months, schedule.BillingAnchor.Time)
 	if err != nil {
 		return err
 	}

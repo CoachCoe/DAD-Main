@@ -1638,7 +1638,7 @@
       "get": {
         "operationId": "recurring",
         "summary": "Monthly gift status",
-        "description": "Reconciles with the processor, so it may take up to 25 seconds. When the processor cannot be read the stored state is returned with `stale: true`. 409 when billing needs reconciliation; 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "description": "Served from the subscription as last synced from Stripe by verified webhooks and recurring commands; it never calls Stripe. `observed_at` is when that sync happened.",
         "tags": [
           "Recurring"
         ],
@@ -1664,9 +1664,6 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
           "503": {
             "$ref": "#/components/responses/Unavailable"
           }
@@ -1677,7 +1674,7 @@
       "get": {
         "operationId": "amountOptions",
         "summary": "Amount change offer",
-        "description": "Reconciles with the processor, so it may take up to 25 seconds. When the processor cannot be read the stored state is returned with `stale: true`. 409 when billing needs reconciliation; 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "description": "Served from the subscription as last synced from Stripe by verified webhooks and recurring commands; it never calls Stripe. The matching POST checks current Stripe state and answers 409 when the offer no longer matches it.",
         "tags": [
           "Recurring"
         ],
@@ -1702,9 +1699,6 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -1817,7 +1811,7 @@
       "get": {
         "operationId": "pauseOptions",
         "summary": "Pause offer: 1, 2, or 3 skipped renewals with exact dates",
-        "description": "Reconciles with the processor, so it may take up to 25 seconds. When the processor cannot be read the stored state is returned with `stale: true`. 409 when billing needs reconciliation; 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "description": "Served from the subscription as last synced from Stripe by verified webhooks and recurring commands; it never calls Stripe. The matching POST checks current Stripe state and answers 409 when the offer no longer matches it. 409 here when the stored billing dates are inconsistent.",
         "tags": [
           "Recurring"
         ],
@@ -1955,7 +1949,7 @@
       "get": {
         "operationId": "resumeOptions",
         "summary": "Resume offer",
-        "description": "Reconciles with the processor, so it may take up to 25 seconds. When the processor cannot be read the stored state is returned with `stale: true`. 409 when billing needs reconciliation; 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "description": "Served from the subscription as last synced from Stripe by verified webhooks and recurring commands; it never calls Stripe. The matching POST checks current Stripe state and answers 409 when the offer no longer matches it.",
         "tags": [
           "Recurring"
         ],
@@ -1980,9 +1974,6 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -2081,7 +2072,7 @@
       "get": {
         "operationId": "paymentMethod",
         "summary": "Card update status",
-        "description": "Reconciles with the processor, so it may take up to 25 seconds. When the processor cannot be read the stored state is returned with `stale: true`. 409 when billing needs reconciliation; 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+        "description": "Served from stored card update records; it never calls Stripe.",
         "tags": [
           "Recurring"
         ],
@@ -2106,9 +2097,6 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -3582,7 +3570,8 @@
           "503": {
             "$ref": "#/components/responses/Unavailable"
           }
-        }
+        },
+        "description": "From recorded refunds, without calling Stripe; the refund itself reads Stripe's refunds again before creating one."
       },
       "post": {
         "operationId": "refund",
@@ -3747,7 +3736,8 @@
           "503": {
             "$ref": "#/components/responses/Unavailable"
           }
-        }
+        },
+        "description": "From the subscription as last synced from Stripe, without calling Stripe; the cancellation itself reads Stripe again before acting."
       },
       "post": {
         "operationId": "cancelSubscription",
@@ -5034,12 +5024,8 @@
           },
           "observed_at": {
             "type": "string",
-            "description": "When the stored state was last confirmed; present only with `stale`.",
+            "description": "When the subscription was last synced from Stripe; present with `subscription`.",
             "format": "date-time"
-          },
-          "stale": {
-            "type": "boolean",
-            "description": "Present and true when the processor could not be read and the response shows stored state as of `observed_at` (or the last reconciliation). Show it as possibly out of date and disable changes that depend on it."
           },
           "state": {
             "type": "string"
@@ -5097,7 +5083,7 @@
       },
       "AmountOptions": {
         "type": "object",
-        "description": "Unless `state` is `ready`, only `state` (and `stale`, when set) is present.",
+        "description": "Unless `state` is `ready`, only `state` is present.",
         "properties": {
           "amount_minor": {
             "type": "integer",
@@ -5117,10 +5103,6 @@
           "effective_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "stale": {
-            "type": "boolean",
-            "description": "Present and true when the processor could not be read and the response shows stored state as of `observed_at` (or the last reconciliation). Show it as possibly out of date and disable changes that depend on it."
           },
           "state": {
             "type": "string"
@@ -5211,10 +5193,6 @@
               }
             ]
           },
-          "stale": {
-            "type": "boolean",
-            "description": "Present and true when the processor could not be read and the response shows stored state as of `observed_at` (or the last reconciliation). Show it as possibly out of date and disable changes that depend on it."
-          },
           "state": {
             "type": "string"
           },
@@ -5252,10 +5230,6 @@
           "request_id": {
             "type": "string",
             "format": "uuid"
-          },
-          "stale": {
-            "type": "boolean",
-            "description": "Present and true when the processor could not be read and the response shows stored state as of `observed_at` (or the last reconciliation). Show it as possibly out of date and disable changes that depend on it."
           },
           "state": {
             "type": "string"
@@ -5644,7 +5618,7 @@
       },
       "StaffSubscription": {
         "type": "object",
-        "description": "The monthly gift as last observed; quotes read the processor live.",
+        "description": "The monthly gift as last synced from Stripe.",
         "properties": {
           "amount_minor": {
             "type": "integer",
@@ -5657,7 +5631,7 @@
           },
           "observed_at": {
             "type": "string",
-            "description": "When the stored subscription state was last confirmed.",
+            "description": "When the subscription was last synced from Stripe.",
             "format": "date-time"
           },
           "status": {
@@ -6100,12 +6074,8 @@
           },
           "observed_at": {
             "type": "string",
-            "description": "When the stored refund states were last confirmed; present only with `stale`.",
+            "description": "When a refund of this gift was last recorded; absent when none has been.",
             "format": "date-time"
-          },
-          "stale": {
-            "type": "boolean",
-            "description": "Present and true when the processor could not be read and the response shows stored state as of `observed_at` (or the last reconciliation). Show it as possibly out of date and disable changes that depend on it."
           }
         },
         "required": [
