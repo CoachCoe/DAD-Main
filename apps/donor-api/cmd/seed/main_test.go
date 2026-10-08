@@ -20,6 +20,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"impactgraph/donor-api/internal/dbroles"
+	"impactgraph/donor-api/internal/dbroles/dbrolestest"
 	"impactgraph/donor-api/internal/httpapi"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/recognition"
@@ -229,8 +231,13 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 	if err != nil || len(sessions) < 50 {
 		t.Fatalf("%d sessions: %v", len(sessions), err)
 	}
+	api, err := store.Open(ctx, dbrolestest.As(t, location, dbroles.API), dbroles.API.Pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer api.Close()
 	const origin = "https://donor.example.org"
-	server := httpapi.NewServer("", httpapi.Services{Origin: origin, Dashboard: store.DashboardReader{DB: pool}, Donor: store.DonorService{DB: pool, Origin: origin}, Recurring: store.RecurringService{DB: pool, Origin: origin}})
+	server := httpapi.NewServer("", httpapi.Services{Origin: origin, Dashboard: store.DashboardReader{DB: api}, Donor: store.DonorService{DB: api, Origin: origin}, Recurring: store.RecurringService{DB: api, Origin: origin}})
 	get := func(path, token string, native bool, into any) int {
 		t.Helper()
 		request := httptest.NewRequest(http.MethodGet, path, nil)

@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"impactgraph/donor-api/internal/credentials"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/store"
 )
@@ -47,19 +48,22 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err != nil {
 		return fmt.Errorf("%s %w", target.variable, err)
 	}
-	dsn := getenv("DONOR_GO_DATABASE_URL")
+	dsn := dbroles.Rekey.URL(getenv)
 	if dsn == "" {
-		return errors.New("DONOR_GO_DATABASE_URL is required")
+		return errors.New(dbroles.Rekey.Variable() + " is required")
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := store.Open(startup, dsn, 2)
+	pool, err := store.Open(startup, dsn, dbroles.Rekey.Pool)
 	if err != nil {
 		return errors.New("database is unavailable")
 	}
 	defer pool.Close()
 	if err = migrations.Verify(startup, pool); err != nil {
 		return errors.New("donor schema is not current; run migrations first")
+	}
+	if err = dbroles.Rekey.Check(startup, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
+		return err
 	}
 	rekeyer := store.Rekeyer{DB: pool, Keys: keys, Batch: int32(*batch)}
 	var usage []store.KeyUsage

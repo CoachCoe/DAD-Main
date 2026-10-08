@@ -20,6 +20,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"impactgraph/donor-api/internal/credentials"
+	"impactgraph/donor-api/internal/dbroles"
+	"impactgraph/donor-api/internal/dbroles/dbrolestest"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/store/queries"
@@ -32,7 +34,7 @@ var (
 )
 
 func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
-	env := map[string]string{"DONOR_GO_DATABASE_URL": "postgresql://unreachable.invalid/donor", "DONOR_EMAIL_ENCRYPTION_KEY": oldKey, "DONOR_CONTENT_ENCRYPTION_KEY": oldKey}
+	env := map[string]string{"DONOR_REKEY_DATABASE_URL": "postgresql://unreachable.invalid/donor", "DONOR_EMAIL_ENCRYPTION_KEY": oldKey, "DONOR_CONTENT_ENCRYPTION_KEY": oldKey}
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -46,7 +48,7 @@ func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
 		{"oversized batch", []string{"--key", "email", "--batch", "10001"}, nil, "usage"},
 		{"unset keys", []string{"--key", "content"}, map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": ""}, "DONOR_CONTENT_ENCRYPTION_KEY key 1 of 1"},
 		{"invalid retired key", []string{"--key", "email"}, map[string]string{"DONOR_EMAIL_ENCRYPTION_KEY": newKey + ",short"}, "DONOR_EMAIL_ENCRYPTION_KEY key 2 of 2"},
-		{"no database", []string{"--key", "email"}, map[string]string{"DONOR_GO_DATABASE_URL": ""}, "DONOR_GO_DATABASE_URL"},
+		{"no database", []string{"--key", "email"}, map[string]string{"DONOR_REKEY_DATABASE_URL": ""}, "DONOR_REKEY_DATABASE_URL"},
 	} {
 		getenv := func(name string) string {
 			if value, ok := tc.env[name]; ok {
@@ -214,8 +216,9 @@ func (f fixture) verify(t *testing.T, pool *pgxpool.Pool, keys credentials.Keyri
 	}
 }
 
-func env(dsn, emailKeys, contentKeys string) func(string) string {
-	values := map[string]string{"DONOR_GO_DATABASE_URL": dsn, "DONOR_EMAIL_ENCRYPTION_KEY": emailKeys, "DONOR_CONTENT_ENCRYPTION_KEY": contentKeys}
+// env runs rekey as its role on the database dsn names.
+func env(t *testing.T, dsn, emailKeys, contentKeys string) func(string) string {
+	values := map[string]string{dbroles.Rekey.Variable(): dbrolestest.As(t, dsn, dbroles.Rekey), "DONOR_EMAIL_ENCRYPTION_KEY": emailKeys, "DONOR_CONTENT_ENCRYPTION_KEY": contentKeys}
 	return func(name string) string { return values[name] }
 }
 
@@ -250,7 +253,7 @@ func TestRekeyMovesEveryTokenToTheNewKey(t *testing.T) {
 	}
 	f["donor_login_emails"][written] = "written after the new key"
 
-	usage, err := rekey(ctx, env(dsn, rotated, oldKey), "--key", "email", "--dry-run")
+	usage, err := rekey(ctx, env(t, dsn, rotated, oldKey), "--key", "email", "--dry-run")
 	if err == nil || !strings.Contains(err.Error(), "run rekey without --dry-run") {
 		t.Fatalf("dry run with retired tokens: got %v", err)
 	}
@@ -265,7 +268,7 @@ func TestRekeyMovesEveryTokenToTheNewKey(t *testing.T) {
 	}
 	f.verify(t, pool, keyring(t, oldKey+","+newKey), store.EmailKeyColumns)
 
-	usage, err = rekey(ctx, env(dsn, rotated, oldKey), "--key", "email", "--batch", "5")
+	usage, err = rekey(ctx, env(t, dsn, rotated, oldKey), "--key", "email", "--batch", "5")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,12 +279,12 @@ func TestRekeyMovesEveryTokenToTheNewKey(t *testing.T) {
 		t.Fatalf("email changes: %+v", got)
 	}
 	f.verify(t, pool, keyring(t, newKey), store.EmailKeyColumns)
-	if _, err = rekey(ctx, env(dsn, newKey, oldKey), "--key", "email", "--dry-run"); err != nil {
+	if _, err = rekey(ctx, env(t, dsn, newKey, oldKey), "--key", "email", "--dry-run"); err != nil {
 		t.Fatalf("dry run after rekey with only the new key: %v", err)
 	}
 
 	before := tokens(t, pool, store.EmailKeyColumns[0])
-	if usage, err = rekey(ctx, env(dsn, rotated, oldKey), "--key", "email"); err != nil || usage["donor_login_emails"].Reencrypted != 0 {
+	if usage, err = rekey(ctx, env(t, dsn, rotated, oldKey), "--key", "email"); err != nil || usage["donor_login_emails"].Reencrypted != 0 {
 		t.Fatalf("second run: %+v, %v", usage, err)
 	}
 	for id, token := range tokens(t, pool, store.EmailKeyColumns[0]) {
@@ -291,7 +294,7 @@ func TestRekeyMovesEveryTokenToTheNewKey(t *testing.T) {
 	}
 
 	f.verify(t, pool, keyring(t, oldKey), store.ContentKeyColumns)
-	if usage, err = rekey(ctx, env(dsn, newKey, newKey+","+oldKey), "--key", "content", "--batch", "1"); err != nil || usage["donor_content_sources"].Reencrypted != 2 {
+	if usage, err = rekey(ctx, env(t, dsn, newKey, newKey+","+oldKey), "--key", "content", "--batch", "1"); err != nil || usage["donor_content_sources"].Reencrypted != 2 {
 		t.Fatalf("content rekey: %+v, %v", usage, err)
 	}
 	f.verify(t, pool, keyring(t, newKey), store.ContentKeyColumns)
@@ -311,7 +314,7 @@ func TestRekeyRefusesTokensNoConfiguredKeyDecrypts(t *testing.T) {
 	}
 	before := tokens(t, pool, store.EmailKeyColumns[0])
 	for _, args := range [][]string{{"--key", "email", "--dry-run"}, {"--key", "email"}} {
-		usage, err := rekey(ctx, env(dsn, newKey+","+oldKey, oldKey), args...)
+		usage, err := rekey(ctx, env(t, dsn, newKey+","+oldKey, oldKey), args...)
 		if err == nil || !strings.Contains(err.Error(), "donor_email_changes "+stray.String()) || strings.Contains(err.Error(), "secret proof") {
 			t.Fatalf("%v: got %v, want a refusal naming the row and not its plaintext", args, err)
 		}
@@ -371,7 +374,7 @@ func TestInterruptedRekeyResumes(t *testing.T) {
 	interrupt, cancel := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {
-		done <- run(interrupt, []string{"--key", "email", "--batch", "3"}, env(dsn, newKey+","+oldKey, oldKey), io.Discard)
+		done <- run(interrupt, []string{"--key", "email", "--batch", "3"}, env(t, dsn, newKey+","+oldKey, oldKey), io.Discard)
 	}()
 	awaitLockWait(t, pool)
 	cancel()
@@ -388,7 +391,7 @@ func TestInterruptedRekeyResumes(t *testing.T) {
 			t.Fatalf("token %d of %d on the new key: %v", i+1, len(ids), rotated.IsCurrent(stored[id]))
 		}
 	}
-	usage, err := rekey(ctx, env(dsn, newKey+","+oldKey, oldKey), "--key", "email")
+	usage, err := rekey(ctx, env(t, dsn, newKey+","+oldKey, oldKey), "--key", "email")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +426,7 @@ func TestRekeyKeepsTokensWrittenWhileItRuns(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		usage, err := rekey(ctx, env(dsn, rotated, oldKey), "--key", "email", "--batch", "2")
+		usage, err := rekey(ctx, env(t, dsn, rotated, oldKey), "--key", "email", "--batch", "2")
 		done <- result{usage, err}
 	}()
 	awaitLockWait(t, pool)

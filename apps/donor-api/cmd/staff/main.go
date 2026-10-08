@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
 )
@@ -31,17 +32,20 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	if err := payments.ValidateOrigin(origin); err != nil {
 		return fmt.Errorf("DONOR_STAFF_ORIGIN %w", err)
 	}
-	dsn := getenv("DONOR_GO_DATABASE_URL")
+	dsn := dbroles.StaffCLI.URL(getenv)
 	if dsn == "" {
-		return errors.New("DONOR_GO_DATABASE_URL is required")
+		return errors.New(dbroles.StaffCLI.Variable() + " is required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	pool, err := store.Open(ctx, dsn, 2)
+	pool, err := store.Open(ctx, dsn, dbroles.StaffCLI.Pool)
 	if err != nil {
 		return errors.New("database is unavailable")
 	}
 	defer pool.Close()
+	if err = dbroles.StaffCLI.Check(ctx, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
+		return err
+	}
 	staff, err := store.NewStaffService(pool, origin)
 	if err != nil {
 		return errors.New("staff passkeys are not configured correctly")

@@ -4,8 +4,13 @@ import (
 	"cmp"
 	"context"
 	"net/netip"
+	"os"
 	"slices"
+	"strings"
 	"testing"
+
+	"impactgraph/donor-api/internal/dbroles"
+	"impactgraph/donor-api/internal/dbroles/dbrolestest"
 )
 
 func TestTrustedProxiesAcceptsProxyNetworksAndRefusesOpenRanges(t *testing.T) {
@@ -23,7 +28,7 @@ func TestTrustedProxiesAcceptsProxyNetworksAndRefusesOpenRanges(t *testing.T) {
 
 func TestConfigureRejectsInvalidEnvironmentBeforeTheDatabase(t *testing.T) {
 	// The database URL is unreachable: each case must fail on configuration first.
-	base := map[string]string{"DONOR_GO_DATABASE_URL": "postgresql://unreachable.invalid/donor"}
+	base := map[string]string{"DONOR_API_DATABASE_URL": "postgresql://unreachable.invalid/donor"}
 	for _, tc := range []struct {
 		name string
 		env  map[string]string
@@ -76,6 +81,29 @@ func TestConfigureAcceptsAStaffHostBesideThePublicOne(t *testing.T) {
 		release()
 		if err != nil || services.StaffOrigin != env["DONOR_STAFF_ORIGIN"] {
 			t.Fatalf("%v: got %q, %v", env, services.StaffOrigin, err)
+		}
+	}
+}
+
+func TestConfigureConnectsAsTheAPIRole(t *testing.T) {
+	owner := os.Getenv("TEST_DATABASE_URL")
+	for _, tc := range []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"own login", map[string]string{"DONOR_API_DATABASE_URL": dbrolestest.URL(t, dbroles.API)}, ""},
+		{"schema owner", map[string]string{"DONOR_API_DATABASE_URL": owner}, "can change the schema"},
+		{"another role", map[string]string{"DONOR_API_DATABASE_URL": dbrolestest.URL(t, dbroles.Monitor)}, "not a member of dad_api"},
+		{"local owner", map[string]string{"DONOR_GO_DATABASE_URL": owner, "DONOR_ALLOW_OWNER_CONNECTION": "true"}, ""},
+	} {
+		services, release, err := configure(context.Background(), func(name string) string { return tc.env[name] })
+		release()
+		if tc.want == "" && (err != nil || services.Ready == nil) {
+			t.Errorf("%s: got %v, want the database services", tc.name, err)
+		}
+		if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s: got %v, want %q", tc.name, err, tc.want)
 		}
 	}
 }

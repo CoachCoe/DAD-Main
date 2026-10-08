@@ -7,7 +7,11 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 	"testing"
+
+	"impactgraph/donor-api/internal/dbroles"
+	"impactgraph/donor-api/internal/dbroles/dbrolestest"
 )
 
 func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
@@ -29,13 +33,10 @@ func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
 }
 
 func TestRunReportsEveryQueue(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Fatal("TEST_DATABASE_URL is required; use the migrated donor_go test database")
-	}
+	dsn := dbrolestest.URL(t, dbroles.Monitor)
 	var out bytes.Buffer
 	// Other tests' queue rows may need attention; only the report is checked.
-	_ = run(context.Background(), nil, func(string) string { return dsn }, &out)
+	_ = run(context.Background(), nil, func(name string) string { return map[string]string{dbroles.Monitor.Variable(): dsn}[name] }, &out)
 	var rows []struct{ Queue string }
 	if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
 		t.Fatalf("report %q: %v", out.String(), err)
@@ -46,5 +47,14 @@ func TestRunReportsEveryQueue(t *testing.T) {
 	}
 	if want := []string{"email-changes", "login-email", "messages", "projections", "push", "stripe", "subscriptions"}; !slices.Equal(queues, want) {
 		t.Fatalf("queues %v, want %v", queues, want)
+	}
+}
+
+func TestRunRefusesTheSchemaOwner(t *testing.T) {
+	owner := os.Getenv("TEST_DATABASE_URL")
+	dbrolestest.URL(t, dbroles.Monitor)
+	err := run(context.Background(), nil, func(name string) string { return map[string]string{dbroles.Monitor.Variable(): owner}[name] }, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "can change the schema") {
+		t.Fatalf("got %v, want the owner refused", err)
 	}
 }

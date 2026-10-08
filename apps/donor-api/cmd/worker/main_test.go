@@ -3,11 +3,16 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
+
+	"impactgraph/donor-api/internal/dbroles"
+	"impactgraph/donor-api/internal/dbroles/dbrolestest"
 )
 
 func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
-	env := map[string]string{"DONOR_GO_WORKERS_ENABLED": "true", "DONOR_GO_DATABASE_URL": "postgresql://unreachable.invalid/donor"}
+	env := map[string]string{"DONOR_GO_WORKERS_ENABLED": "true", "DONOR_WORKER_STRIPE_DATABASE_URL": "postgresql://unreachable.invalid/donor"}
 	for _, tc := range []struct {
 		name  string
 		args  []string
@@ -19,7 +24,7 @@ func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
 		{"retry for another kind", []string{"--kind=messages", "--retry-event=evt_123"}, ""},
 		{"retry without event id", []string{"--kind=stripe", "--retry-event=123"}, ""},
 		{"workers disabled", []string{"--kind=stripe"}, "DONOR_GO_WORKERS_ENABLED"},
-		{"no database", []string{"--kind=stripe"}, "DONOR_GO_DATABASE_URL"},
+		{"no database", []string{"--kind=stripe"}, "DONOR_WORKER_STRIPE_DATABASE_URL"},
 	} {
 		getenv := func(name string) string {
 			if name == tc.unset {
@@ -52,4 +57,27 @@ func TestPushWorkerRunsWithoutProvidersButRefusesPartialOnes(t *testing.T) {
 func isConfigError(err error) bool {
 	_, ok := errors.AsType[configError](err)
 	return ok
+}
+
+func TestWorkersRunAsTheirRoles(t *testing.T) {
+	for _, kind := range []string{"projections", "push"} {
+		role := dbroles.Workers[kind]
+		env := map[string]string{"DONOR_GO_WORKERS_ENABLED": "true", role.Variable(): dbrolestest.URL(t, role)}
+		if err := run(context.Background(), []string{"--kind=" + kind, "--once"}, func(name string) string { return env[name] }); err != nil {
+			t.Errorf("%s: %v", kind, err)
+		}
+	}
+}
+
+func TestRunRefusesTheSchemaOwner(t *testing.T) {
+	dbrolestest.URL(t, dbroles.ProjectionWorker)
+	env := map[string]string{"DONOR_GO_WORKERS_ENABLED": "true", "DONOR_WORKER_PROJECTIONS_DATABASE_URL": os.Getenv("TEST_DATABASE_URL")}
+	err := run(context.Background(), []string{"--kind=projections", "--once"}, func(name string) string { return env[name] })
+	if !isConfigError(err) || !strings.Contains(err.Error(), "can change the schema") {
+		t.Fatalf("got %v, want the owner refused", err)
+	}
+	env[dbroles.AllowOwnerVariable] = "true"
+	if err = run(context.Background(), []string{"--kind=projections", "--once"}, func(name string) string { return env[name] }); err != nil {
+		t.Fatalf("owner allowed: %v", err)
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"log/slog"
+	"maps"
 	"os"
 	"os/signal"
 	"slices"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/payments"
@@ -28,18 +30,18 @@ type configError string
 
 func (e configError) Error() string { return string(e) }
 
-var kinds = []string{"stripe", "projections", "login-email", "email-changes", "messages", "push"}
-
 func run(ctx context.Context, args []string, getenv func(string) string) error {
 	flags := flag.NewFlagSet("donor-worker", flag.ContinueOnError)
-	kind := flags.String("kind", "", strings.Join(kinds, ", "))
+	kinds := strings.Join(slices.Sorted(maps.Keys(dbroles.Workers)), ", ")
+	kind := flags.String("kind", "", kinds)
 	once := flags.Bool("once", false, "process at most one item")
 	retry := flags.String("retry-event", "", "reset an unprocessed Stripe event's attempt budget")
 	if err := flags.Parse(args); err != nil {
 		return configError("invalid worker arguments")
 	}
-	if flags.NArg() != 0 || !slices.Contains(kinds, *kind) {
-		return configError("--kind must be one of " + strings.Join(kinds, ", "))
+	role, known := dbroles.Workers[*kind]
+	if flags.NArg() != 0 || !known {
+		return configError("--kind must be one of " + kinds)
 	}
 	if *retry != "" && (*kind != "stripe" || !strings.HasPrefix(*retry, "evt_")) {
 		return configError("--retry-event requires --kind stripe and an evt_ identifier")
@@ -47,22 +49,24 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	if getenv("DONOR_GO_WORKERS_ENABLED") != "true" {
 		return configError("workers require DONOR_GO_WORKERS_ENABLED=true")
 	}
-	dsn := getenv("DONOR_GO_DATABASE_URL")
+	dsn := role.URL(getenv)
 	if dsn == "" {
-		return configError("DONOR_GO_DATABASE_URL is required")
+		return configError(role.Variable() + " is required")
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
-	pool, err := store.Open(startup, dsn, 2)
+	pool, err := store.Open(startup, dsn, role.Pool)
 	cancel()
 	if err != nil {
 		return configError("worker database is unreachable")
 	}
 	defer pool.Close()
 	check, finish := context.WithTimeout(ctx, 10*time.Second)
-	err = migrations.Verify(check, pool)
-	finish()
-	if err != nil {
+	defer finish()
+	if err = migrations.Verify(check, pool); err != nil {
 		return configError("donor schema is not current; run migrations before starting workers")
+	}
+	if err = role.Check(check, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
+		return configError(err.Error())
 	}
 	if *retry != "" {
 		retryCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

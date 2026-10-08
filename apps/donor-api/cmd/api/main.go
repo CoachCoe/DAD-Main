@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"impactgraph/donor-api/internal/credentials"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/httpapi"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/migrations"
@@ -30,10 +31,6 @@ import (
 // shutdownTimeout lets in-flight processor calls finish within the server's
 // write timeout instead of being cut off and left for reconciliation.
 const shutdownTimeout = 35 * time.Second
-
-// poolConns is the API's database pool. Load tests at 50,000 donors found a
-// 10-connection pool, not PostgreSQL, capped throughput; 40 doubled it.
-const poolConns = 40
 
 // trustedProxies parses DONOR_TRUSTED_PROXY_CIDRS. Ranges broader than a
 // private /8 (IPv4) or /32 (IPv6) are refused because trusting them would let
@@ -140,20 +137,24 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		}
 	}
 
-	dsn := getenv("DONOR_GO_DATABASE_URL")
+	dsn := dbroles.API.URL(getenv)
 	if dsn == "" {
-		slog.Warn("DONOR_GO_DATABASE_URL is unset; only health and static responses are available")
+		slog.Warn(dbroles.API.Variable() + " is unset; only health and static responses are available")
 		return services, release, nil
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := store.Open(startup, dsn, poolConns)
+	pool, err := store.Open(startup, dsn, dbroles.API.Pool)
 	if err != nil {
 		return services, release, errors.New("donor database startup failed")
 	}
 	if err = migrations.Verify(startup, pool); err != nil {
 		pool.Close()
 		return services, release, errors.New("donor schema is not current; run migrations before starting the API")
+	}
+	if err = dbroles.API.Check(startup, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
+		pool.Close()
+		return services, release, err
 	}
 	services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
 	services.Content = store.ContentReader{DB: pool}
