@@ -91,8 +91,15 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		}
 		return store.EventWorker{DB: pool, Gateway: gateway}.ProcessNext, nil
 	case "projections":
+		retention := &store.TouchRetention{DB: pool}
 		return func(ctx context.Context) (bool, error) {
-			return store.RefreshNextProjection(ctx, pool, time.Now().UTC())
+			now := time.Now().UTC()
+			purged, err := retention.PurgeNext(ctx, now)
+			if err != nil {
+				return false, err
+			}
+			refreshed, err := store.RefreshNextProjection(ctx, pool, now)
+			return purged || refreshed, err
 		}, nil
 	}
 	settings, err := mail.FromEnvironment(getenv)
