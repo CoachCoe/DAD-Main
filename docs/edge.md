@@ -132,10 +132,12 @@ on, Pseudo IPv4 off.
 Enable **Authenticated Origin Pulls**. The
 checked-in CA is Cloudflare's shared origin-pull CA from
 <https://developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem> (valid
-until 2029-11-01). Because every Cloudflare zone presents that certificate, it proves a
-request came through Cloudflare, not through this zone; prefer per-zone or per-hostname
-pulls with your own certificate and set `INGRESS_ORIGIN_PULL_CA` to its CA. As defense in
-depth, allow inbound 443 only from Cloudflare's ranges, ideally in the provider's
+until 2029-11-01). Every Cloudflare zone presents a certificate from that CA, so it
+proves only that a request came through Cloudflare, not through this zone: any Cloudflare
+account can proxy its own zone to this origin with `Host` set to the staff or public host
+and so bypass this zone's Access policy, WAF, and rate limiting rules. Use per-hostname
+Authenticated Origin Pulls with your own certificate and set `INGRESS_ORIGIN_PULL_CA` to
+its CA; this is required when Access protects the staff host. As defense in depth, allow inbound 443 only from Cloudflare's ranges, ideally in the provider's
 firewall. Docker-published ports bypass the host's INPUT chain and ufw, so a host
 firewall must filter in `DOCKER-USER`:
 
@@ -156,6 +158,12 @@ eight-hour session to match staff sessions. Access is in front of, not instead o
 app's password and TOTP. Without Access, use a custom rule that issues a Managed
 Challenge on `http.host eq "staff.example.org" and not ip.src in $staff_networks`, or
 `INGRESS_STAFF_ACCESS`.
+
+Access protects the staff host only when the origin refuses requests that did not pass
+through it: either per-hostname Authenticated Origin Pulls with your own CA
+([origin lock](#origin-lock)), or verification of the `Cf-Access-Jwt-Assertion` header at
+the origin, which this nginx does not do. With the shared CA, Access is a convenience,
+not a boundary.
 
 ### WAF
 
