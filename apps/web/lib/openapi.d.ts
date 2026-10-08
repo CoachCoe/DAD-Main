@@ -1760,7 +1760,7 @@ export interface components {
             next_offset: number | null;
         };
         PendingAction: {
-            action?: components["schemas"]["StaffAction"] | null;
+            action: components["schemas"]["StaffAction"] | null;
         };
         Enrolments: {
             /** @description Always empty until R2. */

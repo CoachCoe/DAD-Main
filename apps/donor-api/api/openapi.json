@@ -6142,7 +6142,9 @@
             ]
           }
         },
-        "required": [],
+        "required": [
+          "action"
+        ],
         "additionalProperties": false
       },
       "Enrolments": {
