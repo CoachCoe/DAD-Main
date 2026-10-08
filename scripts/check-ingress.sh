@@ -183,8 +183,10 @@ check 'staff source upload accepts 10 MiB' 200 "$(post_bytes 10485760 https://st
 check 'staff source upload refuses more' 413 "$(post_bytes 10485761 https://staff.test/api/donor/staff/content/sources)"
 check 'other staff API refuses bodies over 256 KiB' 413 "$(post_bytes 262145 https://staff.test/api/donor/staff/accounts)"
 check 'webhook accepts only POST' 403 "$(status https://public.test/api/donor/stripe/webhook)"
-repeat https://public.test/api/donor/stripe/webhook 400
-check 'webhook is exempt from per-client limits' '200:400 ' "$(counts -X POST "${urls[@]}")"
+repeat https://public.test/api/donor/stripe/webhook 1000
+webhooks="$(counts -X POST "${urls[@]}")"
+check 'webhook admits a burst of 500, then limits' yes \
+  "$(awk -F'[: ]' '{ ok = $1 == 200 && $2 >= 500 && $3 == 429 } END { print ok ? "yes" : $0 }' <<< "$webhooks")"
 
 repeat https://public.test/api/donor/login 30
 check 'sign-in admits a burst of 21, then limits' '200:21 429:9 ' "$(counts -X POST "${urls[@]}")"

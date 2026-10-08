@@ -52,11 +52,11 @@ server {
         proxy_pass http://web;
     }
 
-    # Exempt from per-client limits in nginx.conf; the API verifies every signature.
     location = /api/donor/stripe/webhook {
         limit_except POST {
             deny all;
         }
+        limit_req zone=stripe burst=500 nodelay;
         proxy_pass http://web;
     }
 }

@@ -109,9 +109,9 @@ API version `2026-09-30.endive`. Subscribe to:
 - `checkout.session.completed` and `checkout.session.expired`.
 - `customer.subscription.updated` and `customer.subscription.deleted`.
 
-Point the endpoint at `/api/donor/stripe/webhook` on the public origin. nginx exempts it
-from per-client limits and caps bodies at 256 KiB; Cloudflare must skip its bot and rate
-rules for it ([edge](edge.md#waf)). Verify signatures over original bytes.
+Point the endpoint at `/api/donor/stripe/webhook` on the public origin. nginx gives it
+its own generous limit ([edge](edge.md#rate-limits)); Cloudflare must skip its bot and
+rate rules for it ([edge](edge.md#waf)). Verify signatures over original bytes.
 Live events, Connect events, and mismatched API versions are rejected. No card details
 belong in DAD requests, storage, logs, or support tools.
 
