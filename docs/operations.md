@@ -123,7 +123,9 @@ API version `2026-09-30.endive`. Subscribe to:
 - `invoice.payment_succeeded` and `invoice.payment_failed` for monthly periods.
 - `refund.created`, `refund.updated`, and `refund.failed`.
 - `checkout.session.completed` and `checkout.session.expired`.
-- `customer.subscription.updated` and `customer.subscription.deleted`.
+- `customer.subscription.created`, `customer.subscription.updated`,
+  `customer.subscription.deleted`, `customer.subscription.pending_update_applied`, and
+  `customer.subscription.pending_update_expired`.
 
 Point the endpoint at `/api/donor/stripe/webhook` on the public origin. nginx gives it
 its own generous limit ([edge](edge.md#rate-limits)); Cloudflare must skip its bot and

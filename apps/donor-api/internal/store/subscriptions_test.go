@@ -63,6 +63,61 @@ func TestSubscriptionUsesCurrentStateAndReleasesCancelledReservation(t *testing.
 		t.Fatal("reservation not released", err)
 	}
 }
+func TestCheckoutCompletionSyncsTheSubscriptionItBinds(t *testing.T) {
+	f := newWorkerFixture(t, "MONTHLY")
+	result := f.checkout(t)
+	ctx := context.Background()
+	var session pgtype.Text
+	if err := f.service.DB.QueryRow(ctx, "SELECT stripe_session_id FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&session); err != nil {
+		t.Fatal(err)
+	}
+	if !session.Valid {
+		session.String = "cs_test_" + result.CheckoutID
+	}
+	subID := "sub_" + result.CheckoutID
+	completed := map[string]any{"id": session.String, "status": "complete", "subscription": subID, "metadata": map[string]any{"dad_checkout_id": result.CheckoutID}}
+	event := f.receive(t, "checkout.session.completed", completed)
+	f.process(t)
+	assertEventProcessed(t, f, event, false)
+	var bound bool
+	if err := f.service.DB.QueryRow(ctx, "SELECT stripe_subscription_id IS NOT NULL FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&bound); err != nil || bound {
+		t.Fatal("completion applied without its subscription", err)
+	}
+
+	start := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+	f.gateway.subscriptions[subID] = paymentObject(t, subscription(result.CheckoutID, start))
+	f.retryNow(t)
+	f.process(t)
+	assertEventProcessed(t, f, event, true)
+	var status, attempt string
+	var periodEnd, anchor time.Time
+	if err := f.service.DB.QueryRow(ctx, `SELECT s.status,s.period_end,s.billing_anchor,a.status FROM donor_subscriptions s JOIN donor_stripe_checkouts a ON a.id=s.attempt_id WHERE a.checkout_id=$1`, result.CheckoutID).Scan(&status, &periodEnd, &anchor, &attempt); err != nil {
+		t.Fatal("completion did not sync the subscription", err)
+	}
+	if status != "active" || attempt != "COMPLETE" || !periodEnd.Equal(start.Add(30*24*time.Hour)) || !anchor.Equal(start) {
+		t.Fatalf("synced %s %s %s %s", status, attempt, periodEnd, anchor)
+	}
+}
+
+func TestEverySubscriptionEventSyncsCurrentState(t *testing.T) {
+	for _, kind := range []string{"customer.subscription.created", "customer.subscription.pending_update_applied", "customer.subscription.pending_update_expired"} {
+		t.Run(kind, func(t *testing.T) {
+			f := newWorkerFixture(t, "MONTHLY")
+			result := f.checkout(t)
+			start := time.Now().UTC().Truncate(time.Second).Add(-24 * time.Hour)
+			current := subscription(result.CheckoutID, start)
+			current["cancel_at_period_end"] = true
+			f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, current)
+			event := f.receive(t, kind, subscription(result.CheckoutID, start))
+			f.process(t)
+			assertEventProcessed(t, f, event, true)
+			var stops time.Time
+			if err := f.service.DB.QueryRow(context.Background(), "SELECT stops_at FROM donor_subscriptions WHERE donor_id=$1", f.donorID).Scan(&stops); err != nil || !stops.Equal(start.Add(30*24*time.Hour)) {
+				t.Fatal("event did not sync the subscription's current state", stops, err)
+			}
+		})
+	}
+}
 func TestInvalidSubscriptionRollsBackBindingAndProjection(t *testing.T) {
 	cases := map[string]func(map[string]any){
 		"live":        func(r map[string]any) { r["livemode"] = true },

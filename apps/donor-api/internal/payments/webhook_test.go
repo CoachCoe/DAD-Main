@@ -88,6 +88,33 @@ func TestIgnoredAndMalformedEvents(t *testing.T) {
 		t.Fatal("bad UUID accepted")
 	}
 }
+func TestSubscriptionEventsKeepTheSubscription(t *testing.T) {
+	for _, kind := range []string{"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted",
+		"customer.subscription.pending_update_applied", "customer.subscription.pending_update_expired"} {
+		input := event()
+		input["type"] = kind
+		input["data"] = map[string]any{"object": map[string]any{"id": "sub_test", "object": "subscription", "status": "active", "customer": "cus_private",
+			"metadata": map[string]any{"dad_checkout_id": checkoutID}}}
+		body, signature := signed(t, input, time.Now())
+		verified, err := verifyEvent(body, signature, testSecret)
+		if err != nil || verified == nil {
+			t.Fatalf("%s not accepted: %v", kind, err)
+		}
+		var facts map[string]any
+		if err = json.Unmarshal(verified.Data(), &facts); err != nil {
+			t.Fatal(err)
+		}
+		if verified.Kind() != kind || facts["id"] != "sub_test" || facts["checkout_id"] != checkoutID || strings.Contains(string(verified.Data()), "cus_private") {
+			t.Fatalf("%s facts: %s", kind, verified.Data())
+		}
+	}
+	input := event()
+	input["type"] = "customer.subscription.trial_will_end"
+	body, signature := signed(t, input, time.Now())
+	if result, err := verifyEvent(body, signature, testSecret); err != nil || result != nil {
+		t.Fatal("unhandled subscription event not ignored")
+	}
+}
 func TestInvoiceAllowlist(t *testing.T) {
 	input := event()
 	input["type"] = "invoice.payment_succeeded"

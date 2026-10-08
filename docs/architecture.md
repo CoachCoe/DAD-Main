@@ -65,10 +65,12 @@ wait for lease expiry. Checkout completion is not collection. Gifts, billing per
 refund state, append-only observations, projections, and notification intents commit
 together. Money is integer USD cents. Referral credit is one level only.
 
-Reads never call Stripe. The worker syncs each subscription's current state, including
-its billing anchor and whether Stripe holds a schedule or pending update, and recurring
-views, card update status, and staff previews are served from it with `observed_at`, the
-time of that sync. Only commands call Stripe, and each first syncs the subscription it
+Reads never call Stripe. The Stripe worker syncs a subscription's current state, including
+its billing anchor and whether Stripe holds a schedule or pending update, whenever an
+event about it arrives: each `customer.subscription.*` event it accepts, a completed
+checkout that binds it, and an invoice while an amount change is pending. Recurring
+views, card update status, and staff previews are served from that state with
+`observed_at`, the time of the sync. Only commands call Stripe, and each first syncs the subscription it
 acts on, committed on its own so that a command refused as out of date still leaves the
 next view current; none depends on a view having refreshed anything.
 
