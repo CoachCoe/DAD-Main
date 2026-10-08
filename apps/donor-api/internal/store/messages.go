@@ -159,13 +159,14 @@ func renderMessage(ctx context.Context, q *queries.Queries, job queries.DonorMes
 		}
 		return "Your DAD sandbox annual summary", renderSummary(summary), nil
 	case "REFERRAL":
-		channel := "Link"
-		if data.Text("kind") == "IRL" {
-			channel = "IRL"
-		} else if data.Text("kind") != "LINK" {
+		referral, ok := map[string]struct{ subject, phrase string }{
+			"LINK": {"A Link Referral", "a Link Referral"},
+			"IRL":  {"An IRL Referral", "an IRL Referral"},
+		}[data.Text("kind")]
+		if !ok {
 			return "", "", payments.ErrFacts
 		}
-		return "A " + channel + " Referral completed a first test gift", "Someone you invited through an " + channel + " Referral completed their first test gift.\nSee your circle's impact: " + site.dashboard() + "\n\nTurn off referral notifications: " + site.profile() + "\nThis is a sandbox notification. DAD launches in April 2027.\n", nil
+		return referral.subject + " completed a first test gift", "Someone you invited through " + referral.phrase + " completed their first test gift.\nSee your circle's impact: " + site.dashboard() + "\n\nTurn off referral notifications: " + site.profile() + "\nThis is a sandbox notification. DAD launches in April 2027.\n", nil
 	case "RECOVERY":
 		id, err := parseID(data.Text("period_id"))
 		if err != nil {

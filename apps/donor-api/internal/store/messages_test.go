@@ -124,8 +124,9 @@ func TestReferralSuppressionRechecksPreferencesAfterRendering(t *testing.T) {
 	if _, err = w.DeliverNext(ctx, now); err != nil {
 		t.Fatal(err)
 	}
-	if len(transport.messages) != 1 || !strings.Contains(transport.messages[0].Subject, "IRL Referral") {
-		t.Fatal("lost referral channel")
+	if len(transport.messages) != 1 || transport.messages[0].Subject != "An IRL Referral completed a first test gift" ||
+		!strings.Contains(transport.messages[0].Body, "Someone you invited through an IRL Referral completed") {
+		t.Fatal("lost referral channel", transport.messages)
 	}
 	if _, err = w.DB.Exec(ctx, "UPDATE donor_preferences SET referral_emails=false WHERE donor_id=$1", f.donorID); err != nil {
 		t.Fatal(err)
