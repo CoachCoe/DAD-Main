@@ -165,9 +165,29 @@ export interface paths {
         put?: never;
         /**
          * Exchange an emailed sign-in proof for a session
-         * @description A browser request receives an HttpOnly cookie and `{"claimed":true}`. A native request (`X-DAD-Client: native`, no Origin, no cookies) receives the token in the body as NativeSession and no cookie. Any session presented with the request (cookie or bearer) is revoked. 401 means the link is invalid, used, or expired.
+         * @description A browser request receives an HttpOnly cookie and `{"claimed":true}`. A native request (`X-DAD-Client: native`, no Origin, no cookies) receives NativeSession, a new access and refresh token, and no cookie; it may describe its device so the donor can recognize the session later. Any session presented with the request (cookie or bearer) is revoked. 401 means the link is invalid, used, or expired.
          */
         post: operations["claim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange the app's refresh token for new tokens
+         * @description Native requests only; a browser request is 403 even from the public origin. Returns a new access token and a new refresh token, and the previous access token stops working at once. Each refresh token works once. Presenting one the session has already exchanged revokes the whole session (every token issued since that sign-in) and records a security event, because the app or someone who copied the token is using a stale one. The one exception covers a lost response: the refresh token exchanged most recently is accepted again for one minute after that exchange, and answered with yet another pair that supersedes the first. Concurrent refreshes with one token are therefore answered in turn, and only the tokens answered last keep working, so send one refresh at a time and keep only the newest tokens. 401 means the session has ended: sign in again by email.
+         */
+        post: operations["refresh"];
         delete?: never;
         options?: never;
         head?: never;
@@ -205,7 +225,7 @@ export interface paths {
         put?: never;
         /**
          * Sign out this session
-         * @description Succeeds even when the session is already invalid (no 401), so a client can always discard its credential. Browser responses expire the cookie.
+         * @description Succeeds even when the session is already invalid (no 401), so a client can always discard its credential. Ends the whole session: for the app, its refresh token stops working too. Browser responses expire the cookie.
          */
         post: operations["logout"];
         delete?: never;
@@ -223,8 +243,68 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Sign out every session */
+        /**
+         * Sign out every session
+         * @description Ends every session of the donor, this one included.
+         */
         post: operations["logoutAll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Where the donor is signed in */
+        get: operations["sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/sessions/{session_id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign out another session
+         * @description Ends one of the donor's other sessions at once: its cookie, access token, and refresh token stop working immediately. A session that has already ended succeeds again. 404 when the ID is not one of the donor's sessions. 409 for the session making the request; use POST /donor/logout for that.
+         */
+        post: operations["revokeSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/sessions/revoke-others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign out every other session
+         * @description Ends every session of the donor except the one making the request, at once.
+         */
+        post: operations["revokeOtherSessions"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1146,16 +1226,22 @@ export interface components {
             /** @description Stable machine code, e.g. `not_integer`, `too_large`, `invalid_text`. */
             reason: string;
         };
-        /** @description Returned by POST /donor/claim to native requests only. Browsers receive the same session solely as an HttpOnly cookie. */
+        /** @description The donor app's tokens, returned by POST /donor/claim and POST /donor/refresh to native requests only. Browsers never receive tokens in a body: their session is solely an HttpOnly cookie. Store both tokens in the platform keychain/keystore and replace both on every refresh. */
         NativeSession: {
-            claimed: boolean;
-            /** @description Opaque donor session token. Send it as `Authorization: Bearer <token>` together with `X-DAD-Client: native`. Store it in the platform keychain/keystore. */
-            session_token: string;
+            /** @description Opaque. Send it as `Authorization: Bearer <token>` together with `X-DAD-Client: native`. */
+            access_token: string;
             /**
              * Format: int32
-             * @description Seconds until the session expires at the latest. Sign-out, sign-out everywhere, and email changes revoke it earlier.
+             * @description Seconds until the access token expires: 900, or less when the session itself ends sooner.
              */
             expires_in: number;
+            /** @description Opaque and single-use: send it to POST /donor/refresh for the next pair. Never send it as a bearer token. */
+            refresh_token: string;
+            /**
+             * Format: int32
+             * @description Seconds until the session ends unless refreshed: 60 days after the latest refresh, and never more than a year after sign-in, when the donor signs in again by email.
+             */
+            refresh_expires_in: number;
         };
         PublicContent: {
             /** @description Publication cadence label. */
@@ -1270,6 +1356,39 @@ export interface components {
              */
             version: number;
             consent_version: string;
+        };
+        /** @description One place the donor is signed in: a web browser (one per cookie) or an installation of the app. */
+        DeviceSession: {
+            /**
+             * Format: uuid
+             * @description Opaque session ID for POST /donor/me/sessions/{session_id}/revoke. It reveals nothing about any token.
+             */
+            id: string;
+            /** @enum {string} */
+            client: "BROWSER" | "APP";
+            /**
+             * @description As reported by the app at sign-in; always null for browsers.
+             * @enum {string|null}
+             */
+            platform: "IOS" | "ANDROID" | null;
+            /** @description A name the donor can recognize, safe to display as plain text: the device name the app reported, otherwise “iOS device”, “Android device”, or “Mobile device”; every browser is “Web browser”. */
+            label: string;
+            /**
+             * Format: date-time
+             * @description When the donor signed in.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description The latest recorded use, recorded at most every five minutes and on every refresh, so it may trail the true last use by that much.
+             */
+            last_used_at: string;
+            /** @description Whether this is the session making the request. */
+            current: boolean;
+        };
+        SessionList: {
+            /** @description Sessions that can still be used, including app sessions whose access token has expired but can be refreshed: the current session first, then by latest use, at most 50. */
+            sessions: components["schemas"]["DeviceSession"][];
         };
         Sharing: {
             public_name: string | null;
@@ -1933,7 +2052,7 @@ export interface components {
                 "application/json": components["schemas"]["Problem"];
             };
         };
-        /** @description Browser requests: Origin is not the configured site origin, or, on staff routes, Sec-Fetch-Site is present and neither same-origin nor none. App requests: the route does not admit the app, or the request also carried Origin or cookies. Some routes also use 403 for a permission or account restriction. */
+        /** @description Browser requests: Origin is not the configured site origin, or, on staff routes, Sec-Fetch-Site is present and neither same-origin nor none. App requests: the route does not admit the app, or the request also carried Origin or cookies. Any browser request to a route that admits only the app. Some routes also use 403 for a permission or account restriction. */
         Forbidden: {
             headers: {
                 [name: string]: unknown;
@@ -2332,6 +2451,13 @@ export interface operations {
                 "application/json": {
                     /** @description Proof from the emailed link fragment. */
                     token: string;
+                    /** @description Native requests only, optional: the device's user-visible name, shown to the donor in their session list. Control and formatting characters are removed. Ignored for browser requests. */
+                    device_name?: string;
+                    /**
+                     * @description Native requests only, optional. Ignored for browser requests.
+                     * @enum {string}
+                     */
+                    platform?: "IOS" | "ANDROID";
                 };
             };
         };
@@ -2348,6 +2474,39 @@ export interface operations {
                         /** @constant */
                         claimed: true;
                     } | components["schemas"]["NativeSession"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    refresh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    refresh_token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description New tokens. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeSession"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -2444,6 +2603,81 @@ export interface operations {
                         /** @constant */
                         signed_out: true;
                     };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    revokeSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The donor's sessions after the request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    revokeOtherSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The donor's sessions after the request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionList"];
                 };
             };
             401: components["responses"]["Unauthorized"];

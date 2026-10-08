@@ -2,13 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
-import { api, ApiError, failureMessage } from "@/lib/api";
+import { api, ApiError, failureMessage, type Schema } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
-type DeviceSession = { id: string; client: "BROWSER" | "APP"; platform: "IOS" | "ANDROID" | null; label: string;
-  created_at: string; last_used_at: string; current: boolean };
-type SessionList = { sessions: DeviceSession[] };
+type DeviceSession = Schema<"DeviceSession">;
+type SessionList = Schema<"SessionList">;
 
 const apps = { IOS: "iOS app", ANDROID: "Android app" } as const;
 
