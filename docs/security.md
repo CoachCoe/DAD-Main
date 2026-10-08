@@ -77,6 +77,8 @@ Public content never includes donor data or private source files. Source documen
 dedicated encryption key and SHA-256 verification. CSV exports use field allowlists,
 permission checks, private cache headers, formula neutralization, and audit trails.
 Do not publish exports or treat a source document's existence as proof of its accuracy.
+Referral touches store only a hash of the visitor token; touches that led to no
+attributed gift are deleted 13 months after capture.
 
 The frontend restricts connections to its own origin, denies framing, uses no-referrer,
 and disables camera, microphone, and geolocation. Production CSP excludes unsafe-eval.

@@ -40,6 +40,11 @@ were valid at the moment of charge. Conversion requires a successful first gift 
 starting checkout is not conversion. Once converted, the donor's direct referral
 relationship is permanent. Later gifts add dollars, never additional conversions.
 
+A referral touch that led to a gift carrying its referrer is kept for good. Any other
+touch, including one whose checkout was abandoned or paid after the window, is deleted 13
+months after capture, long after its window closed, so retention never changes
+attribution: checkouts and gifts keep their own copy of it.
+
 Self-referral credit is removed when giver and referrer match by account or normalized
 donor email; the gift itself remains allowed. There is no second-level credit.
 

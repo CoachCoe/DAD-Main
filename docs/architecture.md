@@ -2,7 +2,8 @@
 
 The R1 application is a Next.js TypeScript web client backed by a Go HTTP service and
 PostgreSQL 16. Hosted Stripe Checkout handles USD test payments and card setup. Separate
-Go workers reconcile signed Stripe events, refresh donor projections, and deliver email.
+Go workers reconcile signed Stripe events, refresh donor projections, apply referral-touch
+retention, and deliver email.
 
 ```text
 Browser → Next.js /api/donor/* → Go HTTP API → PostgreSQL

@@ -91,7 +91,9 @@ unconfigured. Readiness is not payment-provider acceptance or live-release autho
 Deploy migrations before new API or worker processes start; through `0006` they only
 add tables, columns, constraints, and indexes. `0007` replaces staff passwords and TOTP
 with passkeys: it drops the credential columns and ends every staff session and open
-invitation, so staff must enrol again (see below). Features that are not configured answer
+invitation, so staff must enrol again (see below). `0008` adds the indexes referral-touch
+retention uses and replaces the checkout referrer index with one that also covers the
+attribution expiry. Features that are not configured answer
 503 with a `code` (`PAYMENTS_UNCONFIGURED`, `EMAIL_UNCONFIGURED`, or
 `SOURCE_STORAGE_UNCONFIGURED`) and are not logged as errors; a 503 without a code is a
 transient failure and is logged.
@@ -156,6 +158,13 @@ Projection refresh handles grace expiry, recurring boundaries, permanent recogni
 and prior-year summaries. A donor whose facts cannot be projected is deferred with
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
+The projection worker also applies referral-touch retention ([donor domain](donor-domain.md#referrals)):
+on start and then hourly it deletes touches that led to no attributed gift and were
+captured more than 13 months ago, at most 2,000 per transaction and one batch between projection
+refreshes, until none remain. Concurrent projection workers share the work. A failed pass
+is logged as a worker step failure and retried an hour later without holding up
+projections. Retention is not a monitored queue, since a touch past retention waits up
+to an hour by design.
 Mail workers claim a job, then send outside the donor lock, and Stripe calls for commands,
 refunds, card setup, and webhooks likewise run without it, so a slow provider cannot block
 payments or staff actions for the same donor.
@@ -221,6 +230,8 @@ for actual accuracy and board approval; uploading a source cannot establish eith
 
 Exports use fixed field allowlists, omit credentials and message bodies, neutralize CSV
 formula prefixes, and audit completion/interruption. Referral rows retain channel.
+Referral-touch rows captured more than 13 months ago appear only if they led to an
+attributed gift.
 The `billing-history` CSV contains verified failed and successful invoice observations.
 Apply migration `0005_billing_history.sql` before starting the updated API/workers. Earlier
 period snapshots are not backfilled into invented failure events; reporting must disclose
