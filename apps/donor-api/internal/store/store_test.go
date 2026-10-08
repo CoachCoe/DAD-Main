@@ -79,6 +79,27 @@ func link(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID, now time.Time) strin
 	}
 	return token
 }
+func TestOpenSizesThePoolFromTheDatabaseURL(t *testing.T) {
+	database(t)
+	url := os.Getenv("TEST_DATABASE_URL")
+	separator := "?"
+	if strings.Contains(url, "?") {
+		separator = "&"
+	}
+	for dsn, want := range map[string]int32{url: defaultMaxConns, url + separator + "pool_max_conns=3": 3} {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		pool, err := Open(ctx, dsn)
+		cancel()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := pool.Config().MaxConns; got != want {
+			t.Errorf("pool of %d connections, want %d", got, want)
+		}
+		pool.Close()
+	}
+}
+
 func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 	pool := database(t)
 	id, _ := donor(t, pool)
