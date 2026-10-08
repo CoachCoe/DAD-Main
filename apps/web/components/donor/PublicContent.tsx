@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { Initiative, PublicContent } from "@/lib/publicContent";
+import type { Schema } from "@/lib/api";
 import { formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { RefreshButton } from "./RefreshButton";
@@ -12,7 +12,7 @@ export function ContentUnavailable() {
   </div>;
 }
 
-export function Ledger({ content }: { content: PublicContent }) {
+export function Ledger({ content }: { content: Schema<"PublicContent"> }) {
   return <>
     {content.ledger_as_of && <p className="note">As of <time dateTime={content.ledger_as_of}>{formatDay(content.ledger_as_of)}</time> · Updated {content.cadence}.</p>}
     {content.ledger.length ? <div className="metrics">{content.ledger.map((item) => <article key={item.id} className={item.illustrative ? "metric illustrative" : "metric"}>
@@ -25,7 +25,7 @@ export function Ledger({ content }: { content: PublicContent }) {
   </>;
 }
 
-export function InitiativeList({ initiatives }: { initiatives: Initiative[] }) {
+export function InitiativeList({ initiatives }: { initiatives: Schema<"Initiative">[] }) {
   if (!initiatives.length) return <p className="callout">Board-approved plans will appear here as they are published. No initiatives have been published yet.</p>;
   return <div className="metrics">{initiatives.map((item) => <article key={item.slug} className="metric">
     <h2 className="initiativeTitle"><Link href={`/initiatives/${item.slug}`}>{item.title}</Link></h2>
@@ -33,7 +33,7 @@ export function InitiativeList({ initiatives }: { initiatives: Initiative[] }) {
   </article>)}</div>;
 }
 
-export function InitiativeFacts({ initiative }: { initiative: Initiative }) {
+export function InitiativeFacts({ initiative }: { initiative: Schema<"Initiative"> }) {
   return <>
     <p>{initiative.summary}</p>
     <p>Partner: {initiative.partner}. Planned start: <time dateTime={initiative.planned_start}>{formatDay(initiative.planned_start)}</time>.</p>

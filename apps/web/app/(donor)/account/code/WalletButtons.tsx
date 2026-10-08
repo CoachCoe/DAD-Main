@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
-import { api } from "@/lib/api";
+import { api, type ResponseBody } from "@/lib/api";
 import { useApiResource } from "@/lib/useApiResource";
 
 export default function WalletButtons() {
-  const { data: providers, resource, reload } = useApiResource<{ apple: boolean; google: boolean }>("/donor/me/wallet");
+  const { data: providers, resource, reload } = useApiResource<ResponseBody<"/donor/me/wallet", "get">>("/donor/me/wallet");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [googleURL, setGoogleURL] = useState("");
@@ -15,7 +15,7 @@ export default function WalletButtons() {
     setBusy(true); setError("");
     try {
       if (provider === "google") {
-        const result = await api<{ url: string }>("/donor/me/wallet/google", { method: "POST" });
+        const result = await api<ResponseBody<"/donor/me/wallet/google", "post">>("/donor/me/wallet/google", { method: "POST" });
         const url = new URL(result.url);
         if (url.origin !== "https://pay.google.com" || !url.pathname.startsWith("/gp/v/save/")) throw new Error("Invalid Wallet link");
         setGoogleURL(result.url);

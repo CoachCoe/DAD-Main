@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import type { SignInReturn } from "@/components/donor/SignInForm";
-import { api, failureMessage } from "@/lib/api";
+import { api, failureMessage, type RequestBody } from "@/lib/api";
 import { useHashToken } from "@/lib/useHashToken";
 
 // Where an emailed link may send a donor once signed in (the API's own list). Anything else
@@ -19,10 +19,11 @@ export default function Claim() {
   const [error, setError] = useState("");
 
   async function claim() {
+    if (!token) return;
     setBusy(true);
     setError("");
     try {
-      await api("/donor/claim", { method: "POST", body: JSON.stringify({ token }) });
+      await api("/donor/claim", { method: "POST", body: JSON.stringify({ token } satisfies RequestBody<"/donor/claim", "post">) });
       clear();
       if (next && destinations.has(next)) return window.location.replace(next);
       setDone(true);

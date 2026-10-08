@@ -5,10 +5,10 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
-import { api, classifyFailure } from "@/lib/api";
+import { api, classifyFailure, type RequestBody, type ResponseBody } from "@/lib/api";
 
 export type Referrer = { state: "found"; name: string } | { state: "unavailable" } | { state: "unknown" };
-type Capture = { captured: boolean; public_name: string | null };
+type Capture = ResponseBody<"/donor/referrals/{code}", "post">;
 
 const failures = {
   offline: "We couldn’t confirm your referral because you appear to be offline. Check your connection, then retry.",
@@ -30,7 +30,7 @@ export default function ReferralLanding({ code, kind, referrer = { state: "unkno
     setResult(null); setError("");
     // The capture sets the attribution cookie, so it must come from the visitor's browser.
     capture.current = api<Capture>(`/donor/referrals/${encodeURIComponent(code)}`, {
-      method: "POST", body: JSON.stringify({ kind }), signal: controller.signal,
+      method: "POST", body: JSON.stringify({ kind } satisfies RequestBody<"/donor/referrals/{code}", "post">), signal: controller.signal,
     }).then((value) => { if (!controller.signal.aborted) setResult(value); })
       .catch((cause) => {
         if (controller.signal.aborted) return;

@@ -5,14 +5,12 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
-import { api, ApiError, failureMessage } from "@/lib/api";
+import { api, ApiError, failureMessage, type RequestBody, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
-
-type Profile = { email: string; public_name: string | null; version: number; referral_emails: boolean; marketing_emails: boolean };
 
 export default function Profile() {
   const [signedOut, setSignedOut] = useState(false);
-  const { resource, data, failed, reload, setData } = useApiResource<Profile>(signedOut ? null : "/donor/me/profile");
+  const { resource, data, failed, reload, setData } = useApiResource<Schema<"Profile">>(signedOut ? null : "/donor/me/profile");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -32,15 +30,15 @@ export default function Profile() {
     event.preventDefault();
     if (!data) return;
     run(async () => {
-      setData(await api<Profile>("/donor/me/preferences", { method: "POST", body: JSON.stringify({ version: data.version,
-        referral_emails: data.referral_emails, marketing_emails: data.marketing_emails }) }));
+      setData(await api<Schema<"Profile">>("/donor/me/preferences", { method: "POST", body: JSON.stringify({ version: data.version,
+        referral_emails: data.referral_emails, marketing_emails: data.marketing_emails } satisfies RequestBody<"/donor/me/preferences", "post">) }));
       setMessage("Notification preferences saved.");
     }, "Preferences were not confirmed. Refresh to check the saved choices before retrying.");
   };
   const changeEmail = (event: React.FormEvent) => {
     event.preventDefault();
     run(async () => {
-      await api("/donor/me/email-change", { method: "POST", body: JSON.stringify({ email: newEmail }) });
+      await api("/donor/me/email-change", { method: "POST", body: JSON.stringify({ email: newEmail } satisfies RequestBody<"/donor/me/email-change", "post">) });
       setMessage("Check your current email address first. After you confirm there, we’ll send a second confirmation to your new address. Each link expires after 15 minutes.");
       setNewEmail("");
     }, "We couldn’t request the change right now. Please retry in a moment.");

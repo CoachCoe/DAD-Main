@@ -4,19 +4,13 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
+import type { Schema } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { formatDateTime } from "@/lib/dates";
 
-type Dashboard = { mode: "test"; state: "preparing" } | {
-  mode: "test"; state: "ready"; computed_at: string; founding_donor: boolean;
-  referrals: { link: number; irl: number; total_minor: number; link_minor: number;
-    irl_minor: number; currency: string } | null;
-  streak: { current: number; at_risk: boolean; grace_ends_at: string | null } | null;
-};
-
 export default function Dashboard() {
-  const { resource, data, failed, reload } = useApiResource<Dashboard>("/donor/me/dashboard");
+  const { resource, data, failed, reload } = useApiResource<Schema<"DonorDashboard">>("/donor/me/dashboard");
   const messages = resourceMessages(resource, { loading: "Loading your dashboard…",
     failure: "Your dashboard could not be loaded right now. Please retry in a moment." });
   const updating = data?.state === "preparing" ? "We’re preparing your dashboard. Please refresh shortly."

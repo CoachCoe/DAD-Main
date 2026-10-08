@@ -5,17 +5,13 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
-import { api, ApiError, unconfirmedMessage } from "@/lib/api";
+import { api, ApiError, type RequestBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
 import { formatDate, formatDateTime } from "@/lib/dates";
 
-type Subscription = {
-  id: string; amount_minor: number; currency: string; status: string;
-  period_end: string; pause: { starts_at: string; resumes_at: string } | null; stops_at: string | null;
-};
-type Recurring = { state: "ready" | "preparing"; observed_at?: string; subscription: Subscription | null };
+type Subscription = Schema<"Subscription">;
 
 const cancellable = (status: string) => ["active", "past_due", "unpaid"].includes(status);
 const settingUp = (status: string) => ["incomplete", "trialing"].includes(status);
@@ -40,8 +36,8 @@ function Status({ subscription }: { subscription: Subscription }) {
 export default function RecurringGiving() {
   const [signedOut, setSignedOut] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const command = useRef<{ key: string; subscription_id: string; period_end: string } | null>(null);
-  const { resource, data, failed, reload, setData } = useApiResource<Recurring>(signedOut ? null : "/donor/me/recurring", {
+  const command = useRef<RequestBody<"/donor/me/recurring/cancel", "post"> & { key: string } | null>(null);
+  const { resource, data, failed, reload, setData } = useApiResource<Schema<"RecurringDetails">>(signedOut ? null : "/donor/me/recurring", {
     onLoad: () => { setConfirming(false); setError(""); command.current = null; },
   });
   const [error, setError] = useState("");
@@ -58,7 +54,7 @@ export default function RecurringGiving() {
     const { key, ...body } = command.current;
     setBusy(true); setError(""); setMessage("");
     try {
-      const result = await api<Recurring>("/donor/me/recurring/cancel", {
+      const result = await api<Schema<"RecurringDetails">>("/donor/me/recurring/cancel", {
         method: "POST", headers: { "Idempotency-Key": key }, body: JSON.stringify(body),
       });
       setData(result); setConfirming(false); command.current = null;
