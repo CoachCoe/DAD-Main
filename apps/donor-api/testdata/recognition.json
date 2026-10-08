@@ -832,7 +832,8 @@
       "current": 2,
       "best": 2,
       "at_risk": false,
-      "grace_ends_at": null
+      "grace_ends_at": null,
+      "since": "2027-01-01T00:00:00Z"
     }
   },
   {
@@ -877,7 +878,8 @@
       "current": 1,
       "best": 1,
       "at_risk": true,
-      "grace_ends_at": "2027-02-15T00:00:00Z"
+      "grace_ends_at": "2027-02-15T00:00:00Z",
+      "since": "2027-01-01T00:00:00Z"
     }
   },
   {
@@ -922,7 +924,8 @@
       "current": 0,
       "best": 1,
       "at_risk": false,
-      "grace_ends_at": null
+      "grace_ends_at": null,
+      "since": null
     }
   },
   {
@@ -956,7 +959,8 @@
       "current": 0,
       "best": 0,
       "at_risk": false,
-      "grace_ends_at": null
+      "grace_ends_at": null,
+      "since": null
     }
   },
   {
@@ -1052,7 +1056,8 @@
       "current": 1,
       "best": 1,
       "at_risk": false,
-      "grace_ends_at": null
+      "grace_ends_at": null,
+      "since": "2027-01-01T00:00:00Z"
     }
   },
   {
@@ -1090,7 +1095,8 @@
       "current": 1,
       "best": 1,
       "at_risk": false,
-      "grace_ends_at": null
+      "grace_ends_at": null,
+      "since": "2027-01-01T00:00:00Z"
     }
   },
   {
@@ -1130,7 +1136,8 @@
       "current": 0,
       "best": 1,
       "at_risk": false,
-      "grace_ends_at": null
+      "grace_ends_at": null,
+      "since": null
     }
   },
   {
@@ -1173,7 +1180,8 @@
       "current": 0,
       "best": 1,
       "at_risk": false,
-      "grace_ends_at": null
+      "grace_ends_at": null,
+      "since": null
     }
   },
   {
@@ -1220,7 +1228,8 @@
       "current": 1,
       "best": 1,
       "at_risk": false,
-      "grace_ends_at": null
+      "grace_ends_at": null,
+      "since": "2027-01-01T00:00:00Z"
     }
   },
   {
@@ -1267,7 +1276,8 @@
       "current": 0,
       "best": 4,
       "at_risk": false,
-      "grace_ends_at": null
+      "grace_ends_at": null,
+      "since": null
     }
   },
   {
@@ -1322,7 +1332,8 @@
       "current": 1,
       "best": 1,
       "at_risk": false,
-      "grace_ends_at": null
+      "grace_ends_at": null,
+      "since": "2027-02-01T00:00:00Z"
     }
   }
 ]
