@@ -118,7 +118,8 @@ func (s RecurringService) AmountOptions(ctx context.Context, token string) (Amou
 }
 
 // PauseOptions offers pauses of 1 to 3 renewals with their exact resumption
-// dates, or describes the pause in effect.
+// dates, or describes the pause in effect, which stays shown while Stripe
+// holds a change that withholds new offers.
 func (s RecurringService) PauseOptions(ctx context.Context, token string) (PauseOptions, error) {
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (PauseOptions, error) {
 		unavailable := PauseOptions{State: "unavailable", Options: []PauseOption{}}
@@ -126,7 +127,7 @@ func (s RecurringService) PauseOptions(ctx context.Context, token string) (Pause
 		if err != nil || schedule == nil {
 			return unavailable, err
 		}
-		if schedule.StopsAt.Valid || terminalSubscription(schedule.Status) || schedule.ExternalChange {
+		if schedule.StopsAt.Valid || terminalSubscription(schedule.Status) {
 			return unavailable, nil
 		}
 		out := PauseOptions{State: "ready", SubscriptionID: attempt.ID.String(), Options: []PauseOption{}}
@@ -148,6 +149,8 @@ func (s RecurringService) PauseOptions(ctx context.Context, token string) (Pause
 				return PauseOptions{}, err
 			}
 			out.Pause = &view
+		} else if schedule.ExternalChange {
+			return unavailable, nil
 		} else if schedule.Status == "active" {
 			if !schedule.BillingAnchor.Valid {
 				return unavailable, nil

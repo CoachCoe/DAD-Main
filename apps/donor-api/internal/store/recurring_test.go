@@ -700,6 +700,24 @@ func TestPauseOptionsPauseAndEarlyResume(t *testing.T) {
 	}
 }
 
+func TestConfirmedPauseStaysShownWhileStripeHoldsAChange(t *testing.T) {
+	r := newRecurringFixture(t)
+	ctx := context.Background()
+	resumes := r.end.AddDate(0, 1, 0)
+	if _, err := r.service.Pause(ctx, r.token, PauseRequest{RequestID: testID(t), AttemptID: r.attempt, Months: 1, StartsAt: r.end, ResumesAt: resumes}); err != nil {
+		t.Fatal(err)
+	}
+	r.changeRemotely(t, func(remote map[string]any) { remote["schedule"] = "sub_sched_fixture" })
+	r.syncSubscription(t, r.checkout)
+	options, err := r.service.PauseOptions(ctx, r.token)
+	if err != nil || options.State != "ready" || len(options.Options) != 0 || options.Pause == nil || !options.Pause.Confirmed || !options.Pause.ResumesAt.Equal(resumes) {
+		t.Fatalf("confirmed pause hidden under a processor schedule: %+v %v", options, err)
+	}
+	if resume, err := r.service.ResumeOptions(ctx, r.token); err != nil || resume.State != "unavailable" {
+		t.Fatal("early resumption offered under a processor schedule", resume, err)
+	}
+}
+
 func TestAmountChangeAppliesAtNextRenewal(t *testing.T) {
 	r := newRecurringFixture(t)
 	ctx := context.Background()
