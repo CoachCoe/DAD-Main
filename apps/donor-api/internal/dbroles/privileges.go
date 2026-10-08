@@ -149,7 +149,8 @@ const grantee = `CASE a.grantee WHEN 0 THEN 'PUBLIC' ELSE pg_get_userbyid(a.gran
 
 // catalog reads the privileges of PUBLIC and every declared role on each
 // relation, and on each schema, keyed by name and then grantee. Relations in
-// public are named without their schema.
+// public are named without their schema; an extension's own relations, such
+// as pg_stat_statements, are not the application's and are left out.
 func catalog(ctx context.Context, db querier) (relations, schemas map[string]map[string]privileges, err error) {
 	names := make([]string, 0, len(Roles)+1)
 	for _, role := range Roles {
@@ -162,6 +163,7 @@ WITH relations AS (
  SELECT c.oid,c.relowner,CASE n.nspname WHEN 'public' THEN '' ELSE n.nspname||'.' END||c.relname AS name
  FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
  WHERE `+appSchemas+` AND c.relkind IN ('r','p','v','m','S','f')
+ AND NOT EXISTS(SELECT FROM pg_depend d WHERE d.classid='pg_class'::regclass AND d.objid=c.oid AND d.deptype='e')
 )
 SELECT r.name,'','' FROM relations r
 UNION ALL
