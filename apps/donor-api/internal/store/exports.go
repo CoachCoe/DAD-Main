@@ -23,6 +23,7 @@ var exportDatasets = map[string]exportDataset{
 	"donors":           {"donors", "id created_at email claimed_at disabled public_name", "data.export"},
 	"email-changes":    {"donor_email_changes", "id donor_id old_email new_email stage expires_at created_at completed_at", "data.export"},
 	"identity-events":  {"donor_identity_events", "id donor_id email_change_id action created_at", "data.export"},
+	"session-events":   {"donor_session_events", "id donor_id session_id action created_at", "data.export"},
 	"gifts":            {"donor_gifts", "id donor_id checkout_id amount_minor currency frequency paid_at period_id referrer_id referral_kind", "data.export"},
 	"refunds":          {"donor_refunds", "id gift_id amount_minor currency status observed_at stripe_refund_id", "data.export"},
 	"refund-history":   {"donor_refund_observations", "id refund_id source_event_id source_action_id status observed_at", "data.export"},

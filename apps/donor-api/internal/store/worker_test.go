@@ -236,19 +236,19 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	if gifts != 1 || receipts != 1 || emails != 1 || recovery != 0 {
 		t.Fatalf("duplicate or out-of-order side effects: %d %d %d %d", gifts, receipts, emails, recovery)
 	}
-	token, err := (AccountService{DB: pool}).ClaimAccount(ctx, link(t, pool, f.donorID, time.Now()), "")
+	token, err := (AccountService{DB: pool}).ClaimAccount(ctx, link(t, pool, f.donorID, time.Now()), "", Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dashboard, err := (DashboardReader{DB: pool}).DonorDashboard(ctx, token)
+	dashboard, err := (DashboardReader{DB: pool}).DonorDashboard(ctx, token.Access)
 	if err != nil || !dashboard.FoundingDonor || dashboard.Streak == nil || dashboard.Streak.Current != 1 {
 		t.Fatalf("claimed dashboard: %v %v", dashboard, err)
 	}
-	refToken, err := (AccountService{DB: pool}).ClaimAccount(ctx, link(t, pool, referrer, time.Now()), "")
+	refToken, err := (AccountService{DB: pool}).ClaimAccount(ctx, link(t, pool, referrer, time.Now()), "", Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	refDashboard, err := (DashboardReader{DB: pool}).DonorDashboard(ctx, refToken)
+	refDashboard, err := (DashboardReader{DB: pool}).DonorDashboard(ctx, refToken.Access)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	if err != nil || projection.NetMinor.Int64 != 0 || projection.CurrentStreak.Int32 != 0 || projection.BestStreak != 1 || !projection.FoundingAwardedAt.Valid {
 		t.Fatalf("refund recognition: %+v %v", projection, err)
 	}
-	refDashboard, err = (DashboardReader{DB: pool}).DonorDashboard(ctx, refToken)
+	refDashboard, err = (DashboardReader{DB: pool}).DonorDashboard(ctx, refToken.Access)
 	if err != nil {
 		t.Fatal(err)
 	}

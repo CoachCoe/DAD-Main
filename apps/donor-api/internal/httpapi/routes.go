@@ -22,9 +22,10 @@ type route struct {
 // routes is the complete API surface. Reads are unguarded because they cannot
 // change state. Mutations pass the Origin and rate-limit guard: donor and
 // public routes admit the public origin, and the native donor app on donor
-// account routes only; staff routes admit only the staff origin, and refuse any
-// request a browser reports as started elsewhere. The Stripe webhook is
-// authenticated by its signature instead.
+// account routes only, of which app entry routes admit nothing else; staff
+// routes admit only the staff origin, and refuse any request a browser reports
+// as started elsewhere. The Stripe webhook is authenticated by its signature
+// instead.
 func (a *api) routes() []route {
 	return []route{
 		a.public("GET /health/live", a.live),
@@ -38,6 +39,7 @@ func (a *api) routes() []route {
 
 		a.donorEntry("POST /donor/login", a.login),
 		a.donorEntry("POST /donor/claim", a.claim),
+		a.appEntry("POST /donor/refresh", a.refresh),
 		a.donorEntry("POST /donor/email-change/confirm", a.confirmEmailChange),
 		{"POST /donor/logout", donorAuth, a.guarded(a.Origin, accountLimit, true, a.logout)},
 		a.donorWrite("POST /donor/logout-all", a.logoutAll),
@@ -45,6 +47,9 @@ func (a *api) routes() []route {
 
 		a.donorRead("GET /donor/me/dashboard", a.dashboard),
 		a.donorRead("GET /donor/me/profile", a.profile),
+		a.donorRead("GET /donor/me/sessions", a.sessions),
+		a.donorWrite("POST /donor/me/sessions/{session_id}/revoke", a.signOutSession),
+		a.donorWrite("POST /donor/me/sessions/revoke-others", a.signOutOthers),
 		a.donorWrite("POST /donor/me/preferences", a.savePreferences),
 		a.donorRead("GET /donor/me/sharing", a.sharing),
 		a.donorWrite("POST /donor/me/sharing", a.saveSharing),
@@ -120,6 +125,14 @@ func (a *api) donorEntry(pattern string, handler http.HandlerFunc) route {
 	return route{pattern, noAuth, a.guarded(a.Origin, authLimit, true, handler)}
 }
 
+// appEntry routes renew the app's credentials. Only the app may hold those,
+// so a browser is refused even from the public origin, and they take the
+// account budget: refresh tokens cannot be guessed, and sign-ins at a busy
+// event must not exhaust the budget refreshes need.
+func (a *api) appEntry(pattern string, handler http.HandlerFunc) route {
+	return route{pattern, noAuth, appOnly(a.guarded(a.Origin, accountLimit, true, handler))}
+}
+
 func (a *api) donorRead(pattern string, handler sessionHandler) route {
 	return route{pattern, donorAuth, signedIn(donorSession, handler)}
 }
@@ -156,6 +169,16 @@ func (a *api) staffWrite(pattern string, handler sessionHandler) route {
 func sameOrigin(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+			writeError(w, r, http.StatusForbidden, "Request origin is not allowed", nil)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func appOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !native(r) {
 			writeError(w, r, http.StatusForbidden, "Request origin is not allowed", nil)
 			return
 		}

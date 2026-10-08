@@ -24,11 +24,11 @@ func donorServiceFixture(t *testing.T) (DonorService, string, pgtype.UUID) {
 		}
 	})
 	proof := link(t, pool, id, time.Now())
-	token, err := (AccountService{DB: pool}).ClaimAccount(context.Background(), proof, "")
+	tokens, err := (AccountService{DB: pool}).ClaimAccount(context.Background(), proof, "", Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return DonorService{DB: pool, Origin: "https://donor.example.org"}, token, id
+	return DonorService{DB: pool, Origin: "https://donor.example.org"}, tokens.Access, id
 }
 func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	s, token, id := donorServiceFixture(t)

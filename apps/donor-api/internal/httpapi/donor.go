@@ -25,6 +25,9 @@ type DashboardSource interface {
 type DonorSource interface {
 	Profile(context.Context, string) (store.Profile, error)
 	SavePreferences(context.Context, string, store.Preferences) (store.Profile, error)
+	Sessions(context.Context, string) (store.Sessions, error)
+	SignOutSession(context.Context, string, pgtype.UUID) (store.Sessions, error)
+	SignOutOthers(context.Context, string) (store.Sessions, error)
 	SignOutEverywhere(context.Context, string) error
 	Sharing(context.Context, string) (store.Sharing, error)
 	SaveSharing(context.Context, string, string, bool) (store.Sharing, error)
@@ -49,6 +52,8 @@ func donorStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, store.ErrDenied):
 		return http.StatusUnauthorized, "Sign in required"
+	case errors.Is(err, store.ErrCurrentSession):
+		return http.StatusConflict, "This is the session making the request. Sign out instead"
 	case errors.Is(err, store.ErrPreferenceConflict):
 		return http.StatusConflict, "Preferences changed. Refresh before saving again"
 	case errors.Is(err, store.ErrPublicName):

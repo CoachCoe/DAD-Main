@@ -90,6 +90,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 			"DELETE FROM donor_referral_touches WHERE referrer_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_preference_events WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_preferences WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
+			"DELETE FROM donor_session_events WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_sessions WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_login_links WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donors WHERE email=ANY($1::text[])",

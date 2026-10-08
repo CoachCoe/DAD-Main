@@ -114,10 +114,26 @@ func textPointer(value pgtype.Text) *string {
 	return &value.String
 }
 
-func authenticate(ctx context.Context, q *queries.Queries, token string, now time.Time) (queries.Donor, error) {
-	donor, err := q.AuthenticatedDonor(ctx, queries.AuthenticatedDonorParams{TokenHash: HashToken(token), ExpiresAt: timestamp(now)})
+// signedIn is a donor authenticated by one of their sessions.
+type signedIn struct {
+	queries.Donor
+	session  pgtype.UUID
+	lastUsed time.Time
+}
+
+func authenticate(ctx context.Context, q *queries.Queries, token string, now time.Time) (signedIn, error) {
+	row, err := q.AuthenticatedDonor(ctx, queries.AuthenticatedDonorParams{TokenHash: HashToken(token), ExpiresAt: timestamp(now)})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return donor, ErrDenied
+		return signedIn{}, ErrDenied
 	}
-	return donor, err
+	return signedIn{row.Donor, row.SessionID, row.LastUsedAt.Time}, err
+}
+
+// touch records the session's use, at most once per touchInterval, so that
+// requests do not each write.
+func (s signedIn) touch(ctx context.Context, q *queries.Queries, now time.Time) error {
+	if now.Sub(s.lastUsed) < touchInterval {
+		return nil
+	}
+	return q.TouchSession(ctx, queries.TouchSessionParams{ID: s.session, LastUsedAt: timestamp(now)})
 }

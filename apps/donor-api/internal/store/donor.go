@@ -127,12 +127,6 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, pref Pr
 		return readProfile(ctx, q, d)
 	})
 }
-func (s DonorService) SignOutEverywhere(ctx context.Context, token string) error {
-	_, err := donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (struct{}, error) {
-		return struct{}{}, queries.New(tx).RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: d.ID, RevokedAt: timestamp(now)})
-	})
-	return err
-}
 
 // sharing offers referral links only once the donor has chosen a public name.
 func sharing(d queries.Donor, site publicSite) Sharing {

@@ -7,9 +7,6 @@ SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_
 INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,consent_version,source)
 VALUES($1,$2,$3,$4,$5,'r1-notifications-v1','account');
 
--- name: RevokeAllSessions :exec
-UPDATE donor_sessions SET revoked_at=$2 WHERE donor_id=$1 AND revoked_at IS NULL;
-
 -- name: SaveSharing :one
 UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING *;
 

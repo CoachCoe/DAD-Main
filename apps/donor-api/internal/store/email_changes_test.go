@@ -51,8 +51,8 @@ func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {
 	if _, err := s.Confirm(ctx, first); !errors.Is(err, ErrDenied) {
 		t.Fatal("current proof replay accepted", err)
 	}
-	donor, err := authenticate(ctx, queries.New(s.DB), session, time.Now())
-	if err != nil || donor.Email != old {
+	user, err := authenticate(ctx, queries.New(s.DB), session, time.Now())
+	if err != nil || user.Email != old {
 		t.Fatal("identity changed before second confirmation", err)
 	}
 	if worked, err := w.DeliverNext(ctx, time.Now()); err != nil || !worked {
@@ -89,7 +89,7 @@ func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {
 	if err != nil || !login.ConsumedAt.Valid {
 		t.Fatal("old sign-in proof survived", err)
 	}
-	donor, err = queries.New(s.DB).DonorByEmail(ctx, newEmail)
+	donor, err := queries.New(s.DB).DonorByEmail(ctx, newEmail)
 	if err != nil || donor.ID != id {
 		t.Fatal("identity not preserved", err)
 	}

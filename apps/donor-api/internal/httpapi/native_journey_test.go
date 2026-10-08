@@ -17,8 +17,9 @@ import (
 )
 
 // TestAppSessionLifecycle runs the donor app's sign-in against real session
-// storage: a claimed bearer session reads and writes until it is signed out,
-// revoked everywhere, or expires.
+// storage: a claimed session's access token reads and writes, its refresh
+// token rotates, a reused refresh token or a sign-out from another session
+// ends it at once, and it ends when it expires.
 func TestAppSessionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -40,7 +41,7 @@ func TestAppSessionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		for _, table := range []string{"donor_preference_events", "donor_preferences", "donor_metric_projections", "donor_sessions", "donor_login_links"} {
+		for _, table := range []string{"donor_preference_events", "donor_preferences", "donor_metric_projections", "donor_session_events", "donor_sessions", "donor_login_links"} {
 			if _, err := pool.Exec(ctx, "DELETE FROM "+table+" WHERE donor_id=$1", id); err != nil {
 				t.Error(err)
 			}
@@ -63,7 +64,19 @@ func TestAppSessionLifecycle(t *testing.T) {
 		server.Handler.ServeHTTP(response, r)
 		return response
 	}
-	signIn := func() string {
+	type tokens struct {
+		Access  string `json:"access_token"`
+		Refresh string `json:"refresh_token"`
+	}
+	issued := func(step string, response *httptest.ResponseRecorder) tokens {
+		t.Helper()
+		var body tokens
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK || body.Access == "" || body.Refresh == "" || len(response.Result().Cookies()) != 0 {
+			t.Fatalf("%s: got %d %s, want 200 with tokens and no cookie", step, response.Code, response.Body)
+		}
+		return body
+	}
+	signIn := func(device string) tokens {
 		t.Helper()
 		linkID, err := store.NewID()
 		if err != nil {
@@ -73,14 +86,10 @@ func TestAppSessionLifecycle(t *testing.T) {
 		if _, err = pool.Exec(ctx, "INSERT INTO donor_login_links(id,donor_id,token_hash,expires_at) VALUES($1,$2,$3,$4)", linkID, id, store.HashToken(proof), time.Now().Add(15*time.Minute)); err != nil {
 			t.Fatal(err)
 		}
-		response := call("POST", "/donor/claim", `{"token":"`+proof+`"}`, "")
-		var body struct {
-			SessionToken string `json:"session_token"`
-		}
-		if err = json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK || body.SessionToken == "" || len(response.Result().Cookies()) != 0 {
-			t.Fatalf("app claim: got %d %s, want 200 with a session token and no cookie", response.Code, response.Body)
-		}
-		return body.SessionToken
+		return issued("app claim", call("POST", "/donor/claim", `{"token":"`+proof+`","device_name":"`+device+`","platform":"IOS"}`, ""))
+	}
+	refresh := func(token string) *httptest.ResponseRecorder {
+		return call("POST", "/donor/refresh", `{"refresh_token":"`+token+`"}`, "")
 	}
 	expect := func(step string, response *httptest.ResponseRecorder, status int) {
 		t.Helper()
@@ -88,24 +97,101 @@ func TestAppSessionLifecycle(t *testing.T) {
 			t.Fatalf("%s: got %d %s, want %d", step, response.Code, response.Body, status)
 		}
 	}
+	sessions := func(access string) []store.DeviceSession {
+		t.Helper()
+		response := call("GET", "/donor/me/sessions", "", access)
+		var body store.Sessions
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
+			t.Fatalf("list sessions: got %d %s", response.Code, response.Body)
+		}
+		return body.Sessions
+	}
 
-	session := signIn()
-	profile := call("GET", "/donor/me/profile", "", session)
+	session := signIn("Alex phone")
+	profile := call("GET", "/donor/me/profile", "", session.Access)
 	expect("read with bearer", profile, http.StatusOK)
 	if !strings.Contains(profile.Body.String(), email) {
 		t.Fatalf("profile is not the claimed donor's: %s", profile.Body)
 	}
-	expect("write with bearer", call("POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false}`, session), http.StatusOK)
-	expect("sign out", call("POST", "/donor/logout", "", session), http.StatusOK)
-	expect("read after sign-out", call("GET", "/donor/me/profile", "", session), http.StatusUnauthorized)
+	expect("write with bearer", call("POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false}`, session.Access), http.StatusOK)
+	expect("refresh token as bearer", call("GET", "/donor/me/profile", "", session.Refresh), http.StatusUnauthorized)
+	expect("access token as refresh token", refresh(session.Access), http.StatusUnauthorized)
+	browserRefresh := httptest.NewRequest("POST", "/donor/refresh", strings.NewReader(`{"refresh_token":"`+session.Refresh+`"}`))
+	browserRefresh.Header.Set("Origin", origin)
+	response := httptest.NewRecorder()
+	server.Handler.ServeHTTP(response, browserRefresh)
+	expect("browser refresh", response, http.StatusForbidden)
 
-	session, other := signIn(), signIn()
-	expect("sign out everywhere", call("POST", "/donor/logout-all", "", session), http.StatusOK)
-	expect("other session after sign-out everywhere", call("GET", "/donor/me/profile", "", other), http.StatusUnauthorized)
+	first := session
+	session = issued("refresh", refresh(session.Refresh))
+	expect("read with the replaced access token", call("GET", "/donor/me/profile", "", first.Access), http.StatusUnauthorized)
+	expect("read with the new access token", call("GET", "/donor/me/profile", "", session.Access), http.StatusOK)
+	session = issued("second refresh", refresh(session.Refresh))
+	expect("reuse an exchanged refresh token", refresh(first.Refresh), http.StatusUnauthorized)
+	expect("read after reuse", call("GET", "/donor/me/profile", "", session.Access), http.StatusUnauthorized)
+	expect("refresh after reuse", refresh(session.Refresh), http.StatusUnauthorized)
 
-	session = signIn()
-	if _, err = pool.Exec(ctx, "UPDATE donor_sessions SET expires_at=now()-interval '1 second' WHERE token_hash=$1", store.HashToken(session)); err != nil {
+	session, other := signIn("Alex phone"), signIn("Alex tablet")
+	listed := sessions(session.Access)
+	if len(listed) != 2 || !listed[0].Current || listed[0].Label != "Alex phone" || listed[1].Current || listed[1].Label != "Alex tablet" || listed[1].Client != "APP" {
+		t.Fatalf("listed %+v, want this phone first and the tablet", listed)
+	}
+	expect("sign out this session by ID", call("POST", "/donor/me/sessions/"+listed[0].ID.String()+"/revoke", "", session.Access), http.StatusConflict)
+	expect("sign out the tablet", call("POST", "/donor/me/sessions/"+listed[1].ID.String()+"/revoke", "", session.Access), http.StatusOK)
+	expect("tablet read after sign-out", call("GET", "/donor/me/profile", "", other.Access), http.StatusUnauthorized)
+	expect("tablet refresh after sign-out", refresh(other.Refresh), http.StatusUnauthorized)
+
+	other = signIn("Alex tablet")
+	expect("sign out other sessions", call("POST", "/donor/me/sessions/revoke-others", "", session.Access), http.StatusOK)
+	expect("other session after sign-out of others", call("GET", "/donor/me/profile", "", other.Access), http.StatusUnauthorized)
+	expect("this session after sign-out of others", call("GET", "/donor/me/profile", "", session.Access), http.StatusOK)
+	expect("sign out", call("POST", "/donor/logout", "", session.Access), http.StatusOK)
+	expect("read after sign-out", call("GET", "/donor/me/profile", "", session.Access), http.StatusUnauthorized)
+	expect("refresh after sign-out", refresh(session.Refresh), http.StatusUnauthorized)
+
+	session = signIn("Alex phone")
+	browser := func(method, path, body, cookie string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		r.Header.Set("Origin", origin)
+		if cookie != "" {
+			r.AddCookie(&http.Cookie{Name: "dad_donor_session", Value: cookie})
+		}
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, r)
+		return response
+	}
+	linkID, err := store.NewID()
+	if err != nil {
 		t.Fatal(err)
 	}
-	expect("read with expired session", call("GET", "/donor/me/profile", "", session), http.StatusUnauthorized)
+	proof := strings.Repeat("b", 11) + linkID.String()
+	if _, err = pool.Exec(ctx, "INSERT INTO donor_login_links(id,donor_id,token_hash,expires_at) VALUES($1,$2,$3,$4)", linkID, id, store.HashToken(proof), time.Now().Add(15*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	claimed := browser("POST", "/donor/claim", `{"token":"`+proof+`"}`, "")
+	expect("browser claim", claimed, http.StatusOK)
+	cookie := claimed.Result().Cookies()[0].Value
+	var fromBrowser store.Sessions
+	listing := browser("GET", "/donor/me/sessions", "", cookie)
+	if err = json.Unmarshal(listing.Body.Bytes(), &fromBrowser); err != nil || len(fromBrowser.Sessions) != 2 || fromBrowser.Sessions[0].Label != "Web browser" || !fromBrowser.Sessions[0].Current {
+		t.Fatalf("browser listing: got %d %s, want this browser first and the phone", listing.Code, listing.Body)
+	}
+	expect("browser signs out the phone", browser("POST", "/donor/me/sessions/"+fromBrowser.Sessions[1].ID.String()+"/revoke", "", cookie), http.StatusOK)
+	expect("phone after the browser signed it out", call("GET", "/donor/me/profile", "", session.Access), http.StatusUnauthorized)
+	expect("browser after signing out the phone", browser("GET", "/donor/me/profile", "", cookie), http.StatusOK)
+
+	session, other = signIn("Alex phone"), signIn("Alex tablet")
+	expect("sign out everywhere", call("POST", "/donor/logout-all", "", session.Access), http.StatusOK)
+	expect("other session after sign-out everywhere", call("GET", "/donor/me/profile", "", other.Access), http.StatusUnauthorized)
+
+	session = signIn("Alex phone")
+	if _, err = pool.Exec(ctx, "UPDATE donor_sessions SET expires_at=now()-interval '1 second' WHERE token_hash=$1", store.HashToken(session.Access)); err != nil {
+		t.Fatal(err)
+	}
+	expect("read with expired access token", call("GET", "/donor/me/profile", "", session.Access), http.StatusUnauthorized)
+	session = issued("refresh after access expiry", refresh(session.Refresh))
+	if _, err = pool.Exec(ctx, "UPDATE donor_sessions SET expires_at=now()-interval '1 second',refresh_expires_at=now()-interval '1 second' WHERE token_hash=$1", store.HashToken(session.Access)); err != nil {
+		t.Fatal(err)
+	}
+	expect("refresh after the session expired", refresh(session.Refresh), http.StatusUnauthorized)
 }

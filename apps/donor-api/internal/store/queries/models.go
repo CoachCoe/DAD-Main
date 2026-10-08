@@ -237,6 +237,24 @@ type DonorResumption struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorSession struct {
+	DonorID             pgtype.UUID        `json:"donor_id"`
+	TokenHash           string             `json:"token_hash"`
+	ExpiresAt           pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt           pgtype.Timestamptz `json:"revoked_at"`
+	ID                  pgtype.UUID        `json:"id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	Client              string             `json:"client"`
+	DeviceName          pgtype.Text        `json:"device_name"`
+	Platform            pgtype.Text        `json:"platform"`
+	LastUsedAt          pgtype.Timestamptz `json:"last_used_at"`
+	RefreshFamilyHash   pgtype.Text        `json:"refresh_family_hash"`
+	RefreshHash         pgtype.Text        `json:"refresh_hash"`
+	RefreshPreviousHash pgtype.Text        `json:"refresh_previous_hash"`
+	RefreshedAt         pgtype.Timestamptz `json:"refreshed_at"`
+	RefreshExpiresAt    pgtype.Timestamptz `json:"refresh_expires_at"`
+}
+
 type DonorStaff struct {
 	Email     string             `json:"email"`
 	Name      string             `json:"name"`

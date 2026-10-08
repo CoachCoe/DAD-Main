@@ -104,11 +104,11 @@ func TestLoginEmailCommitsProofBeforeSendAndReusesItOnRetry(t *testing.T) {
 	if err := w.DB.QueryRow(ctx, "SELECT completed_at IS NOT NULL,encrypted_token FROM donor_login_emails WHERE donor_id=$1", id).Scan(&complete, &encrypted); err != nil || !complete || encrypted != nil {
 		t.Fatal("completed job retained credential", err)
 	}
-	session, err := (AccountService{DB: w.DB}).ClaimAccount(ctx, token, "")
-	if err != nil || session == "" {
+	session, err := (AccountService{DB: w.DB}).ClaimAccount(ctx, token, "", Client{})
+	if err != nil || session.Access == "" {
 		t.Fatal("delivered proof failed claim", err)
 	}
-	if _, err = (AccountService{DB: w.DB}).ClaimAccount(ctx, token, ""); !errors.Is(err, ErrDenied) {
+	if _, err = (AccountService{DB: w.DB}).ClaimAccount(ctx, token, "", Client{}); !errors.Is(err, ErrDenied) {
 		t.Fatal("proof replay allowed", err)
 	}
 }

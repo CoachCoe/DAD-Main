@@ -30,14 +30,14 @@ func claimProof(t *testing.T, pool *pgxpool.Pool, proof string) string {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	token, _, err := claim(ctx, tx, proof)
+	tokens, _, err := claim(ctx, tx, proof, Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	return token
+	return tokens.Access
 }
 func TestClaimRefreshesAndReplacesOnlyThisBrowser(t *testing.T) {
 	pool := database(t)
@@ -49,12 +49,12 @@ func TestClaimRefreshesAndReplacesOnlyThisBrowser(t *testing.T) {
 	other := claimProof(t, pool, link(t, pool, id, now))
 	proof := link(t, pool, id, now)
 	service := AccountService{DB: pool}
-	token, err := service.ClaimAccount(ctx, proof, old)
+	tokens, err := service.ClaimAccount(ctx, proof, old, Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	q := queries.New(pool)
-	for _, session := range []string{token, other} {
+	for _, session := range []string{tokens.Access, other} {
 		if _, err = authenticate(ctx, q, session, time.Now()); err != nil {
 			t.Fatal(err)
 		}
@@ -66,7 +66,7 @@ func TestClaimRefreshesAndReplacesOnlyThisBrowser(t *testing.T) {
 	if err != nil || !projection.CurrentStreak.Valid || projection.CurrentStreak.Int32 != 0 || projection.NetMinor.Int64 != 0 {
 		t.Fatal("claim did not atomically initialize recognition")
 	}
-	if _, err = service.ClaimAccount(ctx, proof, token); !errors.Is(err, ErrDenied) {
+	if _, err = service.ClaimAccount(ctx, proof, tokens.Access, Client{}); !errors.Is(err, ErrDenied) {
 		t.Fatal("proof reused")
 	}
 }
@@ -86,7 +86,7 @@ func TestClaimProjectionFailureRollsBackProofAndSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	service := AccountService{DB: pool}
-	if token, err := service.ClaimAccount(ctx, proof, ""); err == nil || token != "" {
+	if tokens, err := service.ClaimAccount(ctx, proof, "", Client{}); err == nil || tokens.Access != "" {
 		t.Fatal("failed projection exposed session")
 	}
 	var claimed *time.Time
@@ -100,7 +100,7 @@ func TestClaimProjectionFailureRollsBackProofAndSession(t *testing.T) {
 	if _, err := pool.Exec(ctx, "UPDATE donor_gifts SET frequency='ONE_TIME' WHERE id=$1", gift); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ClaimAccount(ctx, proof, ""); err != nil {
+	if _, err := service.ClaimAccount(ctx, proof, "", Client{}); err != nil {
 		t.Fatalf("rolled-back proof unusable: %v", err)
 	}
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 AND kind='RECEIPT'", id).Scan(&count); err != nil || count != 1 {

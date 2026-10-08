@@ -58,7 +58,7 @@ func donor(t *testing.T, pool *pgxpool.Pool) (pgtype.UUID, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		for _, query := range []string{"DELETE FROM donor_sessions WHERE donor_id=$1", "DELETE FROM donor_login_links WHERE donor_id=$1", "DELETE FROM donor_metric_projections WHERE donor_id=$1", "DELETE FROM donors WHERE id=$1"} {
+		for _, query := range []string{"DELETE FROM donor_session_events WHERE donor_id=$1", "DELETE FROM donor_sessions WHERE donor_id=$1", "DELETE FROM donor_login_links WHERE donor_id=$1", "DELETE FROM donor_metric_projections WHERE donor_id=$1", "DELETE FROM donors WHERE id=$1"} {
 			if _, err := pool.Exec(ctx, query, id); err != nil {
 				t.Error(err)
 			}
@@ -122,11 +122,11 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 				return
 			}
 			defer tx.Rollback(ctx)
-			session, _, err := claim(ctx, tx, token)
+			tokens, _, err := claim(ctx, tx, token, Client{})
 			if err == nil {
 				err = tx.Commit(ctx)
 				if err == nil {
-					sessions <- session
+					sessions <- tokens.Access
 				}
 			}
 			results <- err
@@ -166,7 +166,7 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	if _, _, err = claim(context.Background(), tx, sibling); !errors.Is(err, ErrDenied) {
+	if _, _, err = claim(context.Background(), tx, sibling, Client{}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("sibling remains usable: %v", err)
 	}
 }
@@ -180,14 +180,14 @@ func TestClaimRollbackLeavesProofUsable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, _, err := claim(ctx, tx, token)
+	tokens, _, err := claim(ctx, tx, token, Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = authenticate(ctx, queries.New(pool), session, now); !errors.Is(err, ErrDenied) {
+	if _, err = authenticate(ctx, queries.New(pool), tokens.Access, now); !errors.Is(err, ErrDenied) {
 		t.Fatalf("rolled back session: %v", err)
 	}
 	tx, err = pool.Begin(ctx)
@@ -195,7 +195,7 @@ func TestClaimRollbackLeavesProofUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, _, err = claim(ctx, tx, token); err != nil {
+	if _, _, err = claim(ctx, tx, token, Client{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -218,7 +218,7 @@ func TestDisabledDonorCannotClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, _, err = claim(ctx, tx, token); !errors.Is(err, ErrDenied) {
+	if _, _, err = claim(ctx, tx, token, Client{}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("disabled donor claimed: %v", err)
 	}
 }
@@ -233,7 +233,7 @@ func TestExpiredProofCannotCreateSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(ctx)
-	if _, _, err = claim(ctx, tx, token); !errors.Is(err, ErrDenied) {
+	if _, _, err = claim(ctx, tx, token, Client{}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("expiry boundary: %v", err)
 	}
 	var count int

@@ -109,7 +109,7 @@ func TestProofExpiryIsCheckedAfterWaitingForOwnerLock(t *testing.T) {
 				if _, err := queries.New(lock).LockDonor(ctx, id); err != nil {
 					t.Fatal(err)
 				}
-				redeem = func(tx pgx.Tx) error { _, _, err := claim(ctx, tx, proof); return err }
+				redeem = func(tx pgx.Tx) error { _, _, err := claim(ctx, tx, proof, Client{}); return err }
 				expire = func() {
 					mustExec(t, lock, "UPDATE donor_login_links SET expires_at=$2 WHERE donor_id=$1", id, time.Now().UTC())
 				}

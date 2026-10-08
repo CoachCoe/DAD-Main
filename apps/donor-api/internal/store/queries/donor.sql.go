@@ -222,20 +222,6 @@ func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) 
 	return i, err
 }
 
-const revokeAllSessions = `-- name: RevokeAllSessions :exec
-UPDATE donor_sessions SET revoked_at=$2 WHERE donor_id=$1 AND revoked_at IS NULL
-`
-
-type RevokeAllSessionsParams struct {
-	DonorID   pgtype.UUID        `json:"donor_id"`
-	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
-}
-
-func (q *Queries) RevokeAllSessions(ctx context.Context, arg RevokeAllSessionsParams) error {
-	_, err := q.db.Exec(ctx, revokeAllSessions, arg.DonorID, arg.RevokedAt)
-	return err
-}
-
 const savePreference = `-- name: SavePreference :exec
 INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails)
 VALUES ($1,$2,$3,$4,$5) ON CONFLICT(donor_id) DO UPDATE

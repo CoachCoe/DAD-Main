@@ -169,12 +169,12 @@ func newRecurringFixture(t *testing.T) *recurringFixture {
 	subscriptionItem(remote)["current_period_end"] = end.Unix()
 	f.gateway.subscriptions[subID] = paymentObject(t, remote)
 	f.syncSubscription(t, result.CheckoutID)
-	token, err := (AccountService{DB: pool}).ClaimAccount(ctx, link(t, pool, f.donorID, time.Now()), "")
+	tokens, err := (AccountService{DB: pool}).ClaimAccount(ctx, link(t, pool, f.donorID, time.Now()), "", Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	gateway := &subscriptionGateway{financialGateway: f.gateway, t: t}
-	return &recurringFixture{workerFixture: f, checkout: result.CheckoutID, sub: gateway, service: RecurringService{DB: pool, Gateway: gateway, Origin: "https://donor.example.org"}, token: token, attempt: attempt, subID: subID, start: start, end: end}
+	return &recurringFixture{workerFixture: f, checkout: result.CheckoutID, sub: gateway, service: RecurringService{DB: pool, Gateway: gateway, Origin: "https://donor.example.org"}, token: tokens.Access, attempt: attempt, subID: subID, start: start, end: end}
 }
 
 // syncSubscription delivers a webhook about checkout's subscription, which
