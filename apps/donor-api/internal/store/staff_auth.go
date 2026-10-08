@@ -81,12 +81,16 @@ func lockStaffUser(ctx context.Context, q *queries.Queries, id pgtype.UUID) (sta
 	return user, nil
 }
 
-// saveCeremony keeps a challenge until it expires and returns its ID. It
-// sweeps abandoned ceremonies, so anonymous sign-in attempts cannot pile up.
+// sweepCeremonies deletes abandoned ceremonies, so anonymous sign-in attempts
+// cannot pile up. It runs on its own: a ceremony being answered stays locked
+// until its transaction has locked the account, so sweeping while holding an
+// account lock could deadlock with it.
+func (s *StaffService) sweepCeremonies(ctx context.Context) error {
+	return queries.New(s.DB).DeleteExpiredStaffCeremonies(ctx, timestamp(time.Now()))
+}
+
+// saveCeremony keeps a challenge until it expires and returns its ID.
 func saveCeremony(ctx context.Context, q *queries.Queries, kind string, invite pgtype.UUID, session *webauthn.SessionData) (string, error) {
-	if err := q.DeleteExpiredStaffCeremonies(ctx, timestamp(time.Now())); err != nil {
-		return "", err
-	}
 	raw, err := json.Marshal(session)
 	if err != nil {
 		return "", err
@@ -127,6 +131,9 @@ func startStaffSession(ctx context.Context, q *queries.Queries, staff pgtype.UUI
 // BeginSignIn issues a usernameless challenge: any of the browser's passkeys
 // for the staff host may answer it, so nothing reveals which accounts exist.
 func (s *StaffService) BeginSignIn(ctx context.Context) (Ceremony, error) {
+	if err := s.sweepCeremonies(ctx); err != nil {
+		return Ceremony{}, err
+	}
 	assertion, session, err := s.WebAuthn.BeginDiscoverableLogin()
 	if err != nil {
 		return Ceremony{}, err
@@ -218,6 +225,9 @@ func staffInvitation(ctx context.Context, q *queries.Queries, token string) (que
 // without an email address.
 func (s *StaffService) BeginActivation(ctx context.Context, token string) (Invitation, error) {
 	var result Invitation
+	if err := s.sweepCeremonies(ctx); err != nil {
+		return result, err
+	}
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
 		invite, user, err := staffInvitation(ctx, q, token)
