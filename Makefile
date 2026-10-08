@@ -1,7 +1,7 @@
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
 
-.PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts generate check-generated deploy-build deploy-up deploy-smoke deploy-down deploy-logs
+.PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress generate check-generated deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 
 install:
 	cd apps/donor-api && go mod download
@@ -52,7 +52,13 @@ lint-web:
 	cd apps/web && npm audit --omit=dev --audit-level=high
 
 lint-scripts:
-	@if command -v shellcheck >/dev/null; then shellcheck scripts/*.sh; else echo "shellcheck not installed; skipping script lint" >&2; fi
+	@if command -v shellcheck >/dev/null; then shellcheck scripts/*.sh deploy/nginx/*.envsh; else echo "shellcheck not installed; skipping script lint" >&2; fi
+
+check-ingress:
+	./scripts/check-ingress.sh config
+
+smoke-ingress:
+	./scripts/check-ingress.sh smoke
 
 deploy-build:
 	./scripts/deploy.sh build
