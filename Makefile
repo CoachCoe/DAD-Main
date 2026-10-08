@@ -1,7 +1,13 @@
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
 
-.PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress generate check-generated deploy-build deploy-up deploy-smoke deploy-down deploy-logs
+# Load testing against a disposable, seeded deployment; see docs/operations.md.
+SEED_DONORS ?= 50000
+LOAD_API ?= http://127.0.0.1:8002
+LOAD_MIX ?= recurring=0
+LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -client-ips
+
+.PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 
 install:
 	cd apps/donor-api && go mod download
@@ -59,6 +65,13 @@ check-ingress:
 
 smoke-ingress:
 	./scripts/check-ingress.sh smoke
+
+seed:
+	cd apps/donor-api && go run ./cmd/seed -database-url "$(SEED_DATABASE_URL)" -confirm "$(SEED_CONFIRM)" -donors "$(SEED_DONORS)" -fixture "$(LOAD_FIXTURE)"
+
+loadtest-seeded:
+	$(LOADTEST) -duration 60s -concurrency 256 -max-p99 250ms
+	$(LOADTEST) -duration 5m -concurrency 32 -max-p99 100ms
 
 deploy-build:
 	./scripts/deploy.sh build

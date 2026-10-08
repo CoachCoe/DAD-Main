@@ -6,8 +6,11 @@ these with a later production database or describe sandbox awards as real recogn
 ## Database and containers
 
 Use a distinct PostgreSQL database and least-privilege credentials for each environment.
-Back up the database together with its separately stored encryption keys, then verify a
-restore. Losing the email or content encryption key makes its encrypted records
+Each API or worker process opens at most 10 connections; append `pool_max_conns=N` to
+`DONOR_GO_DATABASE_URL` to resize a process's pool, keeping the total across processes
+below the server's `max_connections`. Back up the database together with its separately
+stored encryption keys, then verify a restore. Losing the email or content encryption key
+makes its encrypted records
 unreadable. No automatic key-rotation or backup service is included.
 
 ```sh
@@ -222,6 +225,79 @@ replay, and renewal-cohort rules. No browser analytics is enabled by this migrat
 
 The enrolment CSV has headers only until R2. Keep exports private and apply an approved
 retention policy. Sensitive source documents have separate authenticated downloads.
+
+## Load testing with representative data
+
+Capacity is measured against a populated staging deployment: `cmd/seed` fills a
+disposable database with a synthetic donor population, and `cmd/loadtest` drives a
+referral-spike mix at an API serving it. Use the intended database size, network path,
+and process sizes; never point either command at production.
+
+The seeder writes only to a database it can show is disposable. The URL comes from
+`-database-url`, never from `DONOR_GO_DATABASE_URL`; `-confirm` must repeat the database
+name; and it refuses a database holding any donor whose address is not
+`@loadtest.invalid`, or one already seeded unless `-append` is set. Create a dedicated
+database, migrate it, then seed it from the repository root:
+
+```sh
+(cd apps/donor-api && DONOR_GO_DATABASE_URL=postgresql://user:pass@db:5432/dad_load go run ./cmd/migrate)
+make seed SEED_DATABASE_URL=postgresql://user:pass@db:5432/dad_load SEED_CONFIRM=dad_load \
+  LOAD_FIXTURE=/secure/dad-load.json
+```
+
+`SEED_DONORS` (default 50,000) donors are generated deterministically from `-seed`:
+mostly monthly gifts at $30, some at $10, $50, $100 or custom amounts, one-time gifts,
+abandoned checkouts, up to two years of anniversary renewals with failures recovered
+within and after the 14-day grace, unrecovered failures, pauses, cancellations, refunds,
+and referral trees in which most donors refer nobody and a few refer hundreds, with Link
+and IRL visits that did and did not convert. Rows are written as checkout and webhook
+processing store them, including processed Stripe events, and the projection worker's
+code then derives every projection. Before the Founding Donor cutoff every giver earns
+the badge. Messages queued for seeded history are marked suppressed so no mail worker
+sends them, and seeded addresses use the reserved `.invalid` domain.
+
+The fixture is a new mode-0600 file, refused inside a git working tree, holding
+`-sessions` (default 2,000) live session tokens that favour active referrers, and
+referral codes repeated in proportion to how often each would be visited. Treat it as a
+credential. The sessions last 30 days; delete the fixture and drop the database after
+the run.
+
+Run the API as for production with a pool sized for the test, and run the projection
+worker, since projections expire after a day and dashboards then wait for it. The
+recurring scenario reads Stripe when Stripe is configured, so the Makefile leaves it out
+(`LOAD_MIX=recurring=0`); include it with `LOAD_MIX=` only against an API without Stripe.
+Checkout is not in the mix because it calls Stripe.
+
+Referral captures are rate limited per client, and one generator is one client. With
+`-client-ips` it sends each user, and each captured visitor, its own `X-Real-IP` from the
+198.18.0.0/15 benchmarking range, as the ingress does for real visitors. The API accepts
+that header only from `DONOR_TRUSTED_PROXY_CIDRS`, so add the load host's address to the
+staging API's list and have it reach the API directly, not through the ingress, which
+overwrites the header. Otherwise captures fail with 429.
+
+```sh
+make loadtest-seeded LOAD_API=http://api.staging.internal:8002 LOAD_FIXTURE=/secure/dad-load.json
+```
+
+This runs a 60-second burst at 256 users with a 250 ms p99 budget for every scenario,
+then a five-minute soak at 32 users with 100 ms, and exits nonzero on any failed request
+or exceeded budget. For other shapes run `go run ./cmd/loadtest` with `-duration`,
+`-concurrency` (up to 2,048), `-mix name=weight,...` and `-max-p99 250ms,dashboard=400ms`.
+The default weights are referral-lookup 30, referral-capture 12, referral-missing 3 (an
+unknown code, expecting 404), content 15, dashboard 18, gifts 7, sharing 5, profile 4,
+recurring 4 and annual-summary 2. Each signed-in read uses a donor drawn from the fixture;
+`-native` (default 0.25) of users present it as the donor app's bearer token, the rest as
+the browser cookie.
+
+The JSON result gives requests, failures, requests per second, p50/p95/p99/max latency
+in milliseconds and statuses overall, and the same per scenario with error kinds
+(`transport`, `timeout`, `oversized`). Users wait for each response before sending the
+next, so throughput is what the deployment sustained at that concurrency. Latency that
+rises evenly across scenarios, including the single-query referral lookup, means
+requests are queueing for database connections or API CPU; a tail in one scenario points
+at its queries, which can be examined with `EXPLAIN (ANALYZE, BUFFERS)` against the
+seeded database. A generator sharing a host with the API or database competes with them
+for CPU. Keep results with the run's ticket, not in the repository.
 
 ## External acceptance
 

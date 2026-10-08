@@ -123,23 +123,22 @@ SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc; commit SQL a
 generated Go query code together. `make check-generated` fails if they have drifted.
 Applied migrations are immutable and checksum-checked.
 
-Exercise a running synthetic deployment with read-only burst and soak tests. `-url`
-takes a comma-separated mix of endpoints requested round-robin, such as the public
-content and a referral landing lookup:
+Capacity is measured against a seeded, disposable deployment: `make seed` fills a
+dedicated database with 50,000 synthetic donors and writes a private fixture of session
+tokens and referral codes, and `make loadtest-seeded` runs a referral-spike burst and soak
+against an API serving it. See [operations](docs/operations.md#load-testing-with-representative-data)
+for the guard, the mix, budgets, and reading results. For a quick check of a few
+endpoints, `-url` reads a comma-separated list in equal measure:
 
 ```sh
 cd apps/donor-api
-API=http://localhost:8002
-go run ./cmd/loadtest -url "$API/donor/public/content,$API/donor/referrals/CODE" -duration 30s -concurrency 128 -max-p99 250ms
-go run ./cmd/loadtest -url "$API/donor/public/content" -duration 5m -concurrency 16 -max-p99 100ms
+go run ./cmd/loadtest -url "http://localhost:8002/donor/public/content" -duration 30s -concurrency 128 -max-p99 250ms
 ```
 
-The runner reports request counts, failures, throughput, and latency percentiles. It
-fails on non-200 responses (a missing referral code returns 404), timeouts, oversized
-bodies, or a p99 above `-max-p99`. For authenticated reads, set `DONOR_LOAD_COOKIE` to a
-synthetic donor's session cookie and target endpoints such as `/donor/me/dashboard`.
-Public empty-state results do not establish capacity for 50,000 donors: repeat against
-representative data, authenticated dashboards, and the intended deployment before launch.
+The runner reports throughput, statuses, and latency percentiles overall and per
+endpoint as JSON. It fails on non-200 responses, timeouts, oversized bodies, or a p99
+above `-max-p99`; `DONOR_LOAD_COOKIE` sends a synthetic donor's session cookie. Results
+from an empty database do not establish capacity.
 
 ## Containers and deployment
 
@@ -150,7 +149,7 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 
 ## Layout
 
-- `apps/donor-api/cmd`: API, workers, migrations, administrator bootstrap.
+- `apps/donor-api/cmd`: API, workers, migrations, administrator bootstrap, monitoring, load testing.
 - `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, credentials.
 - `apps/donor-api/db`: versioned SQL migrations and sqlc queries.
 - `apps/donor-api/api`: the OpenAPI contract for web and native clients, checked by tests.
