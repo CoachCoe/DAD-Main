@@ -1,0 +1,96 @@
+# Rendered at container start by the image's envsubst entrypoint; 05-ingress.envsh derives
+# the host names from DONOR_PUBLIC_ORIGIN and DONOR_STAFF_ORIGIN and checks INGRESS_MODE.
+include /etc/nginx/ingress/${INGRESS_MODE}/real-ip.conf;
+
+server {
+    listen 8080 default_server;
+    return 444;
+}
+
+server {
+    listen 8080;
+    server_name ${INGRESS_PUBLIC_HOST} ${INGRESS_STAFF_HOST};
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 8443 ssl default_server;
+    http2 on;
+    ssl_reject_handshake on;
+    # Reached only when a known SNI name carries some other Host header.
+    return 421;
+}
+
+server {
+    listen 8443 ssl;
+    http2 on;
+    server_name ${INGRESS_PUBLIC_HOST};
+    include /etc/nginx/ingress/${INGRESS_MODE}/origin.conf;
+    include /etc/nginx/ingress/limited.conf;
+
+    location / {
+        proxy_pass http://web;
+    }
+
+    # The back office lives on the staff host only; the web app and API also refuse it here.
+    location ~* ^/(staff|api/donor/staff)(/|$) {
+        include /etc/nginx/ingress/not-found.conf;
+    }
+
+    location ~ ^/api/donor/(login|claim|email-change/confirm)$ {
+        limit_req zone=auth burst=20 nodelay;
+        error_page 429 @auth_limited;
+        proxy_pass http://web;
+    }
+
+    location ~ ^/api/donor/(checkouts|referrals/[^/]+|public/partner-signup)$ {
+        limit_req zone=visitor burst=60 nodelay;
+        proxy_pass http://web;
+    }
+
+    # Exempt from per-client limits in nginx.conf; the API verifies every signature.
+    location = /api/donor/stripe/webhook {
+        limit_except POST {
+            deny all;
+        }
+        proxy_pass http://web;
+    }
+}
+
+server {
+    listen 8443 ssl;
+    http2 on;
+    server_name ${INGRESS_STAFF_HOST};
+    include /etc/nginx/ingress/${INGRESS_MODE}/origin.conf;
+    include /etc/nginx/ingress/limited.conf;
+    include /etc/nginx/staff-access.conf;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+
+    # Only the back office and the assets it loads; donor pages and APIs stay on the public host.
+    location / {
+        include /etc/nginx/ingress/not-found.conf;
+    }
+
+    # CSV exports stream row by row and abort mid-body on failure.
+    location ^~ /api/donor/staff/exports/ {
+        proxy_buffering off;
+        proxy_pass http://web;
+    }
+
+    # Regular expressions match in order, so the general allowlist comes last.
+    location ~ ^/api/donor/staff/(sign-in|provision|activate)$ {
+        limit_req zone=auth burst=20 nodelay;
+        error_page 429 @auth_limited;
+        proxy_pass http://web;
+    }
+
+    # Source documents up to 10 MB; publications up to 8 MB.
+    location ~ ^/api/donor/staff/content/(sources|publish)$ {
+        client_max_body_size 10m;
+        proxy_pass http://web;
+    }
+
+    location ~ ^/(|favicon\.ico|staff|staff/.*|_next/.*|api/donor/staff/.*)$ {
+        proxy_pass http://web;
+    }
+}

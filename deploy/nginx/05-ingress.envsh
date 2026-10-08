@@ -1,0 +1,25 @@
+#!/bin/sh
+# Sourced by the image entrypoint before 20-envsubst-on-templates.sh renders the templates.
+host_of() {
+    case "$2" in
+        https://*) ;;
+        *) echo "ingress: $1 must be an https:// origin" >&2; return 1 ;;
+    esac
+    host="${2#https://}"
+    host="${host%:*}"
+    case "$host" in
+        "" | *[!A-Za-z0-9.-]*) echo "ingress: $1 must be a bare https origin" >&2; return 1 ;;
+    esac
+    printf '%s' "$host"
+}
+case "${INGRESS_MODE:-}" in
+    cloudflare | direct) ;;
+    *) echo "ingress: INGRESS_MODE must be cloudflare or direct" >&2; exit 1 ;;
+esac
+INGRESS_PUBLIC_HOST="$(host_of DONOR_PUBLIC_ORIGIN "${DONOR_PUBLIC_ORIGIN:-}")" || exit 1
+INGRESS_STAFF_HOST="$(host_of DONOR_STAFF_ORIGIN "${DONOR_STAFF_ORIGIN:-}")" || exit 1
+if [ "$INGRESS_PUBLIC_HOST" = "$INGRESS_STAFF_HOST" ]; then
+    echo "ingress: DONOR_STAFF_ORIGIN must name a different host from DONOR_PUBLIC_ORIGIN" >&2
+    exit 1
+fi
+export INGRESS_PUBLIC_HOST INGRESS_STAFF_HOST
