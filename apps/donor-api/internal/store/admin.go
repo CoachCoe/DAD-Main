@@ -61,8 +61,8 @@ type DonorDetail struct {
 	Subscription        *StaffSubscription          `json:"subscription"`
 }
 
-// StaffSubscription is the donor's monthly gift as last observed; staff
-// previews read the processor live.
+// StaffSubscription is the donor's monthly gift as last synced from the
+// processor.
 type StaffSubscription struct {
 	AmountMinor int64      `json:"amount_minor"`
 	NextRenewal time.Time  `json:"next_renewal"`
@@ -174,7 +174,7 @@ func (s *StaffService) DonorDetail(ctx context.Context, token string, id pgtype.
 	})
 }
 
-// storedSubscription returns the donor's last observed monthly gift, if any.
+// storedSubscription returns the donor's last synced monthly gift, if any.
 func storedSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (*StaffSubscription, error) {
 	details, err := storedDetails(ctx, q, donor)
 	if err != nil || details.Subscription == nil {
