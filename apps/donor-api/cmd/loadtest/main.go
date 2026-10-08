@@ -42,6 +42,10 @@ const (
 // that can never belong to a real visitor.
 var clientBase = netip.MustParseAddr("198.18.0.0")
 
+// streams selects the users' random streams away from those cmd/seed draws
+// codes from, which also seeds PCG with small integers.
+const streams = 0x6c6f616474657374
+
 // user is one simulated client: a browser or the donor app, signed in or not.
 type user struct {
 	r       *rand.Rand
@@ -108,7 +112,8 @@ func seededMix(api, origin string, f fixture, weights map[string]int) ([]scenari
 			return r, err
 		}},
 		{name: "referral-missing", expect: http.StatusNotFound, build: func(u *user) (*http.Request, error) {
-			unknown := make([]byte, 24)
+			// Issued codes encode 24 bytes; 32 can never name a referrer.
+			unknown := make([]byte, 32)
 			for i := range unknown {
 				unknown[i] = byte(u.r.Uint32())
 			}
@@ -337,7 +342,7 @@ func load(ctx context.Context, cfg config) result {
 	for i := range cfg.concurrency {
 		// App users are spread evenly through the numbering, so any concurrency
 		// gets close to the requested share.
-		u := &user{r: rand.New(rand.NewPCG(uint64(i), 0)), native: int(float64(i+1)*cfg.nativeShare) > int(float64(i)*cfg.nativeShare), address: clientAddress(uint32(i))}
+		u := &user{r: rand.New(rand.NewPCG(uint64(i), streams)), native: int(float64(i+1)*cfg.nativeShare) > int(float64(i)*cfg.nativeShare), address: clientAddress(uint32(i))}
 		wg.Go(func() {
 			for time.Now().Before(deadline) && ctx.Err() == nil {
 				pick := u.r.IntN(total)
