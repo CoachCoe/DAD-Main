@@ -2,7 +2,8 @@
 
 The R1 application is a Next.js TypeScript web client backed by a Go HTTP service and
 PostgreSQL 16. Hosted Stripe Checkout handles USD test payments and card setup. Separate
-Go workers reconcile signed Stripe events, refresh donor projections, and deliver email.
+Go workers reconcile signed Stripe events, refresh donor projections, apply referral-touch
+retention, and deliver email.
 
 ```text
 Browser → Next.js /api/donor/* → Go HTTP API → PostgreSQL
@@ -12,10 +13,13 @@ Browser → Next.js /api/donor/* → Go HTTP API → PostgreSQL
                                           SMTP with STARTTLS
 ```
 
-The browser uses the same origin for API requests. The Go service owns authorization,
+The browser uses the same origin for API requests. In production it reaches Next.js
+through Cloudflare and an nginx ingress ([edge](edge.md)). The Go service owns authorization,
 validation, CSRF checks, and business rules. The Next proxy cannot grant permissions.
-Donor and staff cookies identify distinct server-side sessions. Staff require individual
-passwords and MFA; roles map to named permissions checked against current database state.
+Donor and staff cookies identify distinct server-side sessions. The web server answers
+two hosts: the public site on `DONOR_PUBLIC_ORIGIN` and the staff back office, alone, on
+`DONOR_STAFF_ORIGIN`. Staff sign in with individual passkeys for the staff host; roles
+map to named permissions checked against current database state.
 
 ## HTTP contract and native clients
 
@@ -26,11 +30,19 @@ client policy, or JSON shapes drift from the document. Errors are `{detail}` JSO
 an additive `code` for configuration states and `errors` for located spreadsheet
 problems. Money is integer cents and timestamps are RFC 3339.
 
+Staff routes admit mutations only from the staff origin; every other route admits only
+the public origin. Passkey ceremonies take two calls each. `POST
+/donor/staff/sign-in/options` returns a single-use `ceremony` ID and WebAuthn request
+options; `POST /donor/staff/sign-in` takes that ID with the browser's credential JSON and
+sets the staff cookie. Activation is the same pair under `/donor/staff/activate`, started
+with the invitation token, and also signs the new staff member in. Options and
+credentials use the WebAuthn JSON forms, with binary fields in base64url.
+
 The R2 app calls the API host directly with a bearer session instead of cookies (see
 [security](security.md)). Only donor account routes admit it; giving stays on the web.
 Every donor-facing URL is built in `internal/store/links.go`, which is the starting list
 for app/universal links (`/account/claim`, `/account/email-change`,
-`/account/payment-method`, `/r/{code}`). Passkeys and push-notification device
+`/account/payment-method`, `/r/{code}`). Donor passkeys and push-notification device
 registration are not built yet and need new store work.
 
 ## Financial consistency
@@ -52,6 +64,17 @@ can reconcile an already-applied result immediately; another processor mutation 
 wait for lease expiry. Checkout completion is not collection. Gifts, billing periods,
 refund state, append-only observations, projections, and notification intents commit
 together. Money is integer USD cents. Referral credit is one level only.
+
+Reads never call Stripe. The Stripe worker syncs a subscription's current state, including
+its billing anchor and whether Stripe holds a schedule or pending update, whenever an
+event about it arrives: each `customer.subscription.*` event it accepts, a completed
+checkout that binds it, and an invoice while an amount change is pending. When it has no
+events to process, it also syncs subscriptions stored before the billing anchor was kept,
+which offer no pause dates until then, checking for them hourly. Recurring views, card
+update status, and staff previews are served from that state with `observed_at`, the time
+of the sync. Of the API's requests only commands call Stripe, and each first syncs the
+subscription it acts on, committed on its own so that a command refused as out of date
+still leaves the next view current; none depends on a view having refreshed anything.
 
 Domain calculations in `internal/recognition` are independent of HTTP and Stripe. Queries in
 `db` generate the typed store layer with sqlc. Donor reads use indexed projections;

@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import LedgerPage from "@/app/ledger/page";
-import InitiativesPage from "@/app/initiatives/page";
-import InitiativePage from "@/app/initiatives/[slug]/page";
+import LedgerPage from "@/app/(donor)/ledger/page";
+import InitiativesPage from "@/app/(donor)/initiatives/page";
+import InitiativePage from "@/app/(donor)/initiatives/[slug]/page";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", async (original) => ({

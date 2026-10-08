@@ -115,7 +115,7 @@ func TestStaffErrorsMapToStatuses(t *testing.T) {
 		status int
 		detail string
 	}{
-		{store.ErrStaffDenied, 401, "Credentials invalid, expired, or temporarily locked"},
+		{store.ErrStaffDenied, 401, "Passkey, invitation, or session invalid or expired"},
 		{store.ErrStaffForbidden, 403, "Permission denied"},
 		{store.ErrStaffInput, 422, "Invalid request fields"},
 		{store.ErrStaffExists, 409, "A staff account with this email already exists"},

@@ -51,7 +51,7 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 		return configError("DONOR_GO_DATABASE_URL is required")
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
-	pool, err := store.Open(startup, dsn)
+	pool, err := store.Open(startup, dsn, 2)
 	cancel()
 	if err != nil {
 		return configError("worker database is unreachable")
@@ -89,10 +89,25 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		if err != nil {
 			return nil, configError("STRIPE_SECRET_KEY must be a Stripe test-mode secret key")
 		}
-		return store.EventWorker{DB: pool, Gateway: gateway}.ProcessNext, nil
-	case "projections":
+		events := store.EventWorker{DB: pool, Gateway: gateway}
+		backfill := &store.AnchorBackfill{DB: pool, Gateway: gateway}
 		return func(ctx context.Context) (bool, error) {
-			return store.RefreshNextProjection(ctx, pool, time.Now().UTC())
+			worked, err := events.ProcessNext(ctx)
+			if worked || err != nil {
+				return worked, err
+			}
+			return backfill.SyncNext(ctx, time.Now().UTC())
+		}, nil
+	case "projections":
+		retention := &store.TouchRetention{DB: pool}
+		return func(ctx context.Context) (bool, error) {
+			now := time.Now().UTC()
+			purged, err := retention.PurgeNext(ctx, now)
+			if err != nil {
+				return false, err
+			}
+			refreshed, err := store.RefreshNextProjection(ctx, pool, now)
+			return purged || refreshed, err
 		}, nil
 	}
 	settings, err := mail.FromEnvironment(getenv)
@@ -100,8 +115,8 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		return nil, configError("SMTP settings are missing or invalid")
 	}
 	origin := getenv("DONOR_PUBLIC_ORIGIN")
-	if payments.ValidateOrigin(origin) != nil {
-		return nil, configError("DONOR_PUBLIC_ORIGIN must be the public HTTPS origin used in email links")
+	if err := payments.ValidateOrigin(origin); err != nil {
+		return nil, configError("DONOR_PUBLIC_ORIGIN, the origin of email links, " + err.Error())
 	}
 	transport := mail.SMTPTransport{Settings: *settings}
 	var worker deliverer

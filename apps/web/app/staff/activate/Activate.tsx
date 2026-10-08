@@ -1,51 +1,94 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, classifyFailure, failureMessage } from "@/lib/api";
+import { ApiError, api, classifyFailure, failureMessage } from "@/lib/api";
+import { type Ceremony, createPasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, passkeysSupported, UNSUPPORTED_MESSAGE, WAITING_MESSAGE } from "@/lib/passkeys";
 import { useHashToken } from "@/lib/useHashToken";
 
-type Setup = { email: string; secret: string; uri: string };
+type Invitation = Ceremony<PublicKeyCredentialCreationOptionsJSON> & { email: string; name: string };
 
-// Connection, rate-limit and configuration problems say so; anything else is about the invitation.
-const explain = (cause: unknown, fallback: string) =>
+// The server keeps a ceremony for five minutes. An older one is replaced before the passkey
+// is made, so a slow reader is not left holding a passkey the server will refuse.
+const FRESH_FOR_MS = 3 * 60_000;
+
+const unchanging = () => () => {};
+
+const general = (cause: unknown, fallback: string) =>
   ["offline", "rateLimited", "unconfigured"].includes(classifyFailure(cause)) ? failureMessage(cause, fallback) : fallback;
+
+const USED_INVITATION = "This invitation has already been used or has expired. If you already created a passkey, sign in with it. Otherwise, ask a DAD administrator for a new invitation.";
+
+function explainCreation(cause: unknown): string {
+  switch (passkeyFailure(cause)) {
+    case "cancelled": return "Passkey creation was cancelled or timed out. Choose “Create a passkey” to try again.";
+    case "unsupported": return NO_SUITABLE_PASSKEY_MESSAGE;
+    case "refused": return "Your browser refused to create the passkey. Open the invitation link directly in your browser, then try again.";
+  }
+  return cause instanceof ApiError && cause.status === 401
+    ? "The passkey wasn’t accepted. Try again: an invitation allows five attempts and expires 24 hours after it was sent."
+    : general(cause, "Activation could not be completed right now. Please try again.");
+}
 
 export default function Activate() {
   const { token, clear } = useHashToken("dad.staff.invitation");
-  const [setup, setSetup] = useState<Setup | null>(null);
-  const [password, setPassword] = useState("");
-  const [code, setCode] = useState("");
+  // The server cannot know the browser, so it renders as supported and the client corrects it.
+  const supported = useSyncExternalStore(unchanging, passkeysSupported, () => true);
+  const [invitation, setInvitation] = useState<{ value: Invitation; at: number } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
   const [error, setError] = useState("");
-  async function provision() {
+  const [used, setUsed] = useState(false);
+  // A refused invitation is forgotten, so this tab no longer offers it.
+  const refused = useCallback((cause: unknown) => {
+    if (!(cause instanceof ApiError && cause.status === 401)) {
+      setError(general(cause, "Your invitation could not be checked right now. Reload this page to try again."));
+      return;
+    }
+    setUsed(true);
+    setError(USED_INVITATION);
+    clear();
+  }, [clear]);
+  const load = useCallback(async () => {
+    const loaded = { value: await api<Invitation>("/donor/staff/activate/options", { method: "POST", body: JSON.stringify({ token }) }), at: Date.now() };
+    setInvitation(loaded);
+    return loaded;
+  }, [token]);
+  useEffect(() => {
+    if (!token) return;
+    let current = true;
+    load().catch((cause) => { if (current) refused(cause); });
+    return () => { current = false; };
+  }, [token, load, refused]);
+  async function create() {
+    if (busy || !invitation) return;
     setBusy(true); setError("");
-    try { setSetup(await api<Setup>("/donor/staff/provision", { method: "POST", body: JSON.stringify({ token }) })); }
-    catch (cause) { setError(explain(cause, "This invitation is unavailable or expired. Contact a DAD administrator.")); }
-    finally { setBusy(false); }
-  }
-  async function activate(event: React.FormEvent) {
-    event.preventDefault(); if (busy) return;
-    setBusy(true); setError("");
-    try { await api("/donor/staff/activate", { method: "POST", body: JSON.stringify({ token, password, code }) }); setDone(true); setSetup(null); clear(); }
-    catch (cause) { setError(explain(cause, "Activation was not confirmed. Check the authenticator code; invitations allow five attempts and expire after 24 hours.")); }
-    finally { setBusy(false); setPassword(""); setCode(""); }
+    let answered = false;
+    try {
+      const { value } = Date.now() - invitation.at < FRESH_FOR_MS ? invitation : await load();
+      const credential = await createPasskey(value.options);
+      answered = true;
+      await api("/donor/staff/activate", { method: "POST", body: JSON.stringify({ ceremony: value.ceremony, credential }) });
+      clear();
+      window.location.assign("/staff");
+    } catch (cause) {
+      setError(explainCreation(cause));
+      setBusy(false);
+      // An answered ceremony is spent, so another try needs a new one.
+      if (answered) load().catch(refused);
+    }
   }
   return <Page eyebrow="Staff" title="Activate your staff account">
-    {done ? <p>Wait for a new authenticator code, then <Link href="/staff/sign-in">sign in</Link>.</p>
-      : token === "" ? <p className="callout">Open this page from the private invitation link a DAD administrator sent you. If the link has expired, ask them for a replacement invitation.</p>
-      : !setup ? <><p>Keep this invitation private. It can activate one individual staff account.</p>
-        <button type="button" className="button" disabled={busy || !token} onClick={provision}>{busy ? "Checking…" : "Begin secure setup"}</button></> : <>
-        <p>Set up {setup.email} in your authenticator app using this private setup key:</p>
-        <p><code>{setup.secret}</code></p><p>Choose time-based codes, six digits, with a 30-second interval.</p>
-        <p><a href={setup.uri}>Open in an authenticator app</a></p>
-        <form onSubmit={activate}><fieldset disabled={busy}><legend>Confirm staff setup</legend>
-          <label>New password<input type="password" autoComplete="new-password" minLength={12} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
-          <label>Authenticator code<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value)} required /></label>
-          <button type="submit" className="button">{busy ? "Activating…" : "Activate account"}</button>
-        </fieldset></form>
-      </>}<Announcer status={done ? "Your account is active." : ""} alert={error} />
+    {used ? null : token === "" ? <p className="callout">Open this page from the private invitation link a DAD administrator sent you. If the link has expired, ask them for a replacement invitation.</p>
+      : invitation && <>
+        <p>This private invitation is for <strong>{invitation.value.name}</strong> ({invitation.value.email}). If that isn’t you, close this page and tell a DAD administrator.</p>
+        <p>Create a passkey to finish setting up your account. Your device or password manager saves it, then asks for your fingerprint, face, screen lock, or security key each time you sign in. There is no password to remember.</p>
+        {supported
+          // aria-disabled rather than disabled, so a cancelled prompt leaves focus on the button.
+          ? <button type="button" className="button" aria-disabled={busy || undefined} onClick={create}>Create a passkey</button>
+          : <p className="callout">{UNSUPPORTED_MESSAGE}</p>}
+      </>}
+    <Announcer status={busy ? WAITING_MESSAGE : token && !invitation && !error ? "Checking your invitation…" : ""} alert={error} />
+    {used && <p><Link className="button" href="/staff/sign-in">Staff sign-in</Link></p>}
   </Page>;
 }

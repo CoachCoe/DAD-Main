@@ -561,6 +561,34 @@ func (q *Queries) NextStripeEvent(ctx context.Context) (DonorStripeEvent, error)
 	return i, err
 }
 
+const nextSubscriptionWithoutAnchor = `-- name: NextSubscriptionWithoutAnchor :one
+SELECT a.id,a.checkout_id,a.stripe_subscription_id,s.donor_id FROM donor_subscriptions s
+JOIN donor_stripe_checkouts a ON a.id=s.attempt_id
+WHERE s.billing_anchor IS NULL AND s.status NOT IN ('canceled','incomplete_expired') AND a.id>$1::uuid
+ORDER BY a.id LIMIT 1
+`
+
+type NextSubscriptionWithoutAnchorRow struct {
+	ID                   pgtype.UUID `json:"id"`
+	CheckoutID           pgtype.UUID `json:"checkout_id"`
+	StripeSubscriptionID pgtype.Text `json:"stripe_subscription_id"`
+	DonorID              pgtype.UUID `json:"donor_id"`
+}
+
+// Subscriptions synced before the billing anchor was stored, in key order
+// after the cursor. Ended ones need no anchor.
+func (q *Queries) NextSubscriptionWithoutAnchor(ctx context.Context, after pgtype.UUID) (NextSubscriptionWithoutAnchorRow, error) {
+	row := q.db.QueryRow(ctx, nextSubscriptionWithoutAnchor, after)
+	var i NextSubscriptionWithoutAnchorRow
+	err := row.Scan(
+		&i.ID,
+		&i.CheckoutID,
+		&i.StripeSubscriptionID,
+		&i.DonorID,
+	)
+	return i, err
+}
+
 const paymentUpdateByID = `-- name: PaymentUpdateByID :one
 SELECT donor_id, attempt_id, customer_id, request_params, stripe_session_id, hosted_url, status, completed_at, id, created_at FROM donor_payment_updates WHERE id=$1 FOR UPDATE
 `
@@ -715,20 +743,23 @@ func (q *Queries) SavePaymentUpdate(ctx context.Context, arg SavePaymentUpdatePa
 }
 
 const saveSubscription = `-- name: SaveSubscription :one
-INSERT INTO donor_subscriptions (id,attempt_id,donor_id,status,period_end,stops_at,observed_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7)
+INSERT INTO donor_subscriptions (id,attempt_id,donor_id,status,period_end,stops_at,billing_anchor,external_change,observed_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 ON CONFLICT (attempt_id) DO UPDATE SET status=EXCLUDED.status,period_end=EXCLUDED.period_end,
-stops_at=EXCLUDED.stops_at,observed_at=EXCLUDED.observed_at RETURNING attempt_id, donor_id, status, period_end, stops_at, observed_at, id, created_at
+stops_at=EXCLUDED.stops_at,billing_anchor=EXCLUDED.billing_anchor,external_change=EXCLUDED.external_change,
+observed_at=EXCLUDED.observed_at RETURNING attempt_id, donor_id, status, period_end, stops_at, observed_at, id, created_at, billing_anchor, external_change
 `
 
 type SaveSubscriptionParams struct {
-	ID         pgtype.UUID        `json:"id"`
-	AttemptID  pgtype.UUID        `json:"attempt_id"`
-	DonorID    pgtype.UUID        `json:"donor_id"`
-	Status     string             `json:"status"`
-	PeriodEnd  pgtype.Timestamptz `json:"period_end"`
-	StopsAt    pgtype.Timestamptz `json:"stops_at"`
-	ObservedAt pgtype.Timestamptz `json:"observed_at"`
+	ID             pgtype.UUID        `json:"id"`
+	AttemptID      pgtype.UUID        `json:"attempt_id"`
+	DonorID        pgtype.UUID        `json:"donor_id"`
+	Status         string             `json:"status"`
+	PeriodEnd      pgtype.Timestamptz `json:"period_end"`
+	StopsAt        pgtype.Timestamptz `json:"stops_at"`
+	BillingAnchor  pgtype.Timestamptz `json:"billing_anchor"`
+	ExternalChange bool               `json:"external_change"`
+	ObservedAt     pgtype.Timestamptz `json:"observed_at"`
 }
 
 func (q *Queries) SaveSubscription(ctx context.Context, arg SaveSubscriptionParams) (DonorSubscription, error) {
@@ -739,6 +770,8 @@ func (q *Queries) SaveSubscription(ctx context.Context, arg SaveSubscriptionPara
 		arg.Status,
 		arg.PeriodEnd,
 		arg.StopsAt,
+		arg.BillingAnchor,
+		arg.ExternalChange,
 		arg.ObservedAt,
 	)
 	var i DonorSubscription
@@ -751,6 +784,8 @@ func (q *Queries) SaveSubscription(ctx context.Context, arg SaveSubscriptionPara
 		&i.ObservedAt,
 		&i.ID,
 		&i.CreatedAt,
+		&i.BillingAnchor,
+		&i.ExternalChange,
 	)
 	return i, err
 }

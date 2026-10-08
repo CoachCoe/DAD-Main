@@ -3,18 +3,17 @@
 import { useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { StaleNotice } from "@/components/donor/StaleNotice";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, ApiError, unconfirmedMessage } from "@/lib/api";
 import { formatMoney, MAX_GIFT_MINOR, MIN_GIFT_MINOR, monthlyFraming, parseDollars } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
-import { formatDateTime } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 
 type Change = { request_id: string; amount_minor: number; previous_minor: number; effective_at: string; confirmed: boolean };
-type Options = { state: "unavailable" } | { state: "ready"; stale?: boolean; subscription_id: string; amount_minor: number; effective_at: string; change: Change | null };
+type Options = { state: "unavailable" } | { state: "ready"; subscription_id: string; amount_minor: number; effective_at: string; change: Change | null };
 
-const confirmedCopy = (change: Change) => `Last amount change confirmed: ${formatMoney(change.amount_minor)}/month from ${formatDateTime(change.effective_at)}.`;
+const confirmedCopy = (change: Change) => `Last amount change confirmed: ${formatMoney(change.amount_minor)}/month from ${formatDate(change.effective_at)}.`;
 
 export default function Amount() {
   const [amount, setAmount] = useState("30");
@@ -36,7 +35,7 @@ export default function Amount() {
   const amountInput = useRef<HTMLInputElement>(null);
   const step = useStepFocus(confirmation !== null);
   const messages = resourceMessages(resource, { loading: "Checking monthly giving…",
-    failure: "We could not load amount changes. Finish any active pause and refresh your billing details." });
+    failure: "We could not load amount changes right now. Please refresh in a moment." });
 
   function review(event: React.FormEvent) {
     event.preventDefault(); setError(""); setMessage(""); setAmountInvalid(false);
@@ -68,17 +67,16 @@ export default function Amount() {
   }
   return <Page eyebrow="My account" title="Change monthly amount" back={{ href: "/account/recurring", label: "Manage monthly giving" }}>
     {signedOut || resource.state === "signedOut" ? <SignInPrompt>Sign in to manage your giving</SignInPrompt> : <>
-      {data?.state === "unavailable" && <p>No active monthly gift is available to change.</p>}
+      {data?.state === "unavailable" && <p>Your monthly amount can’t be changed right now. Changes are available for an active gift that isn’t paused or ending.</p>}
       {data?.state === "ready" && <>
-        {data.stale && <StaleNotice />}
         <p className="lead">Your next monthly amount: <strong>{formatMoney(data.amount_minor)}/month</strong>.</p>
         {data.change?.confirmed && !message && <p>{confirmedCopy(data.change)}</p>}
         {confirmation ? <div className="callout">
           <h2 ref={step.heading} tabIndex={-1}>Confirm new monthly amount</h2>
-          <p>{formatMoney(confirmation.previous_minor)}/month → {formatMoney(confirmation.amount_minor)}/month, starting {formatDateTime(confirmation.effective_at)}.</p>
+          <p>{formatMoney(confirmation.previous_minor)}/month → {formatMoney(confirmation.amount_minor)}/month, starting {formatDate(confirmation.effective_at)}.</p>
           <p>Past gifts and outstanding invoices keep their original amounts. Your streak continues with successful monthly charges.</p>
           <div className="actions">
-            <button type="button" className="button" disabled={busy || data.stale} onClick={save}>{busy ? "Checking change…" : "Confirm amount change"}</button>
+            <button type="button" className="button" disabled={busy} onClick={save}>{busy ? "Checking change…" : "Confirm amount change"}</button>
             <button type="button" className="secondary" disabled={busy || requestKey !== null} onClick={() => setConfirmation(null)}>Back</button>
           </div>
         </div> : <form onSubmit={review}>
@@ -92,12 +90,12 @@ export default function Amount() {
           <label>Monthly amount in USD<input ref={amountInput} inputMode="decimal" value={amount} required
             aria-invalid={amountInvalid || undefined} aria-describedby={amountInvalid ? "amount-error" : undefined}
             onChange={(event) => { setAmount(event.target.value); setAmountInvalid(false); }} /></label>
-          <button type="submit" ref={step.trigger} className="button" disabled={data.stale}>Review amount change</button>
+          <button type="submit" ref={step.trigger} className="button">Review amount change</button>
         </form>}
       </>}
       <p className="note">Sandbox only. This changes future test gifts, with no charge or proration today.</p>
       <Announcer id="amount-error" status={messages.status || message} alert={error || messages.alert} />
-      {(failed || error || (data?.state === "ready" && data.stale)) && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh amount details</button>}
+      {(failed || error) && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh amount details</button>}
     </>}
   </Page>;
 }

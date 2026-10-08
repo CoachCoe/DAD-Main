@@ -26,7 +26,7 @@ func (s RecurringService) ChangeAmount(ctx context.Context, token string, r Amou
 	if !ValidRequestID(r.RequestID) || !validAmount(r.Amount) || !validAmount(r.Previous) || r.EffectiveAt.IsZero() {
 		return AmountChange{}, payments.ErrFacts
 	}
-	snapshot, err := s.donorSnapshot(ctx, token)
+	snapshot, err := s.donorRefresh(ctx, token)
 	if err != nil {
 		return AmountChange{}, err
 	}

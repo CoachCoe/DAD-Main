@@ -20,8 +20,10 @@ type route struct {
 }
 
 // routes is the complete API surface. Reads are unguarded because they cannot
-// change state. Mutations pass the Origin and rate-limit guard, which admits
-// the native donor app on donor account routes only; the Stripe webhook is
+// change state. Mutations pass the Origin and rate-limit guard: donor and
+// public routes admit the public origin, and the native donor app on donor
+// account routes only; staff routes admit only the staff origin, and refuse any
+// request a browser reports as started elsewhere. The Stripe webhook is
 // authenticated by its signature instead.
 func (a *api) routes() []route {
 	return []route{
@@ -37,7 +39,7 @@ func (a *api) routes() []route {
 		a.donorEntry("POST /donor/login", a.login),
 		a.donorEntry("POST /donor/claim", a.claim),
 		a.donorEntry("POST /donor/email-change/confirm", a.confirmEmailChange),
-		{"POST /donor/logout", donorAuth, a.guarded(accountLimit, true, a.logout)},
+		{"POST /donor/logout", donorAuth, a.guarded(a.Origin, accountLimit, true, a.logout)},
 		a.donorWrite("POST /donor/logout-all", a.logoutAll),
 		a.donorWrite("POST /donor/me/email-change", a.requestEmailChange),
 
@@ -65,10 +67,11 @@ func (a *api) routes() []route {
 		a.donorWrite("POST /donor/me/recurring/amount", recurringCommand(a, changeAmount)),
 		a.donorWrite("POST /donor/me/payment-method/setup", a.beginPaymentUpdate),
 
+		a.staffChallenge("POST /donor/staff/sign-in/options", a.beginStaffSignIn),
 		a.staffEntry("POST /donor/staff/sign-in", a.staffSignIn),
-		a.staffEntry("POST /donor/staff/provision", a.staffProvision),
+		a.staffChallenge("POST /donor/staff/activate/options", a.beginStaffActivation),
 		a.staffEntry("POST /donor/staff/activate", a.staffActivate),
-		{"POST /donor/staff/sign-out", staffAuth, a.guarded(staffLimit, false, a.staffSignOut)},
+		{"POST /donor/staff/sign-out", staffAuth, sameOrigin(a.guarded(a.StaffOrigin, staffLimit, false, a.staffSignOut))},
 		a.staffRead("GET /donor/staff/me", a.staffMe),
 		a.staffRead("GET /donor/staff/accounts", a.staffAccounts),
 		a.staffWrite("POST /donor/staff/accounts", a.inviteStaff),
@@ -109,12 +112,12 @@ func (a *api) public(pattern string, handler http.HandlerFunc) route {
 
 // visitor routes are anonymous browser mutations on the public site.
 func (a *api) visitor(pattern string, handler http.HandlerFunc) route {
-	return route{pattern, noAuth, a.guarded(visitorLimit, false, handler)}
+	return route{pattern, noAuth, a.guarded(a.Origin, visitorLimit, false, handler)}
 }
 
 // donorEntry routes exchange an emailed proof, from a browser or the app.
 func (a *api) donorEntry(pattern string, handler http.HandlerFunc) route {
-	return route{pattern, noAuth, a.guarded(authLimit, true, handler)}
+	return route{pattern, noAuth, a.guarded(a.Origin, authLimit, true, handler)}
 }
 
 func (a *api) donorRead(pattern string, handler sessionHandler) route {
@@ -122,20 +125,42 @@ func (a *api) donorRead(pattern string, handler sessionHandler) route {
 }
 
 func (a *api) donorWrite(pattern string, handler sessionHandler) route {
-	return route{pattern, donorAuth, a.guarded(accountLimit, true, signedIn(donorSession, handler))}
+	return route{pattern, donorAuth, a.guarded(a.Origin, accountLimit, true, signedIn(donorSession, handler))}
 }
 
-// staffEntry routes verify staff credentials; the back office is browser-only.
+// staffChallenge routes start passkey ceremonies. A page asks for one before
+// anyone acts, so they take the staff budget; answering one takes the
+// stricter sign-in budget.
+func (a *api) staffChallenge(pattern string, handler http.HandlerFunc) route {
+	return route{pattern, noAuth, sameOrigin(a.guarded(a.StaffOrigin, staffLimit, false, handler))}
+}
+
+// staffEntry routes answer passkey ceremonies; the back office is browser-only.
 func (a *api) staffEntry(pattern string, handler http.HandlerFunc) route {
-	return route{pattern, noAuth, a.guarded(authLimit, false, handler)}
+	return route{pattern, noAuth, sameOrigin(a.guarded(a.StaffOrigin, authLimit, false, handler))}
 }
 
 func (a *api) staffRead(pattern string, handler sessionHandler) route {
-	return route{pattern, staffAuth, signedIn(staffSession, handler)}
+	return route{pattern, staffAuth, sameOrigin(signedIn(a.staffSession, handler))}
 }
 
 func (a *api) staffWrite(pattern string, handler sessionHandler) route {
-	return route{pattern, staffAuth, a.guarded(staffLimit, false, signedIn(staffSession, handler))}
+	return route{pattern, staffAuth, sameOrigin(a.guarded(a.StaffOrigin, staffLimit, false, signedIn(a.staffSession, handler)))}
+}
+
+// sameOrigin refuses a request the browser reports, in Sec-Fetch-Site, as
+// started by another host. The staff and public hosts are the same site, so
+// the SameSite=Strict staff cookie still rides on a link followed from the
+// public host, which could otherwise start a staff read with an effect, such
+// as an audited export download. Typed addresses and bookmarks report none.
+func sameOrigin(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+			writeError(w, r, http.StatusForbidden, "Request origin is not allowed", nil)
+			return
+		}
+		next(w, r)
+	}
 }
 
 // sessionHandler serves a signed-in request. The session is only a claim: the
@@ -154,5 +179,3 @@ func signedIn(session func(*http.Request) string, next sessionHandler) http.Hand
 		next(w, r, token)
 	}
 }
-
-func staffSession(r *http.Request) string { return cookieValue(r, staffCookie) }

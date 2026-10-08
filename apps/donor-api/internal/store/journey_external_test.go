@@ -61,7 +61,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	if err != nil || dsn == "" || (config.ConnConfig.Database != "donor_go" && !strings.HasPrefix(config.ConnConfig.Database, "donor_go_")) {
 		t.Fatal("dedicated migrated donor_go database required")
 	}
-	pool, err := store.Open(ctx, dsn)
+	pool, err := store.Open(ctx, dsn, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,7 +26,7 @@ func TestAppSessionLifecycle(t *testing.T) {
 	if err != nil || dsn == "" || (config.ConnConfig.Database != "donor_go" && !strings.HasPrefix(config.ConnConfig.Database, "donor_go_")) {
 		t.Fatal("TEST_DATABASE_URL must name a migrated donor_go test database")
 	}
-	pool, err := store.Open(ctx, dsn)
+	pool, err := store.Open(ctx, dsn, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

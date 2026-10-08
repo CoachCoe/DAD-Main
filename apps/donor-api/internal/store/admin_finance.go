@@ -56,6 +56,27 @@ func staffGift(ctx context.Context, q *queries.Queries, donor, id pgtype.UUID) (
 	return gift, err
 }
 
+// refundSnapshot is the processor's refund list fetched without holding the
+// donor lock, with the count of local refund observations it was read after.
+type refundSnapshot struct {
+	gift         queries.DonorGift
+	observations int64
+	rows         []payments.Object
+}
+
+// currentRefunds returns the processor's refunds for the locked gift. The
+// snapshot is used only if no refund state was recorded after it was read.
+func (s StaffFinanceService) currentRefunds(ctx context.Context, q *queries.Queries, gift queries.DonorGift, snapshot refundSnapshot) ([]payments.Object, int64, error) {
+	observations, err := q.GiftRefundObservations(ctx, gift.ID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if observations != snapshot.observations || gift.ID != snapshot.gift.ID || gift.StripePaymentIntentID != snapshot.gift.StripePaymentIntentID {
+		return s.refunds(ctx, gift)
+	}
+	return refundBalance(gift, snapshot.rows)
+}
+
 func (s StaffFinanceService) refunds(ctx context.Context, gift queries.DonorGift) ([]payments.Object, int64, error) {
 	if s.Gateway == nil {
 		return nil, 0, payments.ErrUnconfigured
@@ -326,7 +347,7 @@ func (s StaffFinanceService) Cancel(ctx context.Context, token string, r StaffFi
 		return donor, nil
 	}
 	recurring := s.recurring()
-	snapshot, err := recurring.prefetchSubscription(ctx, r.DonorID)
+	snapshot, err := recurring.refresh(ctx, owner, r.DonorID)
 	if err != nil {
 		return StaffCancellation{}, s.auditFailure(ctx, token, "gift.cancel", "gift.cancellation_failed", r, err)
 	}

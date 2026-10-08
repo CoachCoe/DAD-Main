@@ -11,13 +11,15 @@ import (
 	"impactgraph/donor-api/internal/store/queries"
 )
 
+// Options are offered from the subscription as last synced; each command
+// checks the processor's current state before it changes anything.
+
 // AmountOptions offers a new amount from the next renewal. An unavailable
 // offer carries only its state.
 type AmountOptions struct {
 	AmountMinor    int64         `json:"amount_minor"`
 	Change         *AmountChange `json:"change"`
 	EffectiveAt    time.Time     `json:"effective_at"`
-	Stale          bool          `json:"stale,omitempty"`
 	State          string        `json:"state"`
 	SubscriptionID string        `json:"subscription_id"`
 }
@@ -25,9 +27,8 @@ type AmountOptions struct {
 func (o AmountOptions) MarshalJSON() ([]byte, error) {
 	if o.State != "ready" {
 		return json.Marshal(struct {
-			Stale bool   `json:"stale,omitempty"`
 			State string `json:"state"`
-		}{o.Stale, o.State})
+		}{o.State})
 	}
 	type options AmountOptions
 	return json.Marshal(options(o))
@@ -41,7 +42,6 @@ type PauseOption struct {
 type PauseOptions struct {
 	Options        []PauseOption `json:"options"`
 	Pause          *PauseView    `json:"pause"`
-	Stale          bool          `json:"stale,omitempty"`
 	State          string        `json:"state"`
 	SubscriptionID string        `json:"subscription_id,omitempty"`
 }
@@ -54,12 +54,8 @@ type ResumeOptions struct {
 	OriginalResume *time.Time `json:"original_resume,omitempty"`
 	PauseID        string     `json:"pause_id,omitempty"`
 	RequestID      string     `json:"request_id,omitempty"`
-	Stale          bool       `json:"stale,omitempty"`
 	State          string     `json:"state"`
 }
-
-// Options cannot be offered from stored state: they are unavailable, and
-// marked stale, while the processor cannot be read.
 
 // latestSubscription returns the donor's latest monthly attempt, locked, and
 // whether it has a subscription to act on yet.
@@ -71,27 +67,37 @@ func latestSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UU
 	return attempt, err == nil && attempt.StripeSubscriptionID.Valid, err
 }
 
+// confirmedPause returns the pause voiding attempt's renewals, or nil: a sync
+// confirms a pause or resumption only once the processor shows it, and the
+// voiding lasts until its resumption date.
+func confirmedPause(ctx context.Context, q *queries.Queries, attempt pgtype.UUID, now time.Time) (*PauseWindow, error) {
+	pause, err := q.LatestPause(ctx, attempt)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !pause.ConfirmedAt.Valid) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	until, err := effectiveResume(ctx, q, pause)
+	if err != nil || !now.Before(until) {
+		return nil, err
+	}
+	return &PauseWindow{StartsAt: pause.StartsAt.Time, ResumesAt: until}, nil
+}
+
 // AmountOptions offers the donor's next-renewal amount change.
 func (s RecurringService) AmountOptions(ctx context.Context, token string) (AmountOptions, error) {
-	unavailable := AmountOptions{State: "unavailable"}
-	snapshot, live, err := s.viewSnapshot(ctx, token)
-	if err != nil {
-		return AmountOptions{}, err
-	}
-	if !live {
-		return AmountOptions{State: "unavailable", Stale: true}, nil
-	}
-	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (AmountOptions, error) {
-		q := queries.New(tx)
-		attempt, ok, err := latestSubscription(ctx, q, d.ID)
-		if err != nil || !ok {
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (AmountOptions, error) {
+		unavailable := AmountOptions{State: "unavailable"}
+		attempt, schedule, err := syncedSubscription(ctx, q, d.ID)
+		if err != nil || schedule == nil {
 			return unavailable, err
 		}
-		schedule, _, err := s.read(ctx, tx, attempt, now, forAmount, snapshot)
+		paused, err := confirmedPause(ctx, q, attempt.ID, now)
 		if err != nil {
 			return AmountOptions{}, err
 		}
-		if schedule.Status != "active" || schedule.StopsAt.Valid {
+		if schedule.Status != "active" || schedule.StopsAt.Valid || schedule.ExternalChange || paused != nil {
 			return unavailable, nil
 		}
 		draft, err := q.CheckoutDraft(ctx, attempt.CheckoutID)
@@ -115,28 +121,14 @@ func (s RecurringService) AmountOptions(ctx context.Context, token string) (Amou
 }
 
 // PauseOptions offers pauses of 1 to 3 renewals with their exact resumption
-// dates, or describes the pause in effect.
+// dates, or describes the pause in effect, which stays shown while Stripe
+// holds a change that withholds new offers.
 func (s RecurringService) PauseOptions(ctx context.Context, token string) (PauseOptions, error) {
-	unavailable := PauseOptions{State: "unavailable", Options: []PauseOption{}}
-	snapshot, live, err := s.viewSnapshot(ctx, token)
-	if err != nil {
-		return PauseOptions{}, err
-	}
-	if !live {
-		return PauseOptions{State: "unavailable", Stale: true, Options: []PauseOption{}}, nil
-	}
-	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (PauseOptions, error) {
-		q := queries.New(tx)
-		attempt, ok, err := latestSubscription(ctx, q, d.ID)
-		if err != nil || !ok {
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (PauseOptions, error) {
+		unavailable := PauseOptions{State: "unavailable", Options: []PauseOption{}}
+		attempt, schedule, err := syncedSubscription(ctx, q, d.ID)
+		if err != nil || schedule == nil {
 			return unavailable, err
-		}
-		schedule, remote, err := s.read(ctx, tx, attempt, now, forPause, snapshot)
-		if err != nil {
-			return PauseOptions{}, err
-		}
-		if _, err = refreshProjection(ctx, tx, d.ID, now); err != nil {
-			return PauseOptions{}, err
 		}
 		if schedule.StopsAt.Valid || terminalSubscription(schedule.Status) {
 			return unavailable, nil
@@ -160,13 +152,14 @@ func (s RecurringService) PauseOptions(ctx context.Context, token string) (Pause
 				return PauseOptions{}, err
 			}
 			out.Pause = &view
+		} else if schedule.ExternalChange {
+			return unavailable, nil
 		} else if schedule.Status == "active" {
-			anchor, err := remote.Unix("billing_cycle_anchor")
-			if err != nil {
-				return PauseOptions{}, err
+			if !schedule.BillingAnchor.Valid {
+				return unavailable, nil
 			}
 			for months := int32(1); months <= 3; months++ {
-				until, err := renewalAfter(schedule.PeriodEnd.Time, months, anchor)
+				until, err := renewalAfter(schedule.PeriodEnd.Time, months, schedule.BillingAnchor.Time)
 				if err != nil {
 					return PauseOptions{}, err
 				}
@@ -180,26 +173,11 @@ func (s RecurringService) PauseOptions(ctx context.Context, token string) (Pause
 // ResumeOptions offers to end a confirmed pause at the next renewal, or
 // describes the resumption already requested.
 func (s RecurringService) ResumeOptions(ctx context.Context, token string) (ResumeOptions, error) {
-	unavailable := ResumeOptions{State: "unavailable"}
-	snapshot, live, err := s.viewSnapshot(ctx, token)
-	if err != nil {
-		return ResumeOptions{}, err
-	}
-	if !live {
-		return ResumeOptions{State: "unavailable", Stale: true}, nil
-	}
-	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (ResumeOptions, error) {
-		q := queries.New(tx)
-		attempt, ok, err := latestSubscription(ctx, q, d.ID)
-		if err != nil || !ok {
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (ResumeOptions, error) {
+		unavailable := ResumeOptions{State: "unavailable"}
+		attempt, schedule, err := syncedSubscription(ctx, q, d.ID)
+		if err != nil || schedule == nil {
 			return unavailable, err
-		}
-		schedule, remote, err := s.read(ctx, tx, attempt, now, forPause, snapshot)
-		if err != nil {
-			return ResumeOptions{}, err
-		}
-		if _, err = refreshProjection(ctx, tx, d.ID, now); err != nil {
-			return ResumeOptions{}, err
 		}
 		pause, err := q.LatestPause(ctx, attempt.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -219,7 +197,9 @@ func (s RecurringService) ResumeOptions(ctx context.Context, token string) (Resu
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return ResumeOptions{}, err
 		}
-		if remote.Absent("pause_collection") || !schedule.PeriodEnd.Time.Before(pause.ResumesAt.Time) || !now.Before(schedule.PeriodEnd.Time) {
+		// A confirmed pause still runs until its resumption date, so the
+		// processor is voiding the renewal offered here.
+		if schedule.ExternalChange || !schedule.PeriodEnd.Time.Before(pause.ResumesAt.Time) || !now.Before(schedule.PeriodEnd.Time) {
 			return unavailable, nil
 		}
 		return ResumeOptions{State: "ready", PauseID: pause.ID.String(), NextRenewal: &schedule.PeriodEnd.Time, OriginalResume: &pause.ResumesAt.Time}, nil

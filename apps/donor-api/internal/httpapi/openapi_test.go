@@ -192,6 +192,8 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/me/recurring/resume":                            store.Resumption{},
 		"POST /donor/me/recurring/amount":                            store.AmountChange{},
 		"POST /donor/me/payment-method/setup":                        store.PaymentUpdate{},
+		"POST /donor/staff/sign-in/options":                          store.Ceremony{},
+		"POST /donor/staff/activate/options":                         store.Invitation{},
 		"GET /donor/staff/me":                                        store.StaffView{},
 		"GET /donor/staff/accounts":                                  []store.StaffView{},
 		"POST /donor/staff/accounts/{staff_id}/disable":              store.AccessChange{},
@@ -221,9 +223,9 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/me/recurring/pause":                             pauseBody{},
 		"POST /donor/me/recurring/resume":                            resumeBody{},
 		"POST /donor/me/recurring/amount":                            amountBody{},
-		"POST /donor/staff/sign-in":                                  signInBody{},
-		"POST /donor/staff/provision":                                provisionBody{},
-		"POST /donor/staff/activate":                                 activationBody{},
+		"POST /donor/staff/sign-in":                                  passkeyBody{},
+		"POST /donor/staff/activate/options":                         invitationTokenBody{},
+		"POST /donor/staff/activate":                                 passkeyBody{},
 		"POST /donor/staff/accounts":                                 invitationBody{},
 		"POST /donor/staff/accounts/{staff_id}/role":                 roleBody{},
 		"POST /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund": refundBody{},
@@ -295,9 +297,10 @@ func (c *contract) checkShape(t *testing.T, where string, typ reflect.Type, sche
 	}
 	properties, _ := schema["properties"].(map[string]any)
 	fields := map[string]reflect.Type{}
-	for field := range typ.Fields() {
+	for _, field := range reflect.VisibleFields(typ) {
 		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
-		if !field.IsExported() || name == "-" {
+		// encoding/json promotes the fields of an untagged embedded struct.
+		if !field.IsExported() || name == "-" || (field.Anonymous && name == "" && field.Type.Kind() == reflect.Struct) {
 			continue
 		}
 		fields[cmp.Or(name, field.Name)] = field.Type

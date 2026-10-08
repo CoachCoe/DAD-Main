@@ -238,17 +238,12 @@ type DonorResumption struct {
 }
 
 type DonorStaff struct {
-	Email        string             `json:"email"`
-	Name         string             `json:"name"`
-	Role         string             `json:"role"`
-	Disabled     bool               `json:"disabled"`
-	PasswordHash pgtype.Text        `json:"password_hash"`
-	TotpSecret   []byte             `json:"totp_secret"`
-	TotpCounter  int64              `json:"totp_counter"`
-	Failures     int32              `json:"failures"`
-	LockedUntil  pgtype.Timestamptz `json:"locked_until"`
-	ID           pgtype.UUID        `json:"id"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	Email     string             `json:"email"`
+	Name      string             `json:"name"`
+	Role      string             `json:"role"`
+	Disabled  bool               `json:"disabled"`
+	ID        pgtype.UUID        `json:"id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type DonorStaffAction struct {
@@ -267,14 +262,29 @@ type DonorStaffAction struct {
 }
 
 type DonorStaffInvite struct {
-	StaffID       pgtype.UUID        `json:"staff_id"`
-	TokenHash     string             `json:"token_hash"`
-	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
-	ConsumedAt    pgtype.Timestamptz `json:"consumed_at"`
-	PendingSecret []byte             `json:"pending_secret"`
-	Attempts      int32              `json:"attempts"`
-	ID            pgtype.UUID        `json:"id"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	StaffID    pgtype.UUID        `json:"staff_id"`
+	TokenHash  string             `json:"token_hash"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
+	Attempts   int32              `json:"attempts"`
+	ID         pgtype.UUID        `json:"id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorStaffPasskey struct {
+	StaffID           pgtype.UUID        `json:"staff_id"`
+	CredentialID      []byte             `json:"credential_id"`
+	PublicKey         []byte             `json:"public_key"`
+	SignCount         int64              `json:"sign_count"`
+	Transports        []string           `json:"transports"`
+	Aaguid            []byte             `json:"aaguid"`
+	AttestationFormat string             `json:"attestation_format"`
+	UserVerified      bool               `json:"user_verified"`
+	BackupEligible    bool               `json:"backup_eligible"`
+	BackupState       bool               `json:"backup_state"`
+	LastUsedAt        pgtype.Timestamptz `json:"last_used_at"`
+	ID                pgtype.UUID        `json:"id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
 type DonorStripeCheckout struct {
@@ -303,12 +313,14 @@ type DonorStripeEvent struct {
 }
 
 type DonorSubscription struct {
-	AttemptID  pgtype.UUID        `json:"attempt_id"`
-	DonorID    pgtype.UUID        `json:"donor_id"`
-	Status     string             `json:"status"`
-	PeriodEnd  pgtype.Timestamptz `json:"period_end"`
-	StopsAt    pgtype.Timestamptz `json:"stops_at"`
-	ObservedAt pgtype.Timestamptz `json:"observed_at"`
-	ID         pgtype.UUID        `json:"id"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	AttemptID      pgtype.UUID        `json:"attempt_id"`
+	DonorID        pgtype.UUID        `json:"donor_id"`
+	Status         string             `json:"status"`
+	PeriodEnd      pgtype.Timestamptz `json:"period_end"`
+	StopsAt        pgtype.Timestamptz `json:"stops_at"`
+	ObservedAt     pgtype.Timestamptz `json:"observed_at"`
+	ID             pgtype.UUID        `json:"id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	BillingAnchor  pgtype.Timestamptz `json:"billing_anchor"`
+	ExternalChange bool               `json:"external_change"`
 }

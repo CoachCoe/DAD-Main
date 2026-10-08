@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Inter, Space_Grotesk } from "next/font/google";
-import { SiteFrame } from "@/components/donor/SiteFrame";
 import "./globals.css";
 import { webTokenVariables } from "@/design/web";
 
@@ -29,9 +28,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" style={webTokenVariables} className={`${sans.variable} ${display.variable} ${mono.variable}`}>
-      <body>
-        <SiteFrame>{children}</SiteFrame>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

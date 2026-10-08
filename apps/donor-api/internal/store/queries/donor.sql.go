@@ -102,6 +102,64 @@ func (q *Queries) InsertReferralTouch(ctx context.Context, arg InsertReferralTou
 	return err
 }
 
+const purgeReferralTouches = `-- name: PurgeReferralTouches :many
+WITH deleted AS (
+ DELETE FROM donor_referral_touches WHERE id=ANY(ARRAY(
+  SELECT t.id FROM donor_referral_touches t
+  WHERE (t.touched_at,t.id)>($1::timestamptz,$2::uuid)
+  AND t.touched_at<$3::timestamptz AND t.expires_at<=$4::timestamptz
+  AND NOT EXISTS(SELECT 1 FROM donor_checkouts c JOIN donor_gifts g ON g.checkout_id=c.id
+   WHERE c.referrer_id=t.referrer_id AND c.referral_expires_at=t.expires_at AND c.referral_kind=t.kind
+   AND g.referrer_id IS NOT NULL)
+  ORDER BY t.touched_at,t.id LIMIT $5 FOR UPDATE OF t SKIP LOCKED
+ )) RETURNING touched_at,id
+)
+SELECT touched_at,id FROM deleted ORDER BY touched_at,id
+`
+
+type PurgeReferralTouchesParams struct {
+	AfterTouchedAt pgtype.Timestamptz `json:"after_touched_at"`
+	AfterID        pgtype.UUID        `json:"after_id"`
+	TouchedBefore  pgtype.Timestamptz `json:"touched_before"`
+	AsOf           pgtype.Timestamptz `json:"as_of"`
+	Batch          int32              `json:"batch"`
+}
+
+type PurgeReferralTouchesRow struct {
+	TouchedAt pgtype.Timestamptz `json:"touched_at"`
+	ID        pgtype.UUID        `json:"id"`
+}
+
+// A checkout copies its touch's referrer, kind and expiry exactly, and its gift
+// keeps the referrer only if paid before that expiry, so a closed touch with no
+// such gift never converted. Rows are visited in key order after the cursor so
+// that touches kept for good are passed over once per pass.
+func (q *Queries) PurgeReferralTouches(ctx context.Context, arg PurgeReferralTouchesParams) ([]PurgeReferralTouchesRow, error) {
+	rows, err := q.db.Query(ctx, purgeReferralTouches,
+		arg.AfterTouchedAt,
+		arg.AfterID,
+		arg.TouchedBefore,
+		arg.AsOf,
+		arg.Batch,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PurgeReferralTouchesRow{}
+	for rows.Next() {
+		var i PurgeReferralTouchesRow
+		if err := rows.Scan(&i.TouchedAt, &i.ID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordPreferenceConsent = `-- name: RecordPreferenceConsent :exec
 INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,consent_version,source)
 VALUES($1,$2,$3,$4,$5,'r1-notifications-v1','account')

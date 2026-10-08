@@ -26,7 +26,7 @@ func (s RecurringService) Resume(ctx context.Context, token string, r Resumption
 	if !ValidRequestID(r.RequestID) || r.NextRenewal.IsZero() {
 		return Resumption{}, payments.ErrFacts
 	}
-	snapshot, err := s.donorSnapshot(ctx, token)
+	snapshot, err := s.donorRefresh(ctx, token)
 	if err != nil {
 		return Resumption{}, err
 	}

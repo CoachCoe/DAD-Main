@@ -35,3 +35,21 @@ FROM donor_gifts g CROSS JOIN LATERAL (
 ) r
 WHERE g.donor_id=$1
 ORDER BY g.paid_at DESC,g.id DESC LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+
+-- name: PurgeReferralTouches :many
+-- A checkout copies its touch's referrer, kind and expiry exactly, and its gift
+-- keeps the referrer only if paid before that expiry, so a closed touch with no
+-- such gift never converted. Rows are visited in key order after the cursor so
+-- that touches kept for good are passed over once per pass.
+WITH deleted AS (
+ DELETE FROM donor_referral_touches WHERE id=ANY(ARRAY(
+  SELECT t.id FROM donor_referral_touches t
+  WHERE (t.touched_at,t.id)>(sqlc.arg(after_touched_at)::timestamptz,sqlc.arg(after_id)::uuid)
+  AND t.touched_at<sqlc.arg(touched_before)::timestamptz AND t.expires_at<=sqlc.arg(as_of)::timestamptz
+  AND NOT EXISTS(SELECT 1 FROM donor_checkouts c JOIN donor_gifts g ON g.checkout_id=c.id
+   WHERE c.referrer_id=t.referrer_id AND c.referral_expires_at=t.expires_at AND c.referral_kind=t.kind
+   AND g.referrer_id IS NOT NULL)
+  ORDER BY t.touched_at,t.id LIMIT sqlc.arg(batch) FOR UPDATE OF t SKIP LOCKED
+ )) RETURNING touched_at,id
+)
+SELECT touched_at,id FROM deleted ORDER BY touched_at,id;

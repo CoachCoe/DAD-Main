@@ -3,6 +3,7 @@ package payments
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 
@@ -40,13 +41,34 @@ type CheckoutGateway interface {
 	CreateCheckout(context.Context, []byte, string) (RemoteCheckout, error)
 }
 
+// ValidateOrigin accepts an exact HTTPS origin, or plain HTTP on a loopback
+// name for local runs. It must be written as browsers serialize it, in
+// lowercase without a default port, since request Origin headers and passkey
+// client data are compared with it byte for byte.
 func ValidateOrigin(origin string) error {
 	u, err := url.Parse(origin)
 	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
-		(u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {
-		return errors.New("DONOR_PUBLIC_ORIGIN must be an HTTPS origin (HTTP localhost for tests)")
+		(u.Scheme != "https" && !(u.Scheme == "http" && loopback(u.Hostname()))) {
+		return errors.New("must be an HTTPS origin (HTTP localhost for tests)")
+	}
+	host := strings.ToLower(u.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	if port := u.Port(); port != "" && port != map[string]string{"http": "80", "https": "443"}[u.Scheme] {
+		host += ":" + port
+	}
+	if canonical := u.Scheme + "://" + host; origin != canonical {
+		return fmt.Errorf("must be written as browsers send it: %s", canonical)
 	}
 	return nil
+}
+
+// loopback reports a name browsers always resolve to this machine. Every
+// *.localhost name qualifies, which lets a local staff host differ from the
+// public one.
+func loopback(host string) bool {
+	return host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "127.0.0.1"
 }
 
 func ValidateRemoteCheckout(remote RemoteCheckout) error {

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -26,6 +27,10 @@ import (
 // shutdownTimeout lets in-flight processor calls finish within the server's
 // write timeout instead of being cut off and left for reconciliation.
 const shutdownTimeout = 35 * time.Second
+
+// poolConns is the API's database pool. Load tests at 50,000 donors found a
+// 10-connection pool, not PostgreSQL, capped throughput; 40 doubled it.
+const poolConns = 40
 
 // trustedProxies parses DONOR_TRUSTED_PROXY_CIDRS. Ranges broader than a
 // private /8 (IPv4) or /32 (IPv6) are refused because trusting them would let
@@ -48,6 +53,28 @@ func trustedProxies(value string) ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
+// validateStaffOrigin requires the back office, when enabled, to have its own
+// host: host-only cookies and passkeys are scoped by host, so neither site's
+// sessions or credentials reach the other.
+func validateStaffOrigin(staff, public string, getenv func(string) string) error {
+	if staff == "" {
+		if getenv("DONOR_STAFF_ENCRYPTION_KEY") != "" {
+			return errors.New("set DONOR_STAFF_ORIGIN: staff now sign in with passkeys on their own host, and DONOR_STAFF_ENCRYPTION_KEY is no longer used")
+		}
+		return nil
+	}
+	if err := payments.ValidateOrigin(staff); err != nil {
+		return fmt.Errorf("DONOR_STAFF_ORIGIN %w", err)
+	}
+	staffURL, _ := url.Parse(staff)
+	publicURL, _ := url.Parse(public)
+	// The public site may claim a parent domain as its passkey relying party.
+	if staffHost, publicHost := staffURL.Hostname(), publicURL.Hostname(); publicHost == staffHost || strings.HasSuffix(publicHost, "."+staffHost) {
+		return errors.New("DONOR_STAFF_ORIGIN must use its own host, neither DONOR_PUBLIC_ORIGIN's host nor a parent domain of it")
+	}
+	return nil
+}
+
 // configure validates the environment and connects the services it enables.
 // Every configuration error is reported before the database is contacted.
 // The returned function releases the database pool.
@@ -65,7 +92,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.EmailConfigured = email != nil
 	services.Origin = cmp.Or(getenv("DONOR_PUBLIC_ORIGIN"), "http://localhost:3000")
 	if err = payments.ValidateOrigin(services.Origin); err != nil {
-		return services, release, err
+		return services, release, fmt.Errorf("DONOR_PUBLIC_ORIGIN %w", err)
 	}
 	if services.Wallet, err = wallet.FromEnvironment(getenv, services.Origin); err != nil {
 		return services, release, err
@@ -80,10 +107,11 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 			return services, release, err
 		}
 	}
-	staffKey, contentKey := getenv("DONOR_STAFF_ENCRYPTION_KEY"), getenv("DONOR_CONTENT_ENCRYPTION_KEY")
-	if staffKey != "" && credentials.ValidateKey(staffKey) != nil {
-		return services, release, errors.New("DONOR_STAFF_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
+	services.StaffOrigin = getenv("DONOR_STAFF_ORIGIN")
+	if err = validateStaffOrigin(services.StaffOrigin, services.Origin, getenv); err != nil {
+		return services, release, err
 	}
+	contentKey := getenv("DONOR_CONTENT_ENCRYPTION_KEY")
 	if contentKey != "" && credentials.ValidateKey(contentKey) != nil {
 		return services, release, errors.New("DONOR_CONTENT_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
 	}
@@ -93,7 +121,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	}{
 		{"payments (STRIPE_SECRET_KEY)", gateway != nil},
 		{"account email (SMTP settings)", email != nil},
-		{"staff back office (DONOR_STAFF_ENCRYPTION_KEY)", staffKey != ""},
+		{"staff back office (DONOR_STAFF_ORIGIN)", services.StaffOrigin != ""},
 		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKey != ""},
 	} {
 		if !feature.enabled {
@@ -108,7 +136,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := store.Open(startup, dsn)
+	pool, err := store.Open(startup, dsn, poolConns)
 	if err != nil {
 		return services, release, errors.New("donor database startup failed")
 	}
@@ -130,8 +158,8 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if email != nil {
 		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKey: email.EncryptionKey}
 	}
-	if staffKey != "" {
-		staff, err := store.NewStaffService(pool, staffKey)
+	if services.StaffOrigin != "" {
+		staff, err := store.NewStaffService(pool, services.StaffOrigin)
 		if err != nil {
 			pool.Close()
 			return services, release, errors.New("staff configuration is invalid")

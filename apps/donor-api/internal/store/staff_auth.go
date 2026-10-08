@@ -2,78 +2,196 @@ package store
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base32"
+	"encoding/json"
 	"errors"
-	"net/url"
+	"slices"
 	"time"
-	"unicode/utf8"
 
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/credentials"
-	"impactgraph/donor-api/internal/identity"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-func saveStaffCredentials(ctx context.Context, q *queries.Queries, s queries.DonorStaff) error {
-	return q.SaveStaffCredentials(ctx, queries.SaveStaffCredentialsParams{ID: s.ID, PasswordHash: s.PasswordHash, TotpSecret: s.TotpSecret, TotpCounter: s.TotpCounter, Failures: s.Failures, LockedUntil: s.LockedUntil})
-}
-
 const (
 	staffSessionLifetime = 8 * time.Hour
-	staffLockout         = 15 * time.Minute
-	maxSignInFailures    = 5
+	ceremonyLifetime     = 5 * time.Minute
+	maxInviteAttempts    = 5
 )
 
-// SignIn verifies a staff password and TOTP code and returns a new session
-// token. Unknown addresses verify against a dummy hash so timing does not
-// reveal which accounts exist; five failures lock an account for 15 minutes.
-func (s *StaffService) SignIn(ctx context.Context, email, password, code string) (string, error) {
-	canonical, err := identity.NormalizeEmail(email)
+// Ceremony is one WebAuthn challenge. The browser passes Options to the
+// WebAuthn API and answers with the resulting credential and the ceremony ID.
+type Ceremony struct {
+	ID      string `json:"ceremony"`
+	Options any    `json:"options"`
+}
+
+// Invitation is the passkey registration for an invited account, naming the
+// person it was issued to so they can recognise it as theirs.
+type Invitation struct {
+	Ceremony
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+// staffUser presents an account to WebAuthn. Its user handle is the account
+// ID, which is how a usernameless sign-in names its owner.
+type staffUser struct {
+	staff    queries.DonorStaff
+	passkeys []webauthn.Credential
+}
+
+func (u staffUser) WebAuthnID() []byte                         { return u.staff.ID.Bytes[:] }
+func (u staffUser) WebAuthnName() string                       { return u.staff.Email }
+func (u staffUser) WebAuthnDisplayName() string                { return u.staff.Name }
+func (u staffUser) WebAuthnCredentials() []webauthn.Credential { return u.passkeys }
+
+// lockStaffUser locks an account, then its passkeys.
+func lockStaffUser(ctx context.Context, q *queries.Queries, id pgtype.UUID) (staffUser, error) {
+	staff, err := q.StaffByID(ctx, id)
 	if err != nil {
-		return "", ErrStaffDenied
+		return staffUser{}, err
 	}
-	release, err := s.passwordSlot(ctx)
+	rows, err := q.StaffPasskeys(ctx, id)
+	if err != nil {
+		return staffUser{}, err
+	}
+	user := staffUser{staff: staff}
+	for _, row := range rows {
+		flags := protocol.FlagUserPresent
+		if row.UserVerified {
+			flags |= protocol.FlagUserVerified
+		}
+		if row.BackupEligible {
+			flags |= protocol.FlagBackupEligible
+		}
+		if row.BackupState {
+			flags |= protocol.FlagBackupState
+		}
+		transports := make([]protocol.AuthenticatorTransport, len(row.Transports))
+		for i, transport := range row.Transports {
+			transports[i] = protocol.AuthenticatorTransport(transport)
+		}
+		user.passkeys = append(user.passkeys, webauthn.Credential{
+			ID: row.CredentialID, PublicKey: row.PublicKey, AttestationFormat: row.AttestationFormat, Transport: transports,
+			Flags: webauthn.NewCredentialFlags(flags), Authenticator: webauthn.Authenticator{AAGUID: row.Aaguid, SignCount: uint32(row.SignCount)},
+		})
+	}
+	return user, nil
+}
+
+// sweepCeremonies deletes abandoned ceremonies, so anonymous sign-in attempts
+// cannot pile up. It runs on its own: a ceremony being answered stays locked
+// until its transaction has locked the account, so sweeping while holding an
+// account lock could deadlock with it.
+func (s *StaffService) sweepCeremonies(ctx context.Context) error {
+	return queries.New(s.DB).DeleteExpiredStaffCeremonies(ctx, timestamp(time.Now()))
+}
+
+// saveCeremony keeps a challenge until it expires and returns its ID.
+func saveCeremony(ctx context.Context, q *queries.Queries, kind string, invite pgtype.UUID, session *webauthn.SessionData) (string, error) {
+	raw, err := json.Marshal(session)
 	if err != nil {
 		return "", err
 	}
-	defer release()
+	id, err := randomToken(32)
+	if err != nil {
+		return "", err
+	}
+	return id, q.InsertStaffCeremony(ctx, queries.InsertStaffCeremonyParams{TokenHash: HashToken(id), Kind: kind, InviteID: invite, Session: raw, ExpiresAt: timestamp(session.Expires)})
+}
+
+// takeCeremony deletes a ceremony and returns its challenge, so each one can
+// be answered once.
+func takeCeremony(ctx context.Context, q *queries.Queries, id, kind string, now time.Time) (webauthn.SessionData, pgtype.UUID, error) {
+	var session webauthn.SessionData
+	row, err := q.TakeStaffCeremony(ctx, queries.TakeStaffCeremonyParams{TokenHash: HashToken(id), Kind: kind})
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !row.ExpiresAt.Time.After(now)) {
+		return session, row.InviteID, ErrStaffDenied
+	}
+	if err != nil {
+		return session, row.InviteID, err
+	}
+	return session, row.InviteID, json.Unmarshal(row.Session, &session)
+}
+
+func startStaffSession(ctx context.Context, q *queries.Queries, staff pgtype.UUID, now time.Time) (string, error) {
+	token, err := randomToken(48)
+	if err != nil {
+		return "", err
+	}
+	id, err := NewID()
+	if err != nil {
+		return "", err
+	}
+	return token, q.InsertStaffSession(ctx, queries.InsertStaffSessionParams{ID: id, StaffID: staff, TokenHash: HashToken(token), ExpiresAt: timestamp(now.Add(staffSessionLifetime))})
+}
+
+// BeginSignIn issues a usernameless challenge: any of the browser's passkeys
+// for the staff host may answer it, so nothing reveals which accounts exist.
+func (s *StaffService) BeginSignIn(ctx context.Context) (Ceremony, error) {
+	if err := s.sweepCeremonies(ctx); err != nil {
+		return Ceremony{}, err
+	}
+	assertion, session, err := s.WebAuthn.BeginDiscoverableLogin()
+	if err != nil {
+		return Ceremony{}, err
+	}
+	id, err := saveCeremony(ctx, queries.New(s.DB), "SIGN_IN", pgtype.UUID{}, session)
+	return Ceremony{ID: id, Options: assertion.Response}, err
+}
+
+// SignIn verifies a passkey assertion against its ceremony and returns a new
+// session token. A failure with a known passkey is audited against its owner
+// with its reason. A signature counter that fails to advance is treated as a
+// cloned passkey; synced passkeys always report zero, which is accepted.
+func (s *StaffService) SignIn(ctx context.Context, ceremony string, response []byte) (string, error) {
+	assertion, err := protocol.ParseCredentialRequestResponseBytes(response)
+	if err != nil {
+		return "", ErrStaffInput
+	}
 	var token string
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		staff, err := q.StaffByEmail(ctx, canonical)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		found := err == nil
 		now := time.Now().UTC()
-		counter, err := s.verifySignIn(staff, found, password, code, now)
+		session, _, err := takeCeremony(ctx, q, ceremony, "SIGN_IN", now)
 		if err != nil {
 			return err
 		}
-		if counter < 0 {
-			// The failure is committed, then reported.
-			if found {
-				return recordFailedSignIn(ctx, q, staff, now)
-			}
+		owner, err := q.StaffPasskeyOwner(ctx, assertion.RawID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The consumed ceremony is committed, then the denial reported.
 			return nil
 		}
-		staff.TotpCounter, staff.Failures, staff.LockedUntil = counter, 0, pgtype.Timestamptz{}
-		if err = saveStaffCredentials(ctx, q, staff); err != nil {
-			return err
-		}
-		if token, err = randomToken(48); err != nil {
-			return err
-		}
-		id, err := NewID()
 		if err != nil {
 			return err
 		}
-		if err = q.InsertStaffSession(ctx, queries.InsertStaffSessionParams{ID: id, StaffID: staff.ID, TokenHash: HashToken(token), ExpiresAt: timestamp(now.Add(staffSessionLifetime))}); err != nil {
+		user, err := lockStaffUser(ctx, q, owner)
+		if err != nil {
 			return err
 		}
-		return auditStaff(ctx, q, staff.ID, "staff.signed_in", staff.ID.String(), nil, now)
+		_, passkey, err := s.WebAuthn.ValidatePasskeyLogin(func([]byte, []byte) (webauthn.User, error) { return user, nil }, session, assertion)
+		var reason string
+		switch {
+		case err != nil:
+			reason = "invalid"
+		case passkey.Authenticator.CloneWarning:
+			reason = "counter"
+		case user.staff.Disabled:
+			reason = "disabled"
+		}
+		if reason != "" {
+			return auditStaff(ctx, q, pgtype.UUID{}, "staff.sign_in_failed", owner.String(), map[string]string{"reason": reason}, now)
+		}
+		if err = q.RecordStaffPasskeyUse(ctx, queries.RecordStaffPasskeyUseParams{CredentialID: passkey.ID, SignCount: int64(passkey.Authenticator.SignCount),
+			UserVerified: passkey.Flags.UserVerified, BackupState: passkey.Flags.BackupState, LastUsedAt: timestamp(now)}); err != nil {
+			return err
+		}
+		if token, err = startStaffSession(ctx, q, owner, now); err != nil {
+			return err
+		}
+		return auditStaff(ctx, q, owner, "staff.signed_in", owner.String(), nil, now)
 	})
 	if err != nil {
 		return "", err
@@ -84,164 +202,145 @@ func (s *StaffService) SignIn(ctx context.Context, email, password, code string)
 	return token, nil
 }
 
-// verifySignIn returns the TOTP counter a successful sign-in consumes, or -1.
-// The password is always verified, so every attempt costs the same.
-func (s *StaffService) verifySignIn(staff queries.DonorStaff, found bool, password, code string, now time.Time) (int64, error) {
-	hash := s.dummyHash
-	if found && staff.PasswordHash.Valid {
-		hash = staff.PasswordHash.String
-	}
-	verified, err := credentials.VerifyPassword(password, hash)
-	locked := staff.LockedUntil.Valid && staff.LockedUntil.Time.After(now)
-	if err != nil || !verified || !found || len(staff.TotpSecret) == 0 || staff.Disabled || locked {
-		return -1, nil
-	}
-	secret, err := credentials.Decrypt(staff.TotpSecret, s.EncryptionKey)
+// lockInvitation locks an account and then its invitation, the order every
+// staff write takes, and checks that the invitation is still open.
+func lockInvitation(ctx context.Context, q *queries.Queries, staffID pgtype.UUID, invitation func() (queries.DonorStaffInvite, error)) (queries.DonorStaffInvite, staffUser, error) {
+	user, err := lockStaffUser(ctx, q, staffID)
 	if err != nil {
-		return -1, err
+		return queries.DonorStaffInvite{}, user, err
 	}
-	counter, err := credentials.VerifyOTP(secret, code, now, staff.TotpCounter)
+	invite, err := invitation()
 	if err != nil {
-		return -1, nil
+		return invite, user, err
 	}
-	return counter, nil
+	if invite.StaffID != user.staff.ID || user.staff.Disabled || invite.ConsumedAt.Valid || !invite.ExpiresAt.Time.After(time.Now()) || invite.Attempts >= maxInviteAttempts {
+		return invite, user, ErrStaffDenied
+	}
+	return invite, user, nil
 }
 
-// recordFailedSignIn counts a failure against an account that is not locked,
-// starting a fresh count once an earlier lock has expired, and audits it.
-func recordFailedSignIn(ctx context.Context, q *queries.Queries, staff queries.DonorStaff, now time.Time) error {
-	if !staff.LockedUntil.Valid || !staff.LockedUntil.Time.After(now) {
-		if staff.LockedUntil.Valid {
-			staff.Failures = 0
-			staff.LockedUntil = pgtype.Timestamptz{}
-		}
-		staff.Failures++
-		if staff.Failures >= maxSignInFailures {
-			staff.LockedUntil = timestamp(now.Add(staffLockout))
-		}
-		if err := saveStaffCredentials(ctx, q, staff); err != nil {
-			return err
-		}
-	}
-	return auditStaff(ctx, q, pgtype.UUID{}, "staff.sign_in_failed", staff.ID.String(), nil, now)
-}
-
-func staffInvitation(ctx context.Context, q *queries.Queries, token string) (queries.DonorStaffInvite, queries.DonorStaff, error) {
-	var invite queries.DonorStaffInvite
-	var staff queries.DonorStaff
+func staffInvitation(ctx context.Context, q *queries.Queries, token string) (queries.DonorStaffInvite, staffUser, error) {
 	owner, err := q.StaffInviteOwner(ctx, HashToken(token))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return invite, staff, ErrStaffDenied
+		return queries.DonorStaffInvite{}, staffUser{}, ErrStaffDenied
 	}
 	if err != nil {
-		return invite, staff, err
+		return queries.DonorStaffInvite{}, staffUser{}, err
 	}
-	staff, err = q.StaffByID(ctx, owner)
-	if err != nil {
-		return invite, staff, err
-	}
-	if staff.Disabled || staff.PasswordHash.Valid {
-		return invite, staff, ErrStaffDenied
-	}
-	invite, err = q.StaffInviteByToken(ctx, HashToken(token))
-	if err != nil {
-		return invite, staff, err
-	}
-	if invite.ConsumedAt.Valid || !invite.ExpiresAt.Time.After(time.Now().UTC()) || invite.Attempts >= 5 {
-		return invite, staff, ErrStaffDenied
-	}
-	return invite, staff, nil
+	return lockInvitation(ctx, q, owner, func() (queries.DonorStaffInvite, error) { return q.StaffInviteByToken(ctx, HashToken(token)) })
 }
 
-// Provision returns the TOTP enrolment for an invitation, generating its
-// secret on first use so reloading the page shows the same one.
-func (s *StaffService) Provision(ctx context.Context, token string) (map[string]string, error) {
-	var enrolment map[string]string
+// BeginActivation returns the passkey registration for an invitation. The
+// passkey must be discoverable and verify its user, so it can later sign in
+// without an email address.
+func (s *StaffService) BeginActivation(ctx context.Context, token string) (Invitation, error) {
+	var result Invitation
+	if err := s.sweepCeremonies(ctx); err != nil {
+		return result, err
+	}
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		invite, staff, err := staffInvitation(ctx, q, token)
+		invite, user, err := staffInvitation(ctx, q, token)
 		if err != nil {
 			return err
 		}
-		if len(invite.PendingSecret) == 0 {
-			secret := make([]byte, 20)
-			if _, err = rand.Read(secret); err != nil {
-				return err
-			}
-			if invite.PendingSecret, err = credentials.Encrypt(secret, s.EncryptionKey); err != nil {
-				return err
-			}
-			if err = saveStaffInvite(ctx, q, invite); err != nil {
-				return err
-			}
-		}
-		secret, err := credentials.Decrypt(invite.PendingSecret, s.EncryptionKey)
+		creation, session, err := s.WebAuthn.BeginRegistration(user)
 		if err != nil {
 			return err
 		}
-		encoded := base32.StdEncoding.EncodeToString(secret)
-		uri := "otpauth://totp/" + url.PathEscape("DAD Staff:"+staff.Email) + "?" + url.Values{"secret": {encoded}, "issuer": {"DAD Staff"}, "algorithm": {"SHA1"}, "digits": {"6"}, "period": {"30"}}.Encode()
-		enrolment = map[string]string{"email": staff.Email, "secret": encoded, "uri": uri}
-		return nil
+		id, err := saveCeremony(ctx, q, "ACTIVATION", invite.ID, session)
+		result = Invitation{Ceremony: Ceremony{ID: id, Options: creation.Response}, Email: user.staff.Email, Name: user.staff.Name}
+		return err
 	})
-	if err != nil {
-		return nil, err
-	}
-	return enrolment, nil
+	return result, err
 }
 
-// Activate sets the invited account's password once code proves its TOTP
-// enrolment. Every attempt counts against the invitation, failed ones too.
-func (s *StaffService) Activate(ctx context.Context, token, password, code string) error {
-	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 12 || utf8.RuneCountInString(password) > 128 {
-		return ErrStaffInput
-	}
-	release, err := s.passwordSlot(ctx)
+// Activate stores the passkey answering an activation ceremony, consumes the
+// invitation, and returns a session for its owner. Every answer to an open
+// ceremony counts against the invitation, rejected ones too; a malformed
+// answer, or one to an unknown or expired ceremony, does not.
+func (s *StaffService) Activate(ctx context.Context, ceremony string, response []byte) (string, error) {
+	attestation, err := protocol.ParseCredentialCreationResponseBytes(response)
 	if err != nil {
-		return err
+		return "", ErrStaffInput
 	}
-	defer release()
-	activated := false
+	var token string
 	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		invite, staff, err := staffInvitation(ctx, q, token)
+		now := time.Now().UTC()
+		session, inviteID, err := takeCeremony(ctx, q, ceremony, "ACTIVATION", now)
 		if err != nil {
 			return err
 		}
-		now := time.Now().UTC()
-		invite.Attempts++
-		if len(invite.PendingSecret) > 0 {
-			secret, err := credentials.Decrypt(invite.PendingSecret, s.EncryptionKey)
-			if err != nil {
-				return err
-			}
-			if counter, err := credentials.VerifyOTP(secret, code, now, -1); err == nil {
-				hash, err := credentials.HashPassword(password)
-				if err != nil {
-					return err
-				}
-				staff.PasswordHash, staff.TotpSecret, staff.TotpCounter = text(hash), invite.PendingSecret, counter
-				if err = saveStaffCredentials(ctx, q, staff); err != nil {
-					return err
-				}
-				invite.ConsumedAt, invite.PendingSecret = timestamp(now), nil
-				if err = auditStaff(ctx, q, staff.ID, "staff.activated", staff.ID.String(), nil, now); err != nil {
-					return err
-				}
-				activated = true
-			}
+		if len(session.UserID) != 16 {
+			return ErrStaffDenied
 		}
-		return saveStaffInvite(ctx, q, invite)
+		owner := pgtype.UUID{Bytes: [16]byte(session.UserID), Valid: true}
+		invite, user, err := lockInvitation(ctx, q, owner, func() (queries.DonorStaffInvite, error) { return q.StaffInviteByID(ctx, inviteID) })
+		if err != nil {
+			return err
+		}
+		invite.Attempts++
+		if token, err = s.register(ctx, q, user, session, attestation, now); err != nil {
+			return err
+		}
+		if token != "" {
+			invite.ConsumedAt = timestamp(now)
+		}
+		return q.SaveStaffInvite(ctx, queries.SaveStaffInviteParams{ID: invite.ID, Attempts: invite.Attempts, ConsumedAt: invite.ConsumedAt})
 	})
 	if err != nil {
-		return err
+		return "", err
 	}
-	if !activated {
-		return ErrStaffDenied
+	if token == "" {
+		return "", ErrStaffDenied
 	}
-	return nil
+	return token, nil
 }
 
-func saveStaffInvite(ctx context.Context, q *queries.Queries, invite queries.DonorStaffInvite) error {
-	return q.SaveStaffInvite(ctx, queries.SaveStaffInviteParams{ID: invite.ID, Attempts: invite.Attempts, PendingSecret: invite.PendingSecret, ConsumedAt: invite.ConsumedAt})
+// knownTransports are the transports a passkey may be stored with. The
+// browser reports them unchecked, and the column holds only short names.
+var knownTransports = []protocol.AuthenticatorTransport{protocol.USB, protocol.NFC, protocol.BLE, protocol.SmartCard, protocol.Hybrid, protocol.Internal}
+
+// register stores a verified new passkey and starts a session, or audits the
+// failure and returns no token when the attestation is rejected or its
+// credential is registered already.
+func (s *StaffService) register(ctx context.Context, q *queries.Queries, user staffUser, session webauthn.SessionData, attestation *protocol.ParsedCredentialCreationData, now time.Time) (string, error) {
+	failed := func(reason string) (string, error) {
+		return "", auditStaff(ctx, q, pgtype.UUID{}, "staff.activation_failed", user.staff.ID.String(), map[string]string{"reason": reason}, now)
+	}
+	passkey, err := s.WebAuthn.CreateCredential(user, session, attestation)
+	if err != nil {
+		return failed("invalid")
+	}
+	// A credential registered to anyone already is rejected, not reassigned.
+	switch _, err = q.StaffPasskeyOwner(ctx, passkey.ID); {
+	case err == nil:
+		return failed("credential_in_use")
+	case !errors.Is(err, pgx.ErrNoRows):
+		return "", err
+	}
+	id, err := NewID()
+	if err != nil {
+		return "", err
+	}
+	transports := []string{}
+	for _, transport := range passkey.Transport {
+		if slices.Contains(knownTransports, transport) {
+			transports = append(transports, string(transport))
+		}
+	}
+	if err = q.InsertStaffPasskey(ctx, queries.InsertStaffPasskeyParams{ID: id, StaffID: user.staff.ID, CredentialID: passkey.ID, PublicKey: passkey.PublicKey,
+		SignCount: int64(passkey.Authenticator.SignCount), Transports: transports, Aaguid: passkey.Authenticator.AAGUID, AttestationFormat: passkey.AttestationFormat,
+		UserVerified: passkey.Flags.UserVerified, BackupEligible: passkey.Flags.BackupEligible, BackupState: passkey.Flags.BackupState}); err != nil {
+		return "", err
+	}
+	if err = auditStaff(ctx, q, user.staff.ID, "staff.activated", user.staff.ID.String(), nil, now); err != nil {
+		return "", err
+	}
+	token, err := startStaffSession(ctx, q, user.staff.ID, now)
+	if err != nil {
+		return "", err
+	}
+	return token, auditStaff(ctx, q, user.staff.ID, "staff.signed_in", user.staff.ID.String(), nil, now)
 }

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import DonorDetail from "./DonorDetail";
 
 const detail = { id: "donor-1", email: "donor@example.org", public_name: "Sam",
@@ -41,6 +42,12 @@ it("shows the donor record with links scoped to the staff member's permissions",
   expect(screen.getByRole("link", { name: "Delivery history and resends" })).toHaveAttribute("href", "/staff/messages?donor=donor-1");
   expect(screen.getByRole("link", { name: "Refund gift" })).toHaveAttribute("href", "/staff/finance?donor=donor-1&gift=gift-1");
   expect(screen.getByRole("link", { name: "Cancel monthly giving" })).toHaveAttribute("href", "/staff/finance?donor=donor-1");
+  expect(screen.getByRole("link", { name: "Cancel monthly giving" }).closest("p"))
+    .toHaveTextContent(`Monthly gift: $30.00/month · Active · Next renewal ${formatDate(detail.subscription.next_renewal)} · Cancel monthly giving`);
+  const synced = screen.getByText(/Last updated from Stripe/);
+  expect(synced).toHaveClass("note");
+  expect(synced).toHaveTextContent(`Last updated from Stripe ${formatDateTime(detail.subscription.observed_at)}.`);
+  expect(synced.querySelector("time")).toHaveAttribute("dateTime", detail.subscription.observed_at);
   const history = screen.getByRole("region", { name: "Staff financial actions" });
   expect(await within(history).findByText(/REFUND · SUCCEEDED · \$10.00/)).toBeVisible();
   expect(within(history).queryByRole("button", { name: "Older actions" })).not.toBeInTheDocument();
@@ -132,7 +139,7 @@ it("offers cancellation only for a monthly gift that is still renewing", async (
   serve({ "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: { ...detail.subscription, stops_at: "2027-02-01T00:00:00Z" } }),
     "/donor/staff/me": reply(200, actor), "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }) });
   const { unmount } = render(<DonorDetail donor="donor-1" />);
-  expect(await screen.findByText(/Renewals stop/)).toBeVisible();
+  expect(await screen.findByText(`Monthly gift: $30.00/month · Active · Ends ${formatDate("2027-02-01T00:00:00Z")}`)).toBeVisible();
   expect(screen.queryByRole("link", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
   unmount();
   serve({ "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: null }),
@@ -140,4 +147,15 @@ it("offers cancellation only for a monthly gift that is still renewing", async (
   render(<DonorDetail donor="donor-1" />);
   expect(await screen.findByText("No active monthly gift.")).toBeVisible();
   expect(screen.queryByRole("link", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
+});
+
+it("names Stripe statuses in words", async () => {
+  for (const [status, words] of [["past_due", "Payment overdue"], ["unpaid", "Payment overdue"], ["paused", "Paused"],
+    ["canceled", "Cancelled"], ["incomplete", "Setting up"], ["trialing", "Setting up"]]) {
+    serve({ "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: { ...detail.subscription, status } }),
+      "/donor/staff/me": reply(200, actor), "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }) });
+    const { unmount } = render(<DonorDetail donor="donor-1" />);
+    expect(await screen.findByText(new RegExp(`/month · ${words} · Next renewal`))).toBeVisible();
+    unmount();
+  }
 });

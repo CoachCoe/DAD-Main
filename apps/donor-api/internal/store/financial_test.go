@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -18,7 +17,7 @@ func testID(t *testing.T) pgtype.UUID {
 	}
 	return id
 }
-func mustExec(t *testing.T, tx pgx.Tx, sql string, args ...any) {
+func mustExec(t *testing.T, tx queries.DBTX, sql string, args ...any) {
 	t.Helper()
 	if _, err := tx.Exec(context.Background(), sql, args...); err != nil {
 		t.Fatal(err)

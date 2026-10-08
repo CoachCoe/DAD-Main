@@ -99,6 +99,8 @@ pre { white-space: pre-wrap; }
 .secondary:hover { border-color: var(--ink); }
 .quiet { min-height: 44px; padding-inline: var(--space-1); font-family: var(--font-sans); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .quiet:hover { color: var(--brand-ink); }
+/* Text-aligned with the link column it follows. */
+.links + .quiet { padding-inline: 0; border-inline-width: 0; }
 .danger { color: var(--fail); border-color: var(--fail-line); }
 .danger:hover { border-color: var(--fail); }
 :is(.button, .secondary, .quiet):disabled, .button[aria-disabled="true"] { opacity: .6; cursor: default; }
@@ -182,7 +184,9 @@ fieldset:disabled .segmented label { opacity: .6; cursor: default; }
 .page.narrow { max-width: 640px; }
 /* Vertical rhythm for stacked content. Zero specificity, so any component spacing wins;
    grid and flex children are untouched because only these flow containers apply it. */
-:where(.panel, .callout, form, fieldset, details) > * + * { margin-top: var(--space-4); }
+:where(.panel, .panel > section, .callout, form, fieldset, details) > * + * { margin-top: var(--space-4); }
+/* Sets a block apart from the list or text above it. */
+.divided { padding-top: var(--space-5); border-top: 1px solid var(--line); }
 :where(legend) + * { margin-top: 0; }
 :where(form > fieldset) + * { margin-top: var(--space-5); }
 :where(.panel, .panel > section) > h2:where(:not(:first-child)),
@@ -194,6 +198,7 @@ fieldset:disabled .segmented label { opacity: .6; cursor: default; }
 /* Empty live regions stay in the accessibility tree (see Announcer) but take no space. */
 .liveStatus:empty, .errorMessage:empty { margin: 0; padding: 0; border: 0; }
 .liveStatus { color: var(--ink-soft); }
+.visuallyHidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .errorMessage {
   display: flex;
   flex-direction: column;

@@ -1,0 +1,60 @@
+package store
+
+import (
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/store/queries"
+)
+
+const (
+	// touchRetentionMonths is the product owner's retention period for referral
+	// touches that led to no attributed gift, counted from capture. Touches
+	// that did are kept for good.
+	touchRetentionMonths = 13
+	touchPurgeInterval   = time.Hour
+	// touchPurgeBatch bounds each delete transaction's locks and WAL.
+	touchPurgeBatch = 2000
+)
+
+// TouchRetention deletes referral touches past retention. A pass starts once
+// an interval and deletes one batch per call until a batch comes up short.
+// Concurrent passes skip each other's rows, so every worker may run one.
+type TouchRetention struct {
+	DB     *pgxpool.Pool
+	next   time.Time
+	cursor *queries.PurgeReferralTouchesRow
+}
+
+// PurgeNext deletes the next batch if a pass is due or under way, reporting
+// whether it deleted anything. A failure ends the pass until the next
+// interval, so it cannot hold up the work sharing the worker.
+func (r *TouchRetention) PurgeNext(ctx context.Context, now time.Time) (bool, error) {
+	if r.cursor == nil {
+		if now.Before(r.next) {
+			return false, nil
+		}
+		r.cursor = &queries.PurgeReferralTouchesRow{}
+	}
+	deleted, err := purgeTouches(ctx, r.DB, now, *r.cursor, touchPurgeBatch)
+	if err != nil || len(deleted) < touchPurgeBatch {
+		r.cursor, r.next = nil, now.Add(touchPurgeInterval)
+	} else {
+		r.cursor = &deleted[len(deleted)-1]
+	}
+	return len(deleted) > 0, err
+}
+
+// purgeTouches deletes up to batch touches past retention that follow after,
+// in capture order, and returns their keys in that order.
+func purgeTouches(ctx context.Context, db *pgxpool.Pool, now time.Time, after queries.PurgeReferralTouchesRow, batch int32) ([]queries.PurgeReferralTouchesRow, error) {
+	return queries.New(db).PurgeReferralTouches(ctx, queries.PurgeReferralTouchesParams{
+		AfterTouchedAt: pgtype.Timestamptz{Time: after.TouchedAt.Time, Valid: true},
+		AfterID:        pgtype.UUID{Bytes: after.ID.Bytes, Valid: true},
+		TouchedBefore:  timestamp(now.AddDate(0, -touchRetentionMonths, 0)),
+		AsOf:           timestamp(now),
+		Batch:          batch,
+	})
+}

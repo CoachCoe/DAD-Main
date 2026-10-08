@@ -1,5 +1,7 @@
-// Command staff invites the first administrator. Later staff are invited from
-// the back office by an administrator.
+// Command staff invites the first administrator. With --recover it instead
+// sends an existing administrator a recovery invitation, for when no
+// administrator can sign in. Other staff are invited and recovered from the
+// back office by an administrator.
 package main
 
 import (
@@ -11,20 +13,23 @@ import (
 	"os"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
 )
 
 func run(args []string, getenv func(string) string, out io.Writer) error {
 	flags := flag.NewFlagSet("staff", flag.ContinueOnError)
-	email := flags.String("email", "", "First administrator email")
+	email := flags.String("email", "", "Administrator email")
 	name := flags.String("name", "", "First administrator name")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *email == "" || *name == "" {
-		return errors.New("--email and --name are required")
+	recovery := flags.Bool("recover", false, "Replace an existing administrator's passkeys when no administrator can sign in")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 0 || *email == "" || (*name == "") != *recovery {
+		return errors.New("--email and --name are required, or --recover with --email only")
 	}
-	origin := getenv("DONOR_PUBLIC_ORIGIN")
+	origin := getenv("DONOR_STAFF_ORIGIN")
 	if err := payments.ValidateOrigin(origin); err != nil {
-		return err
+		return fmt.Errorf("DONOR_STAFF_ORIGIN %w", err)
 	}
 	dsn := getenv("DONOR_GO_DATABASE_URL")
 	if dsn == "" {
@@ -32,20 +37,27 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	pool, err := store.Open(ctx, dsn)
+	pool, err := store.Open(ctx, dsn, 2)
 	if err != nil {
 		return errors.New("database is unavailable")
 	}
 	defer pool.Close()
-	staff, err := store.NewStaffService(pool, getenv("DONOR_STAFF_ENCRYPTION_KEY"))
+	staff, err := store.NewStaffService(pool, origin)
 	if err != nil {
-		return errors.New("staff encryption is not configured correctly")
+		return errors.New("staff passkeys are not configured correctly")
 	}
-	token, err := staff.Bootstrap(ctx, *email, *name)
-	if errors.Is(err, store.ErrStaffConflict) {
+	var token string
+	if *recovery {
+		token, err = staff.Recover(ctx, *email)
+	} else {
+		token, err = staff.Bootstrap(ctx, *email, *name)
+	}
+	switch {
+	case *recovery && (errors.Is(err, pgx.ErrNoRows) || errors.Is(err, store.ErrStaffInput)):
+		return errors.New("no enabled administrator has that email")
+	case errors.Is(err, store.ErrStaffConflict):
 		return errors.New("staff already exists; use an administrator account")
-	}
-	if err != nil {
+	case err != nil:
 		return errors.New("administrator invitation failed")
 	}
 	_, err = fmt.Fprintln(out, "One-use private invitation: "+origin+"/staff/activate#token="+token)

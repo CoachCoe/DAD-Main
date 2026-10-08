@@ -35,6 +35,7 @@ services:
       DONOR_GO_LISTEN: 0.0.0.0:8002
       # Only the web proxy may supply X-Real-IP; it strips any client-sent copy.
       DONOR_TRUSTED_PROXY_CIDRS: 172.30.42.10/32
+      DONOR_STAFF_ORIGIN: ${DONOR_STAFF_ORIGIN:?set DONOR_STAFF_ORIGIN}
     # Wallet signing keys stay outside the image. Mount them read-only (files readable
     # by uid 10001) and set DONOR_WALLET_*_FILE to the container paths, for example
     # DONOR_WALLET_GOOGLE_KEY_FILE=/run/secrets/wallet/google.json.
@@ -90,10 +91,11 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         DONOR_PUBLIC_ORIGIN: ${DONOR_PUBLIC_ORIGIN:?set DONOR_PUBLIC_ORIGIN}
+        DONOR_STAFF_ORIGIN: ${DONOR_STAFF_ORIGIN:?set DONOR_STAFF_ORIGIN}
     environment:
       DONOR_API_BASE_URL: http://api:8002
-      # The ingress in front of WEB_PORT must overwrite this header with the peer address;
-      # set DONOR_CLIENT_IP_HEADER= (empty) to share one rate-limit quota instead.
+      # nginx overwrites this header with the client address on every request. No host
+      # port is published: a local process could otherwise set it to any address.
       DONOR_CLIENT_IP_HEADER: ${DONOR_CLIENT_IP_HEADER-X-Real-IP}
     depends_on:
       api:
@@ -101,14 +103,64 @@ services:
     networks:
       default:
         ipv4_address: 172.30.42.10
-    ports: ["127.0.0.1:${WEB_PORT:-3000}:3000"]
+      edge: {}
     read_only: true
     tmpfs: [/tmp, /app/.next/cache]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     restart: unless-stopped
 
+  # The only service with public ports. It reaches the web service alone, over the edge
+  # network; the API and database stay on the default network.
+  nginx:
+    image: nginx:1.30.5-alpine@sha256:0985e772fb9f729e6fa0980da05fca5d9c468e870eed43071545afa9d2e27d94
+    user: "101:101"
+    environment:
+      INGRESS_MODE: ${INGRESS_MODE:-cloudflare}
+      DONOR_PUBLIC_ORIGIN: ${DONOR_PUBLIC_ORIGIN:?set DONOR_PUBLIC_ORIGIN}
+      DONOR_STAFF_ORIGIN: ${DONOR_STAFF_ORIGIN:?set DONOR_STAFF_ORIGIN}
+      NGINX_ENVSUBST_FILTER: ^INGRESS_
+      NGINX_ENTRYPOINT_QUIET_LOGS: "1"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/05-ingress.envsh:/docker-entrypoint.d/05-ingress.envsh:ro
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      - ./deploy/nginx/conf:/etc/nginx/ingress:ro
+      # fullchain.pem and privkey.pem, readable by uid 101.
+      - ${INGRESS_TLS_DIR:-/etc/impactgraph/tls}:/etc/nginx/tls:ro
+      - ${INGRESS_ORIGIN_PULL_CA:-./deploy/nginx/cloudflare-origin-pull-ca.pem}:/etc/nginx/origin-pull-ca.pem:ro
+      - ${INGRESS_STAFF_ACCESS:-./deploy/nginx/staff-access.conf}:/etc/nginx/staff-access.conf:ro
+    tmpfs:
+      - /tmp:size=64m,uid=101,gid=101,mode=0700
+      - /etc/nginx/conf.d:size=1m,uid=101,gid=101,mode=0700
+    ports: ["80:8080", "443:8443"]
+    # Set by scripts/deploy.sh; a change makes Compose recreate the container.
+    labels:
+      org.impactgraph.ingress-config: ${INGRESS_CONFIG_HASH:-}
+    networks: [edge]
+    depends_on:
+      web:
+        condition: service_healthy
+    ulimits:
+      nofile: 65536
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8081/health]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
 networks:
+  # IPv6 lets published ports deliver IPv6 clients with their own addresses; without it,
+  # Docker's proxy presents them all as the gateway, sharing one rate-limit quota.
+  edge:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd42:dad:ed9e::/64
   default:
     ipam:
       config:

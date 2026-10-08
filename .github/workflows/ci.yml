@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
         env:
           POSTGRES_USER: go_test
           POSTGRES_PASSWORD: go_test
@@ -29,51 +29,43 @@ jobs:
     env:
       DONOR_GO_DATABASE_URL: postgresql://go_test:go_test@localhost:5432/donor_go
       TEST_DATABASE_URL: postgresql://go_test:go_test@localhost:5432/donor_go
-    defaults:
-      run:
-        working-directory: apps/donor-api
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.27.1"
           cache-dependency-path: apps/donor-api/go.sum
-      - run: go run ./cmd/migrate
+      - run: make migrate
       - run: make check-generated
-        working-directory: .
-      - run: test -z "$(gofmt -l .)" && go vet ./... && go test -race ./... && go build ./...
+      - run: make test-donor-go
       - run: make lint-go
-        working-directory: .
 
   web:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: apps/web
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: "22", cache: npm, cache-dependency-path: apps/web/package-lock.json }
       - run: npm ci
-      - run: npm run lint && npm test -- --run && npm exec next typegen && npm run typecheck && npm run build
+        working-directory: apps/web
+      - run: make test-web
       - run: make lint-web
-        working-directory: .
 
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - run: shellcheck scripts/*.sh
+      - run: make lint-scripts
+      - run: make check-ingress smoke-ingress
       - name: Validate production compose
         run: |
           sed -e 's/^IMAGE_TAG=$/IMAGE_TAG=ci/' -e 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci/' \
             .env.production.example > "$RUNNER_TEMP/ci.env"
           ENV_FILE="$RUNNER_TEMP/ci.env" docker compose --env-file "$RUNNER_TEMP/ci.env" \
             -f docker-compose.prod.yml --profile workers --profile maintenance config -q
-      - run: docker build -f apps/donor-api/Dockerfile -t impactgraph/api:ci .
-      - run: docker build -f apps/web/Dockerfile -t impactgraph/web:ci .
+      - run: make check-images
 
   browser:
     runs-on: ubuntu-latest
@@ -83,7 +75,7 @@ jobs:
         production: ["0", "1"]
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
         env:
           POSTGRES_USER: go_test
           POSTGRES_PASSWORD: go_test
@@ -96,6 +88,7 @@ jobs:
       DONOR_GO_DATABASE_URL: postgresql://go_test:go_test@localhost:5432/donor_go
       DONOR_API_BASE_URL: http://127.0.0.1:8002
       DONOR_PUBLIC_ORIGIN: http://127.0.0.1:3000
+      DONOR_STAFF_ORIGIN: http://staff.localhost:3000
       E2E_PRODUCTION: ${{ matrix.production }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -103,12 +96,12 @@ jobs:
         with:
           go-version: "1.27.1"
           cache-dependency-path: apps/donor-api/go.sum
-      - run: go run ./cmd/migrate
-        working-directory: apps/donor-api
+      - run: make migrate
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: "22", cache: npm, cache-dependency-path: apps/web/package-lock.json }
-      - run: npm ci && npx playwright install --with-deps chromium && npm run test:e2e
+      - run: npm ci && npx playwright install --with-deps chromium
         working-directory: apps/web
+      - run: make test-browser-e2e
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:

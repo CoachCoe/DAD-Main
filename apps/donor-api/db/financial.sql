@@ -49,6 +49,10 @@ coalesce(bool_and(coalesce(net_minor>=0 AND next_refresh_at>$2 AND referral_kind
 FROM donor_metric_projections WHERE referrer_id=$1;
 
 -- name: MissingReferredProjection :one
-SELECT EXISTS(SELECT 1 FROM donor_gifts g JOIN donor_checkouts c ON c.id=g.checkout_id
-LEFT JOIN donor_metric_projections p ON p.donor_id=g.donor_id
-WHERE c.referrer_id=$1 AND p.net_minor IS NULL)::boolean;
+-- Work stays proportional to the referrer's checkouts: a gift's donor is its
+-- checkout's, and the scalar subquery (NULL for a missing row or a missing
+-- net) is probed per checkout, where a join lets the planner scan every
+-- gift or projection once a tree is large.
+SELECT EXISTS(SELECT 1 FROM donor_checkouts c WHERE c.referrer_id=$1
+AND (SELECT p.net_minor FROM donor_metric_projections p WHERE p.donor_id=c.donor_id) IS NULL
+AND EXISTS(SELECT 1 FROM donor_gifts g WHERE g.checkout_id=c.id))::boolean;

@@ -462,7 +462,7 @@ func (q *Queries) RenderMessage(ctx context.Context, arg RenderMessageParams) er
 }
 
 const subscriptionForCheckout = `-- name: SubscriptionForCheckout :one
-SELECT s.attempt_id, s.donor_id, s.status, s.period_end, s.stops_at, s.observed_at, s.id, s.created_at FROM donor_subscriptions s JOIN donor_stripe_checkouts a ON a.id=s.attempt_id WHERE a.checkout_id=$1
+SELECT s.attempt_id, s.donor_id, s.status, s.period_end, s.stops_at, s.observed_at, s.id, s.created_at, s.billing_anchor, s.external_change FROM donor_subscriptions s JOIN donor_stripe_checkouts a ON a.id=s.attempt_id WHERE a.checkout_id=$1
 `
 
 func (q *Queries) SubscriptionForCheckout(ctx context.Context, checkoutID pgtype.UUID) (DonorSubscription, error) {
@@ -477,6 +477,8 @@ func (q *Queries) SubscriptionForCheckout(ctx context.Context, checkoutID pgtype
 		&i.ObservedAt,
 		&i.ID,
 		&i.CreatedAt,
+		&i.BillingAnchor,
+		&i.ExternalChange,
 	)
 	return i, err
 }

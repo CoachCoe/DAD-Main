@@ -78,7 +78,9 @@ func verifyEvent(body []byte, signature, secret string) (*VerifiedEvent, error) 
 		return nil, ErrInvalidEvent
 	}
 	switch string(event.Type) {
-	case "payment_intent.succeeded", "invoice.payment_succeeded", "invoice.payment_failed", "refund.created", "refund.updated", "refund.failed", "checkout.session.completed", "checkout.session.expired", "customer.subscription.deleted", "customer.subscription.updated":
+	case "payment_intent.succeeded", "invoice.payment_succeeded", "invoice.payment_failed", "refund.created", "refund.updated", "refund.failed", "checkout.session.completed", "checkout.session.expired",
+		"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted",
+		"customer.subscription.pending_update_applied", "customer.subscription.pending_update_expired":
 	default:
 		return nil, nil
 	}

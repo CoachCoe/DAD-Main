@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
+import { staffURL } from "./staff";
 
 // These isolate rendering of states that need a session or a live referral code; Go
 // journey tests exercise the real authorization and attribution behind them.
@@ -79,8 +80,8 @@ test("a staff page past sign-in is accessible", async ({ page }) => {
     id: "staff-1", email: "admin@example.org", name: "Ada Admin", role: "ADMIN", active: true, disabled: false,
     permissions: ["data.export", "content.publish", "audit.read", "gift.refund", "gift.cancel", "staff.manage"],
   } }));
-  await page.goto("/staff");
-  await expect(page.getByText("Ada Admin · ADMIN")).toBeVisible();
+  await page.goto(staffURL("/staff"));
+  await expect(page.getByText("Signed in as Ada Admin · ADMIN")).toBeVisible();
   await expect(page.getByRole("button", { name: "Search donors" })).toBeVisible();
   await expectAccessible(page);
   expect(errors).toEqual([]);
@@ -116,22 +117,24 @@ async function mockStaffDonor(page: Page) {
 test("a donor record has its own accessible page and Back returns to the search", async ({ page }) => {
   const errors = collectErrors(page);
   await mockStaffDonor(page);
-  await page.goto("/staff");
+  await page.goto(staffURL("/staff"));
   await page.getByRole("searchbox", { name: "Find donor by email" }).fill("pat");
   await page.getByRole("button", { name: "Search donors" }).click();
-  await expect(page).toHaveURL(/\/staff\?q=pat$/);
+  await expect(page).toHaveURL(staffURL("/staff?q=pat"));
   await page.getByRole("link", { name: "pat.donor@example.org" }).click();
-  await expect(page).toHaveURL(/\/staff\/donors\/donor-1$/);
+  await expect(page).toHaveURL(staffURL("/staff/donors/donor-1"));
   await expect(page).toHaveTitle(/^Donor record · /);
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);
   await expect(page.getByRole("heading", { level: 1, name: "pat.donor@example.org" })).toBeVisible();
   await expect(page.getByText("Donor asked for a partial refund", { exact: false })).toBeVisible();
   await expect(page.getByRole("link", { name: "Refund gift" })).toBeVisible();
+  await expect(page.getByText(/^Monthly gift: \$30\.00\/month · Active · Next renewal [A-Z][a-z]{2} \d{1,2}, \d{4} ·/)).toBeVisible();
+  await expect(page.locator("p.note").filter({ hasText: /^Last updated from Stripe / })).toBeVisible();
   await expectAccessible(page);
   await page.getByRole("button", { name: "Older actions" }).click();
   await expect(page.getByText("No refunds or cancellations recorded.")).toBeVisible();
   await page.goBack();
-  await expect(page).toHaveURL(/\/staff\?q=pat$/);
+  await expect(page).toHaveURL(staffURL("/staff?q=pat"));
   await expect(page.getByRole("searchbox", { name: "Find donor by email" })).toHaveValue("pat");
   await expect(page.getByRole("link", { name: "pat.donor@example.org" })).toBeVisible();
   expect(errors).toEqual([]);
@@ -139,7 +142,7 @@ test("a donor record has its own accessible page and Back returns to the search"
 
 test("a donor record link that matches no donor says so accessibly", async ({ page }) => {
   await mockStaffDonor(page);
-  await page.goto("/staff/donors/missing");
+  await page.goto(staffURL("/staff/donors/missing"));
   await expect(page.getByRole("main").getByRole("alert")).toContainText("No donor record matches this link");
   await expectAccessible(page);
 });
@@ -172,7 +175,7 @@ test("staff resume an uncertain refund with the saved key and amount", async ({ 
     }
     return route.fulfill({ status: 404, json: { detail: "Unexpected staff lookup" } });
   });
-  await page.goto(`/staff/finance?donor=donor-1&gift=${gift}`);
+  await page.goto(staffURL(`/staff/finance?donor=donor-1&gift=${gift}`));
   await expect(page.getByText("Refund $10.00 USD to the original payment method.")).toBeVisible();
   await expectAccessible(page);
   await page.getByRole("button", { name: "Retry original financial action" }).click();
@@ -185,7 +188,7 @@ test("staff resume an uncertain refund with the saved key and amount", async ({ 
 
 test("staff pages separate a missing session from a missing permission", async ({ page }) => {
   await page.route("**/api/donor/staff/audit*", (route) => route.fulfill({ status: 403, json: { detail: "Forbidden" } }));
-  await page.goto("/staff/audit");
+  await page.goto(staffURL("/staff/audit"));
   await expect(page.getByRole("main").getByRole("alert")).toContainText("requires administrator access");
   await expect(page.getByRole("link", { name: "Staff sign-in" })).toHaveCount(0);
   await page.unroute("**/api/donor/staff/audit*");
@@ -200,6 +203,6 @@ test("public pages carry their own titles and private pages are not indexed", as
   await page.goto("/account/sign-in");
   await expect(page).toHaveTitle(/^Claim your account or sign in · /);
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);
-  await page.goto("/staff/sign-in");
+  await page.goto(staffURL("/staff/sign-in"));
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);
 });

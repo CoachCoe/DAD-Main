@@ -61,14 +61,14 @@ it("forwards only the allowlisted request headers", async () => {
     method: "POST", body: "{}",
     headers: {
       cookie: "dad_session=s", "content-type": "application/json", accept: "application/json", "accept-language": "en-US",
-      "idempotency-key": "k", origin: "http://localhost:3000", "user-agent": "browser", "stripe-signature": "t=1,v1=x",
-      authorization: "Bearer stolen", "x-dad-client": "native", "x-forwarded-host": "evil.example", "x-staff-role": "ADMIN", forwarded: "for=1.2.3.4", host: "evil.example",
+      "idempotency-key": "k", origin: "http://localhost:3000", "user-agent": "browser", "stripe-signature": "t=1,v1=x", "sec-fetch-site": "same-origin",
+      "sec-fetch-mode": "cors", authorization: "Bearer stolen", "x-dad-client": "native", "x-forwarded-host": "evil.example", "x-staff-role": "ADMIN", forwarded: "for=1.2.3.4", host: "evil.example",
     },
   }), context("donor", "checkouts"));
   const sent = new Headers(fetch.mock.calls[0][1].headers);
   expect(Object.fromEntries(sent)).toEqual({
     cookie: "dad_session=s", "content-type": "application/json", accept: "application/json", "accept-language": "en-US",
-    "idempotency-key": "k", origin: "http://localhost:3000", "user-agent": "browser", "stripe-signature": "t=1,v1=x",
+    "idempotency-key": "k", origin: "http://localhost:3000", "user-agent": "browser", "stripe-signature": "t=1,v1=x", "sec-fetch-site": "same-origin",
   });
   expect(fetch.mock.calls[0][0].href).toBe("http://api.test:8002/donor/checkouts");
 });

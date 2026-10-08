@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"unicode/utf8"
@@ -13,11 +14,12 @@ import (
 )
 
 type StaffSource interface {
-	SignIn(context.Context, string, string, string) (string, error)
+	BeginSignIn(context.Context) (store.Ceremony, error)
+	SignIn(context.Context, string, []byte) (string, error)
+	BeginActivation(context.Context, string) (store.Invitation, error)
+	Activate(context.Context, string, []byte) (string, error)
 	SignOut(context.Context, string) error
 	Me(context.Context, string) (store.StaffView, error)
-	Provision(context.Context, string) (map[string]string, error)
-	Activate(context.Context, string, string, string) error
 	Accounts(context.Context, string) ([]store.StaffView, error)
 	Invite(context.Context, string, string, string, string) (string, error)
 	ChangeAccess(context.Context, string, pgtype.UUID, string, string) (store.AccessChange, error)
@@ -26,12 +28,15 @@ type StaffSource interface {
 const (
 	staffSessionAge  = 8 * 60 * 60
 	staffUnavailable = "Staff service is temporarily unavailable"
+	// A passkey response is a few kilobytes; this leaves room for large
+	// attestation certificate chains.
+	maxCredentialBytes = 64 << 10
 )
 
 func staffStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, store.ErrStaffDenied):
-		return http.StatusUnauthorized, "Credentials invalid, expired, or temporarily locked"
+		return http.StatusUnauthorized, "Passkey, invitation, or session invalid or expired"
 	case errors.Is(err, store.ErrStaffForbidden):
 		return http.StatusForbidden, "Permission denied"
 	case errors.Is(err, store.ErrStaffInput):
@@ -51,84 +56,74 @@ func (a *api) staff() service {
 	return service{a.Staff != nil, staffUnavailable, readTimeout, staffStatus}
 }
 
-func validOTP(code string) bool {
-	if len(code) != 6 {
-		return false
-	}
-	for _, c := range code {
-		if c < '0' || c > '9' {
-			return false
-		}
-	}
-	return true
-}
-
-func validPassword(password string, minimum int) bool {
-	n := utf8.RuneCountInString(password)
-	return n >= minimum && n <= 128
-}
-
 func validRole(role string) bool { return role == "ADMIN" || role == "FINANCE" || role == "SUPPORT" }
 
 func (a *api) invitationURL(token string) string {
-	return a.Origin + "/staff/activate#token=" + token
+	return a.StaffOrigin + "/staff/activate#token=" + token
 }
 
-// staffCommand runs a validated staff request body with the staff time
-// budget, which covers password hashing.
+// staffCommand runs a validated staff request body.
 func staffCommand[T requestBody](a *api, w http.ResponseWriter, r *http.Request, run func(context.Context, T) (any, error)) {
 	body, ok := decodeValid[T](w, r)
 	if !ok {
 		return
 	}
-	a.staff().within(staffTimeout).serve(w, r, func(ctx context.Context) (any, error) { return run(ctx, body) })
+	a.staff().serve(w, r, func(ctx context.Context) (any, error) { return run(ctx, body) })
 }
 
-type signInBody struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Code     string `json:"code"`
+// setStaffCookie keeps the staff session on the staff host: it never has a
+// Domain, and over HTTPS the __Host- prefix makes browsers refuse one.
+func (a *api) setStaffCookie(w http.ResponseWriter, value string, maxAge int) {
+	http.SetCookie(w, &http.Cookie{Name: a.staffCookie, Value: value, MaxAge: maxAge, Path: "/", HttpOnly: true, Secure: a.staffSecure, SameSite: http.SameSiteStrictMode})
 }
 
-func (b signInBody) valid() bool {
-	return utf8.RuneCountInString(b.Email) <= maxEmailRunes && validPassword(b.Password, 1) && validOTP(b.Code)
+func (a *api) staffSession(r *http.Request) string { return cookieValue(r, a.staffCookie) }
+
+// passkeyBody answers a ceremony with the browser's PublicKeyCredential JSON,
+// which the store parses and verifies.
+type passkeyBody struct {
+	Ceremony   string          `json:"ceremony"`
+	Credential json.RawMessage `json:"credential"`
+}
+
+func (b passkeyBody) valid() bool {
+	return validToken(b.Ceremony) && len(b.Credential) > 0 && len(b.Credential) <= maxCredentialBytes
+}
+
+func (a *api) beginStaffSignIn(w http.ResponseWriter, r *http.Request) {
+	a.staff().serve(w, r, func(ctx context.Context) (any, error) { return a.Staff.BeginSignIn(ctx) })
 }
 
 func (a *api) staffSignIn(w http.ResponseWriter, r *http.Request) {
-	staffCommand(a, w, r, func(ctx context.Context, b signInBody) (any, error) {
-		token, err := a.Staff.SignIn(ctx, b.Email, b.Password, b.Code)
+	staffCommand(a, w, r, func(ctx context.Context, b passkeyBody) (any, error) {
+		token, err := a.Staff.SignIn(ctx, b.Ceremony, b.Credential)
 		if err == nil {
-			a.setCookie(w, staffCookie, token, staffSessionAge, http.SameSiteStrictMode)
+			a.setStaffCookie(w, token, staffSessionAge)
 		}
 		return map[string]bool{"signed_in": true}, err
 	})
 }
 
-type provisionBody struct {
+type invitationTokenBody struct {
 	Token string `json:"token"`
 }
 
-func (b provisionBody) valid() bool { return validToken(b.Token) }
+func (b invitationTokenBody) valid() bool { return validToken(b.Token) }
 
-func (a *api) staffProvision(w http.ResponseWriter, r *http.Request) {
-	staffCommand(a, w, r, func(ctx context.Context, b provisionBody) (any, error) {
-		return a.Staff.Provision(ctx, b.Token)
+func (a *api) beginStaffActivation(w http.ResponseWriter, r *http.Request) {
+	staffCommand(a, w, r, func(ctx context.Context, b invitationTokenBody) (any, error) {
+		return a.Staff.BeginActivation(ctx, b.Token)
 	})
 }
 
-type activationBody struct {
-	Token    string `json:"token"`
-	Password string `json:"password"`
-	Code     string `json:"code"`
-}
-
-func (b activationBody) valid() bool {
-	return validToken(b.Token) && validPassword(b.Password, 12) && validOTP(b.Code)
-}
-
+// staffActivate signs the new staff member in with the passkey they created.
 func (a *api) staffActivate(w http.ResponseWriter, r *http.Request) {
-	staffCommand(a, w, r, func(ctx context.Context, b activationBody) (any, error) {
-		return map[string]bool{"activated": true}, a.Staff.Activate(ctx, b.Token, b.Password, b.Code)
+	staffCommand(a, w, r, func(ctx context.Context, b passkeyBody) (any, error) {
+		token, err := a.Staff.Activate(ctx, b.Ceremony, b.Credential)
+		if err == nil {
+			a.setStaffCookie(w, token, staffSessionAge)
+		}
+		return map[string]bool{"activated": true}, err
 	})
 }
 
@@ -165,11 +160,11 @@ func (a *api) staffAccounts(w http.ResponseWriter, r *http.Request, session stri
 // always discard its cookie.
 func (a *api) staffSignOut(w http.ResponseWriter, r *http.Request) {
 	a.staff().serve(w, r, func(ctx context.Context) (any, error) {
-		err := a.Staff.SignOut(ctx, staffSession(r))
+		err := a.Staff.SignOut(ctx, a.staffSession(r))
 		if err != nil && !errors.Is(err, store.ErrStaffDenied) {
 			return nil, err
 		}
-		a.setCookie(w, staffCookie, "", -1, http.SameSiteStrictMode)
+		a.setStaffCookie(w, "", -1)
 		return map[string]bool{"signed_out": true}, nil
 	})
 }

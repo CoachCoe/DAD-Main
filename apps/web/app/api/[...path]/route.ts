@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 // Only what the API reads crosses the boundary; anything else a browser or an
 // intermediary adds (including spoofable forwarding headers) is dropped.
-const REQUEST_HEADERS = ["accept", "accept-language", "content-type", "cookie", "idempotency-key", "origin", "stripe-signature", "user-agent"];
+const REQUEST_HEADERS = ["accept", "accept-language", "content-type", "cookie", "idempotency-key", "origin", "sec-fetch-site", "stripe-signature", "user-agent"];
 
 // Response headers not relayed as they are: hop-by-hop ones, a length and encoding that
 // fetch has already undone, and Set-Cookie, which is appended separately below.

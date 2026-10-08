@@ -227,6 +227,10 @@ func (w EventWorker) prefetch(ctx context.Context, q *queries.Queries, event que
 		return facts, err
 	case strings.HasPrefix(kind, "customer.subscription."):
 		subscription = data.Text("id")
+	case kind == "checkout.session.completed":
+		if subscription == "" {
+			return facts, nil
+		}
 	case strings.HasPrefix(kind, "invoice."):
 		pending, err := q.PendingAmountChange(ctx, draft.ID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -281,7 +285,14 @@ func (w EventWorker) applyLockedCheckoutEvent(ctx context.Context, q *queries.Qu
 	kind := event.EventType
 	switch {
 	case strings.HasPrefix(kind, "checkout.session."):
-		return applySessionEvent(ctx, q, kind, data, attempt)
+		if err := applySessionEvent(ctx, q, kind, data, attempt); err != nil || facts.subscription == nil {
+			return err
+		}
+		// Syncing here shows a new monthly gift without waiting for a
+		// subscription event, which Stripe may send before or after this one.
+		attempt.StripeSubscriptionID = text(facts.subscription.id)
+		_, err := reconcileSubscription(ctx, q, w.Gateway, draft, attempt, facts.subscription, now)
+		return err
 	case strings.HasPrefix(kind, "customer.subscription."):
 		if err := bindSubscription(ctx, q, attempt, data.Text("id")); err != nil {
 			return err

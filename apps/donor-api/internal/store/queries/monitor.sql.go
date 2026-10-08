@@ -23,8 +23,13 @@ WITH queues AS (
  UNION ALL
  SELECT 'projections',next_refresh_at,refresh_error IS NOT NULL FROM donor_metric_projections
  WHERE next_refresh_at<=$1::timestamptz
+ UNION ALL
+ -- Stripe renews a subscription at its period end, so one last synced
+ -- before then and still ongoing a day later has missed its sync.
+ SELECT 'subscriptions',period_end+interval '1 day',false FROM donor_subscriptions
+ WHERE status NOT IN ('canceled','incomplete_expired') AND observed_at<period_end
 ), names AS (
- SELECT unnest(ARRAY['stripe','messages','login-email','email-changes','projections']) AS queue
+ SELECT unnest(ARRAY['stripe','messages','login-email','email-changes','projections','subscriptions']) AS queue
 )
 SELECT n.queue,count(q.queue)::bigint AS due,
  count(q.queue) FILTER(WHERE q.parked)::bigint AS parked,

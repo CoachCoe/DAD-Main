@@ -28,7 +28,10 @@ Knowing an email or checkout ID never grants access to giving history.
 One active monthly subscription per donor; additional one-time gifts are allowed.
 Amount changes apply at the next renewal without proration. Cancellation stops future
 renewals without refunding past gifts. Pausing skips 1, 2, or 3 renewals, with the exact
-automatic-resume date shown before confirmation.
+automatic-resume date shown before confirmation. Donors see their monthly gift as last
+synced from Stripe, with the time of that sync; confirming a change checks Stripe's
+current state and refuses the change if it no longer matches what the donor confirmed,
+saving that state so the donor sees it on refreshing.
 
 ## Referrals
 
@@ -39,6 +42,11 @@ before account creation, and each collected gift records the referrer and channe
 were valid at the moment of charge. Conversion requires a successful first gift within the window;
 starting checkout is not conversion. Once converted, the donor's direct referral
 relationship is permanent. Later gifts add dollars, never additional conversions.
+
+A referral touch that led to a gift carrying its referrer is kept for good. Any other
+touch, including one whose checkout was abandoned or paid after the window, is deleted 13
+months after capture, long after its window closed, so retention never changes
+attribution: checkouts and gifts keep their own copy of it.
 
 Self-referral credit is removed when giver and referrer match by account or normalized
 donor email; the gift itself remains allowed. There is no second-level credit.
@@ -83,7 +91,7 @@ decision; existing awards remain permanent.
 
 Support can search/view donors and resend receipts/claim emails. Finance adds refunds,
 cancellations, and donor/financial exports. Administrator adds staff access management
-and approved content publishing. Require individual staff accounts and MFA. Enforce
+and approved content publishing. Require individual staff accounts and passkeys. Enforce
 named permissions server-side; audit actor, time, target, and result, with reasons for
 refunds and staff cancellation. No donor impersonation or access to card details.
 
@@ -103,7 +111,7 @@ unconfirmed. They must be verified before live donations.
 ## Implementation and release boundaries
 
 Go implements the donor API, Stripe inbox, recurring controls, projections, account
-email, notification outbox, staff MFA and permissions, audited refunds/cancellation,
+email, notification outbox, staff passkeys and permissions, audited refunds/cancellation,
 exports, private source documents, spreadsheet publication, and partner inquiries.
 TypeScript implements the public, donor, and staff web surfaces. See [architecture](architecture.md)
 and [operations](operations.md) for runtime behavior and instructions.

@@ -12,7 +12,7 @@ import (
 )
 
 const authenticatedStaff = `-- name: AuthenticatedStaff :one
-SELECT s.email, s.name, s.role, s.disabled, s.password_hash, s.totp_secret, s.totp_counter, s.failures, s.locked_until, s.id, s.created_at FROM donor_staff s JOIN donor_staff_sessions x ON x.staff_id=s.id
+SELECT s.email, s.name, s.role, s.disabled, s.id, s.created_at FROM donor_staff s JOIN donor_staff_sessions x ON x.staff_id=s.id
 WHERE x.token_hash=$1 AND x.revoked_at IS NULL AND x.expires_at>$2 AND NOT s.disabled
 `
 
@@ -29,19 +29,35 @@ func (q *Queries) AuthenticatedStaff(ctx context.Context, arg AuthenticatedStaff
 		&i.Name,
 		&i.Role,
 		&i.Disabled,
-		&i.PasswordHash,
-		&i.TotpSecret,
-		&i.TotpCounter,
-		&i.Failures,
-		&i.LockedUntil,
 		&i.ID,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
+const deleteExpiredStaffCeremonies = `-- name: DeleteExpiredStaffCeremonies :exec
+DELETE FROM donor_staff_ceremonies WHERE expires_at<=$1
+`
+
+func (q *Queries) DeleteExpiredStaffCeremonies(ctx context.Context, expiresAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteExpiredStaffCeremonies, expiresAt)
+	return err
+}
+
+const deleteStaffPasskeys = `-- name: DeleteStaffPasskeys :execrows
+DELETE FROM donor_staff_passkeys WHERE staff_id=$1
+`
+
+func (q *Queries) DeleteStaffPasskeys(ctx context.Context, staffID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteStaffPasskeys, staffID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const insertStaff = `-- name: InsertStaff :one
-INSERT INTO donor_staff(id,email,name,role) VALUES($1,$2,$3,$4) RETURNING email, name, role, disabled, password_hash, totp_secret, totp_counter, failures, locked_until, id, created_at
+INSERT INTO donor_staff(id,email,name,role) VALUES($1,$2,$3,$4) RETURNING email, name, role, disabled, id, created_at
 `
 
 type InsertStaffParams struct {
@@ -64,11 +80,6 @@ func (q *Queries) InsertStaff(ctx context.Context, arg InsertStaffParams) (Donor
 		&i.Name,
 		&i.Role,
 		&i.Disabled,
-		&i.PasswordHash,
-		&i.TotpSecret,
-		&i.TotpCounter,
-		&i.Failures,
-		&i.LockedUntil,
 		&i.ID,
 		&i.CreatedAt,
 	)
@@ -100,6 +111,29 @@ func (q *Queries) InsertStaffAudit(ctx context.Context, arg InsertStaffAuditPara
 	return err
 }
 
+const insertStaffCeremony = `-- name: InsertStaffCeremony :exec
+INSERT INTO donor_staff_ceremonies(token_hash,kind,invite_id,session,expires_at) VALUES($1,$2,$3,$4,$5)
+`
+
+type InsertStaffCeremonyParams struct {
+	TokenHash string             `json:"token_hash"`
+	Kind      string             `json:"kind"`
+	InviteID  pgtype.UUID        `json:"invite_id"`
+	Session   []byte             `json:"session"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) InsertStaffCeremony(ctx context.Context, arg InsertStaffCeremonyParams) error {
+	_, err := q.db.Exec(ctx, insertStaffCeremony,
+		arg.TokenHash,
+		arg.Kind,
+		arg.InviteID,
+		arg.Session,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
 const insertStaffInvite = `-- name: InsertStaffInvite :exec
 INSERT INTO donor_staff_invites(id,staff_id,token_hash,expires_at) VALUES($1,$2,$3,$4)
 `
@@ -117,6 +151,42 @@ func (q *Queries) InsertStaffInvite(ctx context.Context, arg InsertStaffInvitePa
 		arg.StaffID,
 		arg.TokenHash,
 		arg.ExpiresAt,
+	)
+	return err
+}
+
+const insertStaffPasskey = `-- name: InsertStaffPasskey :exec
+INSERT INTO donor_staff_passkeys(id,staff_id,credential_id,public_key,sign_count,transports,aaguid,attestation_format,user_verified,backup_eligible,backup_state)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+`
+
+type InsertStaffPasskeyParams struct {
+	ID                pgtype.UUID `json:"id"`
+	StaffID           pgtype.UUID `json:"staff_id"`
+	CredentialID      []byte      `json:"credential_id"`
+	PublicKey         []byte      `json:"public_key"`
+	SignCount         int64       `json:"sign_count"`
+	Transports        []string    `json:"transports"`
+	Aaguid            []byte      `json:"aaguid"`
+	AttestationFormat string      `json:"attestation_format"`
+	UserVerified      bool        `json:"user_verified"`
+	BackupEligible    bool        `json:"backup_eligible"`
+	BackupState       bool        `json:"backup_state"`
+}
+
+func (q *Queries) InsertStaffPasskey(ctx context.Context, arg InsertStaffPasskeyParams) error {
+	_, err := q.db.Exec(ctx, insertStaffPasskey,
+		arg.ID,
+		arg.StaffID,
+		arg.CredentialID,
+		arg.PublicKey,
+		arg.SignCount,
+		arg.Transports,
+		arg.Aaguid,
+		arg.AttestationFormat,
+		arg.UserVerified,
+		arg.BackupEligible,
+		arg.BackupState,
 	)
 	return err
 }
@@ -143,7 +213,7 @@ func (q *Queries) InsertStaffSession(ctx context.Context, arg InsertStaffSession
 }
 
 const invalidateStaffInvites = `-- name: InvalidateStaffInvites :exec
-UPDATE donor_staff_invites SET consumed_at=$2,pending_secret=NULL WHERE staff_id=$1 AND consumed_at IS NULL
+UPDATE donor_staff_invites SET consumed_at=$2 WHERE staff_id=$1 AND consumed_at IS NULL
 `
 
 type InvalidateStaffInvitesParams struct {
@@ -157,30 +227,32 @@ func (q *Queries) InvalidateStaffInvites(ctx context.Context, arg InvalidateStaf
 }
 
 const lockStaffAccounts = `-- name: LockStaffAccounts :many
-SELECT email, name, role, disabled, password_hash, totp_secret, totp_counter, failures, locked_until, id, created_at FROM donor_staff ORDER BY id FOR UPDATE
+SELECT s.email, s.name, s.role, s.disabled, s.id, s.created_at, EXISTS(SELECT 1 FROM donor_staff_passkeys p WHERE p.staff_id=s.id) AS active
+FROM donor_staff s ORDER BY s.id FOR UPDATE OF s
 `
 
-func (q *Queries) LockStaffAccounts(ctx context.Context) ([]DonorStaff, error) {
+type LockStaffAccountsRow struct {
+	DonorStaff DonorStaff `json:"donor_staff"`
+	Active     bool       `json:"active"`
+}
+
+func (q *Queries) LockStaffAccounts(ctx context.Context) ([]LockStaffAccountsRow, error) {
 	rows, err := q.db.Query(ctx, lockStaffAccounts)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []DonorStaff{}
+	items := []LockStaffAccountsRow{}
 	for rows.Next() {
-		var i DonorStaff
+		var i LockStaffAccountsRow
 		if err := rows.Scan(
-			&i.Email,
-			&i.Name,
-			&i.Role,
-			&i.Disabled,
-			&i.PasswordHash,
-			&i.TotpSecret,
-			&i.TotpCounter,
-			&i.Failures,
-			&i.LockedUntil,
-			&i.ID,
-			&i.CreatedAt,
+			&i.DonorStaff.Email,
+			&i.DonorStaff.Name,
+			&i.DonorStaff.Role,
+			&i.DonorStaff.Disabled,
+			&i.DonorStaff.ID,
+			&i.DonorStaff.CreatedAt,
+			&i.Active,
 		); err != nil {
 			return nil, err
 		}
@@ -190,6 +262,29 @@ func (q *Queries) LockStaffAccounts(ctx context.Context) ([]DonorStaff, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordStaffPasskeyUse = `-- name: RecordStaffPasskeyUse :exec
+UPDATE donor_staff_passkeys SET sign_count=$2,user_verified=$3,backup_state=$4,last_used_at=$5 WHERE credential_id=$1
+`
+
+type RecordStaffPasskeyUseParams struct {
+	CredentialID []byte             `json:"credential_id"`
+	SignCount    int64              `json:"sign_count"`
+	UserVerified bool               `json:"user_verified"`
+	BackupState  bool               `json:"backup_state"`
+	LastUsedAt   pgtype.Timestamptz `json:"last_used_at"`
+}
+
+func (q *Queries) RecordStaffPasskeyUse(ctx context.Context, arg RecordStaffPasskeyUseParams) error {
+	_, err := q.db.Exec(ctx, recordStaffPasskeyUse,
+		arg.CredentialID,
+		arg.SignCount,
+		arg.UserVerified,
+		arg.BackupState,
+		arg.LastUsedAt,
+	)
+	return err
 }
 
 const revokeStaffSession = `-- name: RevokeStaffSession :exec
@@ -220,49 +315,18 @@ func (q *Queries) RevokeStaffSessions(ctx context.Context, arg RevokeStaffSessio
 	return err
 }
 
-const saveStaffCredentials = `-- name: SaveStaffCredentials :exec
-UPDATE donor_staff SET password_hash=$2,totp_secret=$3,totp_counter=$4,failures=$5,locked_until=$6 WHERE id=$1
-`
-
-type SaveStaffCredentialsParams struct {
-	ID           pgtype.UUID        `json:"id"`
-	PasswordHash pgtype.Text        `json:"password_hash"`
-	TotpSecret   []byte             `json:"totp_secret"`
-	TotpCounter  int64              `json:"totp_counter"`
-	Failures     int32              `json:"failures"`
-	LockedUntil  pgtype.Timestamptz `json:"locked_until"`
-}
-
-func (q *Queries) SaveStaffCredentials(ctx context.Context, arg SaveStaffCredentialsParams) error {
-	_, err := q.db.Exec(ctx, saveStaffCredentials,
-		arg.ID,
-		arg.PasswordHash,
-		arg.TotpSecret,
-		arg.TotpCounter,
-		arg.Failures,
-		arg.LockedUntil,
-	)
-	return err
-}
-
 const saveStaffInvite = `-- name: SaveStaffInvite :exec
-UPDATE donor_staff_invites SET attempts=$2,pending_secret=$3,consumed_at=$4 WHERE id=$1
+UPDATE donor_staff_invites SET attempts=$2,consumed_at=$3 WHERE id=$1
 `
 
 type SaveStaffInviteParams struct {
-	ID            pgtype.UUID        `json:"id"`
-	Attempts      int32              `json:"attempts"`
-	PendingSecret []byte             `json:"pending_secret"`
-	ConsumedAt    pgtype.Timestamptz `json:"consumed_at"`
+	ID         pgtype.UUID        `json:"id"`
+	Attempts   int32              `json:"attempts"`
+	ConsumedAt pgtype.Timestamptz `json:"consumed_at"`
 }
 
 func (q *Queries) SaveStaffInvite(ctx context.Context, arg SaveStaffInviteParams) error {
-	_, err := q.db.Exec(ctx, saveStaffInvite,
-		arg.ID,
-		arg.Attempts,
-		arg.PendingSecret,
-		arg.ConsumedAt,
-	)
+	_, err := q.db.Exec(ctx, saveStaffInvite, arg.ID, arg.Attempts, arg.ConsumedAt)
 	return err
 }
 
@@ -281,31 +345,8 @@ func (q *Queries) SetStaffAccess(ctx context.Context, arg SetStaffAccessParams) 
 	return err
 }
 
-const staffByEmail = `-- name: StaffByEmail :one
-SELECT email, name, role, disabled, password_hash, totp_secret, totp_counter, failures, locked_until, id, created_at FROM donor_staff WHERE email=$1 FOR UPDATE
-`
-
-func (q *Queries) StaffByEmail(ctx context.Context, email string) (DonorStaff, error) {
-	row := q.db.QueryRow(ctx, staffByEmail, email)
-	var i DonorStaff
-	err := row.Scan(
-		&i.Email,
-		&i.Name,
-		&i.Role,
-		&i.Disabled,
-		&i.PasswordHash,
-		&i.TotpSecret,
-		&i.TotpCounter,
-		&i.Failures,
-		&i.LockedUntil,
-		&i.ID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const staffByID = `-- name: StaffByID :one
-SELECT email, name, role, disabled, password_hash, totp_secret, totp_counter, failures, locked_until, id, created_at FROM donor_staff WHERE id=$1 FOR UPDATE
+SELECT email, name, role, disabled, id, created_at FROM donor_staff WHERE id=$1 FOR UPDATE
 `
 
 func (q *Queries) StaffByID(ctx context.Context, id pgtype.UUID) (DonorStaff, error) {
@@ -316,11 +357,25 @@ func (q *Queries) StaffByID(ctx context.Context, id pgtype.UUID) (DonorStaff, er
 		&i.Name,
 		&i.Role,
 		&i.Disabled,
-		&i.PasswordHash,
-		&i.TotpSecret,
-		&i.TotpCounter,
-		&i.Failures,
-		&i.LockedUntil,
+		&i.ID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const staffInviteByID = `-- name: StaffInviteByID :one
+SELECT staff_id, token_hash, expires_at, consumed_at, attempts, id, created_at FROM donor_staff_invites WHERE id=$1 FOR UPDATE
+`
+
+func (q *Queries) StaffInviteByID(ctx context.Context, id pgtype.UUID) (DonorStaffInvite, error) {
+	row := q.db.QueryRow(ctx, staffInviteByID, id)
+	var i DonorStaffInvite
+	err := row.Scan(
+		&i.StaffID,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.Attempts,
 		&i.ID,
 		&i.CreatedAt,
 	)
@@ -328,7 +383,7 @@ func (q *Queries) StaffByID(ctx context.Context, id pgtype.UUID) (DonorStaff, er
 }
 
 const staffInviteByToken = `-- name: StaffInviteByToken :one
-SELECT staff_id, token_hash, expires_at, consumed_at, pending_secret, attempts, id, created_at FROM donor_staff_invites WHERE token_hash=$1 FOR UPDATE
+SELECT staff_id, token_hash, expires_at, consumed_at, attempts, id, created_at FROM donor_staff_invites WHERE token_hash=$1 FOR UPDATE
 `
 
 func (q *Queries) StaffInviteByToken(ctx context.Context, tokenHash string) (DonorStaffInvite, error) {
@@ -339,7 +394,6 @@ func (q *Queries) StaffInviteByToken(ctx context.Context, tokenHash string) (Don
 		&i.TokenHash,
 		&i.ExpiresAt,
 		&i.ConsumedAt,
-		&i.PendingSecret,
 		&i.Attempts,
 		&i.ID,
 		&i.CreatedAt,
@@ -356,4 +410,75 @@ func (q *Queries) StaffInviteOwner(ctx context.Context, tokenHash string) (pgtyp
 	var staff_id pgtype.UUID
 	err := row.Scan(&staff_id)
 	return staff_id, err
+}
+
+const staffPasskeyOwner = `-- name: StaffPasskeyOwner :one
+SELECT staff_id FROM donor_staff_passkeys WHERE credential_id=$1
+`
+
+func (q *Queries) StaffPasskeyOwner(ctx context.Context, credentialID []byte) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, staffPasskeyOwner, credentialID)
+	var staff_id pgtype.UUID
+	err := row.Scan(&staff_id)
+	return staff_id, err
+}
+
+const staffPasskeys = `-- name: StaffPasskeys :many
+SELECT staff_id, credential_id, public_key, sign_count, transports, aaguid, attestation_format, user_verified, backup_eligible, backup_state, last_used_at, id, created_at FROM donor_staff_passkeys WHERE staff_id=$1 ORDER BY id FOR UPDATE
+`
+
+func (q *Queries) StaffPasskeys(ctx context.Context, staffID pgtype.UUID) ([]DonorStaffPasskey, error) {
+	rows, err := q.db.Query(ctx, staffPasskeys, staffID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DonorStaffPasskey{}
+	for rows.Next() {
+		var i DonorStaffPasskey
+		if err := rows.Scan(
+			&i.StaffID,
+			&i.CredentialID,
+			&i.PublicKey,
+			&i.SignCount,
+			&i.Transports,
+			&i.Aaguid,
+			&i.AttestationFormat,
+			&i.UserVerified,
+			&i.BackupEligible,
+			&i.BackupState,
+			&i.LastUsedAt,
+			&i.ID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const takeStaffCeremony = `-- name: TakeStaffCeremony :one
+DELETE FROM donor_staff_ceremonies WHERE token_hash=$1 AND kind=$2 RETURNING invite_id,session,expires_at
+`
+
+type TakeStaffCeremonyParams struct {
+	TokenHash string `json:"token_hash"`
+	Kind      string `json:"kind"`
+}
+
+type TakeStaffCeremonyRow struct {
+	InviteID  pgtype.UUID        `json:"invite_id"`
+	Session   []byte             `json:"session"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) TakeStaffCeremony(ctx context.Context, arg TakeStaffCeremonyParams) (TakeStaffCeremonyRow, error) {
+	row := q.db.QueryRow(ctx, takeStaffCeremony, arg.TokenHash, arg.Kind)
+	var i TakeStaffCeremonyRow
+	err := row.Scan(&i.InviteID, &i.Session, &i.ExpiresAt)
+	return i, err
 }

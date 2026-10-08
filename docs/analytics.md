@@ -13,7 +13,7 @@ Use stable record IDs for deduplication, not email addresses, names, or webhook 
 
 | Logical event | Source / identity | Meaning |
 |---|---|---|
-| `referral_touch_captured.v1` | referral-touches / touch ID | First accepted referral touch; channel and 30-day window are fixed. Further opens in that window do not replace the source. This is not every page view. |
+| `referral_touch_captured.v1` | referral-touches / touch ID | First accepted referral touch; channel and 30-day window are fixed. Further opens in that window do not replace the source. This is not every page view. Kept for good once it leads to an attributed gift; otherwise deleted 13 months after capture. |
 | `checkout_requested.v1` | checkouts / checkout ID | Valid donation request persisted before calling Stripe. Does not prove a hosted page opened or a gift completed. |
 | `gift_collected.v1` | gifts / gift ID | Verified processor collection. One-time and recurring are explicit; checkout completion is insufficient. Carries the referrer and LINK/IRL kind valid at the moment of charge. |
 | `refund_observed.v1` | refund-history / observation ID | Provider or audited staff observation of a refund transition. Count successful current refund state once per refund ID when calculating net dollars. |
@@ -30,6 +30,14 @@ exports omit visitor hashes, tokens, processor secrets, and payment details. Ref
 exports carry `kind` (LINK/IRL) on every row. Email addresses are unnecessary for analytics
 joins and must not be copied to an analytics vendor. Deduplicate gifts before joining
 refunds or referrals to avoid multiplying collected dollars.
+
+The referral-touches export holds every touch captured in the last 13 months and, before
+that, only touches that led to an attributed gift; the others have been deleted.
+Attribution on checkouts and gifts is a copy and does not depend on the touch, so
+checkouts keep theirs and conversions, referral counts, and referral dollars are
+unaffected. Touch counts and touch-based denominators for
+capture dates more than 13 months back cannot be recomputed: report them from an export
+taken while that period was within retention, and state the capture cutoff.
 
 ## Metric definitions
 

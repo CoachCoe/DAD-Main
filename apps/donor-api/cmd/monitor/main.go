@@ -29,7 +29,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := store.Open(ctx, dsn)
+	pool, err := store.Open(ctx, dsn, 2)
 	if err != nil {
 		return errors.New("monitor database unavailable")
 	}

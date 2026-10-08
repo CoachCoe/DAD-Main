@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import type { StaffMember } from "../../Staff";
-import { formatDateTime } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 
 type Subscription = { amount_minor: number; next_renewal: string; observed_at: string; status: string; stops_at: string | null };
 type Detail = { id: string; email: string; public_name: string | null; claimed: boolean; founding_donor: boolean; subscription: Subscription | null;
@@ -16,6 +16,8 @@ type Detail = { id: string; email: string; public_name: string | null; claimed: 
   gifts: { id: string; amount_minor: number; currency: string; frequency: string; paid_at: string; refunded_minor: number; net_minor: number }[];
   referred: { id: string; email: string; type: string; net_minor: number | null }[];
   next_gifts_offset: number | null; next_referrals_offset: number | null };
+const statusWords: Record<string, string> = { active: "Active", past_due: "Payment overdue", unpaid: "Payment overdue", paused: "Paused",
+  canceled: "Cancelled", incomplete_expired: "Cancelled", incomplete: "Setting up", trialing: "Setting up" };
 type Actions = { actions: { id: string; actor_id: string; kind: string; target_id: string; amount_minor: number | null; period_end: string | null;
   reason: string; status: string; completed_at: string | null }[]; next_offset: number | null };
 
@@ -47,9 +49,11 @@ export default function DonorDetail({ donor }: { donor: string }) {
       {detail.streak && <p>Computed {formatDateTime(detail.streak.computed_at)}</p>}
       <p>Referrer: {detail.referrer ? <><Link href={`/staff/donors/${encodeURIComponent(detail.referrer.id)}`}>{detail.referrer.email}</Link> · {detail.referrer.type}</> : "No attributed referrer"}</p>
       <h2>Gifts</h2>
-      <p>{detail.subscription ? <>Monthly gift: {formatMoney(detail.subscription.amount_minor)}/month · {detail.subscription.status} · {detail.subscription.stops_at
-        ? `Renewals stop ${formatDateTime(detail.subscription.stops_at)}` : `Next renewal ${formatDateTime(detail.subscription.next_renewal)}`}
+      <p>{detail.subscription ? <>Monthly gift: {formatMoney(detail.subscription.amount_minor)}/month{" · "}
+        {statusWords[detail.subscription.status] ?? detail.subscription.status} · {detail.subscription.stops_at
+        ? `Ends ${formatDate(detail.subscription.stops_at)}` : `Next renewal ${formatDate(detail.subscription.next_renewal)}`}
         {can("gift.cancel") && !detail.subscription.stops_at && <> · <Link href={`/staff/finance?donor=${id}`}>Cancel monthly giving</Link></>}</> : "No active monthly gift."}</p>
+      {detail.subscription && <p className="note">Last updated from Stripe <time dateTime={detail.subscription.observed_at}>{formatDateTime(detail.subscription.observed_at)}</time>.</p>}
       {detail.gifts.length ? <ul>{detail.gifts.map((gift) => <li key={gift.id}>
         {formatMoney(gift.amount_minor, gift.currency)} · {gift.frequency} · {formatDateTime(gift.paid_at)} · <code>{gift.id}</code>
         {gift.refunded_minor ? <> · Refunded {formatMoney(gift.refunded_minor, gift.currency)}</> : null}
@@ -78,7 +82,7 @@ function ActionHistory({ donor }: { donor: string }) {
   return <section aria-labelledby="staff-actions"><h2 id="staff-actions">Staff financial actions</h2>
     {data && <>{data.actions.length ? <ul>{data.actions.map((item) => <li key={item.id}>
       {item.kind} · {item.status}{item.amount_minor !== null && ` · ${formatMoney(item.amount_minor)}`}
-      {item.period_end && ` · Stops ${formatDateTime(item.period_end)}`} · {item.completed_at ? `Completed ${formatDateTime(item.completed_at)}` : "Not completed"}
+      {item.period_end && ` · Stops ${formatDate(item.period_end)}`} · {item.completed_at ? `Completed ${formatDateTime(item.completed_at)}` : "Not completed"}
       <p>Reason: {item.reason}. Staff member: <code>{item.actor_id}</code>. Target: <code>{item.target_id}</code></p>
     </li>)}</ul> : <p>No refunds or cancellations recorded.</p>}
       {offset > 0 && <button type="button" className="secondary" onClick={() => setOffset(0)}>Newest actions</button>}
