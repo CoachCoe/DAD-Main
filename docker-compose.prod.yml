@@ -151,7 +151,13 @@ services:
     restart: unless-stopped
 
 networks:
+  # IPv6 lets published ports deliver IPv6 clients with their own addresses; without it,
+  # Docker's proxy presents them all as the gateway, sharing one rate-limit quota.
   edge:
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd42:dad:ed9e::/64
   default:
     ipam:
       config:

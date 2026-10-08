@@ -78,10 +78,10 @@ address (`DONOR_TRUSTED_PROXY_CIDRS=172.30.42.10/32`).
 `./scripts/refresh-cloudflare-ips.sh --check` monthly; when it reports a change, run it
 without `--check`, commit the result, and run `reload-ingress`.
 
-In direct mode, Docker's userland proxy replaces the source address of IPv6 connections
-with the bridge gateway unless the Docker network has IPv6 enabled, so every IPv6 visitor
-would share one quota. Publish only an A record in direct mode, or enable IPv6 networking
-in Docker. In cloudflare mode the client's IPv6 address arrives in `CF-Connecting-IP`.
+The edge network has IPv6 enabled, so in direct mode IPv6 visitors reach nginx with their
+own addresses rather than as Docker's gateway, and each keeps its own quota. This needs
+Docker Engine 27 or later with its default `ip6tables` setting. In cloudflare mode the
+client's IPv6 address arrives in `CF-Connecting-IP`.
 
 ## Rate limits
 

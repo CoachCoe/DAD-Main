@@ -48,9 +48,10 @@ networks:
       config: !reset []
   edge:
     ipam:
-      config:
+      config: !override
         - subnet: 172.31.243.0/24
           ip_range: 172.31.243.0/25
+        - subnet: fd42:dad:c4ec::/64
 EOF
 files+=(-f "$work/check.yml")
 
@@ -132,7 +133,7 @@ check() {
   fi
 }
 # Requests come from the stub, a peer outside the trusted ranges.
-client() { compose exec -T web curl -sS -k --http1.1 --connect-to :443:nginx:8443 --connect-to :80:nginx:8080 "$@"; }
+client() { compose exec -T web curl -sS -k --http1.1 --connect-to :443:nginx:8443 --connect-to :80:nginx:8080 "${family:--4}" "$@"; }
 status() { client -o /dev/null -w '%{http_code}' "$@" 2>/dev/null || true; }
 exit_code() { client -o /dev/null "$@" 2>/dev/null && echo 0 || echo "$?"; }
 field() { sed -n "s/^$1=//p" <<< "$2"; }
@@ -156,6 +157,8 @@ check 'public page reaches web with its query' '/donate?amount=1' "$(field uri "
 check 'X-Real-IP is the peer, not the client claim' "$peer" "$(field x-real-ip "$body")"
 check 'X-Forwarded-For is the peer only' "$peer" "$(field x-forwarded-for "$body")"
 check 'CF-Connecting-IP is dropped' '' "$(field cf-connecting-ip "$body")"
+peer6="$(docker inspect -f "{{(index .NetworkSettings.Networks \"${project}_edge\").GlobalIPv6Address}}" "$(compose ps -q web)")"
+check 'an IPv6 client keeps its own address' "$peer6" "$(field x-real-ip "$(family=-6 client https://public.test/)")"
 
 for path in /staff /staff/sign-in /STAFF/audit /api/donor/staff/me /api/donor/staff/sign-in; do
   check "public host hides $path" 404 "$(status "https://public.test$path")"
@@ -207,7 +210,7 @@ cert=(--cert /pki/edge.pem --key /pki/edge.key)
 body="$(client "${cert[@]}" "${spoof[@]}" https://public.test/)"
 check 'CF-Connecting-IP from outside Cloudflare is ignored' "$peer" "$(field x-real-ip "$body")"
 body="$(docker run --rm --network "${project}_edge" --ip 172.31.243.200 -v "$work/pki:/pki:ro" "$image" \
-  curl -sS -k --http1.1 --connect-to :443:nginx:8443 "${cert[@]}" -H 'CF-Connecting-IP: 198.51.100.7' \
+  curl -sS -k --http1.1 -4 --connect-to :443:nginx:8443 "${cert[@]}" -H 'CF-Connecting-IP: 198.51.100.7' \
   -H 'X-Real-IP: 203.0.113.9' -H 'X-Forwarded-For: 203.0.113.9' https://public.test/)"
 check 'X-Real-IP is CF-Connecting-IP from Cloudflare' 198.51.100.7 "$(field x-real-ip "$body")"
 check 'X-Forwarded-For is CF-Connecting-IP from Cloudflare' 198.51.100.7 "$(field x-forwarded-for "$body")"
