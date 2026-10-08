@@ -177,8 +177,8 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	if !bytes.Contains(body, []byte(`"captured":true`)) || bytes.Contains(body, []byte(ownerEmail)) {
 		t.Fatal("referral capture privacy or state mismatch")
 	}
-	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": true, "marketing_emails": false}, nil, 200)
-	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": false, "marketing_emails": false}, nil, 409)
+	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": true, "marketing_emails": false, "push_referral_converted": true, "push_streak_at_risk": true, "push_streak_milestone": true}, nil, 200)
+	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": false, "marketing_emails": false, "push_referral_converted": true, "push_streak_at_risk": true, "push_streak_milestone": true}, nil, 409)
 	checkoutBody := map[string]any{"email": guestEmail, "amount_minor": 3000, "frequency": "ONE_TIME"}
 	body = call(guest, "POST", "/donor/checkouts", checkoutBody, map[string]string{"Idempotency-Key": requestID.String()}, 201)
 	var checkout payments.CheckoutResult
