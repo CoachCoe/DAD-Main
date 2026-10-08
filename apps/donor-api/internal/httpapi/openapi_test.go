@@ -295,7 +295,14 @@ func (c *contract) checkShape(t *testing.T, where string, typ reflect.Type, sche
 		c.checkShape(t, where+"[]", typ.Elem(), items)
 		return
 	}
-	properties, _ := schema["properties"].(map[string]any)
+	// A type that encodes differently per state documents each state as a oneOf
+	// variant; together the variants must cover exactly its fields.
+	properties := map[string]any{}
+	variants, _ := schema["oneOf"].([]any)
+	for _, variant := range append([]any{schema}, variants...) {
+		documented, _ := c.resolve(variant.(map[string]any))["properties"].(map[string]any)
+		maps.Copy(properties, documented)
+	}
 	fields := map[string]reflect.Type{}
 	for _, field := range reflect.VisibleFields(typ) {
 		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")

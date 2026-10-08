@@ -4565,56 +4565,82 @@
         "additionalProperties": false
       },
       "DonorDashboard": {
-        "type": "object",
-        "description": "While `state` is `preparing` only `mode` and `state` are present. A null `referrals` or `streak` means the figure is not currently known; never show it as zero.",
-        "properties": {
-          "computed_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "founding_donor": {
-            "type": "boolean"
-          },
-          "mode": {
-            "type": "string",
-            "description": "Always `test`: R1 accepts Stripe test payments only.",
-            "enum": [
-              "test"
-            ]
-          },
-          "referrals": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReferralSummary"
+        "description": "A null `referrals` or `streak` means the figure is not currently known; never show it as zero.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "description": "Always `test`: R1 accepts Stripe test payments only.",
+                "enum": [
+                  "test"
+                ]
               },
-              {
-                "type": "null"
+              "state": {
+                "type": "string",
+                "const": "preparing"
               }
-            ]
+            },
+            "required": [
+              "mode",
+              "state"
+            ],
+            "additionalProperties": false
           },
-          "state": {
-            "type": "string",
-            "enum": [
-              "preparing",
-              "ready"
-            ]
-          },
-          "streak": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/StreakSummary"
+          {
+            "type": "object",
+            "properties": {
+              "computed_at": {
+                "type": "string",
+                "format": "date-time"
               },
-              {
-                "type": "null"
+              "founding_donor": {
+                "type": "boolean"
+              },
+              "mode": {
+                "type": "string",
+                "description": "Always `test`: R1 accepts Stripe test payments only.",
+                "enum": [
+                  "test"
+                ]
+              },
+              "referrals": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReferralSummary"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "state": {
+                "type": "string",
+                "const": "ready"
+              },
+              "streak": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/StreakSummary"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               }
-            ]
+            },
+            "required": [
+              "computed_at",
+              "founding_donor",
+              "mode",
+              "referrals",
+              "state",
+              "streak"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "mode",
-          "state"
-        ],
-        "additionalProperties": false
+        ]
       },
       "Profile": {
         "type": "object",
@@ -5110,40 +5136,61 @@
         "additionalProperties": false
       },
       "AmountOptions": {
-        "type": "object",
-        "description": "Unless `state` is `ready`, only `state` is present.",
-        "properties": {
-          "amount_minor": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Amount of the next renewal."
-          },
-          "change": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AmountChange"
-              },
-              {
-                "type": "null"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "const": "unavailable"
               }
-            ]
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
           },
-          "effective_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "state": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string",
-            "format": "uuid"
+          {
+            "type": "object",
+            "properties": {
+              "amount_minor": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Amount of the next renewal."
+              },
+              "change": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AmountChange"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "effective_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "state": {
+                "type": "string",
+                "const": "ready"
+              },
+              "subscription_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "amount_minor",
+              "change",
+              "effective_at",
+              "state",
+              "subscription_id"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "state"
-        ],
-        "additionalProperties": false
+        ]
       },
       "PauseOption": {
         "type": "object",
@@ -5237,36 +5284,83 @@
         "additionalProperties": false
       },
       "ResumeOptions": {
-        "type": "object",
-        "description": "Each state carries only its own fields.",
-        "properties": {
-          "confirmed": {
-            "type": "boolean"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "state": {
+                "type": "string",
+                "const": "unavailable"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "additionalProperties": false
           },
-          "next_renewal": {
-            "type": "string",
-            "format": "date-time"
+          {
+            "type": "object",
+            "properties": {
+              "next_renewal": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "original_resume": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "pause_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "const": "ready",
+                "description": "An offer to resume at the next renewal."
+              }
+            },
+            "required": [
+              "next_renewal",
+              "original_resume",
+              "pause_id",
+              "state"
+            ],
+            "additionalProperties": false
           },
-          "original_resume": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "pause_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "request_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "state": {
-            "type": "string"
+          {
+            "type": "object",
+            "properties": {
+              "confirmed": {
+                "type": "boolean"
+              },
+              "next_renewal": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "pause_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "request_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "state": {
+                "type": "string",
+                "const": "saved",
+                "description": "A resumption already requested."
+              }
+            },
+            "required": [
+              "confirmed",
+              "next_renewal",
+              "pause_id",
+              "request_id",
+              "state"
+            ],
+            "additionalProperties": false
           }
-        },
-        "required": [
-          "state"
-        ],
-        "additionalProperties": false
+        ]
       },
       "PaymentMethodStatus": {
         "type": "object",
@@ -5336,31 +5430,51 @@
         "additionalProperties": false
       },
       "PaymentUpdate": {
-        "type": "object",
-        "properties": {
-          "completed_at": {
-            "type": [
-              "string",
-              "null"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string",
+                "description": "Stripe-hosted card setup page. Open it in the system browser.",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "url"
             ],
-            "format": "date-time"
+            "additionalProperties": false
           },
-          "status": {
-            "type": "string"
-          },
-          "url": {
-            "type": [
-              "string",
-              "null"
+          {
+            "type": "object",
+            "properties": {
+              "completed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "APPLIED",
+                  "CANCELLED"
+                ]
+              },
+              "url": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "completed_at",
+              "status",
+              "url"
             ],
-            "description": "Stripe-hosted card setup page. Open it in the system browser.",
-            "format": "uri"
+            "additionalProperties": false,
+            "description": "An update that finished before a new one could begin."
           }
-        },
-        "required": [
-          "url"
-        ],
-        "additionalProperties": false
+        ]
       },
       "CheckoutResult": {
         "type": "object",

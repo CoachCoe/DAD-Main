@@ -1217,20 +1217,28 @@ export interface components {
             /** Format: date-time */
             grace_ends_at: string | null;
         };
-        /** @description While `state` is `preparing` only `mode` and `state` are present. A null `referrals` or `streak` means the figure is not currently known; never show it as zero. */
+        /** @description A null `referrals` or `streak` means the figure is not currently known; never show it as zero. */
         DonorDashboard: {
-            /** Format: date-time */
-            computed_at?: string;
-            founding_donor?: boolean;
             /**
              * @description Always `test`: R1 accepts Stripe test payments only.
              * @enum {string}
              */
             mode: "test";
-            referrals?: components["schemas"]["ReferralSummary"] | null;
-            /** @enum {string} */
-            state: "preparing" | "ready";
-            streak?: components["schemas"]["StreakSummary"] | null;
+            /** @constant */
+            state: "preparing";
+        } | {
+            /** Format: date-time */
+            computed_at: string;
+            founding_donor: boolean;
+            /**
+             * @description Always `test`: R1 accepts Stripe test payments only.
+             * @enum {string}
+             */
+            mode: "test";
+            referrals: components["schemas"]["ReferralSummary"] | null;
+            /** @constant */
+            state: "ready";
+            streak: components["schemas"]["StreakSummary"] | null;
         };
         Profile: {
             /** Format: email */
@@ -1439,19 +1447,22 @@ export interface components {
             /** Format: uuid */
             request_id: string;
         };
-        /** @description Unless `state` is `ready`, only `state` is present. */
         AmountOptions: {
+            /** @constant */
+            state: "unavailable";
+        } | {
             /**
              * Format: int64
              * @description Amount of the next renewal.
              */
-            amount_minor?: number;
-            change?: components["schemas"]["AmountChange"] | null;
+            amount_minor: number;
+            change: components["schemas"]["AmountChange"] | null;
             /** Format: date-time */
-            effective_at?: string;
-            state: string;
+            effective_at: string;
+            /** @constant */
+            state: "ready";
             /** Format: uuid */
-            subscription_id?: string;
+            subscription_id: string;
         };
         PauseOption: {
             /** Format: int32 */
@@ -1479,18 +1490,34 @@ export interface components {
             /** Format: uuid */
             subscription_id?: string;
         };
-        /** @description Each state carries only its own fields. */
         ResumeOptions: {
-            confirmed?: boolean;
+            /** @constant */
+            state: "unavailable";
+        } | {
             /** Format: date-time */
-            next_renewal?: string;
+            next_renewal: string;
             /** Format: date-time */
-            original_resume?: string;
+            original_resume: string;
             /** Format: uuid */
-            pause_id?: string;
+            pause_id: string;
+            /**
+             * @description An offer to resume at the next renewal.
+             * @constant
+             */
+            state: "ready";
+        } | {
+            confirmed: boolean;
+            /** Format: date-time */
+            next_renewal: string;
             /** Format: uuid */
-            request_id?: string;
-            state: string;
+            pause_id: string;
+            /** Format: uuid */
+            request_id: string;
+            /**
+             * @description A resumption already requested.
+             * @constant
+             */
+            state: "saved";
         };
         PaymentMethodStatus: {
             /** Format: date-time */
@@ -1515,14 +1542,17 @@ export interface components {
             request_id: string;
         };
         PaymentUpdate: {
-            /** Format: date-time */
-            completed_at?: string | null;
-            status?: string;
             /**
              * Format: uri
              * @description Stripe-hosted card setup page. Open it in the system browser.
              */
-            url: string | null;
+            url: string;
+        } | {
+            /** Format: date-time */
+            completed_at: string | null;
+            /** @enum {string} */
+            status: "APPLIED" | "CANCELLED";
+            url: null;
         };
         CheckoutResult: {
             /**
