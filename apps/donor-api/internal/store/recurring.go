@@ -53,14 +53,20 @@ type RecurringDetails struct {
 	Subscription *Subscription `json:"subscription"`
 }
 type Subscription struct {
-	AmountMinor int64     `json:"amount_minor"`
-	Currency    string    `json:"currency"`
-	ID          string    `json:"id"`
-	PeriodEnd   time.Time `json:"period_end"`
-	// ResumesAt is when giving resumes after a confirmed pause in effect.
-	ResumesAt *time.Time `json:"resumes_at"`
-	Status    string     `json:"status"`
-	StopsAt   *time.Time `json:"stops_at"`
+	AmountMinor int64        `json:"amount_minor"`
+	Currency    string       `json:"currency"`
+	ID          string       `json:"id"`
+	PeriodEnd   time.Time    `json:"period_end"`
+	Pause       *PauseWindow `json:"pause"`
+	Status      string       `json:"status"`
+	StopsAt     *time.Time   `json:"stops_at"`
+}
+
+// PauseWindow is a confirmed pause: renewals from StartsAt are skipped until
+// giving resumes at ResumesAt.
+type PauseWindow struct {
+	StartsAt  time.Time `json:"starts_at"`
+	ResumesAt time.Time `json:"resumes_at"`
 }
 type PauseView struct {
 	Confirmed bool      `json:"confirmed"`
@@ -113,7 +119,7 @@ func subscriptionView(ctx context.Context, q *queries.Queries, attempt queries.D
 	if row.StopsAt.Valid {
 		sub.StopsAt = &row.StopsAt.Time
 	}
-	if sub.ResumesAt, err = pausedUntil(ctx, q, attempt.ID, now); err != nil {
+	if sub.Pause, err = confirmedPause(ctx, q, attempt.ID, now); err != nil {
 		return RecurringDetails{}, err
 	}
 	return RecurringDetails{Mode: "test", ObservedAt: &row.ObservedAt.Time, State: "ready", Subscription: sub}, nil

@@ -40,11 +40,13 @@ for (const [path, fixture] of Object.entries(profiles)) {
 }
 
 const subscription = { id: "6f1c2b9e-0d7a-4e55-9b0c-1a2b3c4d5e6f", amount_minor: 3000, currency: "USD", status: "active",
-  period_end: "2026-11-01T14:00:00Z", resumes_at: null, stops_at: null };
+  period_end: "2026-11-01T14:00:00Z", pause: null, stops_at: null };
 const recurring = {
   active: { subscription, text: /^Next renewal: Nov 1, 2026\.$/, links: ["Update payment method", "Pause monthly giving", "Change monthly amount"] },
-  paused: { subscription: { ...subscription, resumes_at: "2027-01-01T14:00:00Z" }, text: /^Your monthly gift is paused\. Giving resumes Jan 1, 2027\.$/,
-    links: ["Update payment method", "Resume at next renewal"] },
+  paused: { subscription: { ...subscription, pause: { starts_at: "2020-11-01T14:00:00Z", resumes_at: "2027-01-01T14:00:00Z" } },
+    text: /^Your monthly gift is paused\. Giving resumes Jan 1, 2027\.$/, links: ["Update payment method", "Resume at next renewal"] },
+  "scheduled-pause": { subscription: { ...subscription, pause: { starts_at: "2099-11-01T14:00:00Z", resumes_at: "2100-01-01T14:00:00Z" } },
+    text: /^Your monthly gift pauses from Nov 1, 2099\. Giving resumes Jan 1, 2100\.$/, links: ["Update payment method", "Resume at next renewal"] },
   ending: { subscription: { ...subscription, stops_at: subscription.period_end },
     text: /^Renewals cancelled\. Your last monthly gift period ends Nov 1, 2026; no further gifts will be charged\.$/, links: ["Update payment method"] },
 };

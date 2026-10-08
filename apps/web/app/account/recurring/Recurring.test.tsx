@@ -4,7 +4,7 @@ import { formatDate, formatDateTime } from "@/lib/dates";
 import RecurringPage from "./Recurring";
 
 const subscription = { id: "owned-id", amount_minor: 3000, currency: "USD", status: "active",
-  period_end: "2026-11-01T12:00:00Z", resumes_at: null, stops_at: null };
+  period_end: "2026-11-01T12:00:00Z", pause: null, stops_at: null };
 const response = (value: unknown) => ({ ok: true, json: async () => value });
 afterEach(() => vi.unstubAllGlobals());
 // Matches a paragraph by its whole text, which <time> elements split.
@@ -63,9 +63,18 @@ it("distinguishes unconfirmed checkout from having no monthly gift", async () =>
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
 });
 
+it("says when a confirmed pause begins while the current period runs", async () => {
+  const pause = { starts_at: "2099-11-01T12:00:00Z", resumes_at: "2100-01-01T12:00:00Z" };
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, pause } })));
+  render(<RecurringPage />);
+  expect(await screen.findByText(paragraph(`Your monthly gift pauses from ${formatDate(pause.starts_at)}. Giving resumes ${formatDate(pause.resumes_at)}.`))).toBeVisible();
+  expect(screen.getByRole("link", { name: "Resume at next renewal" })).toHaveAttribute("href", "/account/resume");
+  expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
+});
+
 it("shows a pause in effect and offers to resume it instead of another pause", async () => {
   const resumes = "2027-01-01T12:00:00Z";
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, resumes_at: resumes } })));
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, pause: { starts_at: "2020-11-01T12:00:00Z", resumes_at: resumes } } })));
   render(<RecurringPage />);
   expect(await screen.findByText(paragraph(`Your monthly gift is paused. Giving resumes ${formatDate(resumes)}.`))).toBeVisible();
   expect(screen.getByRole("link", { name: "Resume at next renewal" })).toHaveAttribute("href", "/account/resume");

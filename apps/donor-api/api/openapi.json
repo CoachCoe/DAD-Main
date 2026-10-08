@@ -4984,16 +4984,19 @@
             "description": "Subscription attempt ID used by recurring commands.",
             "format": "uuid"
           },
+          "pause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PauseWindow"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The confirmed pause, or null when none is in effect or scheduled."
+          },
           "period_end": {
             "type": "string",
-            "format": "date-time"
-          },
-          "resumes_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "When giving resumes after a confirmed pause in effect; null when not paused.",
             "format": "date-time"
           },
           "status": {
@@ -5011,10 +5014,29 @@
           "amount_minor",
           "currency",
           "id",
+          "pause",
           "period_end",
-          "resumes_at",
           "status",
           "stops_at"
+        ],
+        "additionalProperties": false
+      },
+      "PauseWindow": {
+        "type": "object",
+        "description": "Renewals from starts_at are skipped until giving resumes at resumes_at.",
+        "properties": {
+          "resumes_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "resumes_at",
+          "starts_at"
         ],
         "additionalProperties": false
       },

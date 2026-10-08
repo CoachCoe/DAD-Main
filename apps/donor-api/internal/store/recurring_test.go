@@ -674,16 +674,17 @@ func TestPauseOptionsPauseAndEarlyResume(t *testing.T) {
 	if again, err := r.service.PauseOptions(ctx, r.token); err != nil || len(jsonView(t, again)["options"].([]any)) != 0 || jsonView(t, again)["pause"] == nil {
 		t.Fatal("active pause still offered new pauses", again, err)
 	}
-	resumesAt := func() any {
+	pauseWindow := func() map[string]any {
 		t.Helper()
 		details, err := r.service.Details(ctx, r.token)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return jsonView(t, details)["subscription"].(map[string]any)["resumes_at"]
+		pause, _ := jsonView(t, details)["subscription"].(map[string]any)["pause"].(map[string]any)
+		return pause
 	}
-	if at := resumesAt(); at == nil || !jsonTime(t, at).Equal(request.ResumesAt) {
-		t.Fatal("details do not show the pause in effect", at)
+	if pause := pauseWindow(); pause == nil || !jsonTime(t, pause["starts_at"]).Equal(r.end) || !jsonTime(t, pause["resumes_at"]).Equal(request.ResumesAt) {
+		t.Fatal("details do not show the confirmed pause from the next renewal", pause)
 	}
 	resumable, err := r.service.ResumeOptions(ctx, r.token)
 	if err != nil {
@@ -709,8 +710,8 @@ func TestPauseOptionsPauseAndEarlyResume(t *testing.T) {
 	if err != nil || jsonView(t, saved)["state"] != "saved" {
 		t.Fatal("saved resumption not reported", saved, err)
 	}
-	if at := resumesAt(); at == nil || !jsonTime(t, at).Equal(r.end) {
-		t.Fatal("details do not show the earlier resumption", at)
+	if pause := pauseWindow(); pause == nil || !jsonTime(t, pause["resumes_at"]).Equal(r.end) {
+		t.Fatal("details do not show the earlier resumption", pause)
 	}
 }
 
