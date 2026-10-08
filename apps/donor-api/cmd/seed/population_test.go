@@ -31,30 +31,79 @@ func TestGenerateIsDeterministic(t *testing.T) {
 
 func TestPopulationHasALaunchShape(t *testing.T) {
 	pop := generate(50000, 0, 1, asOf)
-	s := pop.shape()
+	var oneTime, abandoned, monthly, monthly30, referred, sharers, referrers, heavy, periods, failed int
+	var mostReferrals int64
+	var longest, atRisk, paused, cancelled, pastDue, refunds int
+	for _, d := range pop.donors {
+		switch first := d.checkouts[0]; {
+		case first.status == "EXPIRED":
+			abandoned++
+		case first.frequency == "ONE_TIME":
+			oneTime++
+		default:
+			monthly++
+			if first.amount == 3000 {
+				monthly30++
+			}
+		}
+		if g := d.firstGift(); g != nil && g.referrer != nil {
+			referred++
+		}
+		if d.code != "" {
+			sharers++
+		}
+		if n := d.referrals(); n > 0 {
+			referrers++
+			mostReferrals = max(mostReferrals, n)
+			if n >= 100 {
+				heavy++
+			}
+		}
+		longest = max(longest, d.streak)
+		if d.atRisk {
+			atRisk++
+		}
+		for _, c := range d.checkouts {
+			periods += len(c.periods)
+			for _, p := range c.periods {
+				if !p.failedAt.IsZero() {
+					failed++
+				}
+			}
+			for _, g := range c.gifts {
+				if g.refund != nil {
+					refunds++
+				}
+			}
+			if c.pause != nil {
+				paused++
+			}
+			if c.sub != nil && c.sub.status == "canceled" {
+				cancelled++
+			} else if c.sub != nil && c.sub.status == "past_due" {
+				pastDue++
+			}
+		}
+	}
 	share := func(n int) float64 { return float64(n) / float64(len(pop.donors)) }
 	for name, check := range map[string]struct{ got, want, tolerance float64 }{
-		"monthly":      {share(s.Monthly), 1 - abandonedShare - oneTimeShare, 0.02},
-		"one-time":     {share(s.OneTime), oneTimeShare, 0.02},
-		"abandoned":    {share(s.Abandoned), abandonedShare, 0.01},
-		"$30 monthly":  {float64(s.MonthlyAmounts["$30"]) / float64(s.Monthly), 0.60, 0.02},
-		"referred":     {share(s.Referred), 0.40, 0.08},
-		"sharers":      {share(s.Sharers), 0.92 * claimShare * sharerShare, 0.05},
-		"failed rates": {float64(s.FailedRenewals) / float64(s.Periods), renewalFailure, 0.01},
+		"monthly":      {share(monthly), 1 - abandonedShare - oneTimeShare, 0.02},
+		"one-time":     {share(oneTime), oneTimeShare, 0.02},
+		"abandoned":    {share(abandoned), abandonedShare, 0.01},
+		"$30 monthly":  {float64(monthly30) / float64(monthly), 0.60, 0.02},
+		"referred":     {share(referred), 0.40, 0.08},
+		"sharers":      {share(sharers), 0.92 * claimShare * sharerShare, 0.05},
+		"failed rates": {float64(failed) / float64(periods), renewalFailure, 0.01},
 	} {
 		if math.Abs(check.got-check.want) > check.tolerance {
 			t.Errorf("%s share %.3f, want %.3f±%.3f", name, check.got, check.want, check.tolerance)
 		}
 	}
-	referrers := 0
-	for _, n := range s.Referrers {
-		referrers += n
+	if share(referrers) > 0.2 || heavy == 0 || mostReferrals < 200 {
+		t.Errorf("referrals are not heavy-tailed: %d referrers, %d with 100+, most %d", referrers, heavy, mostReferrals)
 	}
-	if share(referrers) > 0.2 || s.Referrers["100+"] == 0 || s.MostReferrals < 200 {
-		t.Errorf("referrals are not heavy-tailed: %d referrers, buckets %v, most %d", referrers, s.Referrers, s.MostReferrals)
-	}
-	if s.LongestStreak < 20 || s.AtRisk == 0 || s.Paused == 0 || s.Cancelled == 0 || s.PastDue == 0 || s.Refunds == 0 {
-		t.Errorf("missing recognition edge cases: %+v", s)
+	if longest < 20 || atRisk == 0 || paused == 0 || cancelled == 0 || pastDue == 0 || refunds == 0 {
+		t.Errorf("missing recognition edge cases: longest streak %d, %d at risk, %d paused, %d cancelled, %d past due, %d refunds", longest, atRisk, paused, cancelled, pastDue, refunds)
 	}
 }
 

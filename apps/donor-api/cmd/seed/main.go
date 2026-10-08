@@ -168,7 +168,8 @@ type report struct {
 	Donors             int              `json:"donors"`
 	Offset             int              `json:"offset"`
 	Seed               uint64           `json:"seed"`
-	Shape              shape            `json:"shape"`
+	MostReferrals      int64            `json:"most_referrals"`
+	LongestStreak      int              `json:"longest_streak"`
 	Rows               map[string]int64 `json:"rows"`
 	Sessions           int              `json:"sessions"`
 	SuppressedMessages int64            `json:"suppressed_messages"`
@@ -189,7 +190,9 @@ func seed(ctx context.Context, pool *pgxpool.Pool, o options, now time.Time) (po
 		return nil, r, err
 	}
 	pop = generate(o.donors, r.Offset, o.seed, now)
-	r.Shape = pop.shape()
+	for _, d := range pop.donors {
+		r.MostReferrals, r.LongestStreak = max(r.MostReferrals, d.referrals()), max(r.LongestStreak, d.streak)
+	}
 	r.GenerateSeconds = time.Since(now).Seconds()
 	copied := time.Now()
 	if r.Rows, err = copyAll(ctx, pool, pop.tables()); err != nil {

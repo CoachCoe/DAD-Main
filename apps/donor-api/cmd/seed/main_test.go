@@ -209,7 +209,7 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Rows["donors"] != 200 || r.Rows["donor_gifts"] == 0 || r.SuppressedMessages == 0 {
+	if r.Rows["donors"] != 200 || r.Rows["donor_gifts"] == 0 || r.SuppressedMessages == 0 || r.LongestStreak == 0 {
 		t.Fatalf("unexpected seed report: %+v", r)
 	}
 	var due, pending, early int
@@ -254,11 +254,8 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 			t.Errorf("donor %d gave before the cutoff but is not a founding donor", d.index)
 		}
 		link, irl := d.referred["LINK"], d.referred["IRL"]
-		if link == nil {
-			link, irl = &referralTally{}, &referralTally{}
-		}
 		if got := dashboard.Referrals; got == nil || got.Link != link.count || got.LinkMinor != link.minor || got.IRL != irl.count || got.IRLMinor != irl.minor {
-			t.Errorf("donor %d referrals %+v, want link %+v irl %+v", d.index, got, *link, *irl)
+			t.Errorf("donor %d referrals %+v, want link %+v irl %+v", d.index, got, link, irl)
 		}
 		if d.referrals() > 0 {
 			referrers++

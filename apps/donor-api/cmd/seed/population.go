@@ -50,7 +50,8 @@ const (
 	influenceCeiling     = 3000
 )
 
-// Gift amounts in cents by weight; 0 draws a custom whole-dollar amount.
+// Gift amounts in cents by weight: the $30, $90 and $150 presets, round
+// custom amounts, and 0 for any other whole-dollar amount.
 var monthlyAmounts = weighted[int64]{{3000, 60}, {1000, 12}, {5000, 12}, {10000, 8}, {9000, 3}, {15000, 2}, {0, 3}}
 var oneTimeAmounts = weighted[int64]{{3000, 30}, {5000, 20}, {10000, 20}, {1000, 10}, {15000, 5}, {9000, 5}, {0, 10}}
 
@@ -92,7 +93,7 @@ type donor struct {
 
 	// Expected dashboard figures, derived from how the facts were generated
 	// rather than by the projection code, so tests can compare the two.
-	referred    map[string]*referralTally
+	referred    map[string]referralTally // by referral kind
 	streak      int
 	atRisk      bool
 	streakKnown bool
@@ -214,7 +215,7 @@ func generate(n, offset int, seed uint64, now time.Time) *population {
 	slices.SortFunc(ages, func(a, b time.Duration) int { return int(b - a) })
 	sharers := &sharerPool{}
 	for i, age := range ages {
-		d := &donor{index: offset + i, id: g.uuid(), createdAt: now.Add(-age), streakKnown: true}
+		d := &donor{index: offset + i, id: g.uuid(), createdAt: now.Add(-age)}
 		d.email = fmt.Sprintf("donor-%07d@%s", d.index, emailDomain)
 		g.pop.donors = append(g.pop.donors, d)
 		g.join(d, sharers)
@@ -275,13 +276,13 @@ func (g *generator) join(d *donor, sharers *sharerPool) {
 			sharers.add(d)
 		}
 	}
-	for _, c := range d.checkouts {
-		for _, gift := range c.gifts {
-			g.maybeRefund(gift)
+	// The oracle does not model how a fully refunded renewal breaks a streak.
+	d.streakKnown = true
+	for _, gift := range d.gifts() {
+		g.maybeRefund(gift)
+		if r := gift.refund; gift.frequency == "MONTHLY" && r != nil && r.status == "SUCCEEDED" && r.amount == gift.amount {
+			d.streakKnown = false
 		}
-	}
-	if d.streakKnown {
-		d.streakKnown = !hasFullMonthlyRefund(d)
 	}
 }
 
@@ -433,17 +434,6 @@ func (g *generator) maybeRefund(gift *gift) {
 	gift.refund = r
 }
 
-func hasFullMonthlyRefund(d *donor) bool {
-	for _, c := range d.checkouts {
-		for _, g := range c.gifts {
-			if g.frequency == "MONTHLY" && g.refund != nil && g.refund.status == "SUCCEEDED" && g.refund.amount == g.amount {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // visits adds the referral touches that did not lead to a gift: several per
 // conversion, plus a few for every sharer.
 func (g *generator) visits() {
@@ -474,16 +464,16 @@ func (g *generator) expectReferrals() {
 		if first == nil || first.referrer == nil {
 			continue
 		}
-		r := first.referrer
+		r, net := first.referrer, d.net()
 		if r.referred == nil {
-			r.referred = map[string]*referralTally{"LINK": {}, "IRL": {}}
+			r.referred = map[string]referralTally{}
 		}
-		net := d.net()
 		tally := r.referred[first.kind]
 		tally.minor += net
 		if net > 0 {
 			tally.count++
 		}
+		r.referred[first.kind] = tally
 	}
 }
 
@@ -623,85 +613,6 @@ func (h *pendingSharers) Pop() any {
 	return d
 }
 
-// shape summarises the generated population for the seed report.
-type shape struct {
-	Abandoned      int            `json:"abandoned"`
-	OneTime        int            `json:"one_time"`
-	Monthly        int            `json:"monthly"`
-	MonthlyAmounts map[string]int `json:"monthly_amounts"`
-	Claimed        int            `json:"claimed"`
-	Sharers        int            `json:"sharers"`
-	Referred       int            `json:"referred"`
-	Referrers      map[string]int `json:"referrers_by_referrals"`
-	MostReferrals  int64          `json:"most_referrals"`
-	Touches        int            `json:"touches"`
-	Gifts          int            `json:"gifts"`
-	Periods        int            `json:"periods"`
-	FailedRenewals int            `json:"failed_renewals"`
-	Refunds        int            `json:"refunds"`
-	Paused         int            `json:"paused"`
-	Cancelled      int            `json:"cancelled"`
-	PastDue        int            `json:"past_due"`
-	AtRisk         int            `json:"at_risk"`
-	LongestStreak  int            `json:"longest_streak"`
-}
-
-func (p *population) shape() shape {
-	s := shape{MonthlyAmounts: map[string]int{}, Referrers: map[string]int{}, Touches: len(p.touches)}
-	for _, d := range p.donors {
-		switch first := d.checkouts[0]; {
-		case first.status == "EXPIRED":
-			s.Abandoned++
-		case first.frequency == "ONE_TIME":
-			s.OneTime++
-		default:
-			s.Monthly++
-			s.MonthlyAmounts[amountLabel(first.amount)]++
-		}
-		if !d.claimedAt.IsZero() {
-			s.Claimed++
-		}
-		if d.code != "" {
-			s.Sharers++
-		}
-		if g := d.firstGift(); g != nil && g.referrer != nil {
-			s.Referred++
-		}
-		if d.atRisk {
-			s.AtRisk++
-		}
-		s.LongestStreak = max(s.LongestStreak, d.streak)
-		if n := d.referrals(); n > 0 {
-			s.MostReferrals = max(s.MostReferrals, n)
-			s.Referrers[referralBucket(n)]++
-		}
-		for _, c := range d.checkouts {
-			s.Gifts += len(c.gifts)
-			s.Periods += len(c.periods)
-			for _, pd := range c.periods {
-				if !pd.failedAt.IsZero() {
-					s.FailedRenewals++
-				}
-			}
-			for _, g := range c.gifts {
-				if g.refund != nil {
-					s.Refunds++
-				}
-			}
-			if c.pause != nil {
-				s.Paused++
-			}
-			if c.sub != nil && c.sub.status == "canceled" {
-				s.Cancelled++
-			}
-			if c.sub != nil && c.sub.status == "past_due" {
-				s.PastDue++
-			}
-		}
-	}
-	return s
-}
-
 // referrals is how many donors d's dashboard should count as referred.
 func (d *donor) referrals() int64 {
 	var n int64
@@ -709,25 +620,4 @@ func (d *donor) referrals() int64 {
 		n += tally.count
 	}
 	return n
-}
-
-func amountLabel(minor int64) string {
-	for _, preset := range monthlyAmounts {
-		if preset.value == minor {
-			return fmt.Sprintf("$%d", minor/100)
-		}
-	}
-	return "custom"
-}
-
-func referralBucket(n int64) string {
-	switch {
-	case n >= 100:
-		return "100+"
-	case n >= 10:
-		return "10-99"
-	case n >= 2:
-		return "2-9"
-	}
-	return "1"
 }
