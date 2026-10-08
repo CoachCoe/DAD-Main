@@ -25,14 +25,17 @@ const (
 // authenticator is a software passkey: an ES256 key that answers ceremonies
 // as a browser and platform authenticator would. Tests change its origin,
 // relying party, flags, or counter to forge the failures a real one cannot.
+// A synced passkey has a step of zero: its counter stays at zero.
 type authenticator struct {
-	key    *ecdsa.PrivateKey
-	id     []byte
-	user   []byte
-	origin string
-	rpID   string
-	flags  byte
-	count  uint32
+	key        *ecdsa.PrivateKey
+	id         []byte
+	user       []byte
+	origin     string
+	rpID       string
+	flags      byte
+	count      uint32
+	step       uint32
+	transports []string
 }
 
 func newAuthenticator(t *testing.T, origin, rpID string) *authenticator {
@@ -45,7 +48,7 @@ func newAuthenticator(t *testing.T, origin, rpID string) *authenticator {
 	if _, err = rand.Read(id); err != nil {
 		t.Fatal(err)
 	}
-	return &authenticator{key: key, id: id, origin: origin, rpID: rpID, flags: flagUP | flagUV | flagBE | flagBS}
+	return &authenticator{key: key, id: id, origin: origin, rpID: rpID, flags: flagUP | flagUV | flagBE | flagBS, step: 1, transports: []string{"internal", "hybrid"}}
 }
 
 func encode(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
@@ -66,7 +69,7 @@ func (a *authenticator) authData(flags byte, attested []byte) []byte {
 	return append(data, attested...)
 }
 
-func (a *authenticator) credential(t *testing.T, response map[string]string) []byte {
+func (a *authenticator) credential(t *testing.T, response map[string]any) []byte {
 	t.Helper()
 	data, err := json.Marshal(map[string]any{"id": encode(a.id), "rawId": encode(a.id), "type": "public-key", "response": response, "clientExtensionResults": map[string]any{}, "authenticatorAttachment": "platform"})
 	if err != nil {
@@ -96,14 +99,14 @@ func (a *authenticator) register(t *testing.T, options any) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return a.credential(t, map[string]string{"clientDataJSON": encode(a.clientData(t, "webauthn.create", creation.Challenge)), "attestationObject": encode(object)})
+	return a.credential(t, map[string]any{"clientDataJSON": encode(a.clientData(t, "webauthn.create", creation.Challenge)), "attestationObject": encode(object), "transports": a.transports})
 }
 
-// assert signs request options with the passkey, advancing its counter.
+// assert signs request options with the passkey, advancing its counter by its step.
 func (a *authenticator) assert(t *testing.T, options any) []byte {
 	t.Helper()
 	request := options.(protocol.PublicKeyCredentialRequestOptions)
-	a.count++
+	a.count += a.step
 	authData := a.authData(a.flags, nil)
 	clientData := a.clientData(t, "webauthn.get", request.Challenge)
 	digest := sha256.Sum256(clientData)
@@ -112,5 +115,5 @@ func (a *authenticator) assert(t *testing.T, options any) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return a.credential(t, map[string]string{"clientDataJSON": encode(clientData), "authenticatorData": encode(authData), "signature": encode(signature), "userHandle": encode(a.user)})
+	return a.credential(t, map[string]any{"clientDataJSON": encode(clientData), "authenticatorData": encode(authData), "signature": encode(signature), "userHandle": encode(a.user)})
 }

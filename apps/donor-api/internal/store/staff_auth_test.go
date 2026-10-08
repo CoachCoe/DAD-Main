@@ -3,6 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"maps"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,17 +58,22 @@ func invitedStaff(t *testing.T, pool *pgxpool.Pool, role string) (pgtype.UUID, s
 // activatedStaff enrols a software passkey for a new account.
 func activatedStaff(t *testing.T, pool *pgxpool.Pool, s *StaffService, role string) (pgtype.UUID, *authenticator) {
 	t.Helper()
-	ctx := context.Background()
 	id, invite := invitedStaff(t, pool, role)
 	key := newAuthenticator(t, staffTestOrigin, staffTestRPID)
-	invitation, err := s.BeginActivation(ctx, invite)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.Activate(ctx, invitation.ID, key.register(t, invitation.Options)); err != nil {
+	if _, err := activate(t, s, invite, key); err != nil {
 		t.Fatal(err)
 	}
 	return id, key
+}
+
+// activate answers an invitation with the passkey.
+func activate(t *testing.T, s *StaffService, invite string, key *authenticator) (string, error) {
+	t.Helper()
+	invitation, err := s.BeginActivation(context.Background(), invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s.Activate(context.Background(), invitation.ID, key.register(t, invitation.Options))
 }
 
 func signIn(t *testing.T, s *StaffService, key *authenticator) (string, error) {
@@ -84,6 +92,17 @@ func auditCount(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID, action string)
 		t.Fatal(err)
 	}
 	return n
+}
+
+// auditReasons counts an account's audit records of one action by reason.
+func auditReasons(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID, action string) map[string]int {
+	t.Helper()
+	var counts map[string]int
+	if err := pool.QueryRow(context.Background(), `SELECT coalesce(jsonb_object_agg(reason, n), '{}') FROM
+		(SELECT details->>'reason' AS reason, count(*) AS n FROM donor_staff_audit WHERE target=$1 AND action=$2 GROUP BY 1) r`, id.String(), action).Scan(&counts); err != nil {
+		t.Fatal(err)
+	}
+	return counts
 }
 
 func TestStaffPasskeyActivationSignsInOnceAndSignInIsSingleUse(t *testing.T) {
@@ -189,17 +208,18 @@ func TestStaffSignInRejectsForgedOrUnusableAssertions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	failures := auditCount(t, pool, id, "staff.sign_in_failed")
+	failures := map[string]int{}
 	for _, tc := range []struct {
-		name   string
-		forge  func(*authenticator)
-		repair func()
+		name, reason string
+		forge        func(*authenticator)
+		repair       func()
 	}{
-		{"wrong origin", func(a *authenticator) { a.origin = "https://donors.example.org" }, nil},
-		{"wrong relying party", func(a *authenticator) { a.rpID = "donors.example.org" }, nil},
-		{"user not verified", func(a *authenticator) { a.flags &^= flagUV }, nil},
-		{"counter regression", func(a *authenticator) { a.count -= 2 }, nil},
-		{"disabled account", func(*authenticator) { mustExec(t, pool, "UPDATE donor_staff SET disabled=true WHERE id=$1", id) },
+		{"wrong origin", "invalid", func(a *authenticator) { a.origin = "https://donors.example.org" }, nil},
+		{"wrong relying party", "invalid", func(a *authenticator) { a.rpID = "donors.example.org" }, nil},
+		{"user not verified", "invalid", func(a *authenticator) { a.flags &^= flagUV }, nil},
+		{"counter regression", "counter", func(a *authenticator) { a.count -= 2 }, nil},
+		{"counter not advancing", "counter", func(a *authenticator) { a.step = 0 }, nil},
+		{"disabled account", "disabled", func(*authenticator) { mustExec(t, pool, "UPDATE donor_staff SET disabled=true WHERE id=$1", id) },
 			func() { mustExec(t, pool, "UPDATE donor_staff SET disabled=false WHERE id=$1", id) }},
 	} {
 		forged := *key
@@ -210,16 +230,22 @@ func TestStaffSignInRejectsForgedOrUnusableAssertions(t *testing.T) {
 		if tc.repair != nil {
 			tc.repair()
 		}
-		failures++
-		if got := auditCount(t, pool, id, "staff.sign_in_failed"); got != failures {
-			t.Fatalf("%s: %d failed sign-ins audited, want %d", tc.name, got, failures)
+		failures[tc.reason]++
+		if got := auditReasons(t, pool, id, "staff.sign_in_failed"); !maps.Equal(got, failures) {
+			t.Fatalf("%s: failed sign-ins audited as %v, want %v", tc.name, got, failures)
 		}
-	}
-	if _, err := signIn(t, s, newAuthenticator(t, staffTestOrigin, staffTestRPID)); !errors.Is(err, ErrStaffDenied) {
-		t.Fatal("unknown passkey accepted", err)
 	}
 	ceremony, err := s.BeginSignIn(ctx)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.SignIn(ctx, ceremony.ID, newAuthenticator(t, staffTestOrigin, staffTestRPID).assert(t, ceremony.Options)); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("unknown passkey accepted", err)
+	}
+	if _, err = s.SignIn(ctx, ceremony.ID, key.assert(t, ceremony.Options)); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("ceremony answered by an unknown passkey was not consumed", err)
+	}
+	if ceremony, err = s.BeginSignIn(ctx); err != nil {
 		t.Fatal(err)
 	}
 	mustExec(t, pool, "UPDATE donor_staff_ceremonies SET expires_at=now() WHERE token_hash=$1", HashToken(ceremony.ID))
@@ -259,6 +285,9 @@ func TestStaffActivationCountsAttemptsAndRejectsForgedAttestations(t *testing.T)
 	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM donor_staff_passkeys WHERE staff_id=$1), (SELECT attempts FROM donor_staff_invites WHERE staff_id=$1)", id).Scan(&passkeys, &attempts); err != nil || passkeys != 0 || attempts != 3 {
 		t.Fatal("rejected attestations stored a passkey or went uncounted", passkeys, attempts, err)
 	}
+	if got := auditReasons(t, pool, id, "staff.activation_failed"); !maps.Equal(got, map[string]int{"invalid": 3}) {
+		t.Fatal("rejected attestations audited as", got)
+	}
 	mustExec(t, pool, "UPDATE donor_staff_invites SET attempts=5 WHERE staff_id=$1", id)
 	if _, err := s.BeginActivation(ctx, invite); !errors.Is(err, ErrStaffDenied) {
 		t.Fatal("exhausted invitation accepted", err)
@@ -266,5 +295,147 @@ func TestStaffActivationCountsAttemptsAndRejectsForgedAttestations(t *testing.T)
 	mustExec(t, pool, "UPDATE donor_staff_invites SET attempts=0, expires_at=now() WHERE staff_id=$1", id)
 	if _, err := s.BeginActivation(ctx, invite); !errors.Is(err, ErrStaffDenied) {
 		t.Fatal("expired invitation accepted", err)
+	}
+}
+
+func TestStaffSyncedPasskeySignsInWithACounterOfZero(t *testing.T) {
+	pool := database(t)
+	s := staffService(t, pool)
+	id, invite := invitedStaff(t, pool, "SUPPORT")
+	key := newAuthenticator(t, staffTestOrigin, staffTestRPID)
+	key.step = 0
+	if _, err := activate(t, s, invite, key); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := signIn(t, s, key); err != nil {
+			t.Fatal("synced passkey refused", err)
+		}
+	}
+	var count int64
+	var eligible, backedUp bool
+	if err := pool.QueryRow(context.Background(), "SELECT sign_count,backup_eligible,backup_state FROM donor_staff_passkeys WHERE staff_id=$1", id).Scan(&count, &eligible, &backedUp); err != nil ||
+		count != 0 || !eligible || !backedUp || auditCount(t, pool, id, "staff.sign_in_failed") != 0 {
+		t.Fatal("synced passkey not recorded as one", count, eligible, backedUp, err)
+	}
+}
+
+func TestStaffActivationRefusesAPasskeyRegisteredToAnotherAccount(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := staffService(t, pool)
+	owner, key := activatedStaff(t, pool, s, "ADMIN")
+	other, invite := invitedStaff(t, pool, "SUPPORT")
+	reused := *key
+	if _, err := activate(t, s, invite, &reused); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("one passkey registered to two accounts", err)
+	}
+	var passkeys, attempts int
+	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM donor_staff_passkeys WHERE staff_id=$1), (SELECT attempts FROM donor_staff_invites WHERE staff_id=$1)", other).Scan(&passkeys, &attempts); err != nil || passkeys != 0 || attempts != 1 {
+		t.Fatal("refused passkey stored or the attempt went uncounted", passkeys, attempts, err)
+	}
+	if got := auditReasons(t, pool, other, "staff.activation_failed"); !maps.Equal(got, map[string]int{"credential_in_use": 1}) {
+		t.Fatal("refused passkey audited as", got)
+	}
+	session, err := signIn(t, s, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if me, err := s.Me(ctx, session); err != nil || me.ID != owner.String() {
+		t.Fatal("passkey no longer signs its owner in", me, err)
+	}
+}
+
+func TestStaffPasskeyKeepsOnlyKnownTransports(t *testing.T) {
+	pool := database(t)
+	s := staffService(t, pool)
+	id, invite := invitedStaff(t, pool, "SUPPORT")
+	key := newAuthenticator(t, staffTestOrigin, staffTestRPID)
+	key.transports = []string{"internal", strings.Repeat("x", 64), "usb", "cable"}
+	if _, err := activate(t, s, invite, key); err != nil {
+		t.Fatal("unknown transport refused the passkey", err)
+	}
+	var transports []string
+	if err := pool.QueryRow(context.Background(), "SELECT transports FROM donor_staff_passkeys WHERE staff_id=$1", id).Scan(&transports); err != nil ||
+		!slices.Equal(transports, []string{"internal", "usb", "hybrid"}) {
+		t.Fatal("stored transports", transports, err)
+	}
+	if _, err := signIn(t, s, key); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStaffCeremoniesAnswerOnlyTheirOwnKind(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := staffService(t, pool)
+	_, signer := activatedStaff(t, pool, s, "SUPPORT")
+	id, invite := invitedStaff(t, pool, "SUPPORT")
+	invitation, err := s.BeginActivation(ctx, invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ceremony, err := s.BeginSignIn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := newAuthenticator(t, staffTestOrigin, staffTestRPID)
+	if _, err = s.Activate(ctx, ceremony.ID, key.register(t, invitation.Options)); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("sign-in ceremony activated a passkey", err)
+	}
+	if _, err = s.SignIn(ctx, invitation.ID, signer.assert(t, ceremony.Options)); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("activation ceremony signed a passkey in", err)
+	}
+	if _, err = s.Activate(ctx, invitation.ID, key.register(t, invitation.Options)); err != nil {
+		t.Fatal("misdirected answer spent the activation ceremony", err)
+	}
+	if auditCount(t, pool, id, "staff.activated") != 1 {
+		t.Fatal("activation not audited")
+	}
+}
+
+func TestStaffActivationRefusesADisabledAccount(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := staffService(t, pool)
+	id, invite := invitedStaff(t, pool, "FINANCE")
+	invitation, err := s.BeginActivation(ctx, invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, pool, "UPDATE donor_staff SET disabled=true WHERE id=$1", id)
+	if _, err = s.Activate(ctx, invitation.ID, newAuthenticator(t, staffTestOrigin, staffTestRPID).register(t, invitation.Options)); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("disabled account activated", err)
+	}
+	if _, err = s.BeginActivation(ctx, invite); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("disabled account offered activation", err)
+	}
+	var passkeys int
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_passkeys WHERE staff_id=$1", id).Scan(&passkeys); err != nil || passkeys != 0 {
+		t.Fatal("disabled account holds a passkey", passkeys, err)
+	}
+}
+
+func TestStaffCeremoniesAreSweptOnceExpired(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := staffService(t, pool)
+	_, invite := invitedStaff(t, pool, "SUPPORT")
+	for _, begin := range []func() error{
+		func() error { _, err := s.BeginSignIn(ctx); return err },
+		func() error { _, err := s.BeginActivation(ctx, invite); return err },
+	} {
+		stale, err := s.BeginSignIn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, pool, "UPDATE donor_staff_ceremonies SET expires_at=now()-interval '1 second' WHERE token_hash=$1", HashToken(stale.ID))
+		if err = begin(); err != nil {
+			t.Fatal(err)
+		}
+		var left int
+		if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_ceremonies WHERE token_hash=$1", HashToken(stale.ID)).Scan(&left); err != nil || left != 0 {
+			t.Fatal("expired ceremony not swept", left, err)
+		}
 	}
 }
