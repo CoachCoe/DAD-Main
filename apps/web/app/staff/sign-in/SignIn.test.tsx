@@ -40,14 +40,33 @@ it("signs in with a passkey, without asking for an email or password", async () 
   expect(screen.getByRole("alert")).toBeEmptyDOMElement();
 });
 
-it("treats a cancelled prompt as a choice, not a failure, and lets the person retry", async () => {
-  browser(async () => { throw new DOMException("The operation either timed out or was not allowed.", "NotAllowedError"); });
+it("treats a cancelled prompt as a choice, not a failure, and lets the person retry from the same button", async () => {
+  let cancel: () => void = () => {};
+  const get = browser(() => new Promise((_, reject) => { cancel = () => reject(new DOMException("The operation either timed out or was not allowed.", "NotAllowedError")); }));
   const fetch = api(new Response("{}", { status: 500 }));
   render(<SignIn />);
-  fireEvent.click(screen.getByRole("button", { name: "Sign in with a passkey" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Sign-in was cancelled or timed out.");
+  const button = screen.getByRole("button", { name: "Sign in with a passkey" });
+  button.focus();
+  fireEvent.click(button);
+  await vi.waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Waiting for your passkey. Follow the prompt from your device or password manager."));
+  expect(button).toHaveAccessibleName("Sign in with a passkey");
+  expect(button).toHaveAttribute("aria-disabled", "true");
+  fireEvent.click(button);
+  await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+  cancel();
+  await vi.waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Sign-in was cancelled or timed out."));
   expect(fetch).toHaveBeenCalledTimes(1);
-  expect(screen.getByRole("button", { name: "Sign in with a passkey" })).toBeEnabled();
+  expect(button).not.toHaveAttribute("aria-disabled");
+  expect(button).toHaveFocus();
+  expect(screen.getByRole("status")).toBeEmptyDOMElement();
+});
+
+it("blames the device, not the browser, when no suitable passkey is available", async () => {
+  browser(async () => { throw new DOMException("", "NotSupportedError"); });
+  api(new Response("{}", { status: 500 }));
+  render(<SignIn />);
+  fireEvent.click(screen.getByRole("button", { name: "Sign in with a passkey" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("This device can’t use a passkey here. Try another browser, your phone, or a security key.");
 });
 
 it("explains a passkey the server refuses", async () => {

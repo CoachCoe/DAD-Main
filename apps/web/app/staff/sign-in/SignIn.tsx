@@ -3,14 +3,14 @@ import { useState, useSyncExternalStore } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { ApiError, api, classifyFailure, failureMessage } from "@/lib/api";
-import { type Ceremony, choosePasskey, passkeyFailure, passkeysSupported, UNSUPPORTED_MESSAGE } from "@/lib/passkeys";
+import { type Ceremony, choosePasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, passkeysSupported, UNSUPPORTED_MESSAGE, WAITING_MESSAGE } from "@/lib/passkeys";
 
 const unchanging = () => () => {};
 
 function explain(cause: unknown): string {
   switch (passkeyFailure(cause)) {
     case "cancelled": return "Sign-in was cancelled or timed out. Choose “Sign in with a passkey” to try again.";
-    case "unsupported": return UNSUPPORTED_MESSAGE;
+    case "unsupported": return NO_SUITABLE_PASSKEY_MESSAGE;
     case "refused": return "Your browser refused the passkey request. Make sure you opened the staff sign-in page directly, then try again.";
   }
   if (cause instanceof ApiError && cause.status === 401) {
@@ -38,9 +38,10 @@ export default function SignIn() {
   return <Page eyebrow="Staff" title="DAD staff sign-in">
     <p>Sign in with the passkey you created when you activated your staff account. Your device or password manager will ask you to confirm it’s you with your fingerprint, face, screen lock, or security key.</p>
     {supported
-      ? <button type="button" className="button" disabled={busy} onClick={signIn}>{busy ? "Waiting for your passkey…" : "Sign in with a passkey"}</button>
+      // aria-disabled rather than disabled, so a cancelled prompt leaves focus on the button.
+      ? <button type="button" className="button" aria-disabled={busy || undefined} onClick={signIn}>Sign in with a passkey</button>
       : <p className="callout">{UNSUPPORTED_MESSAGE}</p>}
+    <Announcer status={busy ? WAITING_MESSAGE : ""} alert={error} />
     <p>Lost your passkey? Ask a DAD administrator for a recovery invitation. Donor accounts do not grant staff access.</p>
-    <Announcer status={busy ? "Waiting for your passkey…" : ""} alert={error} />
   </Page>;
 }

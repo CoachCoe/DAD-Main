@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { ApiError, api, classifyFailure, failureMessage } from "@/lib/api";
-import { type Ceremony, createPasskey, passkeyFailure, passkeysSupported, UNSUPPORTED_MESSAGE } from "@/lib/passkeys";
+import { type Ceremony, createPasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, passkeysSupported, UNSUPPORTED_MESSAGE, WAITING_MESSAGE } from "@/lib/passkeys";
 import { useHashToken } from "@/lib/useHashToken";
 
 type Invitation = Ceremony<PublicKeyCredentialCreationOptionsJSON> & { email: string; name: string };
@@ -24,8 +24,7 @@ const explainInvitation = (cause: unknown) => cause instanceof ApiError && cause
 function explainCreation(cause: unknown): string {
   switch (passkeyFailure(cause)) {
     case "cancelled": return "Passkey creation was cancelled or timed out. Choose “Create a passkey” to try again.";
-    case "exists": return "This device already has a passkey for your staff account. Sign in with it, or ask an administrator for a recovery invitation.";
-    case "unsupported": return "This device can’t create a suitable passkey. Try another browser, your phone, or a security key.";
+    case "unsupported": return NO_SUITABLE_PASSKEY_MESSAGE;
     case "refused": return "Your browser refused to create the passkey. Open the invitation link directly in your browser, then try again.";
   }
   return cause instanceof ApiError && cause.status === 401
@@ -75,9 +74,10 @@ export default function Activate() {
         <p>This private invitation is for <strong>{invitation.value.name}</strong> ({invitation.value.email}). If that isn’t you, close this page and tell a DAD administrator.</p>
         <p>Create a passkey to finish setting up your account. Your device or password manager saves it, then asks for your fingerprint, face, screen lock, or security key each time you sign in. There is no password to remember.</p>
         {supported
-          ? <button type="button" className="button" disabled={busy} onClick={create}>{busy ? "Waiting for your passkey…" : "Create a passkey"}</button>
+          // aria-disabled rather than disabled, so a cancelled prompt leaves focus on the button.
+          ? <button type="button" className="button" aria-disabled={busy || undefined} onClick={create}>Create a passkey</button>
           : <p className="callout">{UNSUPPORTED_MESSAGE}</p>}
       </>}
-    <Announcer status={busy ? "Waiting for your passkey…" : token && !invitation && !error ? "Checking your invitation…" : ""} alert={error} />
+    <Announcer status={busy ? WAITING_MESSAGE : token && !invitation && !error ? "Checking your invitation…" : ""} alert={error} />
   </Page>;
 }

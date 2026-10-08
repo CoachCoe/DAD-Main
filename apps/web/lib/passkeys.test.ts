@@ -65,7 +65,7 @@ it("signs a request without the browser's JSON helpers", async () => {
 
 it("names WebAuthn rejections and leaves other failures alone", () => {
   expect(passkeyFailure(new DOMException("", "NotAllowedError"))).toBe("cancelled");
-  expect(passkeyFailure(new DOMException("", "InvalidStateError"))).toBe("exists");
+  expect(passkeyFailure(new DOMException("", "InvalidStateError"))).toBe("refused");
   expect(passkeyFailure(new DOMException("", "NotSupportedError"))).toBe("unsupported");
   expect(passkeyFailure(new DOMException("", "SecurityError"))).toBe("refused");
   expect(passkeyFailure(new Error("network"))).toBeNull();

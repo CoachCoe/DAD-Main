@@ -65,14 +65,12 @@ export const choosePasskey = (options: PublicKeyCredentialRequestOptionsJSON) =>
  * What a WebAuthn rejection means to the person, or null for any other failure. Browsers
  * report a cancelled or timed-out prompt as NotAllowedError, deliberately without saying which.
  */
-export function passkeyFailure(cause: unknown): "cancelled" | "exists" | "unsupported" | "refused" | null {
+export function passkeyFailure(cause: unknown): "cancelled" | "unsupported" | "refused" | null {
   if (!(cause instanceof DOMException)) return null;
   switch (cause.name) {
     case "NotAllowedError":
     case "AbortError":
       return "cancelled";
-    case "InvalidStateError":
-      return "exists";
     case "NotSupportedError":
       return "unsupported";
     default:
@@ -81,3 +79,9 @@ export function passkeyFailure(cause: unknown): "cancelled" | "exists" | "unsupp
 }
 
 export const UNSUPPORTED_MESSAGE = "This browser can’t use passkeys. Use a current version of Chrome, Edge, Firefox, or Safari.";
+
+/** For NotSupportedError: the browser has WebAuthn, but nothing here can make or use a suitable passkey. */
+export const NO_SUITABLE_PASSKEY_MESSAGE = "This device can’t use a passkey here. Try another browser, your phone, or a security key.";
+
+/** Read out while a passkey prompt is open; the button keeps its own name. */
+export const WAITING_MESSAGE = "Waiting for your passkey. Follow the prompt from your device or password manager.";

@@ -86,3 +86,16 @@ it("explains a used or expired invitation and a missing link", async () => {
   render(<StaffActivate />);
   expect(await screen.findByText(/Open this page from the private invitation link/)).toBeVisible();
 });
+
+it("keeps focus on the button after a cancelled prompt and blames the device when no passkey suits", async () => {
+  window.history.replaceState(null, "", "/staff/activate#token=kept-invitation");
+  browser(async () => { throw new DOMException("", "NotSupportedError"); });
+  vi.stubGlobal("fetch", vi.fn(async () => invitation("ceremony-1")));
+  render(<StaffActivate />);
+  const button = await screen.findByRole("button", { name: "Create a passkey" });
+  button.focus();
+  fireEvent.click(button);
+  expect(await screen.findByRole("alert")).toHaveTextContent("This device can’t use a passkey here. Try another browser, your phone, or a security key.");
+  expect(button).toHaveFocus();
+  expect(button).not.toHaveAttribute("aria-disabled");
+});
