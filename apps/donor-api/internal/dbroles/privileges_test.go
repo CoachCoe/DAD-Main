@@ -174,9 +174,14 @@ func TestCheckRefusesOwnersAndOtherRoles(t *testing.T) {
 	if err := dbroles.API.Check(ctx, pool, true); err != nil {
 		t.Errorf("owner allowed: %v", err)
 	}
+	// The test superuser assumes each role, and could reset it.
 	for _, role := range dbroles.Roles {
-		if err := role.Check(ctx, dbrolestest.Open(t, role), false); err != nil {
-			t.Errorf("%s: %v", role.Name, err)
+		assumed := dbrolestest.Open(t, role)
+		if err := role.Check(ctx, assumed, false); err == nil || !strings.Contains(err.Error(), "can change the schema") {
+			t.Errorf("%s assumed by the owner: got %v", role.Name, err)
+		}
+		if err := role.Check(ctx, assumed, true); err != nil {
+			t.Errorf("%s assumed on a local machine: %v", role.Name, err)
 		}
 	}
 	if err := dbroles.API.Check(ctx, dbrolestest.Open(t, dbroles.Monitor), true); err == nil || !strings.Contains(err.Error(), "not a member of dad_api") {

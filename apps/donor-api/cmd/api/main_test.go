@@ -92,9 +92,10 @@ func TestConfigureConnectsAsTheAPIRole(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		{"own login", map[string]string{"DONOR_API_DATABASE_URL": dbrolestest.URL(t, dbroles.API)}, ""},
+		{"its role", map[string]string{"DONOR_API_DATABASE_URL": dbrolestest.URL(t, dbroles.API), "DONOR_ALLOW_OWNER_CONNECTION": "true"}, ""},
 		{"schema owner", map[string]string{"DONOR_API_DATABASE_URL": owner}, "can change the schema"},
-		{"another role", map[string]string{"DONOR_API_DATABASE_URL": dbrolestest.URL(t, dbroles.Monitor)}, "not a member of dad_api"},
+		{"its role assumed by the owner", map[string]string{"DONOR_API_DATABASE_URL": dbrolestest.URL(t, dbroles.API)}, "can change the schema"},
+		{"another role", map[string]string{"DONOR_API_DATABASE_URL": dbrolestest.URL(t, dbroles.Monitor), "DONOR_ALLOW_OWNER_CONNECTION": "true"}, "not a member of dad_api"},
 		{"local owner", map[string]string{"DONOR_GO_DATABASE_URL": owner, "DONOR_ALLOW_OWNER_CONNECTION": "true"}, ""},
 	} {
 		services, release, err := configure(context.Background(), func(name string) string { return tc.env[name] })

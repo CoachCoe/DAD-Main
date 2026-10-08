@@ -62,7 +62,7 @@ func isConfigError(err error) bool {
 func TestWorkersRunAsTheirRoles(t *testing.T) {
 	for _, kind := range []string{"projections", "push"} {
 		role := dbroles.Workers[kind]
-		env := map[string]string{"DONOR_GO_WORKERS_ENABLED": "true", role.Variable(): dbrolestest.URL(t, role)}
+		env := map[string]string{"DONOR_GO_WORKERS_ENABLED": "true", role.Variable(): dbrolestest.URL(t, role), dbroles.AllowOwnerVariable: "true"}
 		if err := run(context.Background(), []string{"--kind=" + kind, "--once"}, func(name string) string { return env[name] }); err != nil {
 			t.Errorf("%s: %v", kind, err)
 		}

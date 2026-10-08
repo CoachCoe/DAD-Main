@@ -101,6 +101,9 @@ func TestProvisionCreatesALoginPerRole(t *testing.T) {
 	if _, err := monitor.Exec(ctx, "SELECT email FROM donors LIMIT 1"); err == nil {
 		t.Error("the monitor's login read donor addresses")
 	}
+	if err := dbroles.API.Check(ctx, monitor, false); err == nil || !strings.Contains(err.Error(), "not a member of dad_api") {
+		t.Errorf("the monitor's login passed as the API's: %v", err)
+	}
 
 	previous := env[dbroles.API.Variable()]
 	location, _ := url.Parse(previous)

@@ -218,7 +218,7 @@ func (f fixture) verify(t *testing.T, pool *pgxpool.Pool, keys credentials.Keyri
 
 // env runs rekey as its role on the database dsn names.
 func env(t *testing.T, dsn, emailKeys, contentKeys string) func(string) string {
-	values := map[string]string{dbroles.Rekey.Variable(): dbrolestest.As(t, dsn, dbroles.Rekey), "DONOR_EMAIL_ENCRYPTION_KEY": emailKeys, "DONOR_CONTENT_ENCRYPTION_KEY": contentKeys}
+	values := map[string]string{dbroles.Rekey.Variable(): dbrolestest.As(t, dsn, dbroles.Rekey), dbroles.AllowOwnerVariable: "true", "DONOR_EMAIL_ENCRYPTION_KEY": emailKeys, "DONOR_CONTENT_ENCRYPTION_KEY": contentKeys}
 	return func(name string) string { return values[name] }
 }
 

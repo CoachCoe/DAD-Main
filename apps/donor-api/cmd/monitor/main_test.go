@@ -36,7 +36,8 @@ func TestRunReportsEveryQueue(t *testing.T) {
 	dsn := dbrolestest.URL(t, dbroles.Monitor)
 	var out bytes.Buffer
 	// Other tests' queue rows may need attention; only the report is checked.
-	_ = run(context.Background(), nil, func(name string) string { return map[string]string{dbroles.Monitor.Variable(): dsn}[name] }, &out)
+	env := map[string]string{dbroles.Monitor.Variable(): dsn, dbroles.AllowOwnerVariable: "true"}
+	_ = run(context.Background(), nil, func(name string) string { return env[name] }, &out)
 	var rows []struct{ Queue string }
 	if err := json.Unmarshal(out.Bytes(), &rows); err != nil {
 		t.Fatalf("report %q: %v", out.String(), err)

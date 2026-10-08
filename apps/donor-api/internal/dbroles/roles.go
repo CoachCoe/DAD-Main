@@ -81,26 +81,32 @@ func (r Role) URL(getenv func(string) string) string {
 // ErrCheckFailed reports that the connection's privileges could not be read.
 var ErrCheckFailed = errors.New("database role check failed")
 
-// Check refuses a connection that holds more or other than the role. A user
+// Check refuses a connection that holds more or other than the role. A login
 // that can change the schema, as the owner and superusers can, could let a
-// faulty or compromised process rewrite or drop any table, so it is accepted
-// only when allowOwner is set. Every error message is safe to log.
+// faulty or compromised process rewrite or drop any table, even while the
+// session acts as the role (SET ROLE, or a role parameter in the URL), since
+// the process can reset it. Such a login is accepted only when allowOwner is
+// set, and then a role it assumes must still be this one. Every error message
+// is safe to log.
 func (r Role) Check(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, allowOwner bool) error {
-	var schemaChanger, member bool
+	var schemaChanger, assumed, member bool
 	err := db.QueryRow(ctx, `
-SELECT has_database_privilege(current_database(),'CREATE') OR EXISTS(
+SELECT has_database_privilege(session_user,current_database(),'CREATE') OR EXISTS(
  SELECT FROM pg_namespace n WHERE n.nspname NOT LIKE 'pg\_%' AND n.nspname<>'information_schema'
- AND (has_schema_privilege(n.oid,'CREATE') OR pg_has_role(n.nspowner,'USAGE')
-  OR EXISTS(SELECT FROM pg_class c WHERE c.relnamespace=n.oid AND pg_has_role(c.relowner,'USAGE')))),
- COALESCE((SELECT pg_has_role(oid,'USAGE') FROM pg_roles WHERE rolname=$1),false)`, r.Name).Scan(&schemaChanger, &member)
+ AND (has_schema_privilege(session_user,n.oid,'CREATE') OR pg_has_role(session_user,n.nspowner,'USAGE')
+  OR EXISTS(SELECT FROM pg_class c WHERE c.relnamespace=n.oid AND pg_has_role(session_user,c.relowner,'USAGE')))),
+ session_user<>current_user,
+ COALESCE((SELECT pg_has_role(current_user,oid,'USAGE') FROM pg_roles WHERE rolname=$1),false)`, r.Name).Scan(&schemaChanger, &assumed, &member)
 	switch {
 	case err != nil:
 		return ErrCheckFailed
 	case schemaChanger && !allowOwner:
 		return fmt.Errorf("%s connects as a user that can change the schema; use a login of %s (see docs/operations.md#database-roles), or set %s=true on a local machine", r.Variable(), r.Name, AllowOwnerVariable)
-	case !schemaChanger && !member:
+	case schemaChanger && !assumed:
+		return nil
+	case !member:
 		return fmt.Errorf("%s connects as a user that is not a member of %s", r.Variable(), r.Name)
 	}
 	return nil

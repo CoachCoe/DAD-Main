@@ -67,7 +67,8 @@ HTTPS origin or that is the public host or a parent domain of it, or with the re
 `DONOR_STAFF_ENCRYPTION_KEY` set but no staff origin. Both origins must be written as
 browsers send them: lowercase, with no default port, path, or trailing slash. It logs which optional features are disabled.
 Every process except migrations and provisioning refuses to start when its database login
-can change the schema or lacks its role ([database roles](#database-roles)).
+can change the schema, even while assuming a role, or lacks its role
+([database roles](#database-roles)).
 Workers that hit a database or provider failure log the error type and retry with
 exponential backoff up to one minute; persistent failures show up as queue age.
 
@@ -222,9 +223,11 @@ the same way, together with [incident response](#queue-alerts-and-incident-respo
 Locally, processes connect as the owner when `DONOR_ALLOW_OWNER_CONNECTION=true` and
 their own URL is unset, as `.env.example` sets. To run a process with only its role's
 privileges, give it a URL that assumes the role, which a superuser may, such as
-`DONOR_API_DATABASE_URL="$DONOR_GO_DATABASE_URL?role=dad_api"`, or set every process URL
-and run `make provision` to create real logins. Tests and browser tests run the API,
-workers, and commands that way, so the test database's user must be a superuser.
+`DONOR_API_DATABASE_URL="$DONOR_GO_DATABASE_URL?role=dad_api"`; since the session's login
+could still reset the role, a process accepts that only with the same setting, and checks
+that the role is its own. For the closest match to a deployment, set every process URL to
+a login of its own and run `make provision`. Tests and browser tests run the API, workers,
+and commands with assumed roles, so the test database's user must be a superuser.
 
 Roles belong to the whole PostgreSQL cluster, not one database, so run each environment
 in its own cluster: provisioning refuses a role whose privileges reach another

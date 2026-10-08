@@ -93,7 +93,7 @@ func TestRunInvitesTheFirstAdministratorAndRecoversThem(t *testing.T) {
 	if err = migrations.Apply(ctx, pool, false); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org", dbroles.StaffCLI.Variable(): location.String()}
+	env := map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org", dbroles.StaffCLI.Variable(): location.String(), dbroles.AllowOwnerVariable: "true"}
 	getenv := func(name string) string { return env[name] }
 	for _, args := range [][]string{{"--email=first@example.org", "--name=First Administrator"}, {"--recover", "--email=first@example.org"}} {
 		var out bytes.Buffer
