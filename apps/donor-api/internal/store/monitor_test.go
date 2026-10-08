@@ -26,16 +26,36 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 		mustExec(t, tx, `INSERT INTO donor_messages(id,donor_id,kind,dedup_key,context,available_at,attempts,completed_at)
   VALUES($1,$2,'RECEIPT',$3,'{}',$4,$5,CASE WHEN $6 THEN $4::timestamptz ELSE NULL END)`, job, id, job.String(), now.Add(delta), i*5, i == 3)
 	}
+	day := 24 * time.Hour
+	for _, sub := range []struct {
+		status            string
+		periodEnd, synced time.Duration
+	}{
+		{"active", -2 * day, -3 * day},      // missed the sync due a day after renewal
+		{"past_due", -12 * time.Hour, -day}, // renewed less than a day ago
+		{"active", -2 * day, -day},          // synced after its period end
+		{"canceled", -2 * day, -3 * day},    // ended
+	} {
+		checkout, attempt := testID(t), testID(t)
+		mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES($1,$2,3000,'MONTHLY')", checkout, id)
+		mustExec(t, tx, "INSERT INTO donor_stripe_checkouts(id,checkout_id,request_hash,request_params,stripe_subscription_id,status) VALUES($1,$2,'hash','{}',$3,'COMPLETE')", attempt, checkout, "sub_"+attempt.String())
+		mustExec(t, tx, "INSERT INTO donor_subscriptions(id,attempt_id,donor_id,status,period_end,observed_at) VALUES($1,$2,$3,$4,$5,$6)", testID(t), attempt, id, sub.status, now.Add(sub.periodEnd), now.Add(sub.synced))
+	}
 	rows, err := queries.New(tx).QueueHealth(ctx, timestamp(now))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 5 {
+	if len(rows) != 6 {
 		t.Fatal(rows)
 	}
 	for _, row := range rows {
 		if row.Queue == "messages" {
 			if row.Due != 2 || row.Parked != 1 || row.OldestSeconds != 3600 {
+				t.Fatal(row)
+			}
+		}
+		if row.Queue == "subscriptions" {
+			if row.Due != 1 || row.Parked != 0 || row.OldestSeconds != 86400 {
 				t.Fatal(row)
 			}
 		}

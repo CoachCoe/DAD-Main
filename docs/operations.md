@@ -369,9 +369,12 @@ acceptance also require explicit evidence.
 Run `./scripts/deploy.sh monitor [--max-age 10m]` (or `go run ./cmd/monitor` from
 `apps/donor-api` with the database environment loaded). It emits only aggregate JSON counts,
 parked counts, and oldest due age for Stripe, projections, financial mail, login mail,
-and email changes. It exits nonzero if any job is parked or a due item is older than
-five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends are
-excluded. Schema/database failure is also nonzero. Run this every minute from your
+email changes, and subscriptions. It exits nonzero if any job is parked or a due item is
+older than five minutes; `--max-age 10m` changes the age threshold. Future scheduled sends
+are excluded. An ongoing subscription last synced before its billing period ended is due
+a sync one day after that end, when Stripe has renewed or ended it: one still due after
+that has missed its events or keeps failing to sync, so views of it are out of date.
+Check the Stripe worker and that subscription's events in Stripe. Schema/database failure is also nonzero. Run this every minute from your
 private scheduler, alert on two consecutive failures, and send recovery notification
 when it returns to zero. Monitor process/container restarts and both health URLs too:
 queue age alone cannot detect an idle stopped worker. No public monitoring endpoint or
