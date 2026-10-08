@@ -28,7 +28,10 @@ Knowing an email or checkout ID never grants access to giving history.
 One active monthly subscription per donor; additional one-time gifts are allowed.
 Amount changes apply at the next renewal without proration. Cancellation stops future
 renewals without refunding past gifts. Pausing skips 1, 2, or 3 renewals, with the exact
-automatic-resume date shown before confirmation.
+automatic-resume date shown before confirmation. Donors see their monthly gift as last
+synced from Stripe, with the time of that sync; confirming a change checks Stripe's
+current state and refuses the change, showing the current state, if it no longer
+matches what the donor confirmed.
 
 ## Referrals
 

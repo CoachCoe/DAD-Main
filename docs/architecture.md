@@ -65,6 +65,13 @@ wait for lease expiry. Checkout completion is not collection. Gifts, billing per
 refund state, append-only observations, projections, and notification intents commit
 together. Money is integer USD cents. Referral credit is one level only.
 
+Reads never call Stripe. The worker syncs each subscription's current state, including
+its billing anchor and whether Stripe holds a schedule or pending update, and recurring
+views, card update status, and staff previews are served from it with `observed_at`, the
+time of that sync. Only commands call Stripe, and each first syncs the subscription it
+acts on, committed on its own so that a command refused as out of date still leaves the
+next view current; none depends on a view having refreshed anything.
+
 Domain calculations in `internal/recognition` are independent of HTTP and Stripe. Queries in
 `db` generate the typed store layer with sqlc. Donor reads use indexed projections;
 financial replay runs in event/projection workers. Projection expiry makes incomplete

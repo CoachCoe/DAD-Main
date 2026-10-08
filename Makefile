@@ -4,7 +4,7 @@ GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
 # Load testing against a disposable, seeded deployment; see docs/operations.md.
 SEED_DONORS ?= 50000
 LOAD_API ?= http://127.0.0.1:8002
-LOAD_MIX ?= recurring=0
+LOAD_MIX ?=
 LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -client-ips
 
 .PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs

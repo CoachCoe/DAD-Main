@@ -138,10 +138,13 @@ worker running to drain the queue. Never delete financial facts to make a retry 
 Financial commands retain immutable inputs and processor idempotency keys. Unknown
 requests older than 23 hours require reconciliation. Hosted card-setup retries stop
 before their fixed expiry; an old unknown request is not permission to create a new one.
-Staff refund previews reconcile current provider state and reserve pending refunds.
-If Stripe does not answer within five seconds, recurring details and staff previews show
-the last recorded state with `stale: true` and `observed_at`, and no changes are offered
-until Stripe responds; confirming any change always reads Stripe live.
+Recurring views, card update status, and staff refund and cancellation previews never
+call Stripe: they show the state the worker last synced from verified webhooks, and
+`observed_at` says when that was. Pending refunds reserve their amount in previews. A
+change reads Stripe first and syncs what it finds, even when it then refuses the change,
+so the donor's next view is current. While the Stripe worker is behind, views lag by the
+age of the oldest unprocessed event, and changes refused as out of date answer 409. A
+staff refund whose outcome was lost stays pending until the original action is retried.
 A second recurring change submitted while another is still with Stripe receives 409; the
 subscription lease expires after two minutes if a writer stops mid-command, and the same
 request ID can then resume it. One-time gifts take their paid time from the successful
@@ -277,11 +280,10 @@ referral codes repeated in proportion to how often each would be visited. Treat 
 credential. The sessions last 30 days; delete the fixture and drop the database after
 the run.
 
-Run the API as for production, and run the projection
-worker, since projections expire after a day and dashboards then wait for it. The
-recurring scenario reads Stripe when Stripe is configured, so the Makefile leaves it out
-(`LOAD_MIX=recurring=0`); include it with `LOAD_MIX=` only against an API without Stripe.
-Checkout is not in the mix because it calls Stripe.
+Run the API as for production, and run the projection worker, since projections expire
+after a day and dashboards then wait for it. Every scenario reads only the database,
+including recurring, so Stripe configuration does not change the result. Checkout is not
+in the mix because it calls Stripe.
 
 Referral captures are rate limited per client, and one generator is one client. With
 `-client-ips` it sends each user, and each captured visitor, its own `X-Real-IP` from the

@@ -452,7 +452,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	flags := flag.NewFlagSet("loadtest", flag.ContinueOnError)
 	api := flags.String("api", "http://127.0.0.1:8002", "API base URL for the seeded mix")
 	fixturePath := flags.String("fixture", "", "cmd/seed fixture; runs the seeded donor mix")
-	mix := flags.String("mix", "", "scenario weights overriding the default mix, such as dashboard=30,recurring=0")
+	mix := flags.String("mix", "", "scenario weights overriding the default mix, such as dashboard=30,gifts=0")
 	origin := flags.String("origin", "http://localhost:3000", "browser Origin the API admits on referral captures")
 	nativeShare := flags.Float64("native", 0.25, "share of signed-in users that are the donor app (bearer) rather than a browser (cookie)")
 	clientIPs := flags.Bool("client-ips", false, "send a distinct X-Real-IP per user and per captured visitor; the API must trust this host as a proxy")

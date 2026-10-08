@@ -68,6 +68,7 @@ codes; nginx's error log can include a request line, so treat it as sensitive.
 Stripe handles all card entry. Signed webhooks are verified before persistence; only
 allowlisted event fields are stored. Retryable commands are recorded before provider
 calls, and no donor lock is held during the call. Current remote state is reconciled rather than trusting webhook arrival order.
+Reads never call Stripe, so page views cannot multiply provider requests.
 Logs must exclude donor payloads, credentials, tokens, and remote response bodies; API
 failures are logged with route, status, and error type only. Every API response carries
 `no-store`, `nosniff`, `no-referrer`, and a `default-src 'none'; frame-ancestors 'none'`
