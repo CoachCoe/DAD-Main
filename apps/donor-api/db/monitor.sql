@@ -6,7 +6,9 @@ WITH queues AS (
  UNION ALL
  SELECT 'login-email',available_at,attempts>=5 FROM donor_login_emails WHERE completed_at IS NULL
  UNION ALL
- SELECT 'push',available_at,attempts>=5 FROM donor_push_notifications WHERE completed_at IS NULL
+ -- An expired notification will never be sent, so it no longer needs attention.
+ SELECT 'push',available_at,attempts>=5 FROM donor_push_notifications
+ WHERE completed_at IS NULL AND expires_at>sqlc.arg(as_of)::timestamptz
  UNION ALL
  SELECT 'email-changes',available_at,attempts>=5 FROM donor_email_changes WHERE stage IN ('CURRENT','NEW') AND sent_at IS NULL
  UNION ALL

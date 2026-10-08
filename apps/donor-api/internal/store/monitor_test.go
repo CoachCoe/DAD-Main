@@ -27,12 +27,12 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
   VALUES($1,$2,'RECEIPT',$3,'{}',$4,$5,CASE WHEN $6 THEN $4::timestamptz ELSE NULL END)`, job, id, job.String(), now.Add(delta), i*5, i == 3)
 	}
 	for _, push := range []struct {
-		due      time.Duration
-		attempts int
-	}{{-2 * time.Minute, 0}, {-time.Minute, 5}, {time.Hour, 0}} {
+		due, expires time.Duration
+		attempts     int
+	}{{-2 * time.Minute, time.Hour, 0}, {-time.Minute, time.Hour, 5}, {time.Hour, 2 * time.Hour, 0}, {-time.Hour, -time.Second, 5}} {
 		job := testID(t)
 		mustExec(t, tx, `INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at,attempts)
-  VALUES($1,$2,'STREAK_MILESTONE',$3,'{}',$4,$4,$5)`, job, id, job.String(), now.Add(push.due), push.attempts)
+  VALUES($1,$2,'STREAK_MILESTONE',$3,'{}',$4,$5,$6)`, job, id, job.String(), now.Add(push.due), now.Add(push.expires), push.attempts)
 	}
 	day := 24 * time.Hour
 	for _, sub := range []struct {
