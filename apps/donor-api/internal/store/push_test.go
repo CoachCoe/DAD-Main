@@ -252,7 +252,7 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 	}
 	defer tx.Rollback(ctx)
 	h := newHistoryFixture(t, tx)
-	paid := time.Now().UTC().Add(-time.Hour)
+	paid := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 	appDevice(t, tx, h.donor("alice"), push.IOS, iosToken, paid.Add(24*time.Hour))
 	h.gift(recognition.Gift{ID: "first", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid, Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "IRL", ExpiresAt: paid.Add(24 * time.Hour)}})
 	h.gift(recognition.Gift{ID: "unreferred", DonorID: "cara", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid})
@@ -294,7 +294,7 @@ func TestStreakPushesFollowTheProjection(t *testing.T) {
 	pushCleanup(t, f.service.DB, f.donorID)
 	result := f.checkout(t)
 	ctx := context.Background()
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	appDevice(t, f.service.DB, f.donorID, push.Android, androidToken, now.Add(time.Hour))
 	start := now.Add(-95 * 24 * time.Hour)
 	for i := range 3 {
@@ -370,7 +370,7 @@ func newPushFixture(t *testing.T) *pushFixture {
 	pool := database(t)
 	id, _ := donor(t, pool)
 	pushCleanup(t, pool, id)
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	mustExec(t, pool, "INSERT INTO donor_metric_projections(id,donor_id,current_streak,best_streak,computed_at,next_refresh_at) VALUES($1,$2,3,3,$3,$4)", testID(t), id, now, now.Add(time.Hour))
 	intent := testID(t)
 	mustExec(t, pool, `INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
