@@ -55,13 +55,15 @@ runs one. HSTS comes from the web app on every response, so nginx does not add a
 | --- | --- |
 | Public host, `/staff*` or `/api/donor/staff*` (any case) | `404 {"detail":"Not found"}` |
 | Public host, anything else | web service |
-| Staff host, `/`, `/staff*`, `/api/donor/staff/*`, `/_next/*`, `/favicon.ico` | web service, `X-Robots-Tag: noindex, nofollow` |
+| Staff host, `/`, `/staff*`, `/api/donor/staff/*`, `/_next/*`, `/favicon.ico`, `/robots.txt` | web service |
 | Staff host, anything else | `404 {"detail":"Not found"}` |
 | Unknown TLS server name | handshake refused |
 | Known server name with another `Host` | `421` |
 | Port 80 | `301` to HTTPS for known hosts; connection closed otherwise |
 
-The web app and API enforce the same split; nginx is defense in depth. New public pages
+Every staff-host response carries one `X-Robots-Tag: noindex, nofollow`, set by nginx in
+place of the web app's copy. The web app and API enforce the same split; nginx is defense
+in depth. New public pages
 need no change; a staff-host path outside those prefixes needs the allowlist in
 `templates/ingress.conf.template`.
 

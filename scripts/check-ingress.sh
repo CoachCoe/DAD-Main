@@ -95,6 +95,7 @@ http {
     server {
         listen 3000;
         default_type text/plain;
+        add_header X-Robots-Tag "noindex, nofollow";
         return 200 "host=$host\nuri=$request_uri\nx-real-ip=$http_x_real_ip\nx-forwarded-for=$http_x_forwarded_for\ncf-connecting-ip=$http_cf_connecting_ip\n";
     }
 }
@@ -166,13 +167,13 @@ done
 check 'public 404 is JSON' '{"detail":"Not found"}' "$(client https://public.test/staff)"
 body="$(client https://staff.test/)"
 check 'staff host serves /' staff.test "$(field host "$body")"
-for path in /staff /staff/donors/1 /api/donor/staff/me /_next/static/app.js; do
+for path in /staff /staff/donors/1 /api/donor/staff/me /_next/static/app.js /robots.txt; do
   check "staff host serves $path" 200 "$(status "https://staff.test$path")"
 done
 for path in /donate /r/abc /account/sign-in /api/donor/me/profile /api/donor/stripe/webhook /api/donor/staffing; do
   check "staff host hides $path" 404 "$(status "https://staff.test$path")"
 done
-check 'staff host is not indexed' 'noindex, nofollow' \
+check 'staff host is not indexed, with one header' 'noindex, nofollow' \
   "$(header x-robots-tag "$(client -o /dev/null -D - https://staff.test/staff | tr -d '\r')")"
 
 post_bytes() { head -c "$1" /dev/zero | status -X POST --data-binary @- "$2"; }
@@ -194,6 +195,9 @@ headers="$(client -D - -o "/tmp/limited" -X POST https://public.test/api/donor/l
 check 'sign-in 429 has Retry-After' 60 "$(header retry-after "$headers")"
 check 'sign-in 429 is not cacheable' no-store "$(header cache-control "$headers")"
 check 'sign-in 429 body is JSON' '{"detail":"Too many requests"}' "$(compose exec -T web cat /tmp/limited)"
+headers="$(client -D - -o /dev/null -X POST https://staff.test/api/donor/staff/sign-in | tr -d '\r')"
+check 'staff host 429 is not indexed' '429 noindex, nofollow' \
+  "$(awk 'NR == 1 { print $2 }' <<< "$headers") $(header x-robots-tag "$headers")"
 repeat https://public.test/r/abc 400
 pages="$(counts "${urls[@]}")"
 check 'pages admit a burst of 300, then limit' yes \

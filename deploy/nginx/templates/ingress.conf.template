@@ -69,6 +69,8 @@ server {
     include /etc/nginx/ingress/${INGRESS_MODE}/origin.conf;
     include /etc/nginx/ingress/limited.conf;
     include /etc/nginx/staff-access.conf;
+    # The web app marks its responses too; hiding its copy leaves exactly one.
+    proxy_hide_header X-Robots-Tag;
     add_header X-Robots-Tag "noindex, nofollow" always;
 
     # Only the back office and the assets it loads; donor pages and APIs stay on the public host.
@@ -95,7 +97,7 @@ server {
         proxy_pass http://web;
     }
 
-    location ~ ^/(|favicon\.ico|staff|staff/.*|_next/.*|api/donor/staff/.*)$ {
+    location ~ ^/(|favicon\.ico|robots\.txt|staff|staff/.*|_next/.*|api/donor/staff/.*)$ {
         proxy_pass http://web;
     }
 }
