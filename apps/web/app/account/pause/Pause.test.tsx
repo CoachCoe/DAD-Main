@@ -62,9 +62,22 @@ it("returns focus to the chosen option when backing out", async () => {
   expect(screen.getByRole("button", { name: "Skip 2 renewals" })).toHaveFocus();
 });
 
-it("does not offer a pause from stale billing details", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ ...options, stale: true })));
+it("offers current dates after Stripe refuses ones shown from stored billing details", async () => {
+  const later = { months: 2, starts_at: "2026-12-01T12:00:00Z", resumes_at: "2027-02-01T12:00:00Z" };
+  const fetch = vi.fn().mockResolvedValueOnce(response(options))
+    .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ detail: "Billing details changed or require reconciliation. Refresh before confirming" }) })
+    .mockResolvedValueOnce(response({ ...options, options: [later] }))
+    .mockResolvedValueOnce(response({ pause: { ...later, request_id: "command", confirmed: true } }));
+  vi.stubGlobal("fetch", fetch);
   render(<PausePage />);
-  expect(await screen.findByRole("note")).toHaveTextContent("Showing the last known details");
-  expect(screen.getByRole("button", { name: "Skip 2 renewals" })).toBeDisabled();
+  fireEvent.click(await screen.findByRole("button", { name: "Skip 2 renewals" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm pause" }));
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Billing details changed"));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh pause dates" }));
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
+  fireEvent.click(await screen.findByRole("button", { name: "Skip 2 renewals" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm pause" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Pause confirmed."));
+  expect(JSON.parse(fetch.mock.calls[3][1].body)).toEqual({ subscription_id: "owned", ...later });
+  expect(fetch.mock.calls[3][1].headers["Idempotency-Key"]).not.toBe(fetch.mock.calls[1][1].headers["Idempotency-Key"]);
 });

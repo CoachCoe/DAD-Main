@@ -4,7 +4,6 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { StaleNotice } from "@/components/donor/StaleNotice";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, ApiError, unconfirmedMessage } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
@@ -12,7 +11,7 @@ import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
 import { formatDateTime } from "@/lib/dates";
 
-type Recurring = { state: "ready" | "preparing"; stale?: boolean; observed_at?: string; subscription: {
+type Recurring = { state: "ready" | "preparing"; observed_at?: string; subscription: {
   id: string; amount_minor: number; currency: string; status: string;
   period_end: string; stops_at: string | null;
 } | null };
@@ -58,11 +57,11 @@ export default function RecurringGiving() {
         <p>You have no monthly gift to manage.</p>
         <Link className="button" href="/donate">Start a monthly gift</Link>
       </div>}
-      {data?.stale && <StaleNotice observedAt={data.observed_at} />}
       {subscription && <>
         <p className="metricValue">{formatMoney(subscription.amount_minor, subscription.currency)}/month</p>
         {subscription.stops_at ? !message && <p>Renewals cancelled. Your current billing period ends {formatDateTime(subscription.stops_at)}.</p>
           : <p>Current billing period ends <time dateTime={subscription.period_end}>{formatDateTime(subscription.period_end)}</time>.</p>}
+        {data?.observed_at && <p className="note">Last updated from Stripe <time dateTime={data.observed_at}>{formatDateTime(data.observed_at)}</time>.</p>}
         {!subscription.stops_at && !cancellable(subscription.status) && <p>This monthly gift is not ready for cancellation. Refresh once checkout finishes.</p>}
         <nav aria-label="Manage monthly giving" className="links">
           <Link href="/account/payment-method">Update payment method</Link>
@@ -74,14 +73,14 @@ export default function RecurringGiving() {
           <p>Stop future renewals at {formatDateTime(subscription.period_end)}? This does not refund past gifts or forgive an outstanding invoice.
             Your streak ends at the first skipped renewal. An earned Founding Donor badge stays yours.</p>
           <div className="actions">
-            <button type="button" className="secondary danger" disabled={busy || data?.stale} onClick={cancel}>{busy ? "Checking cancellation…" : "Confirm cancel renewals"}</button>
+            <button type="button" className="secondary danger" disabled={busy} onClick={cancel}>{busy ? "Checking cancellation…" : "Confirm cancel renewals"}</button>
             <button type="button" className="secondary" disabled={busy} onClick={() => setConfirming(false)}>Back</button>
           </div>
-        </div> : <button type="button" ref={step.trigger} className="quiet" disabled={data?.stale} onClick={() => setConfirming(true)}>Cancel monthly giving</button>)}
+        </div> : <button type="button" ref={step.trigger} className="quiet" onClick={() => setConfirming(true)}>Cancel monthly giving</button>)}
       </>}
       <p className="note">Sandbox only. These controls affect test subscriptions. Tax receipts are not available in this preview yet.</p>
       <Announcer status={messages.status || message || preparing} alert={error || messages.alert} />
-      {(failed || error || preparing || data?.stale || (subscription && !cancellable(subscription.status))) &&
+      {(failed || error || preparing || (subscription && !cancellable(subscription.status))) &&
         <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh billing details</button>}
     </>}
   </Page>;

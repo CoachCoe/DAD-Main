@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { formatDateTime } from "@/lib/dates";
 import RecurringPage from "./Recurring";
 
 const subscription = { id: "owned-id", amount_minor: 3000, currency: "USD", status: "active",
@@ -58,10 +59,27 @@ it("returns focus to the cancel control when backing out", async () => {
   expect(screen.getByRole("button", { name: "Cancel monthly giving" })).toHaveFocus();
 });
 
-it("shows stale billing details as last known and offers no changes from them", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", stale: true, observed_at: "2026-10-30T12:00:00Z", subscription })));
+it("dates billing details by their last Stripe sync and offers changes from them", async () => {
+  const observed = "2026-10-30T12:00:00Z";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", observed_at: observed, subscription })));
   render(<RecurringPage />);
-  expect(await screen.findByRole("note")).toHaveTextContent("changes are unavailable until Stripe responds");
-  expect(screen.getByRole("button", { name: "Cancel monthly giving" })).toBeDisabled();
-  expect(screen.getByRole("button", { name: "Refresh billing details" })).toBeEnabled();
+  const synced = await screen.findByText(/Last updated from Stripe/);
+  expect(synced).toHaveTextContent(`Last updated from Stripe ${formatDateTime(observed)}.`);
+  expect(synced.querySelector("time")).toHaveAttribute("dateTime", observed);
+  expect(screen.queryByRole("note")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Cancel monthly giving" })).toBeEnabled();
+});
+
+it("offers current billing details after Stripe refuses a cancellation shown from stored ones", async () => {
+  const renewed = { ...subscription, period_end: "2026-12-01T12:00:00Z" };
+  const fetch = vi.fn().mockResolvedValueOnce(response({ state: "ready", subscription }))
+    .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ detail: "Billing details changed or require reconciliation. Refresh before confirming" }) })
+    .mockResolvedValueOnce(response({ state: "ready", subscription: renewed }));
+  vi.stubGlobal("fetch", fetch);
+  render(<RecurringPage />);
+  fireEvent.click(await screen.findByRole("button", { name: "Cancel monthly giving" }));
+  fireEvent.click(screen.getByRole("button", { name: "Confirm cancel renewals" }));
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Billing details changed"));
+  fireEvent.click(screen.getByRole("button", { name: "Refresh billing details" }));
+  expect(await screen.findByText(new RegExp(formatDateTime(renewed.period_end)))).toBeVisible();
 });

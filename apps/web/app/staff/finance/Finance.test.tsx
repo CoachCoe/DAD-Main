@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { formatDateTime } from "@/lib/dates";
 import StaffFinancePage from "./Finance";
 
 const quote = { gift_id: "gift", donor_id: "donor", amount_minor: 3000, available_minor: 3000 };
@@ -113,10 +114,22 @@ it("treats switched-off payments as a definitive refusal, not an uncertain refun
   expect(screen.getByRole("button", { name: "Back" })).toBeEnabled();
 });
 
-it("shows a stale quote as last known and allows no financial action from it", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response({ ...quote, stale: true, observed_at: "2027-01-02T15:04:00Z" }))
+it("dates a quote by its last recorded refund and still allows the action, which reads Stripe itself", async () => {
+  const observed = "2027-01-02T15:04:00Z";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response({ ...quote, available_minor: 2000, observed_at: observed }))
     .mockResolvedValueOnce(pending()));
   render(<StaffFinancePage donor="donor" gift="gift" />);
-  expect(await screen.findByRole("note")).toHaveTextContent("Showing the last known details as of");
-  expect(screen.getByRole("button", { name: "Review financial action" })).toBeDisabled();
+  expect(await screen.findByText(`Original gift: $30.00. Available to refund: $20.00 USD. Last refund recorded ${formatDateTime(observed)}.`)).toBeVisible();
+  expect(screen.queryByRole("note")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Review financial action" })).toBeEnabled();
+});
+
+it("dates a cancellation quote by its last Stripe sync", async () => {
+  const observed = "2027-01-02T15:04:00Z";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response({ mode: "test", state: "ready", observed_at: observed,
+    subscription: { id: "subscription", amount_minor: 3000, currency: "USD", status: "active", period_end: "2027-02-01T00:00:00Z", stops_at: null } }))
+    .mockResolvedValueOnce(pending()));
+  render(<StaffFinancePage donor="donor" gift="" />);
+  expect(await screen.findByText(new RegExp(`Last updated from Stripe ${formatDateTime(observed)}\\.`))).toBeVisible();
+  expect(screen.getByRole("button", { name: "Review financial action" })).toBeEnabled();
 });

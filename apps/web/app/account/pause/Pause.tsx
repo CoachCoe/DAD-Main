@@ -4,7 +4,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { StaleNotice } from "@/components/donor/StaleNotice";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, ApiError, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
@@ -13,7 +12,7 @@ import { formatDateTime } from "@/lib/dates";
 
 type Dates = { months: number; starts_at: string; resumes_at: string };
 type Pause = Dates & { request_id: string; confirmed: boolean };
-type Options = { state: string; stale?: boolean; subscription_id?: string; pause: Pause | null; options: Dates[] };
+type Options = { state: string; subscription_id?: string; pause: Pause | null; options: Dates[] };
 
 const renewals = (months: number) => `${months} renewal${months === 1 ? "" : "s"}`;
 
@@ -51,16 +50,15 @@ export default function PauseGiving() {
   }
   return <Page eyebrow="My account" title="Pause monthly giving" back={{ href: "/account/recurring", label: "Manage monthly giving" }}>
     {signedOut || resource.state === "signedOut" ? <SignInPrompt>Sign in to manage your giving</SignInPrompt> : <>
-      {data?.stale && <StaleNotice />}
       {data?.pause ? <div className="callout">
         {!message && <p>{data.pause.confirmed ? "Pause confirmed." : "Pause not yet confirmed."}</p>}
         <p>Original pause starts {formatDateTime(data.pause.starts_at)}. Giving automatically resumes {formatDateTime(data.pause.resumes_at)}.</p>
-        {!data.pause.confirmed && <button type="button" className="button" disabled={busy || data.stale} onClick={() => data.pause && confirm(data.pause)}>Retry saved pause</button>}
+        {!data.pause.confirmed && <button type="button" className="button" disabled={busy} onClick={() => data.pause && confirm(data.pause)}>Retry saved pause</button>}
         <p><Link href="/account/resume">Resume at next renewal</Link></p>
       </div> : data && data.options.length === 0 ? <p>No monthly gift is currently available to pause.</p> : data && <>
         {!choice ? <>
           <p className="lead">Skip up to three monthly renewals. You’ll see the exact resume date before you confirm.</p>
-          <div className="actions">{data.options.map((option) => <button type="button" className="secondary" key={option.months} disabled={data.stale}
+          <div className="actions">{data.options.map((option) => <button type="button" className="secondary" key={option.months}
             ref={option.months === opener ? step.trigger : undefined} onClick={() => { setOpener(option.months); setChoice(option); }}>
             Skip {renewals(option.months)}
           </button>)}</div>
@@ -69,7 +67,7 @@ export default function PauseGiving() {
           <p>Skip {renewals(choice.months)}, starting <time dateTime={choice.starts_at}>{formatDateTime(choice.starts_at)}</time>.</p>
           <p>Giving automatically resumes <time dateTime={choice.resumes_at}>{formatDateTime(choice.resumes_at)}</time>.</p>
           <div className="actions">
-            <button type="button" className="button" disabled={busy || data.stale} onClick={() => confirm(choice)}>{busy ? "Checking pause…" : "Confirm pause"}</button>
+            <button type="button" className="button" disabled={busy} onClick={() => confirm(choice)}>{busy ? "Checking pause…" : "Confirm pause"}</button>
             <button type="button" className="secondary" disabled={busy || requestKey !== null} onClick={() => setChoice(null)}>Back</button>
           </div>
         </div>}
@@ -77,7 +75,7 @@ export default function PauseGiving() {
       <p className="note">Your streak ends at the first skipped renewal. Your Founding Donor badge stays yours.
         Pausing does not refund gifts or forgive an outstanding invoice. Sandbox only: these controls affect test subscriptions.</p>
       <Announcer status={messages.status || message} alert={error || messages.alert} />
-      {(failed || error || data?.stale) && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh pause dates</button>}
+      {(failed || error) && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh pause dates</button>}
     </>}
   </Page>;
 }

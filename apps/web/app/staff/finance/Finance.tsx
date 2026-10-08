@@ -3,7 +3,6 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { StaleNotice } from "@/components/donor/StaleNotice";
 import { api, ApiError, classifyFailure, unconfirmedMessage } from "@/lib/api";
 import { formatMoney, parseDollars } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
@@ -12,7 +11,7 @@ import { formatDateTime } from "@/lib/dates";
 
 type Quote = ({ gift_id: string; donor_id: string; amount_minor: number; available_minor: number } | {
   subscription: { id: string; amount_minor: number; period_end: string; stops_at: string | null } | null;
-}) & { stale?: boolean; observed_at?: string };
+}) & { observed_at?: string };
 type Action = { id: string; actor_id: string; kind: string; target_id: string; amount_minor: number | null; period_end: string | null; reason: string; status: string };
 type Confirmation = { amount_minor: number; reason: string } | { subscription_id: string; period_end: string; reason: string };
 type Result = { status?: string; subscription?: { stops_at: string | null } };
@@ -30,7 +29,6 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
       const quote = await api<Quote>(path, { signal });
       const target = "gift_id" in quote ? quote.gift_id : quote.subscription?.id;
       const kind = "gift_id" in quote ? "REFUND" : "CANCEL";
-      // Read after quote reconciliation, which may settle an uncertain request.
       const pending = target ? (await api<{ action: Action | null }>(
         `/donor/staff/donors/${encodeURIComponent(donor)}/actions/pending?${new URLSearchParams({ target_id: target, kind })}`, { signal },
       )).action : null;
@@ -55,8 +53,8 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
   const amountInput = useRef<HTMLInputElement>(null);
   const reasonInput = useRef<HTMLTextAreaElement>(null);
   const step = useStepFocus(confirmation !== null);
-  const messages = resourceMessages(resource, { loading: "Checking current Stripe records…",
-    failure: "Financial details could not be loaded. Retry when Stripe is available.",
+  const messages = resourceMessages(resource, { loading: "Loading financial records…",
+    failure: "Financial details could not be loaded. Please retry.",
     forbidden: "Your staff role does not permit refunds or cancellations." });
 
   function reject(field: "amount" | "reason", text: string) {
@@ -102,20 +100,21 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
     <p>Sandbox only. A named financial permission and an audit reason are required.</p>
     {!donor && <p>Select a donor and gift in the staff back office.</p>}
     {resource.state === "signedOut" && donor && <p><Link className="button" href="/staff/sign-in">Staff sign-in</Link></p>}
-    {quote?.stale && <StaleNotice observedAt={quote.observed_at} />}
-    {quote && <>{"gift_id" in quote ? <p>Original gift: {formatMoney(quote.amount_minor)}. Available to refund: {formatMoney(quote.available_minor)} USD.</p> :
-      quote.subscription ? <p>{formatMoney(quote.subscription.amount_minor)}/month. Next renewal: {formatDateTime(quote.subscription.period_end)}.{quote.subscription.stops_at && " Cancellation is already scheduled."}</p> : <p>No monthly gift is available.</p>}
+    {quote && <>{"gift_id" in quote ? <p>Original gift: {formatMoney(quote.amount_minor)}. Available to refund: {formatMoney(quote.available_minor)} USD.
+      {quote.observed_at && ` Last refund recorded ${formatDateTime(quote.observed_at)}.`}</p> :
+      quote.subscription ? <p>{formatMoney(quote.subscription.amount_minor)}/month. Next renewal: {formatDateTime(quote.subscription.period_end)}.{quote.subscription.stops_at && " Cancellation is already scheduled."}
+        {quote.observed_at && ` Last updated from Stripe ${formatDateTime(quote.observed_at)}.`}</p> : <p>No monthly gift is available.</p>}
       {confirmation ? <div className="callout"><h2 ref={step.heading} tabIndex={-1}>Confirm financial action</h2>
         <p>{"amount_minor" in confirmation ? `Refund ${formatMoney(confirmation.amount_minor)} USD to the original payment method.` : `Stop future renewals at ${formatDateTime(confirmation.period_end)}. No refund is included.`}</p>
         <p>Reason: {confirmation.reason}</p>
-        <div className="actions"><button type="button" className="secondary danger" disabled={busy || quote.stale} onClick={submit}>{busy ? "Checking action…" : requestKey ? "Retry original financial action" : "Confirm financial action"}</button>
+        <div className="actions"><button type="button" className="secondary danger" disabled={busy} onClick={submit}>{busy ? "Checking action…" : requestKey ? "Retry original financial action" : "Confirm financial action"}</button>
         <button type="button" className="secondary" disabled={busy || requestKey !== null} onClick={() => setConfirmation(null)}>Back</button></div>
       </div> : (("gift_id" in quote && quote.available_minor > 0) || ("subscription" in quote && quote.subscription && !quote.subscription.stops_at)) && <form onSubmit={review}>
         {"gift_id" in quote && <label>Refund in USD<input ref={amountInput} inputMode="decimal" value={amount} {...describedBy("amount")}
           onChange={(event) => { setAmount(event.target.value); setInvalid(null); }} required /></label>}
         <label>Audit reason<textarea ref={reasonInput} minLength={5} maxLength={500} value={reason} {...describedBy("reason")}
           onChange={(event) => { setReason(event.target.value); setInvalid(null); }} required /></label>
-        <button ref={step.trigger} className="button" disabled={busy || quote.stale} type="submit">Review financial action</button>
+        <button ref={step.trigger} className="button" disabled={busy} type="submit">Review financial action</button>
       </form>}
     </>}
     <Announcer id="finance-error" status={donor ? messages.status || message : ""} alert={donor ? error || messages.alert : ""} />
