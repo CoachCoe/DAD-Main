@@ -11,5 +11,6 @@ var
 **/.next
 **/*.tsbuildinfo
 **/e2e
+**/playwright.config.ts
 **/test-results
 **/playwright-report
