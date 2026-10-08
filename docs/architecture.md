@@ -26,9 +26,18 @@ map to named permissions checked against current database state.
 `apps/donor-api/api/openapi.json` (OpenAPI 3.1) is the HTTP contract for the web app and
 the R2 donor apps. Every route is declared once in `internal/httpapi/routes.go` with its
 authentication and client policy; the `TestContract*` tests fail when routes, security,
-client policy, or JSON shapes drift from the document. Errors are `{detail}` JSON, with
-an additive `code` for configuration states and `errors` for located spreadsheet
-problems. Money is integer cents and timestamps are RFC 3339.
+client policy, or JSON shapes drift from the document, including which response fields
+are always present. A response whose fields depend on its state documents each state as
+a `oneOf` variant. Errors are `{detail}` JSON, with an additive `code` for configuration
+states and `errors` for located spreadsheet problems. Money is integer cents and
+timestamps are RFC 3339.
+
+The web app's request and response types are generated from the contract into
+`apps/web/lib/openapi.d.ts` by pinned openapi-typescript, and pages name them through
+`Schema`, `RequestBody`, and `ResponseBody` in `lib/api.ts` rather than declaring their
+own. `make generate` refreshes the file and `make check-generated` fails CI when it no
+longer matches the contract. The R2 native apps generate their own clients from the same
+document.
 
 Staff routes admit mutations only from the staff origin; every other route admits only
 the public origin. Passkey ceremonies take two calls each. `POST

@@ -15,9 +15,13 @@ database. They do not replace Stripe test-account acceptance or real-device chec
 Never weaken assertions, skip a failing test, or fabricate production facts to pass CI.
 
 Change SQL sources and regenerate with `make generate`; never hand-edit generated query
-files. Add a new forward migration for schema changes. Existing migration checksums must
-remain stable. Review transaction boundaries, authorization, idempotency, refund effects,
-and out-of-order provider events in every financial change.
+files or `apps/web/lib/openapi.d.ts`; CI's `make check-generated` fails on drift. Change
+`apps/donor-api/api/openapi.json` with any API shape and regenerate; web code names API
+shapes through the generated types rather than declaring its own, and native apps
+generate their clients from the same contract. Add a new forward migration for schema
+changes. Existing migration checksums must remain stable. Review transaction boundaries,
+authorization, idempotency, refund effects, and out-of-order provider events in every
+financial change.
 
 Read `apps/web/AGENTS.md` and the installed Next documentation before frontend changes.
 Check mobile and desktop, keyboard interaction, loading/error/empty states, and safe retry

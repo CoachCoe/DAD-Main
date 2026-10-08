@@ -124,8 +124,9 @@ the standalone build and copies its static assets first, matching the container'
 For a local production preview, run `HOSTNAME=127.0.0.1 PORT=3000 npm start` from
 `apps/web` after building.
 
-SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc; commit SQL and its
-generated Go query code together. `make check-generated` fails if they have drifted.
+SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc and regenerates the web
+app's API types from the OpenAPI contract; commit each source with its generated code.
+`make check-generated` fails if either has drifted.
 Applied migrations are immutable and checksum-checked.
 
 Capacity is measured against a seeded, disposable deployment: `make seed` fills a
