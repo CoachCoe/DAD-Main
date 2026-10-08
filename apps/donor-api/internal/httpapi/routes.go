@@ -66,9 +66,9 @@ func (a *api) routes() []route {
 		a.donorWrite("POST /donor/me/recurring/amount", recurringCommand(a, changeAmount)),
 		a.donorWrite("POST /donor/me/payment-method/setup", a.beginPaymentUpdate),
 
-		a.staffEntry("POST /donor/staff/sign-in/options", a.beginStaffSignIn),
+		a.staffChallenge("POST /donor/staff/sign-in/options", a.beginStaffSignIn),
 		a.staffEntry("POST /donor/staff/sign-in", a.staffSignIn),
-		a.staffEntry("POST /donor/staff/activate/options", a.beginStaffActivation),
+		a.staffChallenge("POST /donor/staff/activate/options", a.beginStaffActivation),
 		a.staffEntry("POST /donor/staff/activate", a.staffActivate),
 		{"POST /donor/staff/sign-out", staffAuth, a.guarded(a.StaffOrigin, staffLimit, false, a.staffSignOut)},
 		a.staffRead("GET /donor/staff/me", a.staffMe),
@@ -127,7 +127,14 @@ func (a *api) donorWrite(pattern string, handler sessionHandler) route {
 	return route{pattern, donorAuth, a.guarded(a.Origin, accountLimit, true, signedIn(donorSession, handler))}
 }
 
-// staffEntry routes run passkey ceremonies; the back office is browser-only.
+// staffChallenge routes start passkey ceremonies. A page asks for one before
+// anyone acts, so they take the staff budget; answering one takes the
+// stricter sign-in budget.
+func (a *api) staffChallenge(pattern string, handler http.HandlerFunc) route {
+	return route{pattern, noAuth, a.guarded(a.StaffOrigin, staffLimit, false, handler)}
+}
+
+// staffEntry routes answer passkey ceremonies; the back office is browser-only.
 func (a *api) staffEntry(pattern string, handler http.HandlerFunc) route {
 	return route{pattern, noAuth, a.guarded(a.StaffOrigin, authLimit, false, handler)}
 }

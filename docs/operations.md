@@ -70,8 +70,9 @@ the Compose network if that range clashes on the host.
 
 The in-process limiter keeps a token bucket per client (IPv6 clients per /64) and per
 class, so a burst on one surface cannot starve another for visitors sharing an address:
-sign-in and claim links 10 per minute, giving, referral capture, and partner signup 60,
-other donor actions 30, and staff actions 60. Rejections carry an exact `Retry-After`.
+sign-in, claim links, and passkey answers 10 per minute, giving, referral capture, and
+partner signup 60, other donor actions 30, and staff actions and passkey challenges 60.
+Rejections carry an exact `Retry-After`.
 It tracks at most 65,536 buckets and evicts an existing bucket rather than refusing new
 clients when full. It is the per-instance last line behind the nginx and Cloudflare
 limits. Capacity must still be validated against the agreed launch spike.

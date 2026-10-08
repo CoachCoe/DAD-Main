@@ -2272,7 +2272,7 @@
           "Staff"
         ],
         "security": [],
-        "x-rate-limit": "auth",
+        "x-rate-limit": "staff",
         "x-clients": [
           "browser"
         ],
@@ -2393,7 +2393,7 @@
           "Staff"
         ],
         "security": [],
-        "x-rate-limit": "auth",
+        "x-rate-limit": "staff",
         "x-clients": [
           "browser"
         ],
