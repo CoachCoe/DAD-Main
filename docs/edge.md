@@ -99,8 +99,10 @@ carrier-grade NATs, campuses, and event Wi-Fi share one address during a referra
 
 nginx also caps each client at 100 concurrent requests and answers rejections with
 `429 {"detail":"Too many requests"}`, `Retry-After` (60 for auth, otherwise 5), and
-`Cache-Control: no-store`. nginx keys on the full address, the API on the IPv6 /64. The
-general zone tracks about a million addresses before evicting the least recent. Bodies are
+`Cache-Control: no-store`. Like the API, nginx counts an IPv4 client by its address and
+an IPv6 client by its /64, which one subscriber typically holds whole
+(`deploy/nginx/conf/client-key.js`, run by the image's njs module). The general zone tracks
+about half a million clients before evicting the least recent. Bodies are
 limited to 256 KiB (the API's JSON and webhook limit), except staff source uploads and
 publications at 10 MiB. Exports stream unbuffered.
 

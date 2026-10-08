@@ -217,6 +217,20 @@ check 'X-Forwarded-For is CF-Connecting-IP from Cloudflare' 198.51.100.7 "$(fiel
 check 'CF-Connecting-IP is not forwarded' '' "$(field cf-connecting-ip "$body")"
 check 'staff host serves Cloudflare connections' 200 "$(status "${cert[@]}" https://staff.test/staff)"
 
+# One curl, so the auth zone (one request per 3 s) cannot refill between the groups.
+as_client() {
+  printf -- '%s\n' --next -sS -k --http1.1 -4 --connect-to :443:nginx:8443 --cert /pki/edge.pem --key /pki/edge.key \
+    -X POST -w '%{http_code}\n' -H "CF-Connecting-IP: $1"
+  local i
+  for ((i = 0; i < $2; i++)); do printf '%s\n' -o /dev/null https://public.test/api/donor/login; done
+}
+mapfile -t args < <(as_client 2001:db8:a:b::1 21; as_client 2001:db8:a:b:ffff:ffff:ffff:fffe 1;
+  as_client 2001:db8:a:c::1 1; as_client 2001:db8::1 21; as_client 2001:db8::8000:0:0:1 1; as_client 198.51.100.8 1)
+codes="$(docker run --rm --network "${project}_edge" --ip 172.31.243.200 -v "$work/pki:/pki:ro" "$image" \
+  curl "${args[@]:1}" | tr '\n' ' ')"
+check 'IPv6 clients share limits per /64' \
+  "$(printf '200 %.0s' {1..21})429 200 $(printf '200 %.0s' {1..21})429 200 " "$codes"
+
 if ((failures)); then
   printf '%d ingress check(s) failed.\n' "$failures" >&2
   exit 1
