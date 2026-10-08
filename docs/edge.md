@@ -79,9 +79,10 @@ drops `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, and Next's internal
 address (`DONOR_TRUSTED_PROXY_CIDRS=172.30.42.10/32`).
 
 `deploy/nginx/conf/cloudflare/edge-ranges.conf` is generated from
-<https://www.cloudflare.com/ips-v4> and <https://www.cloudflare.com/ips-v6>. Run
-`./scripts/refresh-cloudflare-ips.sh --check` monthly; when it reports a change, run it
-without `--check`, commit the result, and run `reload-ingress`.
+<https://www.cloudflare.com/ips-v4> and <https://www.cloudflare.com/ips-v6>. The
+scheduled `Cloudflare ranges` workflow runs `./scripts/refresh-cloudflare-ips.sh --check`
+every Monday and fails when the ranges change; then run the script without `--check`,
+commit the result, and run `reload-ingress` on the origin.
 
 The edge network has IPv6 enabled, so in direct mode IPv6 visitors reach nginx with their
 own addresses rather than as Docker's gateway, and each keeps its own quota. This needs
