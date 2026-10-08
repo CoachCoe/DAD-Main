@@ -199,12 +199,31 @@ type DonorPaymentUpdate struct {
 }
 
 type DonorPreference struct {
-	DonorID         pgtype.UUID        `json:"donor_id"`
-	Version         int32              `json:"version"`
-	ReferralEmails  bool               `json:"referral_emails"`
-	MarketingEmails bool               `json:"marketing_emails"`
-	ID              pgtype.UUID        `json:"id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	DonorID               pgtype.UUID        `json:"donor_id"`
+	Version               int32              `json:"version"`
+	ReferralEmails        bool               `json:"referral_emails"`
+	MarketingEmails       bool               `json:"marketing_emails"`
+	ID                    pgtype.UUID        `json:"id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	PushReferralConverted bool               `json:"push_referral_converted"`
+	PushStreakAtRisk      bool               `json:"push_streak_at_risk"`
+	PushStreakMilestone   bool               `json:"push_streak_milestone"`
+}
+
+type DonorPushNotification struct {
+	ID               pgtype.UUID        `json:"id"`
+	DonorID          pgtype.UUID        `json:"donor_id"`
+	Category         string             `json:"category"`
+	DedupKey         string             `json:"dedup_key"`
+	Context          []byte             `json:"context"`
+	AvailableAt      pgtype.Timestamptz `json:"available_at"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	Attempts         int32              `json:"attempts"`
+	LastError        pgtype.Text        `json:"last_error"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
+	SentTo           []pgtype.UUID      `json:"sent_to"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type DonorReferralTouch struct {
@@ -253,6 +272,8 @@ type DonorSession struct {
 	RefreshPreviousHash pgtype.Text        `json:"refresh_previous_hash"`
 	RefreshedAt         pgtype.Timestamptz `json:"refreshed_at"`
 	RefreshExpiresAt    pgtype.Timestamptz `json:"refresh_expires_at"`
+	PushToken           pgtype.Text        `json:"push_token"`
+	PushEnvironment     pgtype.Text        `json:"push_environment"`
 }
 
 type DonorStaff struct {

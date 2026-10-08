@@ -29,15 +29,19 @@ func queueMessage(ctx context.Context, q *queries.Queries, donor pgtype.UUID, ki
 }
 
 // refreshProjection recomputes the donor's recognition and queues the
-// messages its facts call for, which commit together with it. Delivery is a
-// separate worker. It takes the donor lock if the caller does not hold it.
-func refreshProjection(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.Time) (queries.SaveProjectionParams, error) {
+// messages and push notifications its facts call for, which commit together
+// with it. Delivery is a separate worker. It takes the donor lock if the
+// caller does not hold it.
+func refreshProjection(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.Time) (projection, error) {
 	q := queries.New(tx)
 	result, err := projectFacts(ctx, q, id, now)
 	if err != nil {
 		return result, err
 	}
-	return result, q.QueueFinancialIntents(ctx, queries.QueueFinancialIntentsParams{DonorID: id, AsOf: timestamp(now)})
+	if err = q.QueueFinancialIntents(ctx, queries.QueueFinancialIntentsParams{DonorID: id, AsOf: timestamp(now)}); err != nil {
+		return result, err
+	}
+	return result, queuePushIntents(ctx, q, result, now)
 }
 
 // RefreshNextProjection refreshes the donor whose projection is due soonest.

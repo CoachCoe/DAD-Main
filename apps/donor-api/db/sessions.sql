@@ -32,16 +32,18 @@ ORDER BY current DESC, last_used_at DESC, id LIMIT 50;
 SELECT token_hash FROM donor_sessions WHERE id = $1 AND donor_id = $2;
 
 -- name: RevokeSession :exec
-UPDATE donor_sessions SET revoked_at = $2 WHERE token_hash = $1 AND revoked_at IS NULL;
+-- Every revocation clears the session's push token, which a check constraint
+-- requires, so a signed-out installation receives no further notifications.
+UPDATE donor_sessions SET revoked_at = $2, push_token = NULL, push_environment = NULL WHERE token_hash = $1 AND revoked_at IS NULL;
 
 -- name: RevokeSessionByID :execrows
-UPDATE donor_sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL;
+UPDATE donor_sessions SET revoked_at = $2, push_token = NULL, push_environment = NULL WHERE id = $1 AND revoked_at IS NULL;
 
 -- name: RevokeOtherSessions :exec
-UPDATE donor_sessions SET revoked_at = $3 WHERE donor_id = $1 AND token_hash <> $2 AND revoked_at IS NULL;
+UPDATE donor_sessions SET revoked_at = $3, push_token = NULL, push_environment = NULL WHERE donor_id = $1 AND token_hash <> $2 AND revoked_at IS NULL;
 
 -- name: RevokeAllSessions :exec
-UPDATE donor_sessions SET revoked_at=$2 WHERE donor_id=$1 AND revoked_at IS NULL;
+UPDATE donor_sessions SET revoked_at=$2, push_token=NULL, push_environment=NULL WHERE donor_id=$1 AND revoked_at IS NULL;
 
 -- name: RecordSessionEvent :exec
 INSERT INTO donor_session_events (id, donor_id, session_id, action) VALUES ($1, $2, $3, $4);

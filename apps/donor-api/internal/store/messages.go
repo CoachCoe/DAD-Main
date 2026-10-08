@@ -44,13 +44,20 @@ func messageSuppression(ctx context.Context, q *queries.Queries, job queries.Don
 // referralSuppression stops a referral notice the donor opted out of, or
 // whose referred donor no longer counts.
 func referralSuppression(ctx context.Context, q *queries.Queries, data payments.Object, donor queries.Donor) (string, error) {
-	pref, err := q.DonorPreference(ctx, donor.ID)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !pref.ReferralEmails) {
-		return "opted_out", nil
-	}
+	pref, err := readPreferences(ctx, q, donor.ID)
 	if err != nil {
 		return "", err
 	}
+	if !pref.ReferralEmails {
+		return "opted_out", nil
+	}
+	return referralLapsed(ctx, q, data, donor)
+}
+
+// referralLapsed reports why a conversion the donor would be told about no
+// longer counts, if it does not: the referred donor's gifts were refunded or
+// the relationship differs from the one recorded.
+func referralLapsed(ctx context.Context, q *queries.Queries, data payments.Object, donor queries.Donor) (string, error) {
 	id, err := parseID(data.Text("referred_id"))
 	if err != nil {
 		return "", err
@@ -72,31 +79,11 @@ func referralSuppression(ctx context.Context, q *queries.Queries, data payments.
 // recovers, the gift is cancelled, grace ends, or a later reminder is due.
 // Reminders go out on the failure day and days 7 and 13 of the 14-day grace.
 func recoverySuppression(ctx context.Context, q *queries.Queries, data payments.Object, donor queries.Donor, now time.Time) (string, error) {
-	id, err := parseID(data.Text("period_id"))
-	if err != nil {
-		return "", err
-	}
-	period, err := q.MessagePeriod(ctx, queries.MessagePeriodParams{ID: id, DonorID: donor.ID})
-	if err != nil {
-		return "", err
-	}
-	if period.Status != "FAILED" {
-		return "payment_recovered", nil
-	}
-	sub, err := q.SubscriptionForCheckout(ctx, period.CheckoutID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", err
-	}
-	if err == nil && (sub.StopsAt.Valid || terminalSubscription(sub.Status)) {
-		return "subscription_cancelled", nil
+	period, reason, err := failureResolved(ctx, q, data, donor, now)
+	if reason != "" || err != nil {
+		return reason, err
 	}
 	elapsed := now.Sub(period.DueAt.Time)
-	if elapsed >= recognition.Grace {
-		return "grace_ended", nil
-	}
-	if elapsed < 0 {
-		return "", payments.ErrFacts
-	}
 	latest := int64(0)
 	if elapsed >= 13*24*time.Hour {
 		latest = 13
@@ -111,6 +98,38 @@ func recoverySuppression(ctx context.Context, q *queries.Queries, data payments.
 		return "newer_reminder_due", nil
 	}
 	return "", nil
+}
+
+// failureResolved reports why a failed renewal no longer threatens the
+// donor's giving, if it does not: the payment recovered, the gift was
+// cancelled, or grace ended.
+func failureResolved(ctx context.Context, q *queries.Queries, data payments.Object, donor queries.Donor, now time.Time) (queries.DonorBillingPeriod, string, error) {
+	id, err := parseID(data.Text("period_id"))
+	if err != nil {
+		return queries.DonorBillingPeriod{}, "", err
+	}
+	period, err := q.MessagePeriod(ctx, queries.MessagePeriodParams{ID: id, DonorID: donor.ID})
+	if err != nil {
+		return period, "", err
+	}
+	if period.Status != "FAILED" {
+		return period, "payment_recovered", nil
+	}
+	sub, err := q.SubscriptionForCheckout(ctx, period.CheckoutID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return period, "", err
+	}
+	if err == nil && (sub.StopsAt.Valid || terminalSubscription(sub.Status)) {
+		return period, "subscription_cancelled", nil
+	}
+	elapsed := now.Sub(period.DueAt.Time)
+	if elapsed >= recognition.Grace {
+		return period, "grace_ended", nil
+	}
+	if elapsed < 0 {
+		return period, "", payments.ErrFacts
+	}
+	return period, "", nil
 }
 
 func renderMessage(ctx context.Context, q *queries.Queries, job queries.DonorMessage, site publicSite, now time.Time) (string, string, error) {

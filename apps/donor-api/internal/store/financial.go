@@ -158,21 +158,28 @@ func replayBest(ctx context.Context, donorID string, h history, history []recogn
 	return best, nil
 }
 
+// projection is a donor's saved recognition with the start of the current
+// streak run, which identifies the run but is not stored.
+type projection struct {
+	queries.SaveProjectionParams
+	streakSince *time.Time
+}
+
 // projectFacts recomputes and saves the donor's recognition projection
 // under the donor lock.
-func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (queries.SaveProjectionParams, error) {
+func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (projection, error) {
 	out := queries.SaveProjectionParams{DonorID: id, ComputedAt: timestamp(now), NextRefreshAt: timestamp(now.Add(24 * time.Hour))}
 	if _, err := q.LockDonor(ctx, id); err != nil {
-		return out, err
+		return projection{SaveProjectionParams: out}, err
 	}
 	old, err := q.Projection(ctx, id)
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		if out.ID, err = NewID(); err != nil {
-			return out, err
+			return projection{SaveProjectionParams: out}, err
 		}
 	case err != nil:
-		return out, err
+		return projection{SaveProjectionParams: out}, err
 	default:
 		out.ID = old.ID
 		out.FoundingAwardedAt = old.FoundingAwardedAt
@@ -181,40 +188,40 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 	}
 	h, err := loadHistory(ctx, q, id)
 	if err != nil {
-		return out, err
+		return projection{SaveProjectionParams: out}, err
 	}
 	observations, err := q.RefundObservations(ctx, queries.RefundObservationsParams{DonorID: id, ObservedAt: timestamp(now)})
 	if err != nil {
-		return out, err
+		return projection{SaveProjectionParams: out}, err
 	}
 	refunds, refundBoundaries := refundsAsOf(h.Refunds, observations, now)
 	if err = projectConversion(&out, h, id, now); err != nil {
-		return out, err
+		return projection{SaveProjectionParams: out}, err
 	}
 	if out.NetMinor, err = netMinor(h.Gifts, refunds, now); err != nil {
-		return out, err
+		return projection{SaveProjectionParams: out}, err
 	}
 	best, err := historicalBest(ctx, id, h, observations, now, int64(out.BestStreak))
 	if err != nil {
-		return out, err
+		return projection{SaveProjectionParams: out}, err
 	}
 	if best > math.MaxInt32 {
-		return out, recognition.ErrInvalid
+		return projection{SaveProjectionParams: out}, recognition.ErrInvalid
 	}
 	out.BestStreak = int32(best)
 	stops, pauses, err := renewalStops(ctx, q, id, now)
 	if err != nil {
-		return out, err
+		return projection{SaveProjectionParams: out}, err
 	}
 	streak, err := recognition.GivingStreak(h.Gifts, refunds, h.Periods, id.String(), now, best, stops, pauses)
 	switch {
 	case errors.Is(err, recognition.ErrIncomplete):
 		out.NextRefreshAt = timestamp(now.Add(5 * time.Minute))
 	case err != nil:
-		return out, err
+		return projection{SaveProjectionParams: out}, err
 	default:
 		if streak.Current > math.MaxInt32 || streak.Best > math.MaxInt32 {
-			return out, recognition.ErrInvalid
+			return projection{SaveProjectionParams: out}, recognition.ErrInvalid
 		}
 		out.CurrentStreak = pgtype.Int4{Int32: int32(streak.Current), Valid: true}
 		out.BestStreak = int32(streak.Best)
@@ -224,7 +231,7 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		}
 	}
 	out.NextRefreshAt = nextRefresh(out, h, refundBoundaries, stops, pauses, now)
-	return out, q.SaveProjection(ctx, out)
+	return projection{out, streak.Since}, q.SaveProjection(ctx, out)
 }
 
 // nextRefresh is the earliest moment after now at which the projection can

@@ -1,0 +1,77 @@
+-- name: ReleasePushToken :exec
+UPDATE donor_sessions SET push_token=NULL,push_environment=NULL WHERE push_token=$1 AND id<>$2;
+
+-- name: SetPushToken :execrows
+UPDATE donor_sessions SET platform=$2,push_token=$3,push_environment=$4 WHERE id=$1 AND client='APP';
+
+-- name: DropPushToken :exec
+-- Clears a session's token only if it is still the one presented, so a
+-- token the app has since replaced survives a late provider rejection.
+UPDATE donor_sessions SET push_token=NULL,push_environment=NULL WHERE id=$1 AND push_token=$2;
+
+-- name: QueuePushIntents :exec
+-- Push intents follow the facts the projection just saved: a referral
+-- conversion (the referral notice's own condition), a failed latest renewal
+-- while the streak it threatens is at risk, and a streak milestone the caller
+-- computed, keyed by the run it belongs to. Only donors with a live device
+-- get one, so nothing accumulates for donors without the app.
+WITH projection AS (
+    SELECT * FROM donor_metric_projections m WHERE m.donor_id=sqlc.arg(donor_id)::uuid
+), candidates AS (
+    SELECT p.referrer_id AS donor_id,'REFERRAL_CONVERTED' AS category,'push:referral:'||p.donor_id::text AS dedup_key,
+        json_build_object('referred_id',p.donor_id::text,'kind',p.referral_kind) AS context
+    FROM projection p WHERE p.referrer_id IS NOT NULL AND p.net_minor>0
+    UNION ALL
+    SELECT p.donor_id,'STREAK_AT_RISK','push:streak-at-risk:'||b.id::text,json_build_object('period_id',b.id::text)
+    FROM projection p CROSS JOIN LATERAL (
+        SELECT id,status FROM donor_billing_periods WHERE donor_id=p.donor_id AND due_at<=sqlc.arg(as_of)::timestamptz
+        ORDER BY due_at DESC LIMIT 1
+    ) b WHERE p.at_risk AND b.status='FAILED'
+    UNION ALL
+    SELECT sqlc.arg(donor_id)::uuid,'STREAK_MILESTONE',
+        'push:streak-milestone:'||sqlc.arg(donor_id)::text||':'||floor(extract(epoch FROM sqlc.narg(run_started_at)::timestamptz))::bigint::text||':'||sqlc.narg(milestone)::integer::text,
+        json_build_object('months',sqlc.narg(milestone)::integer)
+    WHERE sqlc.narg(milestone)::integer IS NOT NULL AND sqlc.narg(run_started_at)::timestamptz IS NOT NULL
+)
+INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
+SELECT gen_random_uuid(),c.donor_id,c.category,c.dedup_key,c.context,sqlc.arg(as_of)::timestamptz,sqlc.arg(expires_at)::timestamptz
+FROM candidates c
+WHERE EXISTS(SELECT 1 FROM donor_sessions s WHERE s.donor_id=c.donor_id AND s.push_token IS NOT NULL
+    AND coalesce(s.refresh_expires_at,s.expires_at)>sqlc.arg(as_of)::timestamptz)
+ON CONFLICT(dedup_key) DO NOTHING;
+
+-- name: NextPushNotification :one
+SELECT * FROM donor_push_notifications WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
+
+-- name: PushTargets :many
+-- Revoking a session clears its token; one that lapsed keeps it, unused,
+-- until the installation signs in again and registers it anew.
+SELECT id,platform,push_token,push_environment FROM donor_sessions
+WHERE donor_id=$1 AND push_token IS NOT NULL AND coalesce(refresh_expires_at,expires_at)>sqlc.arg(as_of)
+AND id<>ALL(sqlc.arg(sent_to)::uuid[])
+ORDER BY id;
+
+-- name: ClaimPushNotification :exec
+UPDATE donor_push_notifications SET attempts=attempts+1,available_at=$2 WHERE id=$1;
+
+-- name: RecordPushSent :exec
+UPDATE donor_push_notifications SET sent_to=sent_to||sqlc.arg(sessions)::uuid[] WHERE id=$1;
+
+-- name: CompletePushNotification :exec
+UPDATE donor_push_notifications SET completed_at=$2,last_error=NULL,suppressed_reason=$3 WHERE id=$1;
+
+-- name: FailPushNotification :exec
+UPDATE donor_push_notifications SET last_error=$2,available_at=$3,attempts=greatest(attempts,sqlc.arg(attempts))
+WHERE id=$1 AND completed_at IS NULL;
+
+-- name: ReferralConversions :many
+-- A conversion is the referred donor's first gift, while it still counts,
+-- as on the dashboard. Fetches one row past a page.
+SELECT g.paid_at AS converted_at,p.referral_kind::text AS kind
+FROM donor_metric_projections p JOIN donor_gifts g ON g.stripe_object_id=p.first_gift_id
+WHERE p.referrer_id=$1 AND p.net_minor>0 AND (sqlc.narg(since)::timestamptz IS NULL OR g.paid_at>sqlc.narg(since))
+ORDER BY g.paid_at DESC,p.donor_id DESC LIMIT 21;
+
+-- name: ClearPushToken :exec
+UPDATE donor_sessions SET push_token=NULL,push_environment=NULL WHERE id=$1;

@@ -1,11 +1,15 @@
 -- name: SavePreference :exec
-INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails)
-VALUES ($1,$2,$3,$4,$5) ON CONFLICT(donor_id) DO UPDATE
-SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_emails=EXCLUDED.marketing_emails;
+INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,
+ push_referral_converted,push_streak_at_risk,push_streak_milestone)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(donor_id) DO UPDATE
+SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_emails=EXCLUDED.marketing_emails,
+ push_referral_converted=EXCLUDED.push_referral_converted,push_streak_at_risk=EXCLUDED.push_streak_at_risk,
+ push_streak_milestone=EXCLUDED.push_streak_milestone;
 
 -- name: RecordPreferenceConsent :exec
-INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,consent_version,source)
-VALUES($1,$2,$3,$4,$5,'r1-notifications-v1','account');
+INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,
+ push_referral_converted,push_streak_at_risk,push_streak_milestone,consent_version,source)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'account');
 
 -- name: SaveSharing :one
 UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING *;

@@ -171,7 +171,7 @@ func (q *Queries) RecordSessionEvent(ctx context.Context, arg RecordSessionEvent
 }
 
 const refreshingSession = `-- name: RefreshingSession :one
-SELECT s.donor_id, s.token_hash, s.expires_at, s.revoked_at, s.id, s.created_at, s.client, s.device_name, s.platform, s.last_used_at, s.refresh_family_hash, s.refresh_hash, s.refresh_previous_hash, s.refreshed_at, s.refresh_expires_at, d.disabled FROM donor_sessions s JOIN donors d ON d.id = s.donor_id
+SELECT s.donor_id, s.token_hash, s.expires_at, s.revoked_at, s.id, s.created_at, s.client, s.device_name, s.platform, s.last_used_at, s.refresh_family_hash, s.refresh_hash, s.refresh_previous_hash, s.refreshed_at, s.refresh_expires_at, s.push_token, s.push_environment, d.disabled FROM donor_sessions s JOIN donors d ON d.id = s.donor_id
 WHERE s.refresh_family_hash = $1 FOR UPDATE OF s
 `
 
@@ -199,13 +199,15 @@ func (q *Queries) RefreshingSession(ctx context.Context, refreshFamilyHash pgtyp
 		&i.DonorSession.RefreshPreviousHash,
 		&i.DonorSession.RefreshedAt,
 		&i.DonorSession.RefreshExpiresAt,
+		&i.DonorSession.PushToken,
+		&i.DonorSession.PushEnvironment,
 		&i.Disabled,
 	)
 	return i, err
 }
 
 const revokeAllSessions = `-- name: RevokeAllSessions :exec
-UPDATE donor_sessions SET revoked_at=$2 WHERE donor_id=$1 AND revoked_at IS NULL
+UPDATE donor_sessions SET revoked_at=$2, push_token=NULL, push_environment=NULL WHERE donor_id=$1 AND revoked_at IS NULL
 `
 
 type RevokeAllSessionsParams struct {
@@ -219,7 +221,7 @@ func (q *Queries) RevokeAllSessions(ctx context.Context, arg RevokeAllSessionsPa
 }
 
 const revokeOtherSessions = `-- name: RevokeOtherSessions :exec
-UPDATE donor_sessions SET revoked_at = $3 WHERE donor_id = $1 AND token_hash <> $2 AND revoked_at IS NULL
+UPDATE donor_sessions SET revoked_at = $3, push_token = NULL, push_environment = NULL WHERE donor_id = $1 AND token_hash <> $2 AND revoked_at IS NULL
 `
 
 type RevokeOtherSessionsParams struct {
@@ -234,7 +236,7 @@ func (q *Queries) RevokeOtherSessions(ctx context.Context, arg RevokeOtherSessio
 }
 
 const revokeSession = `-- name: RevokeSession :exec
-UPDATE donor_sessions SET revoked_at = $2 WHERE token_hash = $1 AND revoked_at IS NULL
+UPDATE donor_sessions SET revoked_at = $2, push_token = NULL, push_environment = NULL WHERE token_hash = $1 AND revoked_at IS NULL
 `
 
 type RevokeSessionParams struct {
@@ -242,13 +244,15 @@ type RevokeSessionParams struct {
 	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
 }
 
+// Every revocation clears the session's push token, which a check constraint
+// requires, so a signed-out installation receives no further notifications.
 func (q *Queries) RevokeSession(ctx context.Context, arg RevokeSessionParams) error {
 	_, err := q.db.Exec(ctx, revokeSession, arg.TokenHash, arg.RevokedAt)
 	return err
 }
 
 const revokeSessionByID = `-- name: RevokeSessionByID :execrows
-UPDATE donor_sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL
+UPDATE donor_sessions SET revoked_at = $2, push_token = NULL, push_environment = NULL WHERE id = $1 AND revoked_at IS NULL
 `
 
 type RevokeSessionByIDParams struct {
