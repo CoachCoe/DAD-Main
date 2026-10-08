@@ -2291,7 +2291,7 @@
       "post": {
         "operationId": "staffSignIn",
         "summary": "Finish a passkey sign-in",
-        "description": "Verifies the assertion (challenge, origin, relying party, user verification, signature, and signature counter) and sets the staff session cookie. Each ceremony is answered once. 401 covers an unknown, revoked, or disabled passkey and an expired or used ceremony alike; failures with a known passkey are audited.",
+        "description": "Verifies the assertion (challenge, origin, relying party, user verification, signature, and signature counter) and sets the staff session cookie. Each ceremony is answered once. 401 covers an unknown passkey, one whose account is disabled, a signature counter that fails to advance, and an unknown, expired, or used ceremony alike; failures with a known passkey are audited with their reason.",
         "tags": [
           "Staff"
         ],
@@ -2445,7 +2445,7 @@
       "post": {
         "operationId": "staffActivate",
         "summary": "Finish passkey registration and sign in",
-        "description": "Verifies the attestation, stores the passkey, consumes the invitation, and sets the staff session cookie. Every answer counts toward the invitation's five attempts; it expires 24 hours after issue.",
+        "description": "Verifies the attestation, stores the passkey, consumes the invitation, and sets the staff session cookie. Each answer to an open ceremony counts toward the invitation's five attempts, a rejected attestation or a passkey already registered included; a malformed answer (422) or one to an unknown, expired, or used ceremony does not. The invitation expires 24 hours after issue.",
         "tags": [
           "Staff"
         ],

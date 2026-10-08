@@ -256,8 +256,9 @@ func (s *StaffService) BeginActivation(ctx context.Context, token string) (Invit
 }
 
 // Activate stores the passkey answering an activation ceremony, consumes the
-// invitation, and returns a session for its owner. Every answer counts
-// against the invitation, failed ones too.
+// invitation, and returns a session for its owner. Every answer to an open
+// ceremony counts against the invitation, rejected ones too; a malformed
+// answer, or one to an unknown or expired ceremony, does not.
 func (s *StaffService) Activate(ctx context.Context, ceremony string, response []byte) (string, error) {
 	attestation, err := protocol.ParseCredentialCreationResponseBytes(response)
 	if err != nil {
