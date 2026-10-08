@@ -132,18 +132,32 @@ func createFixture(path string) (*os.File, error) {
 	return file, nil
 }
 
-// guard returns how many seeded donors the database already holds, refusing
-// a database with any other donor, or a seeded one unless appending.
+// seedMarker is the database comment a seed leaves, which -append requires.
+const seedMarker = "dad synthetic load data"
+
+// guard returns how many seeded donors the database already holds. It
+// refuses any donor without a seeded address, -append without an earlier
+// seed's marker, and a first seed into a database that already has staff or
+// Stripe events, as a freshly launched one might. Published content needs a
+// staff author, so it is refused with them.
 func guard(ctx context.Context, pool *pgxpool.Pool, appendPopulation bool) (int, error) {
-	var real, seeded int
-	err := pool.QueryRow(ctx, "SELECT count(*) FILTER (WHERE email NOT LIKE '%@"+emailDomain+"'), count(*) FILTER (WHERE email LIKE '%@"+emailDomain+"') FROM donors").Scan(&real, &seeded)
+	var unseeded, seeded int
+	var marked, used bool
+	err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE email NOT LIKE $1),count(*) FILTER (WHERE email LIKE $1),
+coalesce(shobj_description((SELECT oid FROM pg_database WHERE datname=current_database()),'pg_database')=$2,false),
+EXISTS(SELECT 1 FROM donor_staff) OR EXISTS(SELECT 1 FROM donor_stripe_events)
+FROM donors`, "%@"+emailDomain, seedMarker).Scan(&unseeded, &seeded, &marked, &used)
 	switch {
 	case err != nil:
 		return 0, err
-	case real > 0:
-		return 0, fmt.Errorf("refusing: the database holds %d donors that were not seeded", real)
-	case seeded > 0 && !appendPopulation:
+	case unseeded > 0:
+		return 0, fmt.Errorf("refusing: the database holds %d donors that were not seeded", unseeded)
+	case appendPopulation && !marked:
+		return 0, errors.New("refusing: -append needs a database an earlier seed marked")
+	case !appendPopulation && (marked || seeded > 0):
 		return 0, fmt.Errorf("refusing: the database already holds %d seeded donors; pass -append to add more", seeded)
+	case !appendPopulation && used:
+		return 0, errors.New("refusing: the database holds staff or Stripe events")
 	}
 	return seeded, nil
 }

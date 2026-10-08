@@ -142,6 +142,33 @@ func isolatedDatabase(t *testing.T) (*pgxpool.Pool, string) {
 	return pool, location.String()
 }
 
+// TestGuardRefusesDatabasesThatMayBeLive covers a migrated database that has
+// started live use before any donor gave.
+func TestGuardRefusesDatabasesThatMayBeLive(t *testing.T) {
+	pool, _ := isolatedDatabase(t)
+	ctx := context.Background()
+	if _, err := guard(ctx, pool, false); err != nil {
+		t.Fatalf("an unused database was refused: %v", err)
+	}
+	if _, err := guard(ctx, pool, true); err == nil || !strings.Contains(err.Error(), "marked") {
+		t.Fatalf("appended to a database no seed marked: %v", err)
+	}
+	for name, insert := range map[string]string{
+		"Stripe event": "INSERT INTO donor_stripe_events(id,stripe_event_id,event_type,occurred_at,data) VALUES(gen_random_uuid(),'evt_live','invoice.paid',now(),'{}')",
+		"staff member": "INSERT INTO donor_staff(id,email,name,role) VALUES(gen_random_uuid(),'admin@example.org','Admin','ADMIN')",
+	} {
+		if _, err := pool.Exec(ctx, insert); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := guard(ctx, pool, false); err == nil || !strings.Contains(err.Error(), "staff or Stripe events") {
+			t.Errorf("seeded a database holding a %s: %v", name, err)
+		}
+		if _, err := pool.Exec(ctx, "TRUNCATE donor_stripe_events, donor_staff CASCADE"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // TestSeededDonorsAreServedFromTheirFacts seeds a small population and reads
 // every claimed donor's dashboard and monthly gift through the API, comparing
 // the projections the worker derived with what the generator meant the facts

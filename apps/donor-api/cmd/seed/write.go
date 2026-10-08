@@ -226,6 +226,10 @@ func checkoutRequest(d *donor, c *checkout) (string, []byte, error) {
 func copyAll(ctx context.Context, pool *pgxpool.Pool, tables []*table) (map[string]int64, error) {
 	counts := map[string]int64{}
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		name := pgx.Identifier{pool.Config().ConnConfig.Database}.Sanitize()
+		if _, err := tx.Exec(ctx, "COMMENT ON DATABASE "+name+" IS '"+seedMarker+"'"); err != nil {
+			return fmt.Errorf("mark database: %w", err)
+		}
 		for _, t := range tables {
 			n, err := tx.CopyFrom(ctx, pgx.Identifier{t.name}, t.columns, pgx.CopyFromRows(t.rows))
 			if err != nil {
