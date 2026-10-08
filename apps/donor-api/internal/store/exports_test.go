@@ -71,7 +71,7 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 			}
 		}
 		for _, field := range rows[0] {
-			if slices.Contains([]string{"token_hash", "password_hash", "totp_secret", "encrypted_data"}, field) {
+			if slices.Contains([]string{"token_hash", "credential_id", "public_key", "session", "encrypted_data"}, field) {
 				t.Fatal("credential field exported")
 			}
 		}

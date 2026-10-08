@@ -122,12 +122,12 @@ func (l *rateLimiter) evictOne() {
 	}
 }
 
-// guarded admits a mutation only from the configured browser Origin or, where
+// guarded admits a mutation only from the given browser origin or, where
 // appClients is set, from the native donor app, and rate limits either per
 // client address before the handler runs.
-func (a *api) guarded(class rateClass, appClients bool, next http.HandlerFunc) http.HandlerFunc {
+func (a *api) guarded(origin string, class rateClass, appClients bool, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Origin") != a.Origin && !(appClients && native(r)) {
+		if r.Header.Get("Origin") != origin && !(appClients && native(r)) {
 			writeError(w, r, http.StatusForbidden, "Request origin is not allowed", nil)
 			return
 		}

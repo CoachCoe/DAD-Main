@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"slices"
 	"time"
 
+	"github.com/go-webauthn/webauthn/protocol"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/credentials"
+	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -45,39 +48,43 @@ type StaffView struct {
 	Permissions []string `json:"permissions"`
 }
 
-func staffView(s queries.DonorStaff) StaffView {
-	return StaffView{ID: s.ID.String(), Email: s.Email, Name: s.Name, Role: s.Role, Disabled: s.Disabled, Active: s.PasswordHash.Valid, Permissions: staffPermissions(s.Role)}
+// staffView shows an account; it is active while it holds a passkey.
+func staffView(s queries.DonorStaff, active bool) StaffView {
+	return StaffView{ID: s.ID.String(), Email: s.Email, Name: s.Name, Role: s.Role, Disabled: s.Disabled, Active: active, Permissions: staffPermissions(s.Role)}
 }
 
 type StaffService struct {
-	DB            *pgxpool.Pool
-	EncryptionKey string
-	dummyHash     string
-	passwordSlots chan struct{}
+	DB       *pgxpool.Pool
+	WebAuthn *webauthn.WebAuthn
 }
 
-func NewStaffService(db *pgxpool.Pool, key string) (*StaffService, error) {
-	if err := credentials.ValidateKey(key); err != nil {
+// NewStaffService verifies passkeys for the staff origin. Its host is the
+// relying party ID, so the public site can never use a staff passkey.
+func NewStaffService(db *pgxpool.Pool, origin string) (*StaffService, error) {
+	if err := payments.ValidateOrigin(origin); err != nil {
 		return nil, err
 	}
-	secret, err := randomToken(32)
+	u, err := url.Parse(origin)
 	if err != nil {
 		return nil, err
 	}
-	hash, err := credentials.HashPassword(secret)
+	ceremony := webauthn.TimeoutConfig{Enforce: true, Timeout: ceremonyLifetime, TimeoutUVD: ceremonyLifetime}
+	w, err := webauthn.New(&webauthn.Config{
+		RPID:                  u.Hostname(),
+		RPDisplayName:         "DAD staff",
+		RPOrigins:             []string{origin},
+		AttestationPreference: protocol.PreferNoAttestation,
+		AuthenticatorSelection: protocol.AuthenticatorSelection{
+			ResidentKey:        protocol.ResidentKeyRequirementRequired,
+			RequireResidentKey: protocol.ResidentKeyRequired(),
+			UserVerification:   protocol.VerificationRequired,
+		},
+		Timeouts: webauthn.TimeoutsConfig{Login: ceremony, Registration: ceremony},
+	})
 	if err != nil {
 		return nil, err
 	}
-	return &StaffService{DB: db, EncryptionKey: key, dummyHash: hash, passwordSlots: make(chan struct{}, 2)}, nil
-}
-
-func (s *StaffService) passwordSlot(ctx context.Context) (func(), error) {
-	select {
-	case s.passwordSlots <- struct{}{}:
-		return func() { <-s.passwordSlots }, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
+	return &StaffService{DB: db, WebAuthn: w}, nil
 }
 
 func requireStaff(ctx context.Context, q *queries.Queries, token, permission string, now time.Time) (queries.DonorStaff, error) {
@@ -114,7 +121,8 @@ func (s *StaffService) Me(ctx context.Context, token string) (StaffView, error) 
 	if err != nil {
 		return StaffView{}, err
 	}
-	return staffView(staff), nil
+	// A session begins only with a passkey, and recovery revokes both together.
+	return staffView(staff, true), nil
 }
 
 func (s *StaffService) SignOut(ctx context.Context, token string) error {

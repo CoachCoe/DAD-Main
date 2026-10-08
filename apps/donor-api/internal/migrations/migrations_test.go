@@ -140,3 +140,48 @@ func TestAdoptionPreservesExistingRecordsAndRejectsDrift(t *testing.T) {
 		})
 	}
 }
+
+// Password and authenticator-code credentials end with the passkey migration:
+// accounts survive, but their sessions and open invitations do not.
+func TestPasskeyMigrationRetiresPasswordCredentials(t *testing.T) {
+	pool, ctx := isolatedDatabase(t)
+	files, err := manifest(db.Migrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pool.Exec(ctx, "CREATE TABLE donor_schema_migrations(version text PRIMARY KEY,checksum text NOT NULL,applied_at timestamptz NOT NULL DEFAULT now())"); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if file.name == "0007_staff_passkeys.sql" {
+			break
+		}
+		if _, err = pool.Exec(ctx, file.sql); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = pool.Exec(ctx, "INSERT INTO donor_schema_migrations(version,checksum) VALUES($1,$2)", file.name, file.checksum); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = pool.Exec(ctx, `INSERT INTO donor_staff(id,email,name,role,password_hash,totp_secret,totp_counter) VALUES('00000000-0000-4000-8000-000000000001','admin@example.org','Admin','ADMIN','$argon2id$legacy','\x00',7);
+INSERT INTO donor_staff_sessions(id,staff_id,token_hash,expires_at) VALUES('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','session',now()+interval '1 hour');
+INSERT INTO donor_staff_invites(id,staff_id,token_hash,expires_at,pending_secret) VALUES('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','invite',now()+interval '1 hour','\x00')`); err != nil {
+		t.Fatal(err)
+	}
+	if err = Apply(ctx, pool, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = Verify(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var staff, credentialColumns, openSessions, openInvites int
+	if err = pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM donor_staff WHERE email='admin@example.org' AND role='ADMIN'),
+ (SELECT count(*) FROM information_schema.columns WHERE table_name IN ('donor_staff','donor_staff_invites') AND column_name IN ('password_hash','totp_secret','totp_counter','failures','locked_until','pending_secret')),
+ (SELECT count(*) FROM donor_staff_sessions WHERE revoked_at IS NULL),
+ (SELECT count(*) FROM donor_staff_invites WHERE consumed_at IS NULL)`).Scan(&staff, &credentialColumns, &openSessions, &openInvites); err != nil {
+		t.Fatal(err)
+	}
+	if staff != 1 || credentialColumns != 0 || openSessions != 0 || openInvites != 0 {
+		t.Fatalf("got %d accounts, %d credential columns, %d open sessions, %d open invitations", staff, credentialColumns, openSessions, openInvites)
+	}
+}

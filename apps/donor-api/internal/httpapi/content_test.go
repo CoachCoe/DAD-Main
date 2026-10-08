@@ -68,7 +68,7 @@ func (b unreadBody) Read([]byte) (int, error) {
 func TestSourceUploadWithoutStorageKeyIsRejectedBeforeBody(t *testing.T) {
 	upload := func(stub *uploadStub, body io.Reader) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "/donor/staff/content/sources?name=source.pdf", body)
-		r.Header.Set("Origin", "http://localhost:3000")
+		r.Header.Set("Origin", testStaffOrigin)
 		r.AddCookie(&http.Cookie{Name: staffCookie, Value: "staff-session"})
 		response := httptest.NewRecorder()
 		NewServer("", Services{ContentAdmin: stub}).Handler.ServeHTTP(response, r)
@@ -102,7 +102,7 @@ func (s publishStub) Publish(context.Context, string, store.PublicationRequest) 
 func TestRefusedPublicationListsEveryProblem(t *testing.T) {
 	refused := &store.PublicationError{Problems: []store.PublicationProblem{{Sheet: "ledger", Row: 3, Column: "value", Reason: "not_integer"}}}
 	r := httptest.NewRequest("POST", "/donor/staff/content/publish", strings.NewReader(`{"initiatives_csv":"","ledger_csv":"","as_of":"2026-10-01","cadence":"monthly"}`))
-	r.Header.Set("Origin", "http://localhost:3000")
+	r.Header.Set("Origin", testStaffOrigin)
 	r.AddCookie(&http.Cookie{Name: staffCookie, Value: "staff-session"})
 	response := httptest.NewRecorder()
 	NewServer("", Services{ContentAdmin: publishStub{err: refused}}).Handler.ServeHTTP(response, r)

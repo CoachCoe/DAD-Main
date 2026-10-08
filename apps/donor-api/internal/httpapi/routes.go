@@ -20,9 +20,10 @@ type route struct {
 }
 
 // routes is the complete API surface. Reads are unguarded because they cannot
-// change state. Mutations pass the Origin and rate-limit guard, which admits
-// the native donor app on donor account routes only; the Stripe webhook is
-// authenticated by its signature instead.
+// change state. Mutations pass the Origin and rate-limit guard: donor and
+// public routes admit the public origin, and the native donor app on donor
+// account routes only; staff routes admit only the staff origin. The Stripe
+// webhook is authenticated by its signature instead.
 func (a *api) routes() []route {
 	return []route{
 		a.public("GET /health/live", a.live),
@@ -37,7 +38,7 @@ func (a *api) routes() []route {
 		a.donorEntry("POST /donor/login", a.login),
 		a.donorEntry("POST /donor/claim", a.claim),
 		a.donorEntry("POST /donor/email-change/confirm", a.confirmEmailChange),
-		{"POST /donor/logout", donorAuth, a.guarded(accountLimit, true, a.logout)},
+		{"POST /donor/logout", donorAuth, a.guarded(a.Origin, accountLimit, true, a.logout)},
 		a.donorWrite("POST /donor/logout-all", a.logoutAll),
 		a.donorWrite("POST /donor/me/email-change", a.requestEmailChange),
 
@@ -65,10 +66,11 @@ func (a *api) routes() []route {
 		a.donorWrite("POST /donor/me/recurring/amount", recurringCommand(a, changeAmount)),
 		a.donorWrite("POST /donor/me/payment-method/setup", a.beginPaymentUpdate),
 
+		a.staffEntry("POST /donor/staff/sign-in/options", a.beginStaffSignIn),
 		a.staffEntry("POST /donor/staff/sign-in", a.staffSignIn),
-		a.staffEntry("POST /donor/staff/provision", a.staffProvision),
+		a.staffEntry("POST /donor/staff/activate/options", a.beginStaffActivation),
 		a.staffEntry("POST /donor/staff/activate", a.staffActivate),
-		{"POST /donor/staff/sign-out", staffAuth, a.guarded(staffLimit, false, a.staffSignOut)},
+		{"POST /donor/staff/sign-out", staffAuth, a.guarded(a.StaffOrigin, staffLimit, false, a.staffSignOut)},
 		a.staffRead("GET /donor/staff/me", a.staffMe),
 		a.staffRead("GET /donor/staff/accounts", a.staffAccounts),
 		a.staffWrite("POST /donor/staff/accounts", a.inviteStaff),
@@ -109,12 +111,12 @@ func (a *api) public(pattern string, handler http.HandlerFunc) route {
 
 // visitor routes are anonymous browser mutations on the public site.
 func (a *api) visitor(pattern string, handler http.HandlerFunc) route {
-	return route{pattern, noAuth, a.guarded(visitorLimit, false, handler)}
+	return route{pattern, noAuth, a.guarded(a.Origin, visitorLimit, false, handler)}
 }
 
 // donorEntry routes exchange an emailed proof, from a browser or the app.
 func (a *api) donorEntry(pattern string, handler http.HandlerFunc) route {
-	return route{pattern, noAuth, a.guarded(authLimit, true, handler)}
+	return route{pattern, noAuth, a.guarded(a.Origin, authLimit, true, handler)}
 }
 
 func (a *api) donorRead(pattern string, handler sessionHandler) route {
@@ -122,20 +124,20 @@ func (a *api) donorRead(pattern string, handler sessionHandler) route {
 }
 
 func (a *api) donorWrite(pattern string, handler sessionHandler) route {
-	return route{pattern, donorAuth, a.guarded(accountLimit, true, signedIn(donorSession, handler))}
+	return route{pattern, donorAuth, a.guarded(a.Origin, accountLimit, true, signedIn(donorSession, handler))}
 }
 
-// staffEntry routes verify staff credentials; the back office is browser-only.
+// staffEntry routes run passkey ceremonies; the back office is browser-only.
 func (a *api) staffEntry(pattern string, handler http.HandlerFunc) route {
-	return route{pattern, noAuth, a.guarded(authLimit, false, handler)}
+	return route{pattern, noAuth, a.guarded(a.StaffOrigin, authLimit, false, handler)}
 }
 
 func (a *api) staffRead(pattern string, handler sessionHandler) route {
-	return route{pattern, staffAuth, signedIn(staffSession, handler)}
+	return route{pattern, staffAuth, signedIn(a.staffSession, handler)}
 }
 
 func (a *api) staffWrite(pattern string, handler sessionHandler) route {
-	return route{pattern, staffAuth, a.guarded(staffLimit, false, signedIn(staffSession, handler))}
+	return route{pattern, staffAuth, a.guarded(a.StaffOrigin, staffLimit, false, signedIn(a.staffSession, handler))}
 }
 
 // sessionHandler serves a signed-in request. The session is only a claim: the
@@ -154,5 +156,3 @@ func signedIn(session func(*http.Request) string, next sessionHandler) http.Hand
 		next(w, r, token)
 	}
 }
-
-func staffSession(r *http.Request) string { return cookieValue(r, staffCookie) }

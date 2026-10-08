@@ -6,7 +6,7 @@ import (
 )
 
 func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
-	env := map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_GO_DATABASE_URL": "postgresql://unreachable.invalid/donor"}
+	env := map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org", "DONOR_GO_DATABASE_URL": "postgresql://unreachable.invalid/donor"}
 	for _, tc := range []struct {
 		name  string
 		args  []string
@@ -15,7 +15,9 @@ func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
 		{"missing name", []string{"--email=admin@example.org"}, ""},
 		{"missing email", []string{"--name=Admin"}, ""},
 		{"stray argument", []string{"--email=admin@example.org", "--name=Admin", "extra"}, ""},
-		{"no origin", []string{"--email=admin@example.org", "--name=Admin"}, "DONOR_PUBLIC_ORIGIN"},
+		{"recovery with a name", []string{"--recover", "--email=admin@example.org", "--name=Admin"}, ""},
+		{"recovery without an email", []string{"--recover"}, ""},
+		{"no staff origin", []string{"--email=admin@example.org", "--name=Admin"}, "DONOR_STAFF_ORIGIN"},
 		{"no database", []string{"--email=admin@example.org", "--name=Admin"}, "DONOR_GO_DATABASE_URL"},
 	} {
 		getenv := func(name string) string {

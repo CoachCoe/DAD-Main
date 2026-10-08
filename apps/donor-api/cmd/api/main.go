@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -48,6 +49,27 @@ func trustedProxies(value string) ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
+// validateStaffOrigin requires the back office, when enabled, to have its own
+// host: host-only cookies and passkeys are scoped by host, so neither site's
+// sessions or credentials reach the other.
+func validateStaffOrigin(staff, public string, getenv func(string) string) error {
+	if staff == "" {
+		if getenv("DONOR_STAFF_ENCRYPTION_KEY") != "" {
+			return errors.New("set DONOR_STAFF_ORIGIN: staff now sign in with passkeys on their own host, and DONOR_STAFF_ENCRYPTION_KEY is no longer used")
+		}
+		return nil
+	}
+	if payments.ValidateOrigin(staff) != nil {
+		return errors.New("DONOR_STAFF_ORIGIN must be an HTTPS origin (HTTP localhost for tests)")
+	}
+	staffURL, _ := url.Parse(staff)
+	publicURL, _ := url.Parse(public)
+	if strings.EqualFold(staffURL.Hostname(), publicURL.Hostname()) {
+		return errors.New("DONOR_STAFF_ORIGIN must use a different host from DONOR_PUBLIC_ORIGIN")
+	}
+	return nil
+}
+
 // configure validates the environment and connects the services it enables.
 // Every configuration error is reported before the database is contacted.
 // The returned function releases the database pool.
@@ -80,10 +102,11 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 			return services, release, err
 		}
 	}
-	staffKey, contentKey := getenv("DONOR_STAFF_ENCRYPTION_KEY"), getenv("DONOR_CONTENT_ENCRYPTION_KEY")
-	if staffKey != "" && credentials.ValidateKey(staffKey) != nil {
-		return services, release, errors.New("DONOR_STAFF_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
+	services.StaffOrigin = getenv("DONOR_STAFF_ORIGIN")
+	if err = validateStaffOrigin(services.StaffOrigin, services.Origin, getenv); err != nil {
+		return services, release, err
 	}
+	contentKey := getenv("DONOR_CONTENT_ENCRYPTION_KEY")
 	if contentKey != "" && credentials.ValidateKey(contentKey) != nil {
 		return services, release, errors.New("DONOR_CONTENT_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
 	}
@@ -93,7 +116,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	}{
 		{"payments (STRIPE_SECRET_KEY)", gateway != nil},
 		{"account email (SMTP settings)", email != nil},
-		{"staff back office (DONOR_STAFF_ENCRYPTION_KEY)", staffKey != ""},
+		{"staff back office (DONOR_STAFF_ORIGIN)", services.StaffOrigin != ""},
 		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKey != ""},
 	} {
 		if !feature.enabled {
@@ -130,8 +153,8 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if email != nil {
 		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKey: email.EncryptionKey}
 	}
-	if staffKey != "" {
-		staff, err := store.NewStaffService(pool, staffKey)
+	if services.StaffOrigin != "" {
+		staff, err := store.NewStaffService(pool, services.StaffOrigin)
 		if err != nil {
 			pool.Close()
 			return services, release, errors.New("staff configuration is invalid")

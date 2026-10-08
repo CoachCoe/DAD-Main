@@ -32,7 +32,11 @@ func TestConfigureRejectsInvalidEnvironmentBeforeTheDatabase(t *testing.T) {
 		{"plain HTTP origin", map[string]string{"DONOR_PUBLIC_ORIGIN": "http://dad.example.org"}},
 		{"origin with path", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org/app"}},
 		{"half of Stripe", map[string]string{"STRIPE_SECRET_KEY": "sk_test_123"}},
-		{"staff key", map[string]string{"DONOR_STAFF_ENCRYPTION_KEY": "short"}},
+		{"retired staff key without a staff origin", map[string]string{"DONOR_STAFF_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="}},
+		{"plain HTTP staff origin", map[string]string{"DONOR_STAFF_ORIGIN": "http://staff.dad.example.org"}},
+		{"staff origin with path", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org/staff"}},
+		{"staff on the public host", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://DAD.example.org:8443"}},
+		{"local staff on the public host", map[string]string{"DONOR_STAFF_ORIGIN": "http://localhost:3001"}},
 		{"content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "short"}},
 		{"partial SMTP", map[string]string{"DONOR_SMTP_HOST": "smtp.example.org"}},
 	} {
@@ -50,5 +54,18 @@ func TestConfigureWithoutDatabaseServesHealthOnly(t *testing.T) {
 	defer release()
 	if err != nil || services.Origin != "http://localhost:3000" || services.Ready != nil || services.Donor != nil || services.Staff != nil {
 		t.Fatalf("got %+v, %v; want the local origin and no data services", services, err)
+	}
+}
+
+func TestConfigureAcceptsAStaffHostBesideThePublicOne(t *testing.T) {
+	for _, env := range []map[string]string{
+		{"DONOR_STAFF_ORIGIN": "http://staff.localhost:3000"},
+		{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://staff.dad.example.org"},
+	} {
+		services, release, err := configure(context.Background(), func(name string) string { return env[name] })
+		release()
+		if err != nil || services.StaffOrigin != env["DONOR_STAFF_ORIGIN"] {
+			t.Fatalf("%v: got %q, %v", env, services.StaffOrigin, err)
+		}
 	}
 }

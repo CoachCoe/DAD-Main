@@ -34,16 +34,38 @@ func routeRequest(pattern, body string) *http.Request {
 
 func allRoutes() []route { return (&api{}).routes() }
 
+// NewServer's local defaults for each surface.
+const (
+	testPublicOrigin = "http://localhost:3000"
+	testStaffOrigin  = "http://staff.localhost:3000"
+)
+
+func staffPath(path string) bool { return strings.Contains(path, "/donor/staff/") }
+
+// originFor returns the browser Origin admitted on a path's surface.
+func originFor(path string) string {
+	if staffPath(path) {
+		return testStaffOrigin
+	}
+	return testPublicOrigin
+}
+
 // Every mutation must reject a foreign or missing browser Origin before any
 // service runs; a nil service would answer 503 instead of 403. Credentials do
-// not help: cookies make a request a browser request.
-func TestEveryMutationRequiresBrowserOrigin(t *testing.T) {
-	server := NewServer("", Services{Origin: "https://dad.example.org"})
+// not help: cookies make a request a browser request. Neither surface admits
+// the other's origin, so a page on one host cannot act on the other.
+func TestEveryMutationRequiresItsSurfaceOrigin(t *testing.T) {
+	const public, staff = "https://dad.example.org", "https://staff.dad.example.org"
+	server := NewServer("", Services{Origin: public, StaffOrigin: staff})
 	for _, route := range allRoutes() {
 		if strings.HasPrefix(route.pattern, "GET ") || route.auth == stripeAuth {
 			continue
 		}
-		for _, origin := range []string{"", "https://evil.example.org"} {
+		other := staff
+		if staffPath(route.pattern) {
+			other = public
+		}
+		for _, origin := range []string{"", "https://evil.example.org", other} {
 			r := routeRequest(route.pattern, "{}")
 			if origin != "" {
 				r.Header.Set("Origin", origin)
@@ -67,7 +89,7 @@ func TestSignedInRoutesRejectAnonymousRequestsBeforeStorage(t *testing.T) {
 			continue
 		}
 		r := routeRequest(route.pattern, "{}")
-		r.Header.Set("Origin", "http://localhost:3000")
+		r.Header.Set("Origin", originFor(route.pattern))
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, r)
 		want := http.StatusUnauthorized

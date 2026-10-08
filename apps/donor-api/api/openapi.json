@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "description": "The ImpactGraph (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <session token>`. A request with Origin or cookies is a browser request whatever else it carries. Obtain a session by calling POST /donor/login, opening the emailed `/account/claim#token=…` link in the app, and sending the fragment's token to POST /donor/claim as a native request. Routes that admit the app list `native` in `x-clients`; giving, referral capture, partner signup, and every staff route are web-only.\n- Staff routes are browser-only and never accept bearer tokens.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"…\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `…+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
+    "description": "The ImpactGraph (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <session token>`. A request with Origin or cookies is a browser request whatever else it carries. Obtain a session by calling POST /donor/login, opening the emailed `/account/claim#token=…` link in the app, and sending the fragment's token to POST /donor/claim as a native request. Routes that admit the app list `native` in `x-clients`; giving, referral capture, partner signup, and every staff route are web-only.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"…\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `…+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
   },
   "servers": [
     {
@@ -2263,11 +2263,47 @@
         }
       }
     },
+    "/donor/staff/sign-in/options": {
+      "post": {
+        "operationId": "beginStaffSignIn",
+        "summary": "Begin a passkey sign-in",
+        "description": "Issues a usernameless WebAuthn challenge for the staff host. Pass `options` to `PublicKeyCredential.parseRequestOptionsFromJSON` and `navigator.credentials.get`, then answer within five minutes. No body.",
+        "tags": [
+          "Staff"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ceremony"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/donor/staff/sign-in": {
       "post": {
         "operationId": "staffSignIn",
-        "summary": "Staff sign-in with password and TOTP",
-        "description": "Sets the `dad_staff_session` cookie. 401 covers invalid, expired, and locked credentials alike.",
+        "summary": "Finish a passkey sign-in",
+        "description": "Verifies the assertion (challenge, origin, relying party, user verification, signature, and signature counter) and sets the staff session cookie. Each ceremony is answered once. 401 covers an unknown, revoked, or disabled passkey and an expired or used ceremony alike; failures with a known passkey are audited.",
         "tags": [
           "Staff"
         ],
@@ -2283,24 +2319,20 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "email": {
+                  "ceremony": {
                     "type": "string",
-                    "maxLength": 320
+                    "minLength": 32,
+                    "maxLength": 128,
+                    "description": "The `ceremony` from the matching options response."
                   },
-                  "password": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128
-                  },
-                  "code": {
-                    "type": "string",
-                    "pattern": "^[0-9]{6}$"
+                  "credential": {
+                    "type": "object",
+                    "description": "The browser's `PublicKeyCredential` as JSON (`credential.toJSON()`), with base64url binary fields; at most 64 KiB."
                   }
                 },
                 "required": [
-                  "email",
-                  "password",
-                  "code"
+                  "ceremony",
+                  "credential"
                 ],
                 "additionalProperties": false
               }
@@ -2352,10 +2384,11 @@
         }
       }
     },
-    "/donor/staff/provision": {
+    "/donor/staff/activate/options": {
       "post": {
-        "operationId": "staffProvision",
-        "summary": "Read the TOTP secret for an invitation",
+        "operationId": "beginStaffActivation",
+        "summary": "Begin passkey registration for an invitation",
+        "description": "Returns who the invitation is for and WebAuthn creation options requiring a discoverable, user-verifying passkey. Pass `options` to `PublicKeyCredential.parseCreationOptionsFromJSON` and `navigator.credentials.create`, then answer within five minutes.",
         "tags": [
           "Staff"
         ],
@@ -2391,27 +2424,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "email": {
-                      "type": "string",
-                      "format": "email"
-                    },
-                    "secret": {
-                      "type": "string",
-                      "description": "Base32 TOTP secret."
-                    },
-                    "uri": {
-                      "type": "string",
-                      "description": "otpauth:// URI."
-                    }
-                  },
-                  "required": [
-                    "email",
-                    "secret",
-                    "uri"
-                  ],
-                  "additionalProperties": false
+                  "$ref": "#/components/schemas/Invitation"
                 }
               }
             }
@@ -2421,9 +2434,6 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLarge"
@@ -2446,7 +2456,8 @@
     "/donor/staff/activate": {
       "post": {
         "operationId": "staffActivate",
-        "summary": "Set a password and confirm TOTP",
+        "summary": "Finish passkey registration and sign in",
+        "description": "Verifies the attestation, stores the passkey, consumes the invitation, and sets the staff session cookie. Every answer counts toward the invitation's five attempts; it expires 24 hours after issue.",
         "tags": [
           "Staff"
         ],
@@ -2462,25 +2473,20 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "token": {
+                  "ceremony": {
                     "type": "string",
                     "minLength": 32,
-                    "maxLength": 128
+                    "maxLength": 128,
+                    "description": "The `ceremony` from the matching options response."
                   },
-                  "password": {
-                    "type": "string",
-                    "minLength": 12,
-                    "maxLength": 128
-                  },
-                  "code": {
-                    "type": "string",
-                    "pattern": "^[0-9]{6}$"
+                  "credential": {
+                    "type": "object",
+                    "description": "The browser's `PublicKeyCredential` as JSON (`credential.toJSON()`), with base64url binary fields; at most 64 KiB."
                   }
                 },
                 "required": [
-                  "token",
-                  "password",
-                  "code"
+                  "ceremony",
+                  "credential"
                 ],
                 "additionalProperties": false
               }
@@ -2513,9 +2519,6 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
           },
           "413": {
             "$ref": "#/components/responses/PayloadTooLarge"
@@ -4217,7 +4220,7 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "dad_staff_session",
-        "description": "Staff session: HttpOnly, SameSite=Strict, 8 hours at most. Browser-only; mutations require the exact Origin. Permissions are checked server-side against current staff state on every request."
+        "description": "Staff session: HttpOnly, SameSite=Strict, host-only on the staff host, 8 hours at most. Named `__Host-dad_staff_session` when the staff origin is HTTPS. Set by a passkey sign-in or activation. Browser-only; mutations require the exact staff `Origin`. Permissions are checked server-side against current staff state on every request."
       },
       "stripeSignature": {
         "type": "apiKey",
@@ -5374,6 +5377,51 @@
         "required": [
           "checkoutId",
           "url"
+        ],
+        "additionalProperties": false
+      },
+      "Ceremony": {
+        "type": "object",
+        "properties": {
+          "ceremony": {
+            "type": "string",
+            "description": "Single-use ID to send back with the credential."
+          },
+          "options": {
+            "type": "object",
+            "description": "PublicKeyCredentialRequestOptionsJSON."
+          }
+        },
+        "required": [
+          "ceremony",
+          "options"
+        ],
+        "additionalProperties": false
+      },
+      "Invitation": {
+        "type": "object",
+        "properties": {
+          "ceremony": {
+            "type": "string",
+            "description": "Single-use ID to send back with the credential."
+          },
+          "options": {
+            "type": "object",
+            "description": "PublicKeyCredentialCreationOptionsJSON."
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ceremony",
+          "options",
+          "email",
+          "name"
         ],
         "additionalProperties": false
       },

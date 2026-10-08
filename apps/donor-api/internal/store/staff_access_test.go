@@ -90,3 +90,93 @@ func TestStaffPermissionMatrixAndExpiredSessions(t *testing.T) {
 		}
 	}
 }
+
+func TestRecoveryReplacesPasskeysAndRevokesSessions(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := staffService(t, pool)
+	_, adminKey := activatedStaff(t, pool, s, "ADMIN")
+	admin, err := signIn(t, s, adminKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, targetKey := activatedStaff(t, pool, s, "ADMIN")
+	session, err := signIn(t, s, targetKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change, err := s.ChangeAccess(ctx, admin, target, "recovery", "")
+	if err != nil || change.Token == "" {
+		t.Fatal("recovery invitation not issued", err)
+	}
+	if _, err = s.Me(ctx, session); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("recovery left a session usable", err)
+	}
+	if _, err = signIn(t, s, targetKey); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("recovery left a passkey usable", err)
+	}
+	accounts, err := s.Accounts(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range accounts {
+		if account.ID == target.String() && account.Active {
+			t.Fatal("recovered account still reported active")
+		}
+	}
+	var details string
+	if err = pool.QueryRow(ctx, "SELECT details::text FROM donor_staff_audit WHERE target=$1 AND action='staff.recovery_invited'", target.String()).Scan(&details); err != nil || details != `{"previously_active":true,"previously_disabled":false}` {
+		t.Fatal("recovery audit missing", details, err)
+	}
+	invitation, err := s.BeginActivation(ctx, change.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := newAuthenticator(t, staffTestOrigin, staffTestRPID)
+	if _, err = s.Activate(ctx, invitation.ID, replacement.register(t, invitation.Options)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = signIn(t, s, replacement); err != nil {
+		t.Fatal("replacement passkey rejected", err)
+	}
+}
+
+func TestBreakGlassRecoveryReplacesOnlyAnEnabledAdministratorsPasskeys(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := staffService(t, pool)
+	admin, key := activatedStaff(t, pool, s, "ADMIN")
+	session, err := signIn(t, s, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	support, _ := invitedStaff(t, pool, "SUPPORT")
+	disabled, _ := activatedStaff(t, pool, s, "ADMIN")
+	mustExec(t, pool, "UPDATE donor_staff SET disabled=true WHERE id=$1", disabled)
+	for _, other := range []string{support.String() + "@example.org", disabled.String() + "@example.org", "nobody@example.org"} {
+		if _, err := s.Recover(ctx, other); !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("break-glass recovery of %s: got %v, want no such administrator", other, err)
+		}
+	}
+	token, err := s.Recover(ctx, admin.String()+"@example.org")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Me(ctx, session); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("break-glass recovery left a session usable", err)
+	}
+	if _, err = signIn(t, s, key); !errors.Is(err, ErrStaffDenied) {
+		t.Fatal("break-glass recovery left a passkey usable", err)
+	}
+	var actor pgtype.UUID
+	if err = pool.QueryRow(ctx, "SELECT actor_id FROM donor_staff_audit WHERE target=$1 AND action='staff.recovery_invited'", admin.String()).Scan(&actor); err != nil || actor.Valid {
+		t.Fatal("break-glass recovery not audited as an operator action", err)
+	}
+	invitation, err := s.BeginActivation(ctx, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Activate(ctx, invitation.ID, key.register(t, invitation.Options)); err != nil {
+		t.Fatal(err)
+	}
+}

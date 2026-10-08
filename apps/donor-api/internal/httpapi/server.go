@@ -2,6 +2,7 @@
 package httpapi
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
@@ -25,7 +26,8 @@ type WebhookReceiver interface {
 // Services are the optional dependencies behind each route group; a nil
 // service makes its routes answer 503 rather than fail at startup.
 type Services struct {
-	Origin         string // the exact browser Origin admitted on mutations
+	Origin         string // the exact public browser Origin admitted on donor mutations
+	StaffOrigin    string // the exact back-office Origin admitted on staff mutations
 	TrustedProxies []netip.Prefix
 	Ready          func(context.Context) error
 
@@ -51,21 +53,27 @@ type Services struct {
 
 type api struct {
 	Services
-	limiter *rateLimiter
-	secure  bool
+	limiter     *rateLimiter
+	secure      bool
+	staffSecure bool
+	staffCookie string
 }
 
 // WriteTimeout exceeds providerTimeout so a slow processor call can still answer.
 const writeTimeout = 30 * time.Second
 
 func NewServer(address string, services Services) *http.Server {
-	if services.Origin == "" {
-		services.Origin = "http://localhost:3000"
-	}
+	services.Origin = cmp.Or(services.Origin, "http://localhost:3000")
+	services.StaffOrigin = cmp.Or(services.StaffOrigin, "http://staff.localhost:3000")
 	a := &api{
-		Services: services,
-		limiter:  newRateLimiter(services.TrustedProxies),
-		secure:   strings.HasPrefix(services.Origin, "https:"),
+		Services:    services,
+		limiter:     newRateLimiter(services.TrustedProxies),
+		secure:      strings.HasPrefix(services.Origin, "https:"),
+		staffSecure: strings.HasPrefix(services.StaffOrigin, "https:"),
+		staffCookie: staffCookie,
+	}
+	if a.staffSecure {
+		a.staffCookie = "__Host-" + staffCookie
 	}
 	mux := http.NewServeMux()
 	for _, route := range a.routes() {

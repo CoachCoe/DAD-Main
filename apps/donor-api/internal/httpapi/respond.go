@@ -71,11 +71,6 @@ type service struct {
 	classify    classifier
 }
 
-func (s service) within(timeout time.Duration) service {
-	s.timeout = timeout
-	return s
-}
-
 // missing names what a lookup that found no row could not find.
 func (s service) missing(detail string) service {
 	classify := s.classify

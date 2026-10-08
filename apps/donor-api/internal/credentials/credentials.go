@@ -3,47 +3,16 @@
 package credentials
 
 import (
-	"encoding/base32"
 	"encoding/base64"
 	"errors"
 	"strconv"
-	"time"
 	"unicode/utf8"
 
-	"github.com/alexedwards/argon2id"
 	"github.com/fernet/fernet-go"
-	"github.com/pquerna/otp"
-	"github.com/pquerna/otp/hotp"
 )
 
 var ErrInvalid = errors.New("invalid credential")
 
-// The legacy contract's Argon2id writer parameters, deliberately independent of CPU count.
-func HashPassword(password string) (string, error) {
-	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 12 || utf8.RuneCountInString(password) > 128 {
-		return "", ErrInvalid
-	}
-	return argon2id.CreateHash(password, &argon2id.Params{Memory: 65536, Iterations: 3, Parallelism: 4, SaltLength: 16, KeyLength: 32})
-}
-func VerifyPassword(password, encoded string) (bool, error) {
-	if len(encoded) > 512 || !utf8.ValidString(password) || utf8.RuneCountInString(password) > 128 {
-		return false, ErrInvalid
-	}
-	params, salt, key, err := argon2id.DecodeHash(encoded)
-	if err != nil {
-		return false, ErrInvalid
-	}
-	// Reject malformed/extreme stored parameters before allocating attacker-sized memory.
-	if params.Memory < 8*uint32(params.Parallelism) || params.Memory > 262144 || params.Iterations == 0 || params.Iterations > 10 ||
-		params.Parallelism == 0 || params.Parallelism > 16 || len(salt) < 8 || len(salt) > 64 || len(key) < 16 || len(key) > 64 {
-		return false, ErrInvalid
-	}
-	ok, err := argon2id.ComparePasswordAndHash(password, encoded)
-	if err != nil {
-		return false, ErrInvalid
-	}
-	return ok, nil
-}
 func key(value string) (*fernet.Key, error) {
 	decoded, err := base64.URLEncoding.Strict().DecodeString(value)
 	if err != nil || len(decoded) != 32 {
@@ -82,30 +51,6 @@ func Decrypt(token []byte, encodedKey string) ([]byte, error) {
 		return nil, ErrInvalid
 	}
 	return result, nil
-}
-func VerifyOTP(secret []byte, code string, now time.Time, previous int64) (int64, error) {
-	if len(secret) != 20 || len(code) != 6 {
-		return 0, ErrInvalid
-	}
-	for _, c := range code {
-		if c < '0' || c > '9' {
-			return 0, ErrInvalid
-		}
-	}
-	step := now.Unix() / 30
-	for _, counter := range []int64{step, step - 1, step + 1} {
-		if counter <= previous || counter < 0 {
-			continue
-		}
-		matched, err := hotp.ValidateCustom(code, uint64(counter), base32.StdEncoding.EncodeToString(secret), hotp.ValidateOpts{Digits: otp.DigitsSix, Algorithm: otp.AlgorithmSHA1})
-		if err != nil {
-			return 0, ErrInvalid
-		}
-		if matched {
-			return counter, nil
-		}
-	}
-	return 0, ErrInvalid
 }
 
 // QuoteASCII reproduces the legacy contract's ASCII-only JSON string escaping.

@@ -89,10 +89,12 @@ func (s *StaffService) Accounts(ctx context.Context, token string) ([]StaffView,
 		if err != nil {
 			return nil, err
 		}
-		slices.SortFunc(rows, func(a, b queries.DonorStaff) int { return cmp.Compare(a.Email, b.Email) })
+		slices.SortFunc(rows, func(a, b queries.LockStaffAccountsRow) int {
+			return cmp.Compare(a.DonorStaff.Email, b.DonorStaff.Email)
+		})
 		result := make([]StaffView, 0, len(rows))
 		for _, row := range rows {
-			result = append(result, staffView(row))
+			result = append(result, staffView(row.DonorStaff, row.Active))
 		}
 		return result, nil
 	})
@@ -107,7 +109,7 @@ type AccessChange struct {
 }
 
 // ChangeAccess disables another account, changes its role, or replaces its
-// credentials through a recovery invitation, revoking its sessions. It locks
+// passkeys through a recovery invitation, revoking its sessions. It locks
 // every account so at least one other active administrator always remains.
 func (s *StaffService) ChangeAccess(ctx context.Context, token string, targetID pgtype.UUID, action, role string) (AccessChange, error) {
 	return staffRead(ctx, s, token, "staff.manage", func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (AccessChange, error) {
@@ -123,16 +125,16 @@ func (s *StaffService) ChangeAccess(ctx context.Context, token string, targetID 
 		if targetID == actor.ID {
 			return AccessChange{}, ErrStaffConflict
 		}
-		var target queries.DonorStaff
+		var target queries.LockStaffAccountsRow
 		otherAdmins := 0
 		for _, row := range rows {
-			if row.ID == targetID {
+			if row.DonorStaff.ID == targetID {
 				target = row
-			} else if row.Role == "ADMIN" && !row.Disabled && row.PasswordHash.Valid {
+			} else if row.DonorStaff.Role == "ADMIN" && !row.DonorStaff.Disabled && row.Active {
 				otherAdmins++
 			}
 		}
-		if !target.ID.Valid {
+		if !target.DonorStaff.ID.Valid {
 			return AccessChange{}, pgx.ErrNoRows
 		}
 		if otherAdmins == 0 {
@@ -142,10 +144,43 @@ func (s *StaffService) ChangeAccess(ctx context.Context, token string, targetID 
 	})
 }
 
-func changeAccess(ctx context.Context, q *queries.Queries, actor pgtype.UUID, target queries.DonorStaff, action, role string, now time.Time) (AccessChange, error) {
+// Recover is the break-glass path for when no administrator can sign in: it
+// replaces an enabled administrator's passkeys through a recovery invitation.
+// Like Bootstrap it needs the operator's database access rather than a staff
+// session, so its audit record has no actor.
+func (s *StaffService) Recover(ctx context.Context, email string) (string, error) {
+	canonical, err := identity.NormalizeEmail(email)
+	if err != nil {
+		return "", ErrStaffInput
+	}
+	var token string
+	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		rows, err := q.LockStaffAccounts(ctx)
+		if err != nil {
+			return err
+		}
+		var target queries.LockStaffAccountsRow
+		for _, row := range rows {
+			if row.DonorStaff.Email == canonical && row.DonorStaff.Role == "ADMIN" && !row.DonorStaff.Disabled {
+				target = row
+			}
+		}
+		if !target.DonorStaff.ID.Valid {
+			return pgx.ErrNoRows
+		}
+		change, err := changeAccess(ctx, q, pgtype.UUID{}, target, "recovery", "", time.Now().UTC())
+		token = change.Token
+		return err
+	})
+	return token, err
+}
+
+func changeAccess(ctx context.Context, q *queries.Queries, actor pgtype.UUID, row queries.LockStaffAccountsRow, action, role string, now time.Time) (AccessChange, error) {
 	var result AccessChange
 	var details any
 	var event string
+	target := row.DonorStaff
 	switch action {
 	case "disable":
 		target.Disabled = true
@@ -156,19 +191,18 @@ func changeAccess(ctx context.Context, q *queries.Queries, actor pgtype.UUID, ta
 			return result, ErrStaffInput
 		}
 		if target.Role == role {
-			view := staffView(target)
+			view := staffView(target, row.Active)
 			return AccessChange{Staff: &view}, nil
 		}
 		details = map[string]string{"previous": target.Role, "role": role}
 		target.Role = role
 		event = "staff.role_changed"
-		view := staffView(target)
+		view := staffView(target, row.Active)
 		result.Staff = &view
 	case "recovery":
-		details = map[string]bool{"previously_disabled": target.Disabled, "previously_active": target.PasswordHash.Valid}
-		target.PasswordHash, target.TotpSecret, target.Disabled = pgtype.Text{}, nil, false
-		target.TotpCounter, target.Failures, target.LockedUntil = -1, 0, pgtype.Timestamptz{}
-		if err := saveStaffCredentials(ctx, q, target); err != nil {
+		details = map[string]bool{"previously_disabled": target.Disabled, "previously_active": row.Active}
+		target.Disabled = false
+		if _, err := q.DeleteStaffPasskeys(ctx, target.ID); err != nil {
 			return result, err
 		}
 		if err := q.InvalidateStaffInvites(ctx, queries.InvalidateStaffInvitesParams{StaffID: target.ID, ConsumedAt: timestamp(now)}); err != nil {

@@ -42,9 +42,14 @@ func TestHandlersValidateInputBeforeCallingServices(t *testing.T) {
 		{"POST", "/donor/me/recurring/amount", `{"subscription_id":"` + testID + `","amount_minor":99,"previous_minor":3000,"effective_at":"2026-11-01T00:00:00Z"}`, true, 422},
 		{"POST", "/donor/me/payment-method/setup", "", true, 503},
 		{"POST", "/donor/me/payment-method/setup", "", false, 422},
-		{"POST", "/donor/staff/sign-in", `{"email":"staff@example.org","password":"secret","code":"12345"}`, false, 422},
-		{"POST", "/donor/staff/provision", `{"token":"short"}`, false, 422},
-		{"POST", "/donor/staff/activate", `{"token":"` + strings.Repeat("t", 43) + `","password":"too-short","code":"123456"}`, false, 422},
+		{"POST", "/donor/staff/sign-in/options", "", false, 503},
+		{"POST", "/donor/staff/sign-in", `{"ceremony":"` + strings.Repeat("c", 43) + `","credential":{"id":"x"}}`, false, 503},
+		{"POST", "/donor/staff/sign-in", `{"ceremony":"short","credential":{"id":"x"}}`, false, 422},
+		{"POST", "/donor/staff/sign-in", `{"ceremony":"` + strings.Repeat("c", 43) + `"}`, false, 422},
+		{"POST", "/donor/staff/sign-in", `{"ceremony":"` + strings.Repeat("c", 43) + `","credential":"` + strings.Repeat("x", 65<<10) + `"}`, false, 422},
+		{"POST", "/donor/staff/sign-in", `{"email":"staff@example.org","password":"secret","code":"123456"}`, false, 422},
+		{"POST", "/donor/staff/activate/options", `{"token":"short"}`, false, 422},
+		{"POST", "/donor/staff/activate", `{"ceremony":"` + strings.Repeat("c", 43) + `","credential":{"id":"\u0000"}}`, false, 422},
 		{"POST", "/donor/staff/accounts", `{"email":"staff@example.org","name":"Sam","role":"OWNER"}`, false, 422},
 		{"POST", "/donor/staff/accounts/not-a-uuid/disable", "", false, 404},
 		{"POST", "/donor/staff/accounts/" + testID + "/role", `{"role":"ADMIN"}`, false, 503},
@@ -76,7 +81,7 @@ func TestHandlersValidateInputBeforeCallingServices(t *testing.T) {
 		{"GET", "/donor/staff/content/sources/not-a-uuid", "", false, 404},
 	} {
 		r := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
-		r.Header.Set("Origin", "http://localhost:3000")
+		r.Header.Set("Origin", originFor(tc.path))
 		r.AddCookie(&http.Cookie{Name: donorCookie, Value: "session"})
 		r.AddCookie(&http.Cookie{Name: staffCookie, Value: "session"})
 		if tc.key {

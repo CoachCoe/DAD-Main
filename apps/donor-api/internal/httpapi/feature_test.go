@@ -44,7 +44,7 @@ func TestUnconfiguredFeaturesAnswerWithCodesWithoutErrorLogs(t *testing.T) {
 		{"source upload without key", Services{ContentAdmin: &uploadStub{authorizeErr: store.ErrSourceStorageUnconfigured}}, "/donor/staff/content/sources?name=a.pdf", "", "SOURCE_STORAGE_UNCONFIGURED"},
 	} {
 		r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
-		r.Header.Set("Origin", "http://localhost:3000")
+		r.Header.Set("Origin", originFor(tc.path))
 		r.Header.Set("Idempotency-Key", key)
 		r.AddCookie(&http.Cookie{Name: donorCookie, Value: "session"})
 		r.AddCookie(&http.Cookie{Name: staffCookie, Value: "session"})
