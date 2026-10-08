@@ -221,11 +221,11 @@ It works like the back-office recovery action and is audited as `staff.recovery_
 with no actor. Protect the printed invitation, and review the audit history afterwards.
 
 At `/staff/content`, upload private source documents, then publish complete CSV snapshots.
-Sources are limited to 10 MB, encrypted, SHA-256 checked, and permission-protected.
+Sources are limited to 10 MiB, encrypted, SHA-256 checked, and permission-protected.
 Without `DONOR_CONTENT_ENCRYPTION_KEY`, uploads return 503 before the file is read;
 publishing still works. Donor records have linkable URLs (`/staff/donors/{id}`), and
 search keeps its query in `/staff?q=`.
-Each CSV is limited to 512 KB and 500 rows. Exact column order:
+Each CSV is limited to 512 KiB and 500 rows. Exact column order:
 
 ```csv
 slug,title,summary,partner,planned_start,board_approval_source_id,approved_on

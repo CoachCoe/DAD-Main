@@ -50,7 +50,9 @@ which picks up renewed certificates without dropping any. Use those commands rat
 
 Store the key as `root:101`, mode `0640`. TLS 1.2 and 1.3 with ECDHE suites only. There
 is no OCSP stapling: Origin CA certificates have no responder and Let's Encrypt no longer
-runs one. HSTS comes from the web app on every response, so nginx does not add a copy.
+runs one. HSTS comes from the web app on every response it serves, so nginx does not add
+a copy; nginx's own refusals (404, 421, 429) carry none, and browsers keep the policy
+from the app's responses.
 
 ## Hosts and paths
 
@@ -86,7 +88,9 @@ commit the result, and run `reload-ingress` on the origin.
 
 The edge network has IPv6 enabled, so in direct mode IPv6 visitors reach nginx with their
 own addresses rather than as Docker's gateway, and each keeps its own quota. This needs
-Docker Engine 27 or later with its default `ip6tables` setting. In cloudflare mode the
+Docker Engine 27 or later with its default `ip6tables` setting, and IPv6 enabled in the
+host kernel even where the host has no public IPv6 address: nginx listens on `[::]` and
+fails to start under `ipv6.disable=1`. In cloudflare mode the
 client's IPv6 address arrives in `CF-Connecting-IP`.
 
 ## Rate limits
@@ -117,7 +121,7 @@ publications at 10 MiB. Exports stream unbuffered.
 
 ## Cloudflare configuration
 
-Replace `donors.example.org` and `staff.example.org` with the configured hosts. Rule
+Replace `donors.example.org` and `staff.donors.example.org` with the configured hosts. Rule
 counts, counting periods, and mitigation timeouts depend on the plan; where only a
 10-second period is available, divide the per-minute thresholds by six.
 
@@ -205,11 +209,11 @@ Counted per IP, with a custom JSON response
 
 In order:
 
-1. Bypass: `http.host eq "staff.example.org" or starts_with(http.request.uri.path,
+1. Bypass: `http.host eq "staff.donors.example.org" or starts_with(http.request.uri.path,
    "/api/") or starts_with(http.request.uri.path, "/account") or
    starts_with(http.request.uri.path, "/staff")`.
 2. Static pages: `http.host eq "donors.example.org" and http.request.uri.path in {"/"
-   "/about" "/donate" "/how-it-works" "/legal" "/partners"} and not
+   "/donate" "/how-it-works" "/legal" "/partners"} and not
    any(lower(http.request.headers.names[*])[*] == "rsc")` → eligible for cache, Edge TTL
    5 minutes (ignoring the origin), Browser TTL from the origin, cache key ignoring the
    query string.

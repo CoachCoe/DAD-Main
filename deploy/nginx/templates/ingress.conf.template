@@ -91,7 +91,7 @@ server {
         proxy_pass http://web;
     }
 
-    # Source documents up to 10 MB; publications up to 8 MB.
+    # Source documents up to 10 MiB; publications up to 8 MiB.
     location ~ ^/api/donor/staff/content/(sources|publish)$ {
         client_max_body_size 10m;
         proxy_pass http://web;
