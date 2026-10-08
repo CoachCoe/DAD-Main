@@ -67,8 +67,12 @@ from the app's responses.
 | Port 80 | `301` to HTTPS for known hosts; connection closed otherwise |
 
 Every staff-host response carries one `X-Robots-Tag: noindex, nofollow`, set by nginx in
-place of the web app's copy. The web app and API enforce the same split; nginx is defense
-in depth. New public pages
+place of the web app's copy. The web app enforces the same split, and refuses the back
+office on the public host in any letter case: an unserved page renders that host's
+not-found page, and an unserved API path answers `404 {"detail":"Not found"}`. The API
+cannot see the host; it admits staff mutations only from the staff Origin, staff sessions
+only in the host-only staff cookie, and no staff request a browser reports as started on
+another host. nginx is defense in depth. New public pages
 need no change; a staff-host path outside those prefixes needs the allowlist in
 `templates/ingress.conf.template`.
 

@@ -22,10 +22,6 @@ export function DonorHeader() {
     document.addEventListener("keydown", close);
     return () => document.removeEventListener("keydown", close);
   }, [open]);
-  if (pathname.startsWith("/staff")) return <header className="header">
-    {/* Staff tools are internal: no public navigation or giving prompt. */}
-    <Link href="/staff" className="brand"><span className="brandMark" aria-hidden>D</span><span>DAD staff</span></Link>
-  </header>;
   const current = (href: string) => (pathname === href || (href.startsWith("/account/") && pathname.startsWith("/account/")) ? "page" : undefined);
   return <header className="header">
     <Link href="/" className="brand"><span className="brandMark" aria-hidden>D</span><span>Dynamic Aid Delivery</span></Link>

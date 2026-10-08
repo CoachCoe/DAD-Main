@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { loadEnvConfig } from "@next/env";
 import path from "node:path";
 import { contentSecurityPolicy } from "./lib/csp";
+import { UNSERVED_HEADER } from "./lib/hosts";
 
 loadEnvConfig(path.resolve(process.cwd(), "../.."));
 
@@ -23,6 +24,18 @@ const nextConfig: NextConfig = {
   env: {
     DONOR_PUBLIC_ORIGIN: process.env.DONOR_PUBLIC_ORIGIN ?? "",
     DONOR_STAFF_ORIGIN: process.env.DONOR_STAFF_ORIGIN ?? "",
+  },
+  // proxy.ts marks the pages a host does not serve. A rewrite here, unlike one from the proxy,
+  // stays internal whatever address the server binds.
+  async rewrites() {
+    return {
+      beforeFiles: [
+        { source: "/:path*", has: [{ type: "header", key: UNSERVED_HEADER, value: "staff" }], destination: "/staff/_unserved" },
+        { source: "/:path*", has: [{ type: "header", key: UNSERVED_HEADER, value: "public" }], destination: "/_unserved" },
+      ],
+      afterFiles: [],
+      fallback: [],
+    };
   },
   // The API is proxied by app/api/[...path]/route.ts rather than a rewrite: with
   // output: standalone a rewrite destination is baked in at build time, so a runtime

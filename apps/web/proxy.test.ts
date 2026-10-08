@@ -65,17 +65,18 @@ describe("hosts", () => {
   const visit = (url: string, headers: Record<string, string> = {}) => proxy(new NextRequest(url, { headers: { host: new URL(url).host, ...headers } }));
   const answer = (response: Response) => response.status === 404 ? "404"
     : response.headers.has("location") ? `redirect ${response.headers.get("location")}`
-    : response.headers.has("x-middleware-request-x-dad-unserved") ? "not found page" : "served";
+    : response.headers.get("x-middleware-request-x-dad-unserved") === "staff" ? "staff not found"
+    : response.headers.get("x-middleware-request-x-dad-unserved") === "public" ? "public not found" : "served";
   const staff = "https://staff.dad.example.org";
   const site = "https://dad.example.org";
 
   it.each([
     [`${staff}/staff`, "served"], [`${staff}/staff/sign-in`, "served"], [`${staff}/staff/donors/abc`, "served"],
     [`${staff}/api/donor/staff/me`, "served"], [`${staff}/api/donor/staff/sign-in/options`, "served"], [`${staff}/_next/data/build/staff.json`, "served"],
-    [`${staff}/`, `redirect ${staff}/staff`], [`${staff}/ledger`, "404"], [`${staff}/account/dashboard`, "not found page"],
+    [`${staff}/`, `redirect ${staff}/staff`], [`${staff}/ledger`, "staff not found"], [`${staff}/account/dashboard`, "staff not found"], [`${staff}/Staff/sign-in`, "staff not found"],
     [`${staff}/api/donor/me`, "404"], [`${staff}/api/donor/stripe/webhook`, "404"],
     [`${site}/`, "served"], [`${site}/account/dashboard`, "served"], [`${site}/api/donor/me`, "served"],
-    [`${site}/staff`, "not found page"], [`${site}/Staff/sign-in`, "not found page"], [`${site}/api/donor/staff/me`, "404"], [`${site}/api/donor/staff/sign-in`, "404"],
+    [`${site}/staff`, "public not found"], [`${site}/Staff/sign-in`, "public not found"], [`${site}/api/donor/staff/me`, "404"], [`${site}/api/donor/staff/sign-in`, "404"],
   ])("answers %s with %s", (url, expected) => {
     vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
     expect(answer(visit(url))).toBe(expected);
@@ -83,8 +84,8 @@ describe("hosts", () => {
 
   it("serves no back office anywhere until a staff origin is set", () => {
     vi.stubEnv("DONOR_STAFF_ORIGIN", "");
-    expect(answer(visit(`${site}/staff/sign-in`))).toBe("not found page");
-    expect(answer(visit(`${STAFF_ORIGIN}/staff/sign-in`))).toBe("not found page");
+    expect(answer(visit(`${site}/staff/sign-in`))).toBe("public not found");
+    expect(answer(visit(`${STAFF_ORIGIN}/staff/sign-in`))).toBe("public not found");
   });
 
   it("keeps the staff host out of search engines", async () => {
@@ -93,12 +94,23 @@ describe("hosts", () => {
     expect(await visit(`${staff}/robots.txt`).text()).toBe("User-agent: *\nDisallow: /\n");
   });
 
-  it("lets a signed-in surface answer not found under its own frame and policy", () => {
+  it("gives each not-found page the policy it renders under", () => {
     vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
-    for (const url of [`${site}/Staff/sign-in`, `${staff}/account/dashboard`]) {
-      expect(visit(url).headers.get("Content-Security-Policy")).toMatch(/'nonce-[^']+' 'strict-dynamic'/);
-    }
-    expect(answer(visit(`${staff}/staff`, { "x-dad-unserved": "1" }))).toBe("served");
+    const account = visit(`${staff}/account/dashboard`);
+    expect(account.headers.get("Content-Security-Policy")).toMatch(/'nonce-[^']+' 'strict-dynamic'/);
+    expect(account.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+    // next.config.ts already gives /ledger the static policy, which the page renders under.
+    const ledger = visit(`${staff}/ledger`);
+    expect(ledger.headers.has("Content-Security-Policy")).toBe(false);
+    expect(ledger.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+    // The public not-found page is prerendered, so it has no nonce to carry.
+    expect(visit(`${site}/Staff/sign-in`).headers.get("Content-Security-Policy")).toContain("script-src 'self' 'unsafe-inline'");
+  });
+
+  it("drops a client's claim that a page is unserved", () => {
+    vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
+    expect(answer(visit(`${staff}/staff`, { "x-dad-unserved": "public" }))).toBe("served");
+    expect(answer(visit(`${site}/ledger`, { "x-dad-unserved": "staff" }))).toBe("served");
   });
 
   it("upgrades insecure requests by the origin of the host answering", () => {
