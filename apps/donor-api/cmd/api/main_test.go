@@ -35,7 +35,13 @@ func TestConfigureRejectsInvalidEnvironmentBeforeTheDatabase(t *testing.T) {
 		{"retired staff key without a staff origin", map[string]string{"DONOR_STAFF_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="}},
 		{"plain HTTP staff origin", map[string]string{"DONOR_STAFF_ORIGIN": "http://staff.dad.example.org"}},
 		{"staff origin with path", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org/staff"}},
-		{"staff on the public host", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://DAD.example.org:8443"}},
+		{"public origin in capitals", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://DAD.example.org"}},
+		{"public origin with its default port", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org:443"}},
+		{"staff origin in capitals", map[string]string{"DONOR_STAFF_ORIGIN": "https://Staff.dad.example.org"}},
+		{"staff origin with its default port", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org:443"}},
+		{"staff origin with a trailing slash", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org/"}},
+		{"staff on the public host", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://dad.example.org:8443"}},
+		{"staff on a parent of the public host", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://example.org"}},
 		{"local staff on the public host", map[string]string{"DONOR_STAFF_ORIGIN": "http://localhost:3001"}},
 		{"content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "short"}},
 		{"partial SMTP", map[string]string{"DONOR_SMTP_HOST": "smtp.example.org"}},
@@ -61,6 +67,7 @@ func TestConfigureAcceptsAStaffHostBesideThePublicOne(t *testing.T) {
 	for _, env := range []map[string]string{
 		{"DONOR_STAFF_ORIGIN": "http://staff.localhost:3000"},
 		{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://staff.dad.example.org"},
+		{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_STAFF_ORIGIN": "https://staff.example.org:8443"},
 	} {
 		services, release, err := configure(context.Background(), func(name string) string { return env[name] })
 		release()

@@ -44,7 +44,8 @@ func TestPaymentBoundariesRejectLiveAndUnsafeOrigins(t *testing.T) {
 			t.Fatal("non-test credentials accepted")
 		}
 	}
-	for _, origin := range []string{"http://example.org", "https://user:pass@example.org", "https://example.org/", "https://example.org?x=y", "https://example.org#part", "https://", "http://staff.localhost.example.org", "http://localhostx"} {
+	for _, origin := range []string{"http://example.org", "https://user:pass@example.org", "https://example.org/", "https://example.org?x=y", "https://example.org#part", "https://", "http://staff.localhost.example.org", "http://localhostx",
+		"https://Donor.example.org", "HTTPS://donor.example.org", "https://donor.example.org:443", "http://localhost:80", "https://donor.example.org:"} {
 		if ValidateOrigin(origin) == nil {
 			t.Fatalf("unsafe origin accepted: %s", origin)
 		}

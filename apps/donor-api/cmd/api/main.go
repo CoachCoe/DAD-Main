@@ -63,13 +63,14 @@ func validateStaffOrigin(staff, public string, getenv func(string) string) error
 		}
 		return nil
 	}
-	if payments.ValidateOrigin(staff) != nil {
-		return errors.New("DONOR_STAFF_ORIGIN must be an HTTPS origin (HTTP localhost for tests)")
+	if err := payments.ValidateOrigin(staff); err != nil {
+		return fmt.Errorf("DONOR_STAFF_ORIGIN %w", err)
 	}
 	staffURL, _ := url.Parse(staff)
 	publicURL, _ := url.Parse(public)
-	if strings.EqualFold(staffURL.Hostname(), publicURL.Hostname()) {
-		return errors.New("DONOR_STAFF_ORIGIN must use a different host from DONOR_PUBLIC_ORIGIN")
+	// The public site may claim a parent domain as its passkey relying party.
+	if staffHost, publicHost := staffURL.Hostname(), publicURL.Hostname(); publicHost == staffHost || strings.HasSuffix(publicHost, "."+staffHost) {
+		return errors.New("DONOR_STAFF_ORIGIN must use its own host, neither DONOR_PUBLIC_ORIGIN's host nor a parent domain of it")
 	}
 	return nil
 }
@@ -91,7 +92,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.EmailConfigured = email != nil
 	services.Origin = cmp.Or(getenv("DONOR_PUBLIC_ORIGIN"), "http://localhost:3000")
 	if err = payments.ValidateOrigin(services.Origin); err != nil {
-		return services, release, err
+		return services, release, fmt.Errorf("DONOR_PUBLIC_ORIGIN %w", err)
 	}
 	if services.Wallet, err = wallet.FromEnvironment(getenv, services.Origin); err != nil {
 		return services, release, err

@@ -7,7 +7,9 @@ separate, HttpOnly, and Secure on HTTPS. Staff cookies use SameSite=Strict; dono
 use Lax. Anonymous login responses do not reveal whether an address exists.
 
 The back office runs on its own host, `DONOR_STAFF_ORIGIN`, which the API requires to
-differ from the public host. The web server answers only the back office and its API
+be neither the public host nor a parent domain of it, since a site may use passkeys for
+its parent domain. Both origins must be written exactly as browsers send them, because
+Origin headers and passkey client data are compared with them byte for byte. The web server answers only the back office and its API
 there, marked noindex, and none of it on the public host. The staff cookie is host-only
 (`__Host-dad_staff_session` over HTTPS), so it never reaches the public site, and a page
 on either host cannot pass the other's Origin check. The staff host is the passkey

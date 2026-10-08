@@ -28,8 +28,8 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 		return errors.New("--email and --name are required, or --recover with --email only")
 	}
 	origin := getenv("DONOR_STAFF_ORIGIN")
-	if payments.ValidateOrigin(origin) != nil {
-		return errors.New("DONOR_STAFF_ORIGIN must be an HTTPS origin (HTTP localhost for tests)")
+	if err := payments.ValidateOrigin(origin); err != nil {
+		return fmt.Errorf("DONOR_STAFF_ORIGIN %w", err)
 	}
 	dsn := getenv("DONOR_GO_DATABASE_URL")
 	if dsn == "" {

@@ -51,8 +51,9 @@ renewed certificates without dropping connections.
 The API refuses to start with only one of `STRIPE_SECRET_KEY` and
 `STRIPE_WEBHOOK_SECRET`, with a malformed encryption key, with a trusted proxy range
 broader than an IPv4 /8 or IPv6 /32, with a `DONOR_STAFF_ORIGIN` that is not an exact
-HTTPS origin or shares the public host, or with the retired `DONOR_STAFF_ENCRYPTION_KEY`
-set but no staff origin. It logs which optional features are disabled.
+HTTPS origin or that is the public host or a parent domain of it, or with the retired
+`DONOR_STAFF_ENCRYPTION_KEY` set but no staff origin. Both origins must be written as
+browsers send them: lowercase, with no default port, path, or trailing slash. It logs which optional features are disabled.
 Workers that hit a database or provider failure log the error type and retry with
 exponential backoff up to one minute; persistent failures show up as queue age.
 

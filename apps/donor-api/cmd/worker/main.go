@@ -115,8 +115,8 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		return nil, configError("SMTP settings are missing or invalid")
 	}
 	origin := getenv("DONOR_PUBLIC_ORIGIN")
-	if payments.ValidateOrigin(origin) != nil {
-		return nil, configError("DONOR_PUBLIC_ORIGIN must be the public HTTPS origin used in email links")
+	if err := payments.ValidateOrigin(origin); err != nil {
+		return nil, configError("DONOR_PUBLIC_ORIGIN, the origin of email links, " + err.Error())
 	}
 	transport := mail.SMTPTransport{Settings: *settings}
 	var worker deliverer
