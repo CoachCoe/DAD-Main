@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # `config` renders the production nginx service in both modes and runs `nginx -t`;
-# `smoke` runs it in front of a stub web service and checks its behaviour over HTTP.
-# Both use docker-compose.prod.yml itself, under a throwaway project, certificate, and env.
+# `smoke` runs it in front of a stub web service and checks its behaviour over HTTP;
+# `web IMAGE` runs it in front of a web image built for https://public.test and
+# https://staff.test, with no API. All use docker-compose.prod.yml itself, under a
+# throwaway project, certificate, and env.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-usage() { printf '%s\n' 'Usage: scripts/check-ingress.sh {config|smoke}'; }
+usage() { printf '%s\n' 'Usage: scripts/check-ingress.sh {config|smoke|web IMAGE}'; }
 case "${1:-config}" in
   config | smoke) command="${1:-config}" ;;
+  web) [[ -n "${2:-}" ]] || { usage >&2; exit 2; }; command=web web_image="$2" ;;
   -h | --help) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -54,6 +57,23 @@ networks:
         - subnet: fd42:dad:c4ec::/64
 EOF
 files+=(-f "$work/check.yml")
+failures=0
+check() {
+  if [[ "$3" == "$2" ]]; then
+    printf 'ok    %s\n' "$1"
+  else
+    printf 'FAIL  %s: expected %q, got %q\n' "$1" "$2" "$3"
+    failures=$((failures + 1))
+  fi
+}
+header() { awk -v name="$1" -F': ' 'tolower($1) == name { print $2 }' <<< "$2"; }
+finish() {
+  if ((failures)); then
+    printf '%d ingress check(s) failed.\n' "$failures" >&2
+    exit 1
+  fi
+  printf 'All ingress checks passed.\n'
+}
 
 if [[ "$command" == config ]]; then
   for mode in cloudflare direct; do
@@ -69,6 +89,42 @@ if [[ "$command" == config ]]; then
   fi
   printf 'unknown INGRESS_MODE rejected: ok\n'
   exit 0
+fi
+
+if [[ "$command" == web ]]; then
+  cat > "$work/web.yml" <<EOF
+services:
+  web:
+    image: $web_image
+    build: !reset null
+    depends_on: !reset {}
+    networks: !override [edge]
+    healthcheck:
+      interval: 1s
+  nginx:
+    ports: !reset []
+    healthcheck:
+      interval: 1s
+EOF
+  files+=(-f "$work/web.yml")
+  if ! INGRESS_MODE=direct compose up -d --wait nginx >/dev/null 2>&1; then
+    compose logs web nginx >&2
+    exit 1
+  fi
+  fetch() { compose exec -T nginx curl -sS -k --connect-to :443:127.0.0.1:8443 "$@"; }
+  headers() { fetch -o /dev/null -D - "$1" | tr -d '\r'; }
+  page() { local h; h="$(headers "$1")"; printf '%s %s' "$(awk 'NR == 1 { print $2 }' <<< "$h")" "$(header content-type "$h")"; }
+  check 'public home page is HTML' '200 text/html; charset=utf-8' "$(page https://public.test/)"
+  check 'staff sign-in page is HTML' '200 text/html; charset=utf-8' "$(page https://staff.test/staff/sign-in)"
+  check 'public host hides the staff sign-in page' 404 "$(page https://public.test/staff/sign-in | cut -d' ' -f1)"
+  check 'staff host hides public pages' 404 "$(page https://staff.test/how-it-works | cut -d' ' -f1)"
+  check 'staff host sends / to the back office' https://staff.test/staff \
+    "$(header location "$(headers https://staff.test/)")"
+  check 'staff robots.txt disallows everything' 'Disallow: /' "$(fetch https://staff.test/robots.txt | tail -1)"
+  check 'staff page carries one X-Robots-Tag' 'noindex, nofollow' \
+    "$(header x-robots-tag "$(headers https://staff.test/staff/sign-in)")"
+  finish
+  exit
 fi
 
 # Smoke: a stub replaces the web service and echoes what nginx forwarded. "Cloudflare"
@@ -124,21 +180,11 @@ services:
 EOF
 files+=(-f "$work/stub.yml")
 
-failures=0
-check() {
-  if [[ "$3" == "$2" ]]; then
-    printf 'ok    %s\n' "$1"
-  else
-    printf 'FAIL  %s: expected %q, got %q\n' "$1" "$2" "$3"
-    failures=$((failures + 1))
-  fi
-}
 # Requests come from the stub, a peer outside the trusted ranges.
 client() { compose exec -T web curl -sS -k --http1.1 --connect-to :443:nginx:8443 --connect-to :80:nginx:8080 "${family:--4}" "$@"; }
 status() { client -o /dev/null -w '%{http_code}' "$@" 2>/dev/null || true; }
 exit_code() { client -o /dev/null "$@" 2>/dev/null && echo 0 || echo "$?"; }
 field() { sed -n "s/^$1=//p" <<< "$2"; }
-header() { awk -v name="$1" -F': ' 'tolower($1) == name { print $2 }' <<< "$2"; }
 spoof=(-H 'X-Real-IP: 203.0.113.9' -H 'X-Forwarded-For: 203.0.113.9' -H 'CF-Connecting-IP: 203.0.113.9')
 counts() { client -w '%{http_code}\n' "$@" | sort | uniq -c | awk '{printf "%s:%s ", $2, $1}'; }
 repeat() { local i; urls=(); for ((i = 0; i < $2; i++)); do urls+=(-o /dev/null "$1"); done; }
@@ -237,8 +283,4 @@ codes="$(docker run --rm --network "${project}_edge" --ip 172.31.243.200 -v "$wo
 check 'IPv6 clients share limits per /64' \
   "$(printf '200 %.0s' {1..21})429 200 $(printf '200 %.0s' {1..21})429 200 " "$codes"
 
-if ((failures)); then
-  printf '%d ingress check(s) failed.\n' "$failures" >&2
-  exit 1
-fi
-printf 'All ingress checks passed.\n'
+finish

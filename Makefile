@@ -7,7 +7,7 @@ LOAD_API ?= http://127.0.0.1:8002
 LOAD_MIX ?=
 LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -client-ips
 
-.PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
+.PHONY: install db-up migrate api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 
 install:
 	cd apps/donor-api && go mod download
@@ -65,6 +65,13 @@ check-ingress:
 
 smoke-ingress:
 	./scripts/check-ingress.sh smoke
+
+# The web image is built for the ingress check's hosts so it can be served through nginx.
+check-images:
+	docker build -f apps/donor-api/Dockerfile -t impactgraph/api:check .
+	docker build -f apps/web/Dockerfile -t impactgraph/web:check \
+		--build-arg DONOR_PUBLIC_ORIGIN=https://public.test --build-arg DONOR_STAFF_ORIGIN=https://staff.test .
+	./scripts/check-ingress.sh web impactgraph/web:check
 
 seed:
 	cd apps/donor-api && go run ./cmd/seed -database-url "$(SEED_DATABASE_URL)" -confirm "$(SEED_CONFIRM)" -donors "$(SEED_DONORS)" -fixture "$(LOAD_FIXTURE)"

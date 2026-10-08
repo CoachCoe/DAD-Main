@@ -73,8 +73,7 @@ jobs:
             .env.production.example > "$RUNNER_TEMP/ci.env"
           ENV_FILE="$RUNNER_TEMP/ci.env" docker compose --env-file "$RUNNER_TEMP/ci.env" \
             -f docker-compose.prod.yml --profile workers --profile maintenance config -q
-      - run: docker build -f apps/donor-api/Dockerfile -t impactgraph/api:ci .
-      - run: docker build -f apps/web/Dockerfile -t impactgraph/web:ci .
+      - run: make check-images
 
   browser:
     runs-on: ubuntu-latest
