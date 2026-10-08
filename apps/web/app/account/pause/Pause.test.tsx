@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { formatDate } from "@/lib/dates";
 import PausePage from "./Pause";
 
 const dates = { months: 2, starts_at: "2026-11-01T12:00:00Z", resumes_at: "2027-01-01T12:00:00Z" };
@@ -15,7 +16,7 @@ it("requires confirmation of the exact skipped and resumed renewal dates", async
   fireEvent.click(await screen.findByRole("button", { name: "Skip 2 renewals" }));
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("heading", { name: "Confirm your pause" })).toHaveFocus();
-  expect(screen.getByText(/Giving automatically resumes/)).toBeVisible();
+  expect(screen.getByText((_, node) => node?.tagName === "P" && node.textContent === `Giving automatically resumes ${formatDate(dates.resumes_at)}.`)).toBeVisible();
   expect(screen.getByText(/streak ends at the first skipped renewal/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Confirm pause" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Pause confirmed."));

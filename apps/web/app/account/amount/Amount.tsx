@@ -8,12 +8,12 @@ import { api, ApiError, unconfirmedMessage } from "@/lib/api";
 import { formatMoney, MAX_GIFT_MINOR, MIN_GIFT_MINOR, monthlyFraming, parseDollars } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
-import { formatDateTime } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 
 type Change = { request_id: string; amount_minor: number; previous_minor: number; effective_at: string; confirmed: boolean };
 type Options = { state: "unavailable" } | { state: "ready"; subscription_id: string; amount_minor: number; effective_at: string; change: Change | null };
 
-const confirmedCopy = (change: Change) => `Last amount change confirmed: ${formatMoney(change.amount_minor)}/month from ${formatDateTime(change.effective_at)}.`;
+const confirmedCopy = (change: Change) => `Last amount change confirmed: ${formatMoney(change.amount_minor)}/month from ${formatDate(change.effective_at)}.`;
 
 export default function Amount() {
   const [amount, setAmount] = useState("30");
@@ -73,7 +73,7 @@ export default function Amount() {
         {data.change?.confirmed && !message && <p>{confirmedCopy(data.change)}</p>}
         {confirmation ? <div className="callout">
           <h2 ref={step.heading} tabIndex={-1}>Confirm new monthly amount</h2>
-          <p>{formatMoney(confirmation.previous_minor)}/month → {formatMoney(confirmation.amount_minor)}/month, starting {formatDateTime(confirmation.effective_at)}.</p>
+          <p>{formatMoney(confirmation.previous_minor)}/month → {formatMoney(confirmation.amount_minor)}/month, starting {formatDate(confirmation.effective_at)}.</p>
           <p>Past gifts and outstanding invoices keep their original amounts. Your streak continues with successful monthly charges.</p>
           <div className="actions">
             <button type="button" className="button" disabled={busy} onClick={save}>{busy ? "Checking change…" : "Confirm amount change"}</button>

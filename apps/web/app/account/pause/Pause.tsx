@@ -8,7 +8,7 @@ import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, ApiError, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
-import { formatDateTime } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 
 type Dates = { months: number; starts_at: string; resumes_at: string };
 type Pause = Dates & { request_id: string; confirmed: boolean };
@@ -52,7 +52,7 @@ export default function PauseGiving() {
     {signedOut || resource.state === "signedOut" ? <SignInPrompt>Sign in to manage your giving</SignInPrompt> : <>
       {data?.pause ? <div className="callout">
         {!message && <p>{data.pause.confirmed ? "Pause confirmed." : "Pause not yet confirmed."}</p>}
-        <p>Original pause starts {formatDateTime(data.pause.starts_at)}. Giving automatically resumes {formatDateTime(data.pause.resumes_at)}.</p>
+        <p>Original pause starts {formatDate(data.pause.starts_at)}. Giving automatically resumes {formatDate(data.pause.resumes_at)}.</p>
         {!data.pause.confirmed && <button type="button" className="button" disabled={busy} onClick={() => data.pause && confirm(data.pause)}>Retry saved pause</button>}
         <p><Link href="/account/resume">Resume at next renewal</Link></p>
       </div> : data && data.options.length === 0 ? <p>Pausing isn’t available for your monthly giving right now.
@@ -65,8 +65,8 @@ export default function PauseGiving() {
           </button>)}</div>
         </> : <div className="callout">
           <h2 ref={step.heading} tabIndex={-1}>Confirm your pause</h2>
-          <p>Skip {renewals(choice.months)}, starting <time dateTime={choice.starts_at}>{formatDateTime(choice.starts_at)}</time>.</p>
-          <p>Giving automatically resumes <time dateTime={choice.resumes_at}>{formatDateTime(choice.resumes_at)}</time>.</p>
+          <p>Skip {renewals(choice.months)}, starting <time dateTime={choice.starts_at}>{formatDate(choice.starts_at)}</time>.</p>
+          <p>Giving automatically resumes <time dateTime={choice.resumes_at}>{formatDate(choice.resumes_at)}</time>.</p>
           <div className="actions">
             <button type="button" className="button" disabled={busy} onClick={() => confirm(choice)}>{busy ? "Checking pause…" : "Confirm pause"}</button>
             <button type="button" className="secondary" disabled={busy || requestKey !== null} onClick={() => setChoice(null)}>Back</button>
