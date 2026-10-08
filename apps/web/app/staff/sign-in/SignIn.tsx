@@ -1,34 +1,46 @@
 "use client";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { classifyFailure, OFFLINE_MESSAGE, RATE_LIMITED_MESSAGE, api } from "@/lib/api";
+import { ApiError, api, classifyFailure, failureMessage } from "@/lib/api";
+import { type Ceremony, choosePasskey, passkeyFailure, passkeysSupported, UNSUPPORTED_MESSAGE } from "@/lib/passkeys";
+
+const unchanging = () => () => {};
+
+function explain(cause: unknown): string {
+  switch (passkeyFailure(cause)) {
+    case "cancelled": return "Sign-in was cancelled or timed out. Choose “Sign in with a passkey” to try again.";
+    case "unsupported": return UNSUPPORTED_MESSAGE;
+    case "refused": return "Your browser refused the passkey request. Make sure you opened the staff sign-in page directly, then try again.";
+  }
+  if (cause instanceof ApiError && cause.status === 401) {
+    return "That passkey wasn’t accepted. Use the passkey you created for DAD staff, or ask an administrator for a recovery invitation.";
+  }
+  return ["offline", "rateLimited", "unconfigured"].includes(classifyFailure(cause))
+    ? failureMessage(cause, "") : "Sign-in could not be completed right now. Please try again.";
+}
 
 export default function SignIn() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [code, setCode] = useState("");
+  // The server cannot know the browser, so it renders as supported and the client corrects it.
+  const supported = useSyncExternalStore(unchanging, passkeysSupported, () => true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function submit(event: React.FormEvent) {
-    event.preventDefault(); if (busy) return;
+  async function signIn() {
+    if (busy) return;
     setBusy(true); setError("");
-    try { await api("/donor/staff/sign-in", { method: "POST", body: JSON.stringify({ email, password, code }) }); window.location.assign("/staff"); }
-    catch (cause) {
-      const failure = classifyFailure(cause);
-      setError(failure === "offline" ? OFFLINE_MESSAGE : failure === "rateLimited" ? `${RATE_LIMITED_MESSAGE} After five failed attempts, wait 15 minutes.`
-        : "Sign-in was not confirmed. Check your credentials and use a fresh authenticator code. After five failed attempts, wait 15 minutes.");
-    }
-    finally { setBusy(false); setCode(""); setPassword(""); }
+    try {
+      const { ceremony, options } = await api<Ceremony<PublicKeyCredentialRequestOptionsJSON>>("/donor/staff/sign-in/options", { method: "POST" });
+      const credential = await choosePasskey(options);
+      await api("/donor/staff/sign-in", { method: "POST", body: JSON.stringify({ ceremony, credential }) });
+      window.location.assign("/staff");
+    } catch (cause) { setError(explain(cause)); setBusy(false); }
   }
   return <Page eyebrow="Staff" title="DAD staff sign-in">
-    <p>Individual staff access requires a password and an authenticator code. Donor accounts do not grant staff access.</p>
-    <form onSubmit={submit}><fieldset disabled={busy}><legend>Staff credentials</legend>
-      <label>Email<input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
-      <label>Password<input type="password" autoComplete="current-password" maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
-      <label>Authenticator code<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" value={code} onChange={(event) => setCode(event.target.value)} required /></label>
-      <button type="submit" className="button">{busy ? "Checking…" : "Sign in"}</button>
-    </fieldset></form>
-    <Announcer status={busy ? "Checking…" : ""} alert={error} />
+    <p>Sign in with the passkey you created when you activated your staff account. Your device or password manager will ask you to confirm it’s you with your fingerprint, face, screen lock, or security key.</p>
+    {supported
+      ? <button type="button" className="button" disabled={busy} onClick={signIn}>{busy ? "Waiting for your passkey…" : "Sign in with a passkey"}</button>
+      : <p className="callout">{UNSUPPORTED_MESSAGE}</p>}
+    <p>Lost your passkey? Ask a DAD administrator for a recovery invitation. Donor accounts do not grant staff access.</p>
+    <Announcer status={busy ? "Waiting for your passkey…" : ""} alert={error} />
   </Page>;
 }

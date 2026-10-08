@@ -52,8 +52,8 @@ export default function Staff({ q }: { q: string | null }) {
       {manages && <section><h2>Staff access</h2>
         {accounts && <ul>{accounts.map((account) => <li key={account.id}>{account.name} · {account.email} · {account.role} · {account.disabled ? "Disabled" : account.active ? "Active" : "Invited"}
           {account.id !== actor.id && <>
-            <details><summary>Replace credentials or invitation</summary>
-              <p>This revokes existing sessions and invitations. The staff member must choose a new password and authenticator. Disabled accounts are restored only after completing setup.</p>
+            <details><summary>Replace passkeys or invitation</summary>
+              <p>This removes the staff member’s passkeys and revokes their sessions and invitations. They sign in again only after creating a new passkey from the replacement invitation, which also restores a disabled account.</p>
               <button type="button" className="secondary danger" disabled={busy} onClick={() => action(async () => { const result = await api<{ invitation_url: string }>(`/donor/staff/accounts/${account.id}/recovery`, { method: "POST" }); setInvitation(result.invitation_url); reloadAccounts(); })}>Confirm replacement invitation</button>
             </details>
             <details><summary>Change role</summary>
