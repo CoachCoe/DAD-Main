@@ -13,7 +13,11 @@ Origin headers and passkey client data are compared with them byte for byte. The
 there, marked noindex, and none of it on the public host. The staff cookie is host-only
 (`__Host-dad_staff_session` over HTTPS), so it never reaches the public site, and a page
 on either host cannot pass the other's Origin check. The staff host is the passkey
-relying party: passkeys are bound to it and are useless to any other site.
+relying party: passkeys are bound to it and are useless to any other site. The two
+hosts are the same site, so SameSite=Strict alone would still send the staff cookie with
+a link followed from the public host; staff routes therefore also refuse any request whose
+`Sec-Fetch-Site` is present and neither `same-origin` nor `none`, which covers reads with
+effects such as audited export downloads. The web proxy forwards that header to the API.
 
 Staff sign-in is usernameless. The browser offers a discoverable passkey for the staff
 host, so there is no email field, no account enumeration, and no password to guess or

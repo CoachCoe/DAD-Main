@@ -88,3 +88,36 @@ func TestStaffInvitationsLinkToTheStaffHost(t *testing.T) {
 		}
 	}
 }
+
+// The public host is the same site as the staff host, so its links carry the
+// SameSite=Strict staff cookie; the browser's Sec-Fetch-Site still tells them
+// apart from the back office's own requests.
+func TestStaffRoutesRefuseRequestsStartedOnAnotherHost(t *testing.T) {
+	server := NewServer("", Services{Origin: testPublicOrigin, StaffOrigin: testStaffOrigin})
+	send := func(pattern, site string) int {
+		r := routeRequest(pattern, "{}")
+		r.Header.Set("Origin", testStaffOrigin)
+		r.Header.Set("Sec-Fetch-Site", site)
+		r.AddCookie(&http.Cookie{Name: staffCookie, Value: "session"})
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, r)
+		return response.Code
+	}
+	for _, route := range allRoutes() {
+		if !staffPath(route.pattern) {
+			continue
+		}
+		for _, site := range []string{"same-site", "cross-site"} {
+			if code := send(route.pattern, site); code != http.StatusForbidden {
+				t.Errorf("%s from a %s page: got %d, want 403", route.pattern, site, code)
+			}
+		}
+	}
+	for _, pattern := range []string{"GET /donor/staff/exports/{file}", "POST /donor/staff/sign-in/options"} {
+		for _, site := range []string{"same-origin", "none", ""} {
+			if code := send(pattern, site); code == http.StatusForbidden {
+				t.Errorf("%s with Sec-Fetch-Site %q refused", pattern, site)
+			}
+		}
+	}
+}

@@ -4262,7 +4262,7 @@
         }
       },
       "Forbidden": {
-        "description": "Browser requests: Origin is not the configured site origin. App requests: the route does not admit the app, or the request also carried Origin or cookies. Some routes also use 403 for a permission or account restriction.",
+        "description": "Browser requests: Origin is not the configured site origin, or, on staff routes, Sec-Fetch-Site is present and neither same-origin nor none. App requests: the route does not admit the app, or the request also carried Origin or cookies. Some routes also use 403 for a permission or account restriction.",
         "content": {
           "application/json": {
             "schema": {
