@@ -91,12 +91,13 @@ Tests must never run against the application database.
 ```sh
 docker run -d --name impactgraph-go-test-postgres -p 127.0.0.1:55440:5432 \
   -e POSTGRES_USER=go_test -e POSTGRES_PASSWORD=go_test -e POSTGRES_DB=donor_go \
-  postgres:16-alpine
+  postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
 # Wait for: docker exec impactgraph-go-test-postgres pg_isready -U go_test -d donor_go
 export TEST_DATABASE_URL=postgresql://go_test:go_test@localhost:55440/donor_go
 (cd apps/donor-api && DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/migrate)
 make test
 make lint
+make check-ingress smoke-ingress check-images
 (cd apps/web && npx playwright install chromium)
 make test-browser-e2e
 ```
@@ -113,11 +114,15 @@ with `cmd/staff`, so point `DONOR_GO_DATABASE_URL` at a synthetic database.
 unit tests, generated route types, TypeScript, and the production build. Browser tests
 start a local Go API and Next server. Use a synthetic application database and no live
 SMTP settings for those tests. `make lint` runs staticcheck, govulncheck, `npm audit`, and
-shellcheck when installed. CI runs all of these with PostgreSQL and Chromium, and also
-validates the production Compose file and builds both images. CI runs browser tests in
-both development and production modes. `npm start` serves the standalone build and copies
-its static assets first, matching the container's server. For a local production preview,
-run `HOSTNAME=127.0.0.1 PORT=3000 npm start` from `apps/web` after building.
+shellcheck when installed. `make check-ingress` runs `nginx -t` on the production ingress
+in both modes; `make smoke-ingress` checks its hosts, client addresses, body sizes, and
+rate limits in front of a stub web service; `make check-images` builds both production
+images and serves the web image through nginx. CI runs all of these through the same
+`make` targets, with PostgreSQL and Chromium, and also validates the production Compose
+file. CI runs browser tests in both development and production modes. `npm start` serves
+the standalone build and copies its static assets first, matching the container's server.
+For a local production preview, run `HOSTNAME=127.0.0.1 PORT=3000 npm start` from
+`apps/web` after building.
 
 SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc; commit SQL and its
 generated Go query code together. `make check-generated` fails if they have drifted.

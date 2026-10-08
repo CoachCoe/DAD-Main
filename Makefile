@@ -1,5 +1,6 @@
 STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
+SQLC := sqlc/sqlc:1.31.1@sha256:70f53171d27b2424e9358869975455a6e955a5aa8e58a998a270a6e34e525537
 
 # Load testing against a disposable, seeded deployment; see docs/operations.md.
 SEED_DONORS ?= 50000
@@ -32,7 +33,7 @@ worker:
 	cd apps/donor-api && go run ./cmd/worker --kind "$(KIND)"
 
 generate:
-	docker run --rm -v "$(CURDIR)/apps/donor-api:/src" -w /src sqlc/sqlc:1.31.1 generate
+	docker run --rm -v "$(CURDIR)/apps/donor-api:/src" -w /src $(SQLC) generate
 
 check-generated: generate
 	@test -z "$$(git status --porcelain -- apps/donor-api/internal/store/queries)" || \
@@ -58,7 +59,7 @@ lint-web:
 	cd apps/web && npm audit --omit=dev --audit-level=high
 
 lint-scripts:
-	@if command -v shellcheck >/dev/null; then shellcheck scripts/*.sh deploy/nginx/*.envsh; else echo "shellcheck not installed; skipping script lint" >&2; fi
+	@if command -v shellcheck >/dev/null || [ -n "$$CI" ]; then shellcheck scripts/*.sh deploy/nginx/*.envsh; else echo "shellcheck not installed; skipping script lint" >&2; fi
 
 check-ingress:
 	./scripts/check-ingress.sh config
