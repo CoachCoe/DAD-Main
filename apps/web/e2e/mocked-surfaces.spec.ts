@@ -128,6 +128,8 @@ test("a donor record has its own accessible page and Back returns to the search"
   await expect(page.getByRole("heading", { level: 1, name: "pat.donor@example.org" })).toBeVisible();
   await expect(page.getByText("Donor asked for a partial refund", { exact: false })).toBeVisible();
   await expect(page.getByRole("link", { name: "Refund gift" })).toBeVisible();
+  await expect(page.getByText(/^Monthly gift: \$30\.00\/month · Active · Next renewal [A-Z][a-z]{2} \d{1,2}, \d{4} ·/)).toBeVisible();
+  await expect(page.locator("p.note").filter({ hasText: /^Last updated from Stripe / })).toBeVisible();
   await expectAccessible(page);
   await page.getByRole("button", { name: "Older actions" }).click();
   await expect(page.getByText("No refunds or cancellations recorded.")).toBeVisible();

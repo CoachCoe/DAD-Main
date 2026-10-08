@@ -39,6 +39,54 @@ for (const [path, fixture] of Object.entries(profiles)) {
   });
 }
 
+const subscription = { id: "6f1c2b9e-0d7a-4e55-9b0c-1a2b3c4d5e6f", amount_minor: 3000, currency: "USD", status: "active",
+  period_end: "2026-11-01T14:00:00Z", resumes_at: null, stops_at: null };
+const recurring = {
+  active: { subscription, text: /^Next renewal: Nov 1, 2026\.$/, links: ["Update payment method", "Pause monthly giving", "Change monthly amount"] },
+  paused: { subscription: { ...subscription, resumes_at: "2027-01-01T14:00:00Z" }, text: /^Your monthly gift is paused\. Giving resumes Jan 1, 2027\.$/,
+    links: ["Update payment method", "Resume at next renewal"] },
+  ending: { subscription: { ...subscription, stops_at: subscription.period_end },
+    text: /^Renewals cancelled\. Your last monthly gift period ends Nov 1, 2026; no further gifts will be charged\.$/, links: ["Update payment method"] },
+};
+
+for (const [name, fixture] of Object.entries(recurring)) {
+  test(`monthly giving describes a ${name} gift accessibly`, async ({ page }) => {
+    await page.route("**/api/donor/me/recurring", (route) => route.fulfill({ json: {
+      mode: "test", state: "ready", observed_at: "2026-10-07T13:42:00Z", subscription: fixture.subscription } }));
+    await page.goto("/account/recurring");
+    await expect(page.getByText(fixture.text)).toBeVisible();
+    await expect(page.getByText(/^Billing details last updated from Stripe /)).toBeVisible();
+    const nav = page.getByRole("navigation", { name: "Manage monthly giving" });
+    await expect(nav.getByRole("link")).toHaveText(fixture.links);
+    const cancel = page.getByRole("button", { name: "Cancel monthly giving" });
+    if (name === "ending") await expect(cancel).toHaveCount(0);
+    else {
+      const linkBox = await nav.getByRole("link").first().boundingBox();
+      const textBox = await cancel.evaluate((button) => {
+        const range = document.createRange();
+        range.selectNodeContents(button);
+        return range.getBoundingClientRect().left;
+      });
+      expect(Math.abs((linkBox?.x ?? 0) - textBox)).toBeLessThan(1);
+    }
+    const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+    expect(results.violations).toEqual([]);
+  });
+}
+
+test("a new monthly gift shows its confirmation first and the sandbox note last", async ({ page }) => {
+  await page.route("**/api/donor/me/recurring", (route) => route.fulfill({ json: { mode: "test", state: "preparing", subscription: null } }));
+  await page.goto("/account/recurring");
+  const callout = page.locator(".callout").filter({ hasText: "We’re confirming your new monthly gift with Stripe." });
+  await expect(callout).toBeVisible();
+  await expect(callout.getByRole("button", { name: "Refresh billing details" })).toBeVisible();
+  await expect(page.getByRole("main").getByRole("status")).toHaveText("We’re confirming your new monthly gift with Stripe. This usually takes a few seconds.");
+  const order = await page.locator(".callout, .note").evaluateAll((nodes) => nodes.map((node) => node.className));
+  expect(order).toEqual(["callout", "note"]);
+  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect(results.violations).toEqual([]);
+});
+
 test("dashboard explains partial data and recovers from a connection failure", async ({ page }) => {
   let available = false;
   await page.route("**/api/donor/me/dashboard", (route) => available
