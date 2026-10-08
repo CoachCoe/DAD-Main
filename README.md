@@ -136,8 +136,9 @@ representative data, authenticated dashboards, and the intended deployment befor
 
 ## Containers and deployment
 
-See [operations](docs/operations.md). Docker images run as non-root users; Compose binds
-web and API ports to loopback for a separately managed HTTPS ingress. No command
+See [operations](docs/operations.md) and [edge and ingress](docs/edge.md). Docker images
+run as non-root users. Only nginx publishes ports: it terminates HTTPS in front of the web
+service, behind Cloudflare or on its own, and the API binds to loopback. No command
 enables workers or deletes database volumes implicitly. Test-only readiness is not approval to solicit live donations.
 
 ## Layout
@@ -147,6 +148,7 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 - `apps/donor-api/db`: versioned SQL migrations and sqlc queries.
 - `apps/donor-api/api`: the OpenAPI contract for web and native clients, checked by tests.
 - `apps/web`: public website, donor account, staff interface, browser and unit tests.
+- `deploy/nginx`: the production ingress configuration.
 - `docs`: product rules, architecture, operations, and security guidance.
 
 [Contributing](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [MIT license](LICENSE)

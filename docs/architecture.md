@@ -12,7 +12,8 @@ Browser → Next.js /api/donor/* → Go HTTP API → PostgreSQL
                                           SMTP with STARTTLS
 ```
 
-The browser uses the same origin for API requests. The Go service owns authorization,
+The browser uses the same origin for API requests. In production it reaches Next.js
+through Cloudflare and an nginx ingress ([edge](edge.md)). The Go service owns authorization,
 validation, CSRF checks, and business rules. The Next proxy cannot grant permissions.
 Donor and staff cookies identify distinct server-side sessions. Staff require individual
 passwords and MFA; roles map to named permissions checked against current database state.

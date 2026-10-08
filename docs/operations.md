@@ -12,8 +12,9 @@ unreadable. No automatic key-rotation or backup service is included.
 
 ```sh
 cp .env.production.example .env.production
-# Fill in IMAGE_TAG (for example the git commit), database settings, the public HTTPS
-# origin, and required test-mode secrets. Keep the previous IMAGE_TAG for rollback.
+# Fill in IMAGE_TAG (for example the git commit), database settings, the public and staff
+# HTTPS origins, the ingress mode and certificate directory, and required test-mode
+# secrets. Keep the previous IMAGE_TAG for rollback.
 ./scripts/deploy.sh build
 ./scripts/deploy.sh migrate
 ./scripts/deploy.sh up
@@ -27,13 +28,14 @@ the baseline checksum, and preserves data. Stop all older API/worker processes b
 adoption; never run two versions of financial writers. Unsupported or divergent schemas
 require a reviewed migration, not a forced baseline stamp.
 
-`up` starts the API and web service, not workers. Set `DONOR_GO_WORKERS_ENABLED=true`
+`up` starts the API, web service, and nginx, not workers. Set `DONOR_GO_WORKERS_ENABLED=true`
 only when ready to process test payments and deliver configured email, then run
 `./scripts/deploy.sh workers`; the script refuses while the flag is unset. `down` stops
 services without deleting database volumes. `logs` follows service logs. No command
 pushes images or activates live donations. `ENV_FILE` may be relative to the current
 directory. The web container runs with a read-only filesystem and tmpfs mounts for
-`/tmp` and `/app/.next/cache`.
+`/tmp` and `/app/.next/cache`. `reload-ingress` makes nginx reread its certificates and
+Cloudflare ranges without dropping connections.
 
 The API refuses to start with only one of `STRIPE_SECRET_KEY` and
 `STRIPE_WEBHOOK_SECRET`, with a malformed encryption key, or with a trusted proxy range
@@ -41,28 +43,29 @@ broader than an IPv4 /8 or IPv6 /32. It logs which optional features are disable
 Workers that hit a database or provider failure log the error type and retry with
 exponential backoff up to one minute; persistent failures show up as queue age.
 
-Terminate TLS at a controlled ingress, restrict API access, set the exact
-`DONOR_PUBLIC_ORIGIN`, and route browsers through the web service. Compose exposes ports
-only on loopback. Configure trusted client abuse limits at ingress; the API's local
-rate limiter alone is not a distributed public-release defense. Never trust an arbitrary
-client-supplied forwarding header. Configure database TLS for remote database connections.
+Browsers reach the app only through nginx, which publishes ports 80 and 443, terminates
+TLS, separates the public and staff hosts, and applies per-client limits. In production it
+runs behind Cloudflare, which absorbs attacks, applies distributed limits, and caches
+static pages; it also runs without Cloudflare. [Edge and ingress](edge.md) covers modes,
+certificates, the Cloudflare configuration, and the limits at each layer. The web service
+publishes no host port and the API binds to loopback. Set the exact `DONOR_PUBLIC_ORIGIN`
+and `DONOR_STAFF_ORIGIN`. Configure database TLS for remote database connections.
 
-Rate limits are per visitor. Production Compose gives the web service the fixed
-address `172.30.42.10` on the `172.30.42.0/24` network, sets the API's
-`DONOR_TRUSTED_PROXY_CIDRS` to that address, and defaults the web service's
-`DONOR_CLIENT_IP_HEADER` to `X-Real-IP`. The host ingress **must** overwrite `X-Real-IP`
-with the connecting client's address on every request; otherwise clients could choose
-their own identity. Setting `DONOR_CLIENT_IP_HEADER` empty makes all visitors share the
-proxy's quota. Edit the Compose network if that range clashes on the host. Block direct
-browser access around the ingress; the API trusts `X-Real-IP` only from listed peers.
+Rate limits are per visitor. nginx overwrites `X-Real-IP` with the client address on every
+request (behind Cloudflare, from `CF-Connecting-IP` sent by Cloudflare's ranges only) and
+drops other forwarding headers. Production Compose gives the web service the fixed address
+`172.30.42.10` on the `172.30.42.0/24` network, sets the API's `DONOR_TRUSTED_PROXY_CIDRS`
+to that address, and defaults the web service's `DONOR_CLIENT_IP_HEADER` to `X-Real-IP`.
+Setting `DONOR_CLIENT_IP_HEADER` empty makes all visitors share the proxy's quota. Edit
+the Compose network if that range clashes on the host.
 
 The in-process limiter keeps a token bucket per client (IPv6 clients per /64) and per
 class, so a burst on one surface cannot starve another for visitors sharing an address:
 sign-in and claim links 10 per minute, giving, referral capture, and partner signup 60,
 other donor actions 30, and staff actions 60. Rejections carry an exact `Retry-After`.
 It tracks at most 65,536 buckets and evicts an existing bucket rather than refusing new
-clients when full. Capacity and distributed limits must still be validated against the
-agreed launch spike.
+clients when full. It is the per-instance last line behind the nginx and Cloudflare
+limits. Capacity must still be validated against the agreed launch spike.
 
 `/health/live` checks process availability. `/health/ready` checks the migration history
 through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is intentionally
@@ -85,8 +88,9 @@ API version `2026-09-30.endive`. Subscribe to:
 - `checkout.session.completed` and `checkout.session.expired`.
 - `customer.subscription.updated` and `customer.subscription.deleted`.
 
-Configure `/api/donor/stripe/webhook` through the web origin, or the Go route
-`/donor/stripe/webhook` behind controlled ingress. Verify signatures over original bytes.
+Point the endpoint at `/api/donor/stripe/webhook` on the public origin. nginx exempts it
+from per-client limits and caps bodies at 256 KiB; Cloudflare must skip its bot and rate
+rules for it ([edge](edge.md#waf)). Verify signatures over original bytes.
 Live events, Connect events, and mismatched API versions are rejected. No card details
 belong in DAD requests, storage, logs, or support tools.
 

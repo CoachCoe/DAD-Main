@@ -21,8 +21,9 @@ app (sign-in, claim, email-change confirmation, sign-out, `/donor/me/*`); giving
 referral capture, partner signup, and all staff routes stay browser-only, and staff
 sessions are never accepted as bearer tokens. The app must keep its token in the
 platform keychain/keystore. The Next proxy does not forward `Authorization` or
-`X-DAD-Client`, so the app calls the API host directly; that ingress must be listed in
-`DONOR_TRUSTED_PROXY_CIDRS` and set `X-Real-IP`.
+`X-DAD-Client`, so the app calls the API host directly. The bundled nginx serves only the
+web hosts; an API host needs its own ingress, listed in `DONOR_TRUSTED_PROXY_CIDRS`, that
+overwrites `X-Real-IP`.
 
 Named permissions are checked server-side against current staff state. Ownership comes
 from the session and database, never an email or customer ID supplied by the browser.
@@ -31,8 +32,18 @@ Staff recovery/role changes revoke sessions and preserve the last active adminis
 
 Browser mutations require the configured exact Origin. Requests, pages, uploads,
 exports, password verification concurrency, and provider calls have bounded sizes or
-timeouts. Local abuse limits are not a substitute for controlled, distributed ingress
-limits. The Next proxy exposes only `/donor/*`; it is not an arbitrary HTTP proxy.
+timeouts. The Next proxy exposes only `/donor/*`; it is not an arbitrary HTTP proxy.
+
+Browsers reach the web service only through nginx ([edge](edge.md)). It accepts TLS 1.2
+and 1.3 for the configured public and staff hosts only, serves back-office paths only on
+the staff host and donor paths only on the public host, and marks the staff host
+`noindex`. It sets `X-Real-IP` to the client address on every request and drops other
+client-chosen address headers; behind Cloudflare it takes the address from
+`CF-Connecting-IP` only from Cloudflare's published ranges and serves only connections
+with an Authenticated Origin Pulls certificate. Rate limits are layered: Cloudflare's
+distributed rules, nginx's per-client limits, and the API's per-instance buckets. Access
+logs record method, path, status, and timing, never query strings, cookies, or referral
+codes; nginx's error log can include a request line, so treat it as sensitive.
 
 Stripe handles all card entry. Signed webhooks are verified before persistence; only
 allowlisted event fields are stored. Retryable commands are recorded before provider
@@ -58,6 +69,7 @@ anchor rather than client routing. User content must never be inserted as
 raw HTML. Account tokens use fragments removed before network requests.
 
 Release still needs verified legal/entity details, approved retention and incident
-procedures, managed secret storage, backup/restore evidence, trusted ingress protection,
+procedures, managed secret storage, backup/restore evidence, the Cloudflare edge
+configuration and origin firewall,
 provider acceptance, and security/accessibility review. This document describes controls
 implemented in code, not a claim of independent certification or production readiness.
