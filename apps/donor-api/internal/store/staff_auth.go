@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
@@ -296,6 +297,10 @@ func (s *StaffService) Activate(ctx context.Context, ceremony string, response [
 	return token, nil
 }
 
+// knownTransports are the transports a passkey may be stored with. The
+// browser reports them unchecked, and the column holds only short names.
+var knownTransports = []protocol.AuthenticatorTransport{protocol.USB, protocol.NFC, protocol.BLE, protocol.SmartCard, protocol.Hybrid, protocol.Internal}
+
 // register stores a verified new passkey and starts a session, or audits the
 // failure and returns no token when the attestation is rejected or its
 // credential is registered already.
@@ -318,9 +323,11 @@ func (s *StaffService) register(ctx context.Context, q *queries.Queries, user st
 	if err != nil {
 		return "", err
 	}
-	transports := make([]string, len(passkey.Transport))
-	for i, transport := range passkey.Transport {
-		transports[i] = string(transport)
+	transports := []string{}
+	for _, transport := range passkey.Transport {
+		if slices.Contains(knownTransports, transport) {
+			transports = append(transports, string(transport))
+		}
 	}
 	if err = q.InsertStaffPasskey(ctx, queries.InsertStaffPasskeyParams{ID: id, StaffID: user.staff.ID, CredentialID: passkey.ID, PublicKey: passkey.PublicKey,
 		SignCount: int64(passkey.Authenticator.SignCount), Transports: transports, Aaguid: passkey.Authenticator.AAGUID, AttestationFormat: passkey.AttestationFormat,
