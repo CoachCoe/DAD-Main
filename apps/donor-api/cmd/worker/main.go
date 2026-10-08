@@ -89,7 +89,15 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		if err != nil {
 			return nil, configError("STRIPE_SECRET_KEY must be a Stripe test-mode secret key")
 		}
-		return store.EventWorker{DB: pool, Gateway: gateway}.ProcessNext, nil
+		events := store.EventWorker{DB: pool, Gateway: gateway}
+		backfill := &store.AnchorBackfill{DB: pool, Gateway: gateway}
+		return func(ctx context.Context) (bool, error) {
+			worked, err := events.ProcessNext(ctx)
+			if worked || err != nil {
+				return worked, err
+			}
+			return backfill.SyncNext(ctx, time.Now().UTC())
+		}, nil
 	case "projections":
 		retention := &store.TouchRetention{DB: pool}
 		return func(ctx context.Context) (bool, error) {

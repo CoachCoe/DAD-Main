@@ -81,3 +81,12 @@ it("offers current dates after Stripe refuses ones shown from stored billing det
   expect(JSON.parse(fetch.mock.calls[3][1].body)).toEqual({ subscription_id: "owned", ...later });
   expect(fetch.mock.calls[3][1].headers["Idempotency-Key"]).not.toBe(fetch.mock.calls[1][1].headers["Idempotency-Key"]);
 });
+
+it("never claims there is no monthly gift when pausing is unavailable", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "unavailable", pause: null, options: [] })));
+  render(<PausePage />);
+  expect(await screen.findByText(/Pausing isn’t available for your monthly giving right now/)).toBeVisible();
+  expect(screen.getByRole("link", { name: "See its current status" })).toHaveAttribute("href", "/account/recurring");
+  expect(screen.queryByText(/no monthly gift/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Skip/ })).not.toBeInTheDocument();
+});

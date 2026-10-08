@@ -132,3 +132,11 @@ UPDATE donor_payment_updates SET stripe_session_id=$2,status=$3,hosted_url=$4,co
 
 -- name: RetryStripeEvent :execrows
 UPDATE donor_stripe_events SET attempts=0,last_error=NULL,available_at=now() WHERE stripe_event_id=$1 AND processed_at IS NULL;
+
+-- name: NextSubscriptionWithoutAnchor :one
+-- Subscriptions synced before the billing anchor was stored, in key order
+-- after the cursor. Ended ones need no anchor.
+SELECT a.id,a.checkout_id,a.stripe_subscription_id,s.donor_id FROM donor_subscriptions s
+JOIN donor_stripe_checkouts a ON a.id=s.attempt_id
+WHERE s.billing_anchor IS NULL AND s.status NOT IN ('canceled','incomplete_expired') AND a.id>sqlc.arg(after)::uuid
+ORDER BY a.id LIMIT 1;

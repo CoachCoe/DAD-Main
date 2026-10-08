@@ -136,7 +136,10 @@ belong in DAD requests, storage, logs, or support tools.
 The Stripe worker persists verified collection, refunds, and billing schedules.
 Checkout completion alone is not a gift. Incomplete or unsupported invoices remain
 unprocessed rather than becoming guessed financial facts. A single-item monthly USD
-subscription with a complete card payment is the supported billing model.
+subscription with a complete card payment is the supported billing model. Between
+events, the worker syncs any subscription stored without a billing anchor (one saved
+before migration 0009), one at a time and checking hourly; one that fails to sync is
+logged as a worker step failure and retried in the next hourly pass.
 
 Monitor the oldest unprocessed `donor_stripe_events`, attempt counts, and worker health.
 A failed event waits before its next attempt, doubling from one minute up to an hour,

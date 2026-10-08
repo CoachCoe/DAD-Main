@@ -68,11 +68,13 @@ together. Money is integer USD cents. Referral credit is one level only.
 Reads never call Stripe. The Stripe worker syncs a subscription's current state, including
 its billing anchor and whether Stripe holds a schedule or pending update, whenever an
 event about it arrives: each `customer.subscription.*` event it accepts, a completed
-checkout that binds it, and an invoice while an amount change is pending. Recurring
-views, card update status, and staff previews are served from that state with
-`observed_at`, the time of the sync. Only commands call Stripe, and each first syncs the subscription it
-acts on, committed on its own so that a command refused as out of date still leaves the
-next view current; none depends on a view having refreshed anything.
+checkout that binds it, and an invoice while an amount change is pending. When it has no
+events to process, it also syncs subscriptions stored before the billing anchor was kept,
+which offer no pause dates until then, checking for them hourly. Recurring views, card
+update status, and staff previews are served from that state with `observed_at`, the time
+of the sync. Of the API's requests only commands call Stripe, and each first syncs the
+subscription it acts on, committed on its own so that a command refused as out of date
+still leaves the next view current; none depends on a view having refreshed anything.
 
 Domain calculations in `internal/recognition` are independent of HTTP and Stripe. Queries in
 `db` generate the typed store layer with sqlc. Donor reads use indexed projections;

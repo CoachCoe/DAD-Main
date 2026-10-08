@@ -55,7 +55,8 @@ export default function PauseGiving() {
         <p>Original pause starts {formatDateTime(data.pause.starts_at)}. Giving automatically resumes {formatDateTime(data.pause.resumes_at)}.</p>
         {!data.pause.confirmed && <button type="button" className="button" disabled={busy} onClick={() => data.pause && confirm(data.pause)}>Retry saved pause</button>}
         <p><Link href="/account/resume">Resume at next renewal</Link></p>
-      </div> : data && data.options.length === 0 ? <p>No monthly gift is currently available to pause.</p> : data && <>
+      </div> : data && data.options.length === 0 ? <p>Pausing isn’t available for your monthly giving right now.
+        {" "}<Link href="/account/recurring">See its current status</Link>.</p> : data && <>
         {!choice ? <>
           <p className="lead">Skip up to three monthly renewals. You’ll see the exact resume date before you confirm.</p>
           <div className="actions">{data.options.map((option) => <button type="button" className="secondary" key={option.months}

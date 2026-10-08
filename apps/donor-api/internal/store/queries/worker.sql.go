@@ -561,6 +561,34 @@ func (q *Queries) NextStripeEvent(ctx context.Context) (DonorStripeEvent, error)
 	return i, err
 }
 
+const nextSubscriptionWithoutAnchor = `-- name: NextSubscriptionWithoutAnchor :one
+SELECT a.id,a.checkout_id,a.stripe_subscription_id,s.donor_id FROM donor_subscriptions s
+JOIN donor_stripe_checkouts a ON a.id=s.attempt_id
+WHERE s.billing_anchor IS NULL AND s.status NOT IN ('canceled','incomplete_expired') AND a.id>$1::uuid
+ORDER BY a.id LIMIT 1
+`
+
+type NextSubscriptionWithoutAnchorRow struct {
+	ID                   pgtype.UUID `json:"id"`
+	CheckoutID           pgtype.UUID `json:"checkout_id"`
+	StripeSubscriptionID pgtype.Text `json:"stripe_subscription_id"`
+	DonorID              pgtype.UUID `json:"donor_id"`
+}
+
+// Subscriptions synced before the billing anchor was stored, in key order
+// after the cursor. Ended ones need no anchor.
+func (q *Queries) NextSubscriptionWithoutAnchor(ctx context.Context, after pgtype.UUID) (NextSubscriptionWithoutAnchorRow, error) {
+	row := q.db.QueryRow(ctx, nextSubscriptionWithoutAnchor, after)
+	var i NextSubscriptionWithoutAnchorRow
+	err := row.Scan(
+		&i.ID,
+		&i.CheckoutID,
+		&i.StripeSubscriptionID,
+		&i.DonorID,
+	)
+	return i, err
+}
+
 const paymentUpdateByID = `-- name: PaymentUpdateByID :one
 SELECT donor_id, attempt_id, customer_id, request_params, stripe_session_id, hosted_url, status, completed_at, id, created_at FROM donor_payment_updates WHERE id=$1 FOR UPDATE
 `
