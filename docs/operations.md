@@ -89,15 +89,31 @@ limits. Capacity must still be validated against the agreed launch spike.
 through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is intentionally
 unconfigured. Readiness is not payment-provider acceptance or live-release authorization.
 
-Deploy migrations before new API or worker processes start; through `0006` they only
-add tables, columns, constraints, and indexes. `0007` replaces staff passwords and TOTP
-with passkeys: it drops the credential columns and ends every staff session and open
-invitation, so staff must enrol again (see below). `0008` adds the indexes referral-touch
-retention uses and replaces the checkout referrer index with one that also covers the
-attribution expiry. Features that are not configured answer
-503 with a `code` (`PAYMENTS_UNCONFIGURED`, `EMAIL_UNCONFIGURED`, or
-`SOURCE_STORAGE_UNCONFIGURED`) and are not logged as errors; a 503 without a code is a
-transient failure and is logged.
+Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURED`,
+`EMAIL_UNCONFIGURED`, or `SOURCE_STORAGE_UNCONFIGURED`) and are not logged as errors; a
+503 without a code is a transient failure and is logged.
+
+### Upgrading an existing deployment
+
+1. Set a new `IMAGE_TAG`, keeping the previous one for rollback, and run
+   `./scripts/deploy.sh build`.
+2. Run `./scripts/deploy.sh migrate` before starting any new API or worker process, which
+   requires the complete migration history.
+3. Run `./scripts/deploy.sh up`, then `workers` if they are enabled, then `smoke`.
+
+Some migrations need more:
+
+- `0007_staff_passkeys` replaces staff passwords and authenticator codes with passkeys.
+  It deletes the old credentials and ends every staff session and open invitation, so
+  every staff member enrols again: run break-glass recovery
+  ([staff and content](#staff-and-content)) for one administrator, who creates a passkey
+  from the printed invitation and then issues recovery invitations to the remaining staff
+  from `/staff`.
+- `0008_referral_touch_retention` builds its indexes without `CONCURRENTLY`, blocking
+  checkout writes while it runs; on a large database, migrate at a quiet time.
+- `0009_subscription_sync` adds the billing anchor that dates paused renewals. A
+  subscription synced before it shows no anchor until the Stripe worker next syncs it, so
+  start the workers promptly after `up`.
 
 ## Stripe
 
@@ -205,11 +221,6 @@ go run ./cmd/staff --recover --email named.person@example.org
 It works like the back-office recovery action and is audited as `staff.recovery_invited`
 with no actor. Protect the printed invitation, and review the audit history afterwards.
 
-After migration `0007`, every staff member enrols again: run break-glass recovery for one
-administrator, who creates a passkey from the printed invitation, then issues recovery
-invitations to the remaining staff from `/staff`. Invitations sent before the migration no
-longer work.
-
 At `/staff/content`, upload private source documents, then publish complete CSV snapshots.
 Sources are limited to 10 MB, encrypted, SHA-256 checked, and permission-protected.
 Without `DONOR_CONTENT_ENCRYPTION_KEY`, uploads return 503 before the file is read;
@@ -237,10 +248,8 @@ formula prefixes, and audit completion/interruption. Referral rows retain channe
 Referral-touch rows captured more than 13 months ago appear only if they led to an
 attributed gift.
 The `billing-history` CSV contains verified failed and successful invoice observations.
-Apply migration `0005_billing_history.sql` before starting the updated API/workers. Earlier
-period snapshots are not backfilled into invented failure events; reporting must disclose
-the worker rollout date as its coverage boundary. See [analytics](analytics.md) for timestamp,
-replay, and renewal-cohort rules. No browser analytics is enabled by this migration.
+See [analytics](analytics.md) for its coverage boundary and for timestamp, replay, and
+renewal-cohort rules.
 
 The enrolment CSV has headers only until R2. Keep exports private and apply an approved
 retention policy. Sensitive source documents have separate authenticated downloads.
