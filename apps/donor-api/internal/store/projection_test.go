@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/recognition"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -139,11 +140,13 @@ func TestSharedReferralScenariosAgainstSQLAggregate(t *testing.T) {
 				names = append(names, name)
 			}
 			slices.Sort(names)
+			actAs(t, tx, dbroles.ProjectionWorker)
 			for _, name := range names {
 				if _, err = refreshProjection(ctx, tx, h.donors[name], c.AsOf); err != nil {
 					t.Fatal(name, err)
 				}
 			}
+			actAs(t, tx, dbroles.API)
 			for _, name := range names {
 				want := expected[name]
 				board, err := dashboard(ctx, h.q, h.donors[name], c.AsOf)
@@ -270,6 +273,7 @@ func TestRefundRecordedByLaterClockUsesEarlierObservation(t *testing.T) {
 
 func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 	pool := database(t)
+	worker := as(t, dbroles.ProjectionWorker)
 	ctx := context.Background()
 	// A historical clock keeps other tests' due projections out of this queue.
 	now := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -308,11 +312,11 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if worked, err := RefreshNextProjection(ctx, pool, now); err != nil || !worked {
+		if worked, err := RefreshNextProjection(ctx, worker, now); err != nil || !worked {
 			t.Fatal("projection worker stalled", worked, err)
 		}
 	}
-	if worked, err := RefreshNextProjection(ctx, pool, now); err != nil || worked {
+	if worked, err := RefreshNextProjection(ctx, worker, now); err != nil || worked {
 		t.Fatal("deferred donor retried immediately", worked, err)
 	}
 	q := queries.New(pool)
@@ -324,7 +328,7 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 	if err != nil || !good.NetMinor.Valid || !good.ComputedAt.Time.Equal(now) || good.RefreshError.Valid {
 		t.Fatalf("healthy projection blocked: %+v %v", good, err)
 	}
-	rows, err := q.QueueHealth(ctx, timestamp(now.Add(5*time.Minute)))
+	rows, err := queries.New(as(t, dbroles.Monitor)).QueueHealth(ctx, timestamp(now.Add(5*time.Minute)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +337,7 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 			t.Fatal("unprojectable donor not surfaced", row)
 		}
 	}
-	if worked, err := RefreshNextProjection(ctx, pool, now.Add(5*time.Minute)); err != nil || !worked {
+	if worked, err := RefreshNextProjection(ctx, worker, now.Add(5*time.Minute)); err != nil || !worked {
 		t.Fatal(worked, err)
 	}
 	if bad, err = q.Projection(ctx, poisoned); err != nil || bad.RefreshFailures != 2 || !bad.NextRefreshAt.Time.Equal(now.Add(15*time.Minute)) {
@@ -342,7 +346,7 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 	if _, err = pool.Exec(ctx, "UPDATE donor_refunds SET amount_minor=1000 WHERE gift_id=$1", gift); err != nil {
 		t.Fatal(err)
 	}
-	if worked, err := RefreshNextProjection(ctx, pool, now.Add(15*time.Minute)); err != nil || !worked {
+	if worked, err := RefreshNextProjection(ctx, worker, now.Add(15*time.Minute)); err != nil || !worked {
 		t.Fatal(worked, err)
 	}
 	if bad, err = q.Projection(ctx, poisoned); err != nil || bad.RefreshFailures != 0 || bad.RefreshError.Valid || bad.NetMinor.Int64 != 2000 {

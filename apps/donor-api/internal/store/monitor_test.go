@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -49,6 +50,7 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 		mustExec(t, tx, "INSERT INTO donor_stripe_checkouts(id,checkout_id,request_hash,request_params,stripe_subscription_id,status) VALUES($1,$2,'hash','{}',$3,'COMPLETE')", attempt, checkout, "sub_"+attempt.String())
 		mustExec(t, tx, "INSERT INTO donor_subscriptions(id,attempt_id,donor_id,status,period_end,observed_at) VALUES($1,$2,$3,$4,$5,$6)", testID(t), attempt, id, sub.status, now.Add(sub.periodEnd), now.Add(sub.synced))
 	}
+	actAs(t, tx, dbroles.Monitor)
 	rows, err := queries.New(tx).QueueHealth(ctx, timestamp(now))
 	if err != nil {
 		t.Fatal(err)

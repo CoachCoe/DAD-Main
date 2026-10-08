@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"impactgraph/donor-api/internal/dbroles"
 )
 
 func TestPublicContentUsesMigratedSchemaAndOmitsPrivateSources(t *testing.T) {
@@ -19,10 +21,12 @@ func TestPublicContentUsesMigratedSchemaAndOmitsPrivateSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := ContentReader{DB: tx}
+	actAs(t, tx, dbroles.API)
 	empty, err := reader.PublicContent(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
+	mustExec(t, tx, "RESET ROLE")
 	if empty.State != "unpublished" {
 		t.Fatal("unpublished ledger must be explicit")
 	}
@@ -44,6 +48,7 @@ func TestPublicContentUsesMigratedSchemaAndOmitsPrivateSources(t *testing.T) {
 	if _, err = tx.Exec(ctx, "INSERT INTO donor_content_head (id,publication_id) VALUES ('r1',$1)", publicationID); err != nil {
 		t.Fatal(err)
 	}
+	actAs(t, tx, dbroles.API)
 	result, err := reader.PublicContent(ctx)
 	if err != nil {
 		t.Fatal(err)

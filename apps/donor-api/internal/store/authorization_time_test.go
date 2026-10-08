@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -16,6 +17,7 @@ import (
 // waits for the donor lock; the expiry must be honoured once the lock is held.
 func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	for _, kind := range []string{"donor", "staff"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -50,7 +52,7 @@ func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 			if _, err = queries.New(lock).LockDonor(ctx, donorID); err != nil {
 				t.Fatal(err)
 			}
-			tx, err := pool.Begin(ctx)
+			tx, err := api.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -92,6 +94,7 @@ func awaitBlocked(ctx context.Context, t *testing.T, pool *pgxpool.Pool, tx pgx.
 
 func TestProofExpiryIsCheckedAfterWaitingForOwnerLock(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	for _, kind := range []string{"donor", "staff"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -132,7 +135,7 @@ func TestProofExpiryIsCheckedAfterWaitingForOwnerLock(t *testing.T) {
 					mustExec(t, lock, "UPDATE donor_staff_invites SET expires_at=$2 WHERE staff_id=$1", id, time.Now().UTC())
 				}
 			}
-			tx, err := pool.Begin(ctx)
+			tx, err := api.Begin(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}

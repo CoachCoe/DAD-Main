@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -18,7 +19,8 @@ var app = Client{App: true, Device: "Test phone", Platform: "ANDROID"}
 
 func claimSession(t *testing.T, pool *pgxpool.Pool, donor pgtype.UUID, client Client) Tokens {
 	t.Helper()
-	tokens, err := (AccountService{DB: pool}).ClaimAccount(context.Background(), link(t, pool, donor, time.Now()), "", client)
+	api := as(t, dbroles.API)
+	tokens, err := (AccountService{DB: api}).ClaimAccount(context.Background(), link(t, pool, donor, time.Now()), "", client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,9 +45,10 @@ func sessionEvents(t *testing.T, pool *pgxpool.Pool, donor pgtype.UUID, action s
 	return count
 }
 
-func refresh(t *testing.T, pool *pgxpool.Pool, token string) Tokens {
+func refresh(t *testing.T, token string) Tokens {
 	t.Helper()
-	tokens, err := (AccountService{DB: pool}).Refresh(context.Background(), token)
+	api := as(t, dbroles.API)
+	tokens, err := (AccountService{DB: api}).Refresh(context.Background(), token)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +57,7 @@ func refresh(t *testing.T, pool *pgxpool.Pool, token string) Tokens {
 
 func TestAppSignInIssuesSeparateAccessAndRefreshTokens(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	tokens := claimSession(t, pool, id, Client{App: true, Device: " Alex’s\u202e  phone\a ", Platform: "IOS"})
@@ -64,7 +68,7 @@ func TestAppSignInIssuesSeparateAccessAndRefreshTokens(t *testing.T) {
 	if !signedInAs(t, pool, tokens.Access) || signedInAs(t, pool, tokens.Refresh) {
 		t.Fatal("only the access token may authenticate requests")
 	}
-	if _, err := (AccountService{DB: pool}).Refresh(context.Background(), tokens.Access); !errors.Is(err, ErrDenied) {
+	if _, err := (AccountService{DB: api}).Refresh(context.Background(), tokens.Access); !errors.Is(err, ErrDenied) {
 		t.Fatalf("access token refreshed: %v", err)
 	}
 	var client, device, platform string
@@ -93,7 +97,7 @@ func TestRefreshRotatesAndRetiresTheOldAccessToken(t *testing.T) {
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	first := claimSession(t, pool, id, app)
-	second := refresh(t, pool, first.Refresh)
+	second := refresh(t, first.Refresh)
 	if signedInAs(t, pool, first.Access) || !signedInAs(t, pool, second.Access) {
 		t.Fatal("refresh must replace the access token at once")
 	}
@@ -101,7 +105,7 @@ func TestRefreshRotatesAndRetiresTheOldAccessToken(t *testing.T) {
 	if second.Refresh == first.Refresh || !strings.HasPrefix(second.Refresh, family+".") || second.AccessTTL != accessLifetime {
 		t.Fatalf("rotation issued %+v", second)
 	}
-	third := refresh(t, pool, second.Refresh)
+	third := refresh(t, second.Refresh)
 	if !signedInAs(t, pool, third.Access) || sessionEvents(t, pool, id, "REFRESH_REUSED") != 0 {
 		t.Fatal("a chain of rotations broke the session")
 	}
@@ -109,52 +113,54 @@ func TestRefreshRotatesAndRetiresTheOldAccessToken(t *testing.T) {
 
 func TestReusedRefreshTokenRevokesTheWholeSession(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	ctx := context.Background()
 	stolen := claimSession(t, pool, id, app)
-	rotated := refresh(t, pool, stolen.Refresh)
-	latest := refresh(t, pool, rotated.Refresh)
+	rotated := refresh(t, stolen.Refresh)
+	latest := refresh(t, rotated.Refresh)
 	other := claimSession(t, pool, id, app)
-	if _, err := (AccountService{DB: pool}).Refresh(ctx, stolen.Refresh); !errors.Is(err, ErrDenied) {
+	if _, err := (AccountService{DB: api}).Refresh(ctx, stolen.Refresh); !errors.Is(err, ErrDenied) {
 		t.Fatalf("reused token: %v", err)
 	}
 	if signedInAs(t, pool, latest.Access) {
 		t.Fatal("access descended from the reused token still works")
 	}
-	if _, err := (AccountService{DB: pool}).Refresh(ctx, latest.Refresh); !errors.Is(err, ErrDenied) {
+	if _, err := (AccountService{DB: api}).Refresh(ctx, latest.Refresh); !errors.Is(err, ErrDenied) {
 		t.Fatalf("refresh descended from the reused token still works: %v", err)
 	}
 	if !signedInAs(t, pool, other.Access) || sessionEvents(t, pool, id, "REFRESH_REUSED") != 1 {
 		t.Fatal("reuse must revoke only its own session, recorded once")
 	}
 	forged := strings.SplitN(latest.Refresh, ".", 2)[0] + "." + strings.Repeat("x", 43)
-	if _, err := (AccountService{DB: pool}).Refresh(ctx, forged); !errors.Is(err, ErrDenied) || sessionEvents(t, pool, id, "REFRESH_REUSED") != 1 {
+	if _, err := (AccountService{DB: api}).Refresh(ctx, forged); !errors.Is(err, ErrDenied) || sessionEvents(t, pool, id, "REFRESH_REUSED") != 1 {
 		t.Fatalf("a revoked session answered or recorded again: %v", err)
 	}
 }
 
 func TestRefreshGraceAnswersALostResponseOnce(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	ctx := context.Background()
 	original := claimSession(t, pool, id, app)
-	lost := refresh(t, pool, original.Refresh)
-	retried := refresh(t, pool, original.Refresh)
+	lost := refresh(t, original.Refresh)
+	retried := refresh(t, original.Refresh)
 	if signedInAs(t, pool, lost.Access) || !signedInAs(t, pool, retried.Access) {
 		t.Fatal("the retry's answer must supersede the lost one")
 	}
-	if _, err := (AccountService{DB: pool}).Refresh(ctx, lost.Refresh); !errors.Is(err, ErrDenied) || signedInAs(t, pool, retried.Access) {
+	if _, err := (AccountService{DB: api}).Refresh(ctx, lost.Refresh); !errors.Is(err, ErrDenied) || signedInAs(t, pool, retried.Access) {
 		t.Fatalf("a superseded token must count as reuse: %v", err)
 	}
 
 	original = claimSession(t, pool, id, app)
-	next := refresh(t, pool, original.Refresh)
+	next := refresh(t, original.Refresh)
 	if _, err := pool.Exec(ctx, "UPDATE donor_sessions SET refreshed_at=refreshed_at-$2::interval WHERE token_hash=$1", HashToken(next.Access), (refreshGrace + time.Second).String()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (AccountService{DB: pool}).Refresh(ctx, original.Refresh); !errors.Is(err, ErrDenied) || signedInAs(t, pool, next.Access) {
+	if _, err := (AccountService{DB: api}).Refresh(ctx, original.Refresh); !errors.Is(err, ErrDenied) || signedInAs(t, pool, next.Access) {
 		t.Fatalf("the previous token after the grace must count as reuse: %v", err)
 	}
 	if sessionEvents(t, pool, id, "REFRESH_REUSED") != 2 {
@@ -167,6 +173,7 @@ func TestRefreshGraceAnswersALostResponseOnce(t *testing.T) {
 // earlier refresh token is then stale.
 func TestConcurrentRefreshesLetTheLaterAnswerWin(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	original := claimSession(t, pool, id, app)
@@ -176,7 +183,7 @@ func TestConcurrentRefreshesLetTheLaterAnswerWin(t *testing.T) {
 	for range 2 {
 		wg.Go(func() {
 			<-start
-			tokens, err := (AccountService{DB: pool}).Refresh(context.Background(), original.Refresh)
+			tokens, err := (AccountService{DB: api}).Refresh(context.Background(), original.Refresh)
 			if err != nil {
 				t.Error(err)
 			}
@@ -197,13 +204,14 @@ func TestConcurrentRefreshesLetTheLaterAnswerWin(t *testing.T) {
 	if len(winners) != 1 || len(losers) != 1 {
 		t.Fatalf("got %d working and %d superseded answers, want one of each", len(winners), len(losers))
 	}
-	if _, err := (AccountService{DB: pool}).Refresh(context.Background(), losers[0].Refresh); !errors.Is(err, ErrDenied) || signedInAs(t, pool, winners[0].Access) {
+	if _, err := (AccountService{DB: api}).Refresh(context.Background(), losers[0].Refresh); !errors.Is(err, ErrDenied) || signedInAs(t, pool, winners[0].Access) {
 		t.Fatalf("the superseded answer must count as reuse: %v", err)
 	}
 }
 
 func TestSessionExpiry(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	ctx := context.Background()
@@ -218,12 +226,12 @@ func TestSessionExpiry(t *testing.T) {
 	if signedInAs(t, pool, tokens.Access) {
 		t.Fatal("expired access token accepted")
 	}
-	renewed := refresh(t, pool, tokens.Refresh)
+	renewed := refresh(t, tokens.Refresh)
 	if !signedInAs(t, pool, renewed.Access) {
 		t.Fatal("refresh after access expiry failed")
 	}
 	expire("refresh_expires_at", renewed.Access)
-	if _, err := (AccountService{DB: pool}).Refresh(ctx, renewed.Refresh); !errors.Is(err, ErrDenied) {
+	if _, err := (AccountService{DB: api}).Refresh(ctx, renewed.Refresh); !errors.Is(err, ErrDenied) {
 		t.Fatalf("expired refresh token accepted: %v", err)
 	}
 	if sessionEvents(t, pool, id, "REFRESH_REUSED") != 0 {
@@ -234,29 +242,30 @@ func TestSessionExpiry(t *testing.T) {
 	if _, err := pool.Exec(ctx, "UPDATE donor_sessions SET created_at=now()-$2::interval WHERE token_hash=$1", HashToken(tokens.Access), (refreshLimit - 5*time.Minute).String()); err != nil {
 		t.Fatal(err)
 	}
-	capped := refresh(t, pool, tokens.Refresh)
+	capped := refresh(t, tokens.Refresh)
 	if capped.RefreshTTL > 5*time.Minute || capped.AccessTTL > capped.RefreshTTL {
 		t.Fatalf("refresh extended past the sign-in limit: %+v", capped)
 	}
 	if _, err := pool.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (AccountService{DB: pool}).Refresh(ctx, capped.Refresh); !errors.Is(err, ErrDenied) {
+	if _, err := (AccountService{DB: api}).Refresh(ctx, capped.Refresh); !errors.Is(err, ErrDenied) {
 		t.Fatalf("disabled donor refreshed: %v", err)
 	}
 }
 
 func TestDonorListsAndSignsOutSessions(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	ctx := context.Background()
-	service := DonorService{DB: pool}
+	service := DonorService{DB: api}
 	browser := claimSession(t, pool, id, Client{})
 	phone := claimSession(t, pool, id, app)
 	tablet := claimSession(t, pool, id, Client{App: true, Platform: "IOS"})
 	ended := claimSession(t, pool, id, Client{})
-	if err := (AccountService{DB: pool}).SignOut(ctx, ended.Access); err != nil {
+	if err := (AccountService{DB: api}).SignOut(ctx, ended.Access); err != nil {
 		t.Fatal(err)
 	}
 
@@ -297,7 +306,7 @@ func TestDonorListsAndSignsOutSessions(t *testing.T) {
 	if signedInAs(t, pool, phone.Access) {
 		t.Fatal("signed-out session's access token still works")
 	}
-	if _, err = (AccountService{DB: pool}).Refresh(ctx, phone.Refresh); !errors.Is(err, ErrDenied) {
+	if _, err = (AccountService{DB: api}).Refresh(ctx, phone.Refresh); !errors.Is(err, ErrDenied) {
 		t.Fatalf("signed-out session refreshed: %v", err)
 	}
 	if _, err = service.SignOutSession(ctx, browser.Access, phoneID); err != nil || sessionEvents(t, pool, id, "SIGNED_OUT_SESSION") != 1 {
@@ -318,6 +327,7 @@ func TestDonorListsAndSignsOutSessions(t *testing.T) {
 
 func TestSessionUseIsRecordedAtMostEveryInterval(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	ctx := context.Background()
@@ -338,7 +348,7 @@ func TestSessionUseIsRecordedAtMostEveryInterval(t *testing.T) {
 		}
 		return at
 	}
-	service := DonorService{DB: pool}
+	service := DonorService{DB: api}
 	for _, use := range []struct {
 		name string
 		call func() error

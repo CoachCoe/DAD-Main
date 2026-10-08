@@ -3,12 +3,14 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -35,8 +37,9 @@ func staffFixture(t *testing.T, pool *pgxpool.Pool, role string) (pgtype.UUID, s
 
 func TestStaffWriteHoldsActorLockAndRechecksRevocation(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, token := staffFixture(t, pool, "ADMIN")
-	s := &StaffService{DB: pool}
+	s := &StaffService{DB: api}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err := staffWrite(ctx, s, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (bool, error) {
@@ -94,7 +97,7 @@ func TestStaffPermissionMatrixAndExpiredSessions(t *testing.T) {
 func TestRecoveryReplacesPasskeysAndRevokesSessions(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
 	_, adminKey := activatedStaff(t, pool, s, "ADMIN")
 	admin, err := signIn(t, s, adminKey)
 	if err != nil {
@@ -141,10 +144,44 @@ func TestRecoveryReplacesPasskeysAndRevokesSessions(t *testing.T) {
 	}
 }
 
+func TestAdministratorInvitesStaffWhoAreInactiveUntilTheyEnrol(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	_, admin := staffFixture(t, pool, "ADMIN")
+	email := testID(t).String() + "@example.org"
+	t.Cleanup(func() {
+		for _, sql := range []string{
+			"DELETE FROM donor_staff_audit WHERE target IN (SELECT id::text FROM donor_staff WHERE email=$1)",
+			"DELETE FROM donor_staff_ceremonies WHERE invite_id IN (SELECT i.id FROM donor_staff_invites i JOIN donor_staff s ON s.id=i.staff_id WHERE s.email=$1)",
+			"DELETE FROM donor_staff_invites WHERE staff_id IN (SELECT id FROM donor_staff WHERE email=$1)",
+			"DELETE FROM donor_staff WHERE email=$1",
+		} {
+			mustExec(t, pool, sql, email)
+		}
+	})
+	s := staffService(t, dbroles.API)
+	token, err := s.Invite(ctx, admin, email, "New Person", "SUPPORT")
+	if err != nil || token == "" {
+		t.Fatalf("invitation: %v", err)
+	}
+	accounts, err := s.Accounts(ctx, admin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invited := slices.IndexFunc(accounts, func(a StaffView) bool { return a.Email == email })
+	if invited < 0 || accounts[invited].Active || accounts[invited].Role != "SUPPORT" {
+		t.Fatalf("invited account missing or active: %+v", accounts)
+	}
+	if _, err = s.BeginActivation(ctx, token); err != nil {
+		t.Fatalf("the invitation does not start enrolment: %v", err)
+	}
+}
+
 func TestBreakGlassRecoveryReplacesOnlyAnEnabledAdministratorsPasskeys(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
+	operator := staffService(t, dbroles.StaffCLI)
 	admin, key := activatedStaff(t, pool, s, "ADMIN")
 	session, err := signIn(t, s, key)
 	if err != nil {
@@ -154,11 +191,11 @@ func TestBreakGlassRecoveryReplacesOnlyAnEnabledAdministratorsPasskeys(t *testin
 	disabled, _ := activatedStaff(t, pool, s, "ADMIN")
 	mustExec(t, pool, "UPDATE donor_staff SET disabled=true WHERE id=$1", disabled)
 	for _, other := range []string{support.String() + "@example.org", disabled.String() + "@example.org", "nobody@example.org"} {
-		if _, err := s.Recover(ctx, other); !errors.Is(err, pgx.ErrNoRows) {
+		if _, err := operator.Recover(ctx, other); !errors.Is(err, pgx.ErrNoRows) {
 			t.Fatalf("break-glass recovery of %s: got %v, want no such administrator", other, err)
 		}
 	}
-	token, err := s.Recover(ctx, admin.String()+"@example.org")
+	token, err := operator.Recover(ctx, admin.String()+"@example.org")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -142,7 +143,8 @@ func newRecurringFixture(t *testing.T) *recurringFixture {
 	f := newWorkerFixture(t, "MONTHLY")
 	result := f.checkout(t)
 	ctx := context.Background()
-	pool := f.service.DB
+	pool := f.db
+	api := as(t, dbroles.API)
 	start := time.Now().UTC().Truncate(time.Second).Add(-24 * time.Hour)
 	// Month-end anchors are covered by TestRenewalAfterKeepsMonthEndAnchors.
 	if day := start.Day(); day > 28 {
@@ -169,12 +171,12 @@ func newRecurringFixture(t *testing.T) *recurringFixture {
 	subscriptionItem(remote)["current_period_end"] = end.Unix()
 	f.gateway.subscriptions[subID] = paymentObject(t, remote)
 	f.syncSubscription(t, result.CheckoutID)
-	tokens, err := (AccountService{DB: pool}).ClaimAccount(ctx, link(t, pool, f.donorID, time.Now()), "", Client{})
+	tokens, err := (AccountService{DB: api}).ClaimAccount(ctx, link(t, pool, f.donorID, time.Now()), "", Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	gateway := &subscriptionGateway{financialGateway: f.gateway, t: t}
-	return &recurringFixture{workerFixture: f, checkout: result.CheckoutID, sub: gateway, service: RecurringService{DB: pool, Gateway: gateway, Origin: "https://donor.example.org"}, token: tokens.Access, attempt: attempt, subID: subID, start: start, end: end}
+	return &recurringFixture{workerFixture: f, checkout: result.CheckoutID, sub: gateway, service: RecurringService{DB: api, Gateway: gateway, Origin: "https://donor.example.org"}, token: tokens.Access, attempt: attempt, subID: subID, start: start, end: end}
 }
 
 // syncSubscription delivers a webhook about checkout's subscription, which
@@ -334,7 +336,7 @@ func TestRecurringCommandReadsProcessorOutsideDonorLock(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r := newRecurringFixture(t)
 			ctx := context.Background()
-			pool := r.service.DB
+			pool := r.db
 			request := CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end}
 			reading, release := make(chan struct{}), make(chan struct{})
 			r.sub.beforeRetrieve = func() { close(reading); <-release }
@@ -385,6 +387,7 @@ func TestRecurringCommandReadsProcessorOutsideDonorLock(t *testing.T) {
 
 func TestViewsServeSyncedStateWithoutCallingProcessor(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	_, finance := staffFixture(t, pool, "FINANCE")
 	_, support := staffFixture(t, pool, "SUPPORT")
 	r := newRecurringFixture(t)
@@ -409,8 +412,8 @@ func TestViewsServeSyncedStateWithoutCallingProcessor(t *testing.T) {
 		t.Fatal(err)
 	}
 	offline := &offlineGateway{}
-	service := RecurringService{DB: pool, Gateway: offline, Origin: r.service.Origin}
-	staff := StaffFinanceService{Staff: &StaffService{DB: pool}, Gateway: offline, Origin: r.service.Origin}
+	service := RecurringService{DB: api, Gateway: offline, Origin: r.service.Origin}
+	staff := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: offline, Origin: r.service.Origin}
 
 	details, err := service.Details(ctx, r.token)
 	if err != nil {
@@ -447,7 +450,7 @@ func TestViewsServeSyncedStateWithoutCallingProcessor(t *testing.T) {
 	if view := jsonView(t, refund); err != nil || view["available_minor"] != float64(2500) || !jsonTime(t, view["observed_at"]).Equal(refundObserved) {
 		t.Fatal("refund quote: want 2500 available", view, err)
 	}
-	detail, err := (&StaffService{DB: pool}).DonorDetail(ctx, support, r.donorID, 0, 0)
+	detail, err := (&StaffService{DB: api}).DonorDetail(ctx, support, r.donorID, 0, 0)
 	if err != nil || detail.Subscription == nil || !detail.Subscription.ObservedAt.Equal(synced) {
 		t.Fatal("staff detail", detail.Subscription, err)
 	}
@@ -488,7 +491,7 @@ func TestViewsFollowWebhookSyncs(t *testing.T) {
 
 	// A subscription synced before the anchor was stored offers no pause
 	// dates until its next sync.
-	if _, err := r.service.DB.Exec(ctx, "UPDATE donor_subscriptions SET billing_anchor=NULL WHERE attempt_id=$1", r.attempt); err != nil {
+	if _, err := r.db.Exec(ctx, "UPDATE donor_subscriptions SET billing_anchor=NULL WHERE attempt_id=$1", r.attempt); err != nil {
 		t.Fatal(err)
 	}
 	if _, pause := states(); pause != "unavailable" {
@@ -536,6 +539,20 @@ func TestViewsFollowWebhookSyncs(t *testing.T) {
 	}
 }
 
+func TestCommandAfterStripeEndedTheGiftReleasesItsReservation(t *testing.T) {
+	r := newRecurringFixture(t)
+	ctx := context.Background()
+	r.changeRemotely(t, func(remote map[string]any) { remote["status"] = "canceled" })
+	if _, err := r.service.ChangeAmount(ctx, r.token, AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}); !errors.Is(err, ErrSubscriptionConflict) {
+		t.Fatalf("amount change for an ended gift: got %v, want ErrSubscriptionConflict", err)
+	}
+	var attempt string
+	var reservations int
+	if err := r.db.QueryRow(ctx, "SELECT a.status,(SELECT count(*) FROM donor_recurring_reservations WHERE donor_id=$2) FROM donor_stripe_checkouts a WHERE a.id=$1", r.attempt, r.donorID).Scan(&attempt, &reservations); err != nil || attempt != "CANCELLED" || reservations != 0 {
+		t.Fatalf("attempt %s with %d reservations after the command synced an ended gift: %v", attempt, reservations, err)
+	}
+}
+
 func TestRefusedCommandLeavesViewsCurrent(t *testing.T) {
 	r := newRecurringFixture(t)
 	ctx := context.Background()
@@ -573,7 +590,7 @@ func TestRefusedCommandLeavesViewsCurrent(t *testing.T) {
 func TestRecurringDetailsWithoutSubscription(t *testing.T) {
 	r := newRecurringFixture(t)
 	ctx := context.Background()
-	if _, err := r.service.DB.Exec(ctx, "UPDATE donor_stripe_checkouts SET stripe_subscription_id=NULL WHERE id=$1", r.attempt); err != nil {
+	if _, err := r.db.Exec(ctx, "UPDATE donor_stripe_checkouts SET stripe_subscription_id=NULL WHERE id=$1", r.attempt); err != nil {
 		t.Fatal(err)
 	}
 	result, err := r.service.Details(ctx, r.token)
@@ -613,7 +630,7 @@ func TestDonorCancellationStopsAtPeriodEndOnce(t *testing.T) {
 		t.Fatalf("processor mutations: %v", r.sub.keys)
 	}
 	var completed bool
-	if err = r.service.DB.QueryRow(ctx, "SELECT completed_at IS NOT NULL FROM donor_cancellations WHERE id=$1", request.RequestID).Scan(&completed); err != nil || !completed {
+	if err = r.db.QueryRow(ctx, "SELECT completed_at IS NOT NULL FROM donor_cancellations WHERE id=$1", request.RequestID).Scan(&completed); err != nil || !completed {
 		t.Fatal("cancellation not completed", err)
 	}
 	changed := request
@@ -785,12 +802,13 @@ func TestAmountChangeAppliesAtNextRenewal(t *testing.T) {
 
 func TestStaffCancellationIsAuditedWithReasonAndOutcome(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	// Staff outlive the fixture's staff actions, so they are created first.
 	_, finance := staffFixture(t, pool, "FINANCE")
 	_, support := staffFixture(t, pool, "SUPPORT")
 	r := newRecurringFixture(t)
 	ctx := context.Background()
-	s := StaffFinanceService{Staff: &StaffService{DB: pool}, Gateway: r.sub, Origin: "https://donor.example.org"}
+	s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: r.sub, Origin: "https://donor.example.org"}
 	request := StaffFinancialRequest{RequestID: testID(t), DonorID: r.donorID, TargetID: r.attempt, Reason: "Donor asked by phone to stop", PeriodEnd: r.end}
 	if _, err := s.Cancel(ctx, support, request); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatal("support cancelled a gift", err)
@@ -860,6 +878,7 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			pool := database(t)
+			api := as(t, dbroles.API)
 			actor, finance := staffFixture(t, pool, "FINANCE")
 			r := newRecurringFixture(t)
 			ctx := context.Background()
@@ -876,7 +895,7 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 			}
 			refund := paymentObject(t, map[string]any{"id": "re_" + action.String(), "payment_intent": gift.StripePaymentIntentID.String, "amount": 1000, "currency": "usd", "status": "succeeded", "metadata": map[string]string{"dad_staff_action": action.String()}})
 			r.sub.refundRows = []payments.Object{refund}
-			s := StaffFinanceService{Staff: &StaffService{DB: pool}, Gateway: r.sub, Origin: "https://donor.example.org"}
+			s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: r.sub, Origin: "https://donor.example.org"}
 			quote, err := s.RefundQuote(ctx, finance, r.donorID, gift.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -886,7 +905,7 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 			if view["available_minor"] != float64(3000) || view["amount_minor"] != float64(3000) || view["gift_id"] != gift.ID.String() || r.sub.refundLists != 0 {
 				t.Fatalf("quote: %v after %d processor lists", view, r.sub.refundLists)
 			}
-			pending, err := (&StaffService{DB: pool}).PendingAction(ctx, finance, r.donorID, gift.ID, "REFUND")
+			pending, err := (&StaffService{DB: api}).PendingAction(ctx, finance, r.donorID, gift.ID, "REFUND")
 			if err != nil || pending.Action == nil || pending.Action.ID != action {
 				t.Fatal("unsettled refund not offered for retry", pending, err)
 			}
@@ -932,6 +951,7 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 
 func TestGiftListsAndStaffDetailShowRefundsAndSubscription(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	_, support := staffFixture(t, pool, "SUPPORT")
 	r := newRecurringFixture(t)
 	ctx := context.Background()
@@ -954,11 +974,11 @@ func TestGiftListsAndStaffDetailShowRefundsAndSubscription(t *testing.T) {
 	if _, err := r.service.Details(ctx, r.token); err != nil {
 		t.Fatal(err)
 	}
-	donorPage, err := DonorService{DB: pool, Origin: "https://donor.example.org"}.Gifts(ctx, r.token, 0)
+	donorPage, err := DonorService{DB: api, Origin: "https://donor.example.org"}.Gifts(ctx, r.token, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	detail, err := (&StaffService{DB: pool}).DonorDetail(ctx, support, r.donorID, 0, 0)
+	detail, err := (&StaffService{DB: api}).DonorDetail(ctx, support, r.donorID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

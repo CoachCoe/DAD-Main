@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -42,11 +43,12 @@ func restoreContent(t *testing.T, pool *pgxpool.Pool, actor pgtype.UUID) {
 
 func TestSourceUploadsRequireEncryptionKeyButPublishingDoesNot(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	actor, token := staffFixture(t, pool, "ADMIN")
 	_, support := staffFixture(t, pool, "SUPPORT")
 	restoreContent(t, pool, actor)
-	s := ContentService{Staff: &StaffService{DB: pool}}
+	s := ContentService{Staff: &StaffService{DB: api}}
 	if err := s.AuthorizeSourceUpload(ctx, support); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatal("unauthorized caller learned storage configuration", err)
 	}
@@ -75,11 +77,12 @@ func TestSourceUploadsRequireEncryptionKeyButPublishingDoesNot(t *testing.T) {
 
 func TestSourceStoredBeforeAKeyRotationStaysReadable(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	actor, token := staffFixture(t, pool, "ADMIN")
 	restoreContent(t, pool, actor)
 	old := base64.URLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
-	s := ContentService{Staff: &StaffService{DB: pool}, EncryptionKeys: keyring(t, old)}
+	s := ContentService{Staff: &StaffService{DB: api}, EncryptionKeys: keyring(t, old)}
 	data := []byte("Private signed source record")
 	source, err := s.StoreSource(ctx, token, "source.txt", data)
 	if err != nil {
@@ -93,11 +96,12 @@ func TestSourceStoredBeforeAKeyRotationStaysReadable(t *testing.T) {
 
 func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	actor, token := staffFixture(t, pool, "ADMIN")
 	_, support := staffFixture(t, pool, "SUPPORT")
 	restoreContent(t, pool, actor)
-	s := ContentService{Staff: &StaffService{DB: pool}, EncryptionKeys: keyring(t, base64.URLEncoding.EncodeToString(make([]byte, 32)))}
+	s := ContentService{Staff: &StaffService{DB: api}, EncryptionKeys: keyring(t, base64.URLEncoding.EncodeToString(make([]byte, 32)))}
 	data := []byte("Private signed source record")
 	if _, err := s.StoreSource(ctx, support, "source.txt", data); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatal("support uploaded source", err)
@@ -141,10 +145,11 @@ func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
 
 func TestPublicationErrorsLocateEachProblem(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	actor, token := staffFixture(t, pool, "ADMIN")
 	restoreContent(t, pool, actor)
-	s := ContentService{Staff: &StaffService{DB: pool}}
+	s := ContentService{Staff: &StaffService{DB: api}}
 	source := testID(t)
 	if err := queries.New(pool).InsertContentSource(ctx, queries.InsertContentSourceParams{ID: source, ActorID: actor, Name: "approval.pdf", Sha256: strings.Repeat("0", 64), EncryptedData: []byte("ciphertext")}); err != nil {
 		t.Fatal(err)

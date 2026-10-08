@@ -13,6 +13,7 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -21,9 +22,11 @@ const (
 	staffTestRPID   = "staff.example.org"
 )
 
-func staffService(t *testing.T, pool *pgxpool.Pool) *StaffService {
+// staffService runs staff operations as role: the API, or the staff command
+// for break-glass recovery.
+func staffService(t *testing.T, role dbroles.Role) *StaffService {
 	t.Helper()
-	s, err := NewStaffService(pool, staffTestOrigin)
+	s, err := NewStaffService(as(t, role), staffTestOrigin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +112,7 @@ func TestStaffPasskeyActivationSignsInOnceAndSignInIsSingleUse(t *testing.T) {
 	pool := database(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
 	id, invite := invitedStaff(t, pool, "SUPPORT")
 	invitation, err := s.BeginActivation(ctx, invite)
 	if err != nil {
@@ -201,7 +204,7 @@ func TestStaffSignInRejectsForgedOrUnusableAssertions(t *testing.T) {
 	pool := database(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
 	id, key := activatedStaff(t, pool, s, "SUPPORT")
 	for range 2 {
 		if _, err := signIn(t, s, key); err != nil {
@@ -264,7 +267,7 @@ func TestStaffActivationCountsAttemptsAndRejectsForgedAttestations(t *testing.T)
 	pool := database(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
 	id, invite := invitedStaff(t, pool, "FINANCE")
 	for _, forge := range []func(*authenticator){
 		func(a *authenticator) { a.origin = "https://donors.example.org" },
@@ -300,7 +303,7 @@ func TestStaffActivationCountsAttemptsAndRejectsForgedAttestations(t *testing.T)
 
 func TestStaffSyncedPasskeySignsInWithACounterOfZero(t *testing.T) {
 	pool := database(t)
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
 	id, invite := invitedStaff(t, pool, "SUPPORT")
 	key := newAuthenticator(t, staffTestOrigin, staffTestRPID)
 	key.step = 0
@@ -323,7 +326,7 @@ func TestStaffSyncedPasskeySignsInWithACounterOfZero(t *testing.T) {
 func TestStaffActivationRefusesAPasskeyRegisteredToAnotherAccount(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
 	owner, key := activatedStaff(t, pool, s, "ADMIN")
 	other, invite := invitedStaff(t, pool, "SUPPORT")
 	reused := *key
@@ -348,7 +351,7 @@ func TestStaffActivationRefusesAPasskeyRegisteredToAnotherAccount(t *testing.T) 
 
 func TestStaffPasskeyKeepsOnlyKnownTransports(t *testing.T) {
 	pool := database(t)
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
 	id, invite := invitedStaff(t, pool, "SUPPORT")
 	key := newAuthenticator(t, staffTestOrigin, staffTestRPID)
 	key.transports = []string{"internal", strings.Repeat("x", 64), "usb", "cable"}
@@ -368,7 +371,7 @@ func TestStaffPasskeyKeepsOnlyKnownTransports(t *testing.T) {
 func TestStaffCeremoniesAnswerOnlyTheirOwnKind(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
 	_, signer := activatedStaff(t, pool, s, "SUPPORT")
 	id, invite := invitedStaff(t, pool, "SUPPORT")
 	invitation, err := s.BeginActivation(ctx, invite)
@@ -397,7 +400,7 @@ func TestStaffCeremoniesAnswerOnlyTheirOwnKind(t *testing.T) {
 func TestStaffActivationRefusesADisabledAccount(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
 	id, invite := invitedStaff(t, pool, "FINANCE")
 	invitation, err := s.BeginActivation(ctx, invite)
 	if err != nil {
@@ -419,7 +422,7 @@ func TestStaffActivationRefusesADisabledAccount(t *testing.T) {
 func TestStaffCeremoniesAreSweptOnceExpired(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	s := staffService(t, pool)
+	s := staffService(t, dbroles.API)
 	_, invite := invitedStaff(t, pool, "SUPPORT")
 	for _, begin := range []func() error{
 		func() error { _, err := s.BeginSignIn(ctx); return err },

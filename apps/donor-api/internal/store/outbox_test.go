@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -39,6 +40,7 @@ func TestFinancialOutboxDeduplicationYearBoundaryAndRollback(t *testing.T) {
 	if err = q.SaveProjection(ctx, queries.SaveProjectionParams{ID: testID(t), DonorID: id, ReferrerID: referrer, ReferralKind: pgtype.Text{String: "IRL", Valid: true}, NetMinor: pgtype.Int8{Int64: 6000, Valid: true}, ComputedAt: timestamp(now), NextRefreshAt: timestamp(now.Add(time.Hour))}); err != nil {
 		t.Fatal(err)
 	}
+	actAs(t, tx, dbroles.ProjectionWorker)
 	for i := 0; i < 2; i++ {
 		if err = q.QueueFinancialIntents(ctx, queries.QueueFinancialIntentsParams{DonorID: id, AsOf: timestamp(now)}); err != nil {
 			t.Fatal(err)
@@ -96,6 +98,7 @@ func TestFinancialOutboxBatchesLongHistoryAndExcludesFutureGifts(t *testing.T) {
 	now := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
 	mustExec(t, tx, `INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at)
  SELECT gen_random_uuid(),$1,$2,'pi_'||($1::uuid)::text||'_'||n,3000,'USD','ONE_TIME',$3::timestamptz+n*interval '1 minute' FROM generate_series(-999,1) n`, id, checkout, now)
+	actAs(t, tx, dbroles.ProjectionWorker)
 	db := &countedOutbox{DBTX: tx}
 	for i := range 2 {
 		if err = queries.New(db).QueueFinancialIntents(ctx, queries.QueueFinancialIntentsParams{DonorID: id, AsOf: timestamp(now)}); err != nil {

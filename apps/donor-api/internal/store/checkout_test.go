@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -64,7 +65,7 @@ func checkoutFixture(t *testing.T) (CheckoutService, payments.CheckoutRequest, p
 		}
 	})
 	gateway := &checkoutGateway{pool: pool}
-	return CheckoutService{DB: pool, Gateway: gateway, Origin: "http://localhost:3000"}, payments.CheckoutRequest{RequestID: testID(t), Email: email, Amount: 3000, Frequency: "MONTHLY"}, id, gateway
+	return CheckoutService{DB: as(t, dbroles.API), Gateway: gateway, Origin: "http://localhost:3000"}, payments.CheckoutRequest{RequestID: testID(t), Email: email, Amount: 3000, Frequency: "MONTHLY"}, id, gateway
 }
 func TestCheckoutRetriesAndReservations(t *testing.T) {
 	service, request, _, gateway := checkoutFixture(t)
@@ -138,12 +139,13 @@ func TestCheckoutConcurrentMonthlyReservation(t *testing.T) {
 }
 func TestCheckoutUncertainWindowAndDisabledDonor(t *testing.T) {
 	service, request, id, gateway := checkoutFixture(t)
+	pool := database(t)
 	ctx := context.Background()
 	gateway.fail = true
 	if _, err := service.BeginCheckout(ctx, request); err == nil {
 		t.Fatal("expected lost response")
 	}
-	if _, err := service.DB.Exec(ctx, "UPDATE donor_stripe_checkouts SET created_at=$2 WHERE id=$1", request.RequestID, time.Now().Add(-23*time.Hour)); err != nil {
+	if _, err := pool.Exec(ctx, "UPDATE donor_stripe_checkouts SET created_at=$2 WHERE id=$1", request.RequestID, time.Now().Add(-23*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrCheckoutConflict) {
@@ -152,7 +154,7 @@ func TestCheckoutUncertainWindowAndDisabledDonor(t *testing.T) {
 	if len(gateway.calls) != 1 {
 		t.Fatal("old request reached provider")
 	}
-	if _, err := service.DB.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
+	if _, err := pool.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
 		t.Fatal(err)
 	}
 	request.RequestID = testID(t)
@@ -163,22 +165,23 @@ func TestCheckoutUncertainWindowAndDisabledDonor(t *testing.T) {
 }
 func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 	service, request, id, gateway := checkoutFixture(t)
+	pool := database(t)
 	ctx := context.Background()
-	referrer, _ := donor(t, service.DB)
+	referrer, _ := donor(t, pool)
 	// Registered after referrer cleanup so dependent rows disappear first.
 	t.Cleanup(func() {
 		for _, sql := range []string{"DELETE FROM donor_recurring_reservations WHERE donor_id=$1", "DELETE FROM donor_stripe_checkouts WHERE checkout_id IN (SELECT id FROM donor_checkouts WHERE donor_id=$1)", "DELETE FROM donor_checkouts WHERE donor_id=$1"} {
-			if _, err := service.DB.Exec(ctx, sql, id); err != nil {
+			if _, err := pool.Exec(ctx, sql, id); err != nil {
 				t.Error(err)
 			}
 		}
-		if _, err := service.DB.Exec(ctx, "DELETE FROM donor_referral_touches WHERE referrer_id=$1", referrer); err != nil {
+		if _, err := pool.Exec(ctx, "DELETE FROM donor_referral_touches WHERE referrer_id=$1", referrer); err != nil {
 			t.Error(err)
 		}
 	})
 	token := "test-visitor"
 	touch := testID(t)
-	if _, err := service.DB.Exec(ctx, `INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES ($1,$2,$3,'IRL',$4,$5)`, touch, HashToken(token), referrer, time.Now(), time.Now().Add(time.Hour)); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES ($1,$2,$3,'IRL',$4,$5)`, touch, HashToken(token), referrer, time.Now(), time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	request.Visitor = &token
@@ -186,7 +189,7 @@ func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 	if _, err := service.BeginCheckout(ctx, request); err == nil {
 		t.Fatal("expected lost response")
 	}
-	if _, err := service.DB.Exec(ctx, "UPDATE donor_referral_touches SET expires_at=$2 WHERE id=$1", touch, time.Now().Add(-time.Hour)); err != nil {
+	if _, err := pool.Exec(ctx, "UPDATE donor_referral_touches SET expires_at=$2 WHERE id=$1", touch, time.Now().Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.BeginCheckout(ctx, request); err != nil {
@@ -200,7 +203,7 @@ func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 	if metadata["dad_referrer_id"] != referrer.String() || metadata["dad_referral_kind"] != "IRL" {
 		t.Fatal("snapshot referral was lost on retry")
 	}
-	if _, err := service.DB.Exec(ctx, "UPDATE donor_referral_touches SET referrer_id=$2,expires_at=$3 WHERE id=$1", touch, id, time.Now().Add(time.Hour)); err != nil {
+	if _, err := pool.Exec(ctx, "UPDATE donor_referral_touches SET referrer_id=$2,expires_at=$3 WHERE id=$1", touch, id, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	request.RequestID = testID(t)
@@ -217,13 +220,14 @@ func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 }
 func TestUnexpectedProviderCheckoutIsNotAcknowledged(t *testing.T) {
 	service, request, _, gateway := checkoutFixture(t)
+	pool := database(t)
 	ctx := context.Background()
 	live := true
 	gateway.remote = &payments.RemoteCheckout{ID: "cs_live_invalid", URL: "https://checkout.stripe.com/c/test", Livemode: &live}
 	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, payments.ErrProcessorUnavailable) {
 		t.Fatal("live response accepted")
 	}
-	attempt, err := queries.New(service.DB).StripeCheckout(ctx, request.RequestID)
+	attempt, err := queries.New(pool).StripeCheckout(ctx, request.RequestID)
 	if err != nil || attempt.HostedUrl.Valid || attempt.StripeSessionID.Valid || attempt.Status != "PENDING" {
 		t.Fatal("untrusted checkout acknowledged")
 	}
@@ -231,6 +235,7 @@ func TestUnexpectedProviderCheckoutIsNotAcknowledged(t *testing.T) {
 
 func TestConcurrentRetrySharesOneDraftAndProviderKey(t *testing.T) {
 	service, request, id, gateway := checkoutFixture(t)
+	pool := database(t)
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	results := make(chan payments.CheckoutResult, 4)
@@ -264,7 +269,7 @@ func TestConcurrentRetrySharesOneDraftAndProviderKey(t *testing.T) {
 		}
 	}
 	var count int
-	if err := service.DB.QueryRow(ctx, "SELECT count(*) FROM donor_checkouts WHERE donor_id=$1", id).Scan(&count); err != nil || count != 1 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_checkouts WHERE donor_id=$1", id).Scan(&count); err != nil || count != 1 {
 		t.Fatal("concurrent retry created duplicate drafts")
 	}
 	for _, call := range gateway.calls {

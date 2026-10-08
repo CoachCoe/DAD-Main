@@ -31,7 +31,7 @@ func subscriptionItem(remote map[string]any) map[string]any {
 func assertEventProcessed(t *testing.T, f *workerFixture, id string, want bool) {
 	t.Helper()
 	var done bool
-	if err := f.service.DB.QueryRow(context.Background(), "SELECT processed_at IS NOT NULL FROM donor_stripe_events WHERE stripe_event_id=$1", id).Scan(&done); err != nil {
+	if err := f.db.QueryRow(context.Background(), "SELECT processed_at IS NOT NULL FROM donor_stripe_events WHERE stripe_event_id=$1", id).Scan(&done); err != nil {
 		t.Fatal(err)
 	}
 	if done != want {
@@ -53,13 +53,13 @@ func TestSubscriptionUsesCurrentStateAndReleasesCancelledReservation(t *testing.
 	var status, attempt string
 	var stops time.Time
 	var reservations int
-	if err := f.service.DB.QueryRow(ctx, `SELECT s.status,s.stops_at,a.status FROM donor_subscriptions s JOIN donor_stripe_checkouts a ON a.id=s.attempt_id WHERE s.donor_id=$1`, f.donorID).Scan(&status, &stops, &attempt); err != nil {
+	if err := f.db.QueryRow(ctx, `SELECT s.status,s.stops_at,a.status FROM donor_subscriptions s JOIN donor_stripe_checkouts a ON a.id=s.attempt_id WHERE s.donor_id=$1`, f.donorID).Scan(&status, &stops, &attempt); err != nil {
 		t.Fatal(err)
 	}
 	if status != "canceled" || attempt != "CANCELLED" || !stops.Equal(start.Add(30*24*time.Hour)) {
 		t.Fatal("stale webhook overrode current cancellation")
 	}
-	if err := f.service.DB.QueryRow(ctx, "SELECT count(*) FROM donor_recurring_reservations WHERE donor_id=$1", f.donorID).Scan(&reservations); err != nil || reservations != 0 {
+	if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_recurring_reservations WHERE donor_id=$1", f.donorID).Scan(&reservations); err != nil || reservations != 0 {
 		t.Fatal("reservation not released", err)
 	}
 }
@@ -68,7 +68,7 @@ func TestCheckoutCompletionSyncsTheSubscriptionItBinds(t *testing.T) {
 	result := f.checkout(t)
 	ctx := context.Background()
 	var session pgtype.Text
-	if err := f.service.DB.QueryRow(ctx, "SELECT stripe_session_id FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&session); err != nil {
+	if err := f.db.QueryRow(ctx, "SELECT stripe_session_id FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&session); err != nil {
 		t.Fatal(err)
 	}
 	if !session.Valid {
@@ -80,7 +80,7 @@ func TestCheckoutCompletionSyncsTheSubscriptionItBinds(t *testing.T) {
 	f.process(t)
 	assertEventProcessed(t, f, event, false)
 	var bound bool
-	if err := f.service.DB.QueryRow(ctx, "SELECT stripe_subscription_id IS NOT NULL FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&bound); err != nil || bound {
+	if err := f.db.QueryRow(ctx, "SELECT stripe_subscription_id IS NOT NULL FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&bound); err != nil || bound {
 		t.Fatal("completion applied without its subscription", err)
 	}
 
@@ -91,7 +91,7 @@ func TestCheckoutCompletionSyncsTheSubscriptionItBinds(t *testing.T) {
 	assertEventProcessed(t, f, event, true)
 	var status, attempt string
 	var periodEnd, anchor time.Time
-	if err := f.service.DB.QueryRow(ctx, `SELECT s.status,s.period_end,s.billing_anchor,a.status FROM donor_subscriptions s JOIN donor_stripe_checkouts a ON a.id=s.attempt_id WHERE a.checkout_id=$1`, result.CheckoutID).Scan(&status, &periodEnd, &anchor, &attempt); err != nil {
+	if err := f.db.QueryRow(ctx, `SELECT s.status,s.period_end,s.billing_anchor,a.status FROM donor_subscriptions s JOIN donor_stripe_checkouts a ON a.id=s.attempt_id WHERE a.checkout_id=$1`, result.CheckoutID).Scan(&status, &periodEnd, &anchor, &attempt); err != nil {
 		t.Fatal("completion did not sync the subscription", err)
 	}
 	if status != "active" || attempt != "COMPLETE" || !periodEnd.Equal(start.Add(30*24*time.Hour)) || !anchor.Equal(start) {
@@ -112,7 +112,7 @@ func TestEverySubscriptionEventSyncsCurrentState(t *testing.T) {
 			f.process(t)
 			assertEventProcessed(t, f, event, true)
 			var stops time.Time
-			if err := f.service.DB.QueryRow(context.Background(), "SELECT stops_at FROM donor_subscriptions WHERE donor_id=$1", f.donorID).Scan(&stops); err != nil || !stops.Equal(start.Add(30*24*time.Hour)) {
+			if err := f.db.QueryRow(context.Background(), "SELECT stops_at FROM donor_subscriptions WHERE donor_id=$1", f.donorID).Scan(&stops); err != nil || !stops.Equal(start.Add(30*24*time.Hour)) {
 				t.Fatal("event did not sync the subscription's current state", stops, err)
 			}
 		})
@@ -144,10 +144,10 @@ func TestInvalidSubscriptionRollsBackBindingAndProjection(t *testing.T) {
 			assertEventProcessed(t, f, event, false)
 			var bound bool
 			var schedules int
-			if err := f.service.DB.QueryRow(context.Background(), "SELECT stripe_subscription_id IS NOT NULL FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&bound); err != nil || bound {
+			if err := f.db.QueryRow(context.Background(), "SELECT stripe_subscription_id IS NOT NULL FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&bound); err != nil || bound {
 				t.Fatal("failed binding survived", err)
 			}
-			if err := f.service.DB.QueryRow(context.Background(), "SELECT count(*) FROM donor_subscriptions WHERE donor_id=$1", f.donorID).Scan(&schedules); err != nil || schedules != 0 {
+			if err := f.db.QueryRow(context.Background(), "SELECT count(*) FROM donor_subscriptions WHERE donor_id=$1", f.donorID).Scan(&schedules); err != nil || schedules != 0 {
 				t.Fatal("invalid schedule saved", err)
 			}
 		})
@@ -160,15 +160,15 @@ func TestReconcileAuthorizedAmountPauseAndResumption(t *testing.T) {
 	start := time.Now().UTC().Truncate(time.Second).Add(-24 * time.Hour)
 	end := start.Add(30 * 24 * time.Hour)
 	var attempt pgtype.UUID
-	if err := f.service.DB.QueryRow(ctx, "SELECT id FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&attempt); err != nil {
+	if err := f.db.QueryRow(ctx, "SELECT id FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&attempt); err != nil {
 		t.Fatal(err)
 	}
 	change, pause, resume := testID(t), testID(t), testID(t)
-	if _, err := f.service.DB.Exec(ctx, `INSERT INTO donor_amount_changes(id,donor_id,checkout_id,previous_minor,amount_minor,effective_at,item_id,product_id) VALUES($1,$2,$3,3000,9000,$4,'si_fixture','prod_fixture')`, change, f.donorID, result.CheckoutID, end); err != nil {
+	if _, err := f.db.Exec(ctx, `INSERT INTO donor_amount_changes(id,donor_id,checkout_id,previous_minor,amount_minor,effective_at,item_id,product_id) VALUES($1,$2,$3,3000,9000,$4,'si_fixture','prod_fixture')`, change, f.donorID, result.CheckoutID, end); err != nil {
 		t.Fatal(err)
 	}
 	until := end.Add(60 * 24 * time.Hour)
-	if _, err := f.service.DB.Exec(ctx, `INSERT INTO donor_pauses(id,donor_id,attempt_id,months,starts_at,resumes_at) VALUES($1,$2,$3,2,$4,$5)`, pause, f.donorID, attempt, end, until); err != nil {
+	if _, err := f.db.Exec(ctx, `INSERT INTO donor_pauses(id,donor_id,attempt_id,months,starts_at,resumes_at) VALUES($1,$2,$3,2,$4,$5)`, pause, f.donorID, attempt, end, until); err != nil {
 		t.Fatal(err)
 	}
 	remote := subscription(result.CheckoutID, start)
@@ -180,11 +180,11 @@ func TestReconcileAuthorizedAmountPauseAndResumption(t *testing.T) {
 	assertEventProcessed(t, f, event, true)
 	var confirmed bool
 	for _, table := range []string{"donor_amount_changes", "donor_pauses"} {
-		if err := f.service.DB.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM "+table+" WHERE donor_id=$1", f.donorID).Scan(&confirmed); err != nil || !confirmed {
+		if err := f.db.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM "+table+" WHERE donor_id=$1", f.donorID).Scan(&confirmed); err != nil || !confirmed {
 			t.Fatal("authorization not confirmed", table, err)
 		}
 	}
-	if _, err := f.service.DB.Exec(ctx, `INSERT INTO donor_resumptions(id,donor_id,pause_id,next_renewal) VALUES($1,$2,$3,$4)`, resume, f.donorID, pause, end); err != nil {
+	if _, err := f.db.Exec(ctx, `INSERT INTO donor_resumptions(id,donor_id,pause_id,next_renewal) VALUES($1,$2,$3,$4)`, resume, f.donorID, pause, end); err != nil {
 		t.Fatal(err)
 	}
 	remote["pause_collection"] = map[string]any{"behavior": "void", "resumes_at": end.Unix()}
@@ -192,7 +192,7 @@ func TestReconcileAuthorizedAmountPauseAndResumption(t *testing.T) {
 	event = f.receive(t, "customer.subscription.updated", remote)
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
-	if err := f.service.DB.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM donor_resumptions WHERE id=$1", resume).Scan(&confirmed); err != nil || !confirmed {
+	if err := f.db.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM donor_resumptions WHERE id=$1", resume).Scan(&confirmed); err != nil || !confirmed {
 		t.Fatal("resumption not confirmed", err)
 	}
 	remote["pause_collection"] = nil
@@ -208,7 +208,7 @@ func TestInvoiceConfirmsPendingAmountWithoutRepricingPriorPeriod(t *testing.T) {
 	ctx := context.Background()
 	start := time.Now().UTC().Truncate(time.Second).Add(-24 * time.Hour)
 	end := start.Add(30 * 24 * time.Hour)
-	if _, err := f.service.DB.Exec(ctx, `INSERT INTO donor_amount_changes(id,donor_id,checkout_id,previous_minor,amount_minor,effective_at,item_id,product_id) VALUES($1,$2,$3,3000,9000,$4,'si_fixture','prod_fixture')`, testID(t), f.donorID, result.CheckoutID, end); err != nil {
+	if _, err := f.db.Exec(ctx, `INSERT INTO donor_amount_changes(id,donor_id,checkout_id,previous_minor,amount_minor,effective_at,item_id,product_id) VALUES($1,$2,$3,3000,9000,$4,'si_fixture','prod_fixture')`, testID(t), f.donorID, result.CheckoutID, end); err != nil {
 		t.Fatal(err)
 	}
 	remote := subscription(result.CheckoutID, start)
@@ -228,7 +228,7 @@ func TestInvoiceConfirmsPendingAmountWithoutRepricingPriorPeriod(t *testing.T) {
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
 	var total int64
-	if err := f.service.DB.QueryRow(ctx, "SELECT sum(amount_minor) FROM donor_gifts WHERE donor_id=$1", f.donorID).Scan(&total); err != nil || total != 12000 {
+	if err := f.db.QueryRow(ctx, "SELECT sum(amount_minor) FROM donor_gifts WHERE donor_id=$1", f.donorID).Scan(&total); err != nil || total != 12000 {
 		t.Fatal("invoice effective boundary changed", total, err)
 	}
 }

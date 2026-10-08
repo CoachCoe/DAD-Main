@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -64,6 +65,7 @@ func whileStalled(t *testing.T, stalled *gate, command func() error, during func
 
 func TestRecurringCommandsCallProcessorOutsideDonorLock(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	_, finance := staffFixture(t, pool, "FINANCE")
 	ctx := context.Background()
 	pause := func(r *recurringFixture) PauseRequest {
@@ -104,7 +106,7 @@ func TestRecurringCommandsCallProcessorOutsideDonorLock(t *testing.T) {
 			return err
 		}},
 		{"staff cancel", nil, func(r *recurringFixture, _ pgtype.UUID) error {
-			s := StaffFinanceService{Staff: &StaffService{DB: pool}, Gateway: r.sub, Origin: "https://donor.example.org"}
+			s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: r.sub, Origin: "https://donor.example.org"}
 			_, err := s.Cancel(ctx, finance, StaffFinancialRequest{RequestID: testID(t), DonorID: r.donorID, TargetID: r.attempt, Reason: "Donor asked by phone to stop", PeriodEnd: r.end})
 			return err
 		}},
@@ -130,7 +132,7 @@ func TestRecurringCommandsCallProcessorOutsideDonorLock(t *testing.T) {
 func TestOutstandingProcessorRequestBlocksOtherSubscriptionCommands(t *testing.T) {
 	r := newRecurringFixture(t)
 	ctx := context.Background()
-	pool := r.service.DB
+	pool := r.db
 	pause := PauseRequest{RequestID: testID(t), AttemptID: r.attempt, Months: 1, StartsAt: r.end, ResumesAt: r.end.AddDate(0, 1, 0)}
 	amount := AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}
 	cancel := CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end}
@@ -174,7 +176,7 @@ func TestOutstandingProcessorRequestBlocksOtherSubscriptionCommands(t *testing.T
 func TestRetryAfterCrashAppliesProcessorResultOnce(t *testing.T) {
 	r := newRecurringFixture(t)
 	ctx := context.Background()
-	pool := r.service.DB
+	pool := r.db
 	request := PauseRequest{RequestID: testID(t), AttemptID: r.attempt, Months: 1, StartsAt: r.end, ResumesAt: r.end.AddDate(0, 1, 0)}
 	r.sub.loseAcknowledgement = true
 	if _, err := r.service.Pause(ctx, r.token, request); !errors.Is(err, payments.ErrProcessorUnavailable) {
@@ -245,7 +247,7 @@ func TestEventWorkerReadsProcessorOutsideDonorLock(t *testing.T) {
 	process := func(t *testing.T, f *workerFixture, during func()) *stalledReads {
 		t.Helper()
 		gateway := &stalledReads{financialGateway: f.gateway, gate: newGate(t)}
-		worker := EventWorker{DB: f.service.DB, Gateway: gateway}
+		worker := EventWorker{DB: as(t, dbroles.StripeWorker), Gateway: gateway}
 		err := whileStalled(t, gateway.gate, func() error {
 			worked, err := worker.ProcessNext(context.Background())
 			if err == nil && !worked {
@@ -253,7 +255,7 @@ func TestEventWorkerReadsProcessorOutsideDonorLock(t *testing.T) {
 			}
 			return err
 		}, func() {
-			assertDonorUnlocked(t, f.service.DB, f.donorID)
+			assertDonorUnlocked(t, f.db, f.donorID)
 			if during != nil {
 				during()
 			}
@@ -313,7 +315,7 @@ func TestEventWorkerReadsProcessorOutsideDonorLock(t *testing.T) {
 				t.Fatalf("processor reads=%d want %d", gateway.reads, want)
 			}
 			assertEventProcessed(t, f, event, true)
-			if p, err := queries.New(f.service.DB).Projection(context.Background(), f.donorID); err != nil || p.NetMinor.Int64 != 0 {
+			if p, err := queries.New(f.db).Projection(context.Background(), f.donorID); err != nil || p.NetMinor.Int64 != 0 {
 				t.Fatal("refund not applied", err)
 			}
 		})

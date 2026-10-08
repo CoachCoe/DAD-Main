@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/push"
 	"impactgraph/donor-api/internal/recognition"
 	"impactgraph/donor-api/internal/store/queries"
@@ -58,6 +59,7 @@ func pushTokenOf(t *testing.T, pool *pgxpool.Pool, access string) (string, strin
 
 func TestPushRegistrationBelongsToTheAppSession(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	service := pushServices
 	service.DB = pool
@@ -110,7 +112,7 @@ func TestPushRegistrationBelongsToTheAppSession(t *testing.T) {
 			t.Errorf("%s: got %v, want ErrPushToken", name, err)
 		}
 	}
-	iosOnly := PushService{DB: pool, Platforms: []string{push.IOS}}
+	iosOnly := PushService{DB: api, Platforms: []string{push.IOS}}
 	if _, err = iosOnly.RegisterDevice(ctx, phone.Access, PushDevice{Platform: push.Android, Token: androidToken}); !errors.Is(err, ErrPushUnconfigured) {
 		t.Fatalf("registered for an unconfigured platform: %v", err)
 	}
@@ -125,10 +127,11 @@ func TestPushRegistrationBelongsToTheAppSession(t *testing.T) {
 
 func TestEndingASessionClearsItsPushToken(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	service := pushServices
 	service.DB = pool
-	donorService := DonorService{DB: pool}
+	donorService := DonorService{DB: api}
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	register := func(token string) Tokens {
@@ -147,18 +150,18 @@ func TestEndingASessionClearsItsPushToken(t *testing.T) {
 	}
 
 	loggedOut := register(androidToken + "1")
-	if err := (AccountService{DB: pool}).SignOut(ctx, loggedOut.Access); err != nil {
+	if err := (AccountService{DB: api}).SignOut(ctx, loggedOut.Access); err != nil {
 		t.Fatal(err)
 	}
 	cleared("sign-out", loggedOut)
 
 	reused := register(androidToken + "2")
-	refresh(t, pool, reused.Refresh)
+	refresh(t, reused.Refresh)
 	family := HashToken(strings.SplitN(reused.Refresh, ".", 2)[0])
 	if _, err := pool.Exec(ctx, "UPDATE donor_sessions SET refreshed_at=refreshed_at-interval '2 minutes' WHERE refresh_family_hash=$1", family); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (AccountService{DB: pool}).Refresh(ctx, reused.Refresh); !errors.Is(err, ErrDenied) {
+	if _, err := (AccountService{DB: api}).Refresh(ctx, reused.Refresh); !errors.Is(err, ErrDenied) {
 		t.Fatalf("reused refresh token accepted: %v", err)
 	}
 	var reusedToken pgtype.Text
@@ -203,7 +206,8 @@ func TestEndingASessionClearsItsPushToken(t *testing.T) {
 
 func TestPushPreferencesStartOnAndAreVersioned(t *testing.T) {
 	s, token, id := donorServiceFixture(t)
-	pushCleanup(t, s.DB, id)
+	pool := database(t)
+	pushCleanup(t, pool, id)
 	ctx := context.Background()
 	profile, err := s.Profile(ctx, token)
 	if err != nil || !profile.PushReferralConverted || !profile.PushStreakAtRisk || !profile.PushStreakMilestone || profile.ReferralEmails || profile.MarketingEmails {
@@ -215,7 +219,7 @@ func TestPushPreferencesStartOnAndAreVersioned(t *testing.T) {
 	}
 	var referral, atRisk, milestone bool
 	var consent string
-	if err = s.DB.QueryRow(ctx, "SELECT push_referral_converted,push_streak_at_risk,push_streak_milestone,consent_version FROM donor_preference_events WHERE donor_id=$1 AND version=1", id).Scan(&referral, &atRisk, &milestone, &consent); err != nil || !referral || atRisk || !milestone || consent != consentVersion {
+	if err = pool.QueryRow(ctx, "SELECT push_referral_converted,push_streak_at_risk,push_streak_milestone,consent_version FROM donor_preference_events WHERE donor_id=$1 AND version=1", id).Scan(&referral, &atRisk, &milestone, &consent); err != nil || !referral || atRisk || !milestone || consent != consentVersion {
 		t.Fatalf("preference event: %v %v %v %q %v", referral, atRisk, milestone, consent, err)
 	}
 	if _, err = s.SavePreferences(ctx, token, Preferences{Version: 0}); !errors.Is(err, ErrPreferenceConflict) {
@@ -259,6 +263,7 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 	// An old conversion is history, not news, for a referrer who installs the app later.
 	h.gift(recognition.Gift{ID: "old", DonorID: "dee", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid.Add(-48 * time.Hour), Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: paid}})
 	mustExec(t, tx, "UPDATE donor_gifts SET created_at=paid_at WHERE donor_id=$1", h.donor("dee"))
+	actAs(t, tx, dbroles.ProjectionWorker)
 	for _, at := range []time.Time{paid, paid.Add(time.Minute)} {
 		for _, name := range []string{"ben", "cara", "dee"} {
 			if _, err = refreshProjection(ctx, tx, h.donor(name), at); err != nil {
@@ -291,7 +296,7 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 
 func TestStreakPushesFollowTheProjection(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
-	pushCleanup(t, f.service.DB, f.donorID)
+	pushCleanup(t, f.db, f.donorID)
 	result := f.checkout(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Microsecond)
@@ -313,7 +318,7 @@ func TestStreakPushesFollowTheProjection(t *testing.T) {
 	// The next renewal fails: the streak is at risk, announced once for that period.
 	f.receive(t, "invoice.payment_failed", invoice(result.CheckoutID, "in_"+result.CheckoutID+"_d", start.Add(90*24*time.Hour), false))
 	f.process(t)
-	tx, err := f.service.DB.Begin(ctx)
+	tx, err := as(t, dbroles.ProjectionWorker).Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +330,7 @@ func TestStreakPushesFollowTheProjection(t *testing.T) {
 	}
 	intents = pushIntents(t, f.service.DB, f.donorID)
 	var period string
-	if err = f.service.DB.QueryRow(ctx, "SELECT id::text FROM donor_billing_periods WHERE donor_id=$1 AND status='FAILED'", f.donorID).Scan(&period); err != nil {
+	if err = f.db.QueryRow(ctx, "SELECT id::text FROM donor_billing_periods WHERE donor_id=$1 AND status='FAILED'", f.donorID).Scan(&period); err != nil {
 		t.Fatal(err)
 	}
 	if len(intents) != 2 || intents[0].Category != "STREAK_AT_RISK" || intents[0].DedupKey != "push:streak-at-risk:"+period {
@@ -403,7 +408,7 @@ func TestPushDeliveryReachesEachDeviceOnce(t *testing.T) {
 	appDevice(t, f.pool, f.donor, push.Android, androidToken+"lapsed", f.now.Add(-time.Minute))
 	apns := &fakeProvider{}
 	fcm := &fakeProvider{result: func(push.Device) error { return push.Unavailable{After: 10 * time.Minute} }}
-	w := PushWorker{DB: f.pool, Providers: map[string]push.Provider{push.IOS: apns, push.Android: fcm}}
+	w := PushWorker{DB: as(t, dbroles.PushWorker), Providers: map[string]push.Provider{push.IOS: apns, push.Android: fcm}}
 
 	if !f.deliver(t, w, f.now) {
 		t.Fatal("no work found")
@@ -440,7 +445,7 @@ func TestUnregisteredTokenIsDroppedWithoutRetry(t *testing.T) {
 	f := newPushFixture(t)
 	phone := appDevice(t, f.pool, f.donor, push.IOS, iosToken, f.now.Add(time.Hour))
 	apns := &fakeProvider{result: func(push.Device) error { return push.ErrUnregistered }}
-	w := PushWorker{DB: f.pool, Providers: map[string]push.Provider{push.IOS: apns}}
+	w := PushWorker{DB: as(t, dbroles.PushWorker), Providers: map[string]push.Provider{push.IOS: apns}}
 	f.deliver(t, w, f.now)
 	if _, completed, reason, _, _ := f.state(t); !completed || reason != "unregistered" {
 		t.Fatalf("completed=%v reason=%q, want completion without retry", completed, reason)
@@ -455,7 +460,7 @@ func TestRejectedConfigurationParksTheNotification(t *testing.T) {
 	f := newPushFixture(t)
 	appDevice(t, f.pool, f.donor, push.IOS, iosToken, f.now.Add(time.Hour))
 	apns := &fakeProvider{result: func(push.Device) error { return push.ErrRejected }}
-	w := PushWorker{DB: f.pool, Providers: map[string]push.Provider{push.IOS: apns}}
+	w := PushWorker{DB: as(t, dbroles.PushWorker), Providers: map[string]push.Provider{push.IOS: apns}}
 	f.deliver(t, w, f.now)
 	attempts, completed, _, lastError, _ := f.state(t)
 	if attempts != maxDeliveryAttempts || completed || lastError != "ProviderRejected" {
@@ -487,6 +492,20 @@ func TestPushRechecksItsCircumstancesAtDelivery(t *testing.T) {
 		{"signed out", func(t *testing.T, f *pushFixture) {
 			mustExec(t, f.pool, "UPDATE donor_sessions SET revoked_at=now(),push_token=NULL,push_environment=NULL WHERE donor_id=$1", f.donor)
 		}, 0, "no_device"},
+		{"renewal cancelled", func(t *testing.T, f *pushFixture) {
+			checkout, attempt, period := testID(t), testID(t), testID(t)
+			t.Cleanup(func() {
+				for _, sql := range []string{"DELETE FROM donor_billing_periods WHERE donor_id=$1", "DELETE FROM donor_subscriptions WHERE donor_id=$1",
+					"DELETE FROM donor_stripe_checkouts WHERE checkout_id IN (SELECT id FROM donor_checkouts WHERE donor_id=$1)", "DELETE FROM donor_checkouts WHERE donor_id=$1"} {
+					mustExec(t, f.pool, sql, f.donor)
+				}
+			})
+			mustExec(t, f.pool, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES($1,$2,3000,'MONTHLY')", checkout, f.donor)
+			mustExec(t, f.pool, "INSERT INTO donor_stripe_checkouts(id,checkout_id,request_hash,request_params,stripe_subscription_id,status) VALUES($1,$2,'hash','{}',$3,'COMPLETE')", attempt, checkout, "sub_"+attempt.String())
+			mustExec(t, f.pool, "INSERT INTO donor_subscriptions(id,attempt_id,donor_id,status,period_end,stops_at,observed_at) VALUES($1,$2,$3,'active',$4,$4,$5)", testID(t), attempt, f.donor, f.now.Add(24*time.Hour), f.now)
+			mustExec(t, f.pool, "INSERT INTO donor_billing_periods(id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status) VALUES($1,$2,$3,$4,$5,$6,$7,'FAILED')", period, f.donor, checkout, "in_"+period.String(), "sub_"+attempt.String(), f.now.Add(-time.Hour), f.now.Add(24*time.Hour))
+			mustExec(t, f.pool, "UPDATE donor_push_notifications SET category='STREAK_AT_RISK',context=json_build_object('period_id',$2::text) WHERE id=$1", f.intent, period)
+		}, 0, "subscription_cancelled"},
 		{"provider unconfigured", func(t *testing.T, f *pushFixture) {
 			appDevice(t, f.pool, f.donor, push.Android, androidToken, f.now.Add(time.Hour))
 			mustExec(t, f.pool, "UPDATE donor_sessions SET push_token=NULL,push_environment=NULL WHERE donor_id=$1 AND platform='IOS'", f.donor)
@@ -497,7 +516,7 @@ func TestPushRechecksItsCircumstancesAtDelivery(t *testing.T) {
 			appDevice(t, f.pool, f.donor, push.IOS, iosToken, f.now.Add(48*time.Hour))
 			tc.prepare(t, f)
 			apns := &fakeProvider{}
-			f.deliver(t, PushWorker{DB: f.pool, Providers: map[string]push.Provider{push.IOS: apns}}, f.now.Add(tc.at))
+			f.deliver(t, PushWorker{DB: as(t, dbroles.PushWorker), Providers: map[string]push.Provider{push.IOS: apns}}, f.now.Add(tc.at))
 			if _, completed, reason, _, _ := f.state(t); !completed || reason != tc.reason || len(apns.sent) != 0 {
 				t.Fatalf("completed=%v reason=%q after %d sends, want suppressed as %s", completed, reason, len(apns.sent), tc.reason)
 			}
@@ -507,20 +526,21 @@ func TestPushRechecksItsCircumstancesAtDelivery(t *testing.T) {
 
 func TestReferralConversionsFeedShowsOnlyChannelAndTime(t *testing.T) {
 	s, token, referrer := donorServiceFixture(t)
+	pool := database(t)
 	ctx := context.Background()
 	base := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Second)
 	for i, kind := range []string{"LINK", "IRL", "LINK"} {
-		id, _ := donor(t, s.DB)
-		accountCleanup(t, s.DB, id)
+		id, _ := donor(t, pool)
+		accountCleanup(t, pool, id)
 		checkout := testID(t)
-		mustExec(t, s.DB, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'ONE_TIME',$3,$4,$5)", checkout, id, referrer, kind, base.Add(30*24*time.Hour))
+		mustExec(t, pool, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'ONE_TIME',$3,$4,$5)", checkout, id, referrer, kind, base.Add(30*24*time.Hour))
 		object := "pi_feed_" + checkout.String()
-		mustExec(t, s.DB, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,$7)", testID(t), id, checkout, object, base.Add(time.Duration(i)*time.Hour), referrer, kind)
+		mustExec(t, pool, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,$7)", testID(t), id, checkout, object, base.Add(time.Duration(i)*time.Hour), referrer, kind)
 		net := int64(3000)
 		if i == 2 {
 			net = 0 // fully refunded: no longer a referral
 		}
-		mustExec(t, s.DB, `INSERT INTO donor_metric_projections(id,donor_id,referrer_id,referral_kind,first_gift_id,net_minor,computed_at,next_refresh_at)
+		mustExec(t, pool, `INSERT INTO donor_metric_projections(id,donor_id,referrer_id,referral_kind,first_gift_id,net_minor,computed_at,next_refresh_at)
 VALUES($1,$2,$3,$4,$5,$6,now(),now()+interval '1 day')`, testID(t), id, referrer, kind, object, net)
 	}
 	feed, err := s.Conversions(ctx, token, nil)

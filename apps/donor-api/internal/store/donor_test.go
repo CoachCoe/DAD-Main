@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
 func donorServiceFixture(t *testing.T) (DonorService, string, pgtype.UUID) {
 	t.Helper()
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	t.Cleanup(func() {
@@ -24,14 +26,15 @@ func donorServiceFixture(t *testing.T) (DonorService, string, pgtype.UUID) {
 		}
 	})
 	proof := link(t, pool, id, time.Now())
-	tokens, err := (AccountService{DB: pool}).ClaimAccount(context.Background(), proof, "", Client{})
+	tokens, err := (AccountService{DB: api}).ClaimAccount(context.Background(), proof, "", Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return DonorService{DB: pool, Origin: "https://donor.example.org"}, tokens.Access, id
+	return DonorService{DB: api, Origin: "https://donor.example.org"}, tokens.Access, id
 }
 func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	s, token, id := donorServiceFixture(t)
+	pool := database(t)
 	ctx := context.Background()
 	profile, err := s.Profile(ctx, token)
 	if err != nil || profile.Version != 0 || profile.ReferralEmails || profile.MarketingEmails || profile.ConsentVersion != consentVersion {
@@ -64,10 +67,10 @@ func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	var count int
 	var version int
 	var consent, source string
-	if err := s.DB.QueryRow(ctx, "SELECT count(*) FROM donor_preference_events WHERE donor_id=$1", id).Scan(&count); err != nil || count != 1 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_preference_events WHERE donor_id=$1", id).Scan(&count); err != nil || count != 1 {
 		t.Fatal("duplicate/missing consent event", err)
 	}
-	if err := s.DB.QueryRow(ctx, "SELECT version,consent_version,source FROM donor_preference_events WHERE donor_id=$1", id).Scan(&version, &consent, &source); err != nil || version != 1 || consent != consentVersion || source != "account" {
+	if err := pool.QueryRow(ctx, "SELECT version,consent_version,source FROM donor_preference_events WHERE donor_id=$1", id).Scan(&version, &consent, &source); err != nil || version != 1 || consent != consentVersion || source != "account" {
 		t.Fatal("audit mismatch", err)
 	}
 	if err = s.SignOutEverywhere(ctx, token); err != nil {
@@ -79,6 +82,7 @@ func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 }
 func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 	first, token, id := donorServiceFixture(t)
+	pool := database(t)
 	second, other, _ := donorServiceFixture(t)
 	ctx := context.Background()
 	now := time.Now()
@@ -111,7 +115,7 @@ func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 	if err != nil || later.Token != touch.Token || *later.PublicName != "First" {
 		t.Fatal("first touch replaced", later, err)
 	}
-	saved, err := queries.New(first.DB).ReferralTouchByToken(ctx, HashToken(touch.Token))
+	saved, err := queries.New(pool).ReferralTouchByToken(ctx, HashToken(touch.Token))
 	if err != nil || saved.Kind != "LINK" || !saved.ExpiresAt.Time.Equal(now.Add(30*24*time.Hour).Truncate(time.Microsecond)) {
 		t.Fatal("attribution type/expiry changed", err)
 	}
@@ -131,7 +135,7 @@ func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 	if err != nil || renewed.Token == touch.Token || renewed.Token == "" {
 		t.Fatal("expired token repurposed", err)
 	}
-	if _, err = first.DB.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
+	if _, err = pool.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = first.Sharing(ctx, token); !errors.Is(err, ErrDenied) {

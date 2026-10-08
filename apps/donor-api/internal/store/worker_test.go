@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stripe/stripe-go/v87"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/recognition"
 	"impactgraph/donor-api/internal/store/queries"
@@ -77,6 +79,8 @@ func (g *financialGateway) UpdateSubscriptionPaymentMethod(_ context.Context, id
 }
 
 type workerFixture struct {
+	// db is the owner's pool, for fixtures and assertions.
+	db      *pgxpool.Pool
 	service CheckoutService
 	request payments.CheckoutRequest
 	donorID pgtype.UUID
@@ -90,7 +94,7 @@ func newWorkerFixture(t *testing.T, frequency string) *workerFixture {
 	service, request, id, _ := checkoutFixture(t)
 	request.Frequency = frequency
 	gateway := &financialGateway{intents: map[string]payments.Object{}, refunds: map[string]payments.Object{}, subscriptions: map[string]payments.Object{}, sessions: map[string]payments.Object{}, setups: map[string]payments.Object{}}
-	f := &workerFixture{service: service, request: request, donorID: id, worker: EventWorker{DB: service.DB, Gateway: gateway}, gateway: gateway}
+	f := &workerFixture{db: database(t), service: service, request: request, donorID: id, worker: EventWorker{DB: as(t, dbroles.StripeWorker), Gateway: gateway}, gateway: gateway}
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, sql := range []string{
@@ -113,11 +117,11 @@ func newWorkerFixture(t *testing.T, frequency string) *workerFixture {
 			if sql == "DELETE FROM donor_messages WHERE donor_id=$1 OR dedup_key=$2" {
 				args = append(args, "referral:"+id.String())
 			}
-			if _, err := service.DB.Exec(ctx, sql, args...); err != nil {
+			if _, err := f.db.Exec(ctx, sql, args...); err != nil {
 				t.Error(err)
 			}
 		}
-		if _, err := service.DB.Exec(ctx, "DELETE FROM donor_stripe_events WHERE stripe_event_id=ANY($1::text[])", f.events); err != nil {
+		if _, err := f.db.Exec(ctx, "DELETE FROM donor_stripe_events WHERE stripe_event_id=ANY($1::text[])", f.events); err != nil {
 			t.Error(err)
 		}
 	})
@@ -171,7 +175,7 @@ func (f *workerFixture) process(t *testing.T) {
 // retryNow lifts the backoff on the fixture's failed events.
 func (f *workerFixture) retryNow(t *testing.T) {
 	t.Helper()
-	if _, err := f.service.DB.Exec(context.Background(), "UPDATE donor_stripe_events SET available_at=now() WHERE stripe_event_id=ANY($1::text[]) AND processed_at IS NULL", f.events); err != nil {
+	if _, err := f.db.Exec(context.Background(), "UPDATE donor_stripe_events SET available_at=now() WHERE stripe_event_id=ANY($1::text[]) AND processed_at IS NULL", f.events); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -198,7 +202,7 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	ctx := context.Background()
 	visitor := "visitor-" + f.donorID.String()
 	f.request.Visitor = &visitor
-	if _, err := f.service.DB.Exec(ctx, `INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES ($1,$2,$3,'IRL',$4,$5)`, testID(t), HashToken(visitor), referrer, time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour)); err != nil {
+	if _, err := f.db.Exec(ctx, `INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES ($1,$2,$3,'IRL',$4,$5)`, testID(t), HashToken(visitor), referrer, time.Now().Add(-time.Hour), time.Now().Add(24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -236,19 +240,20 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	if gifts != 1 || receipts != 1 || emails != 1 || recovery != 0 {
 		t.Fatalf("duplicate or out-of-order side effects: %d %d %d %d", gifts, receipts, emails, recovery)
 	}
-	token, err := (AccountService{DB: pool}).ClaimAccount(ctx, link(t, pool, f.donorID, time.Now()), "", Client{})
+	api := as(t, dbroles.API)
+	token, err := (AccountService{DB: api}).ClaimAccount(ctx, link(t, pool, f.donorID, time.Now()), "", Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dashboard, err := (DashboardReader{DB: pool}).DonorDashboard(ctx, token.Access)
+	dashboard, err := (DashboardReader{DB: api}).DonorDashboard(ctx, token.Access)
 	if err != nil || !dashboard.FoundingDonor || dashboard.Streak == nil || dashboard.Streak.Current != 1 {
 		t.Fatalf("claimed dashboard: %v %v", dashboard, err)
 	}
-	refToken, err := (AccountService{DB: pool}).ClaimAccount(ctx, link(t, pool, referrer, time.Now()), "", Client{})
+	refToken, err := (AccountService{DB: api}).ClaimAccount(ctx, link(t, pool, referrer, time.Now()), "", Client{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	refDashboard, err := (DashboardReader{DB: pool}).DonorDashboard(ctx, refToken.Access)
+	refDashboard, err := (DashboardReader{DB: api}).DonorDashboard(ctx, refToken.Access)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +276,7 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	if err != nil || projection.NetMinor.Int64 != 0 || projection.CurrentStreak.Int32 != 0 || projection.BestStreak != 1 || !projection.FoundingAwardedAt.Valid {
 		t.Fatalf("refund recognition: %+v %v", projection, err)
 	}
-	refDashboard, err = (DashboardReader{DB: pool}).DonorDashboard(ctx, refToken.Access)
+	refDashboard, err = (DashboardReader{DB: api}).DonorDashboard(ctx, refToken.Access)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,13 +296,13 @@ func TestInvoiceFailureRecoveryPreservesGrace(t *testing.T) {
 	due := start.Add(30 * 24 * time.Hour)
 	f.receive(t, "invoice.payment_failed", invoice(checkout.CheckoutID, second, due, false))
 	f.process(t)
-	p, err := queries.New(f.service.DB).Projection(ctx, f.donorID)
+	p, err := queries.New(f.db).Projection(ctx, f.donorID)
 	if err != nil || !p.CurrentStreak.Valid || p.CurrentStreak.Int32 != 1 || !p.AtRisk || !p.GraceEndsAt.Time.Equal(due.Add(14*24*time.Hour)) {
 		t.Fatalf("grace lost: %+v %v", p, err)
 	}
 	f.receive(t, "invoice.payment_succeeded", invoice(checkout.CheckoutID, second, due, true))
 	f.process(t)
-	p, err = queries.New(f.service.DB).Projection(ctx, f.donorID)
+	p, err = queries.New(f.db).Projection(ctx, f.donorID)
 	if err != nil || p.CurrentStreak.Int32 != 2 || p.AtRisk || p.GraceEndsAt.Valid {
 		t.Fatal("recovery did not restore streak")
 	}
@@ -327,14 +332,14 @@ func TestInvalidInvoiceRollsBackAllFinancialEffects(t *testing.T) {
 		"SELECT count(*) FROM donor_messages WHERE donor_id=$1",
 	} {
 		var count int
-		if err := f.service.DB.QueryRow(ctx, sql, f.donorID).Scan(&count); err != nil || count != 0 {
+		if err := f.db.QueryRow(ctx, sql, f.donorID).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("partial financial write survived: %s %d %v", sql, count, err)
 		}
 	}
 	var attempts int
 	var processed *time.Time
 	var failure string
-	if err := f.service.DB.QueryRow(ctx, "SELECT attempts,processed_at,last_error FROM donor_stripe_events WHERE stripe_event_id=$1", eventID).Scan(&attempts, &processed, &failure); err != nil || attempts != 10 || processed != nil || failure != "InvalidFacts" {
+	if err := f.db.QueryRow(ctx, "SELECT attempts,processed_at,last_error FROM donor_stripe_events WHERE stripe_event_id=$1", eventID).Scan(&attempts, &processed, &failure); err != nil || attempts != 10 || processed != nil || failure != "InvalidFacts" {
 		t.Fatal("failure budget not durable")
 	}
 }
@@ -369,14 +374,14 @@ func TestOneTimeInboxConcurrentWorkers(t *testing.T) {
 		t.Fatal("event claimed by multiple workers")
 	}
 	var observations int
-	if err := f.service.DB.QueryRow(ctx, "SELECT count(*) FROM donor_billing_observations WHERE source_event_id IN (SELECT id FROM donor_stripe_events WHERE stripe_event_id=ANY($1::text[]))", f.events).Scan(&observations); err != nil || observations != 0 {
+	if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_billing_observations WHERE source_event_id IN (SELECT id FROM donor_stripe_events WHERE stripe_event_id=ANY($1::text[]))", f.events).Scan(&observations); err != nil || observations != 0 {
 		t.Fatalf("one-time gift entered recurring history: %d %v", observations, err)
 	}
-	p, err := queries.New(f.service.DB).Projection(ctx, f.donorID)
+	p, err := queries.New(f.db).Projection(ctx, f.donorID)
 	if err != nil || p.NetMinor.Int64 != 3000 || p.CurrentStreak.Int32 != 0 {
 		t.Fatal("one-time payment changed streak")
 	}
-	if _, err = authenticate(ctx, queries.New(f.service.DB), "", time.Now()); !errors.Is(err, ErrDenied) {
+	if _, err = authenticate(ctx, queries.New(f.db), "", time.Now()); !errors.Is(err, ErrDenied) {
 		t.Fatal("payment granted account access")
 	}
 }
@@ -384,7 +389,7 @@ func TestOneTimeInboxConcurrentWorkers(t *testing.T) {
 func eventRetryState(t *testing.T, f *workerFixture, id string) (attempts int, failure string, delay time.Duration) {
 	t.Helper()
 	var seconds float64
-	if err := f.service.DB.QueryRow(context.Background(), "SELECT attempts,coalesce(last_error,''),extract(epoch FROM available_at-now()) FROM donor_stripe_events WHERE stripe_event_id=$1", id).Scan(&attempts, &failure, &seconds); err != nil {
+	if err := f.db.QueryRow(context.Background(), "SELECT attempts,coalesce(last_error,''),extract(epoch FROM available_at-now()) FROM donor_stripe_events WHERE stripe_event_id=$1", id).Scan(&attempts, &failure, &seconds); err != nil {
 		t.Fatal(err)
 	}
 	return attempts, failure, time.Duration(seconds * float64(time.Second))
@@ -414,7 +419,7 @@ func TestTransientGatewayFailureBacksOffThenSucceeds(t *testing.T) {
 	f.retryNow(t)
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
-	p, err := queries.New(f.service.DB).Projection(ctx, f.donorID)
+	p, err := queries.New(f.db).Projection(ctx, f.donorID)
 	if err != nil || p.NetMinor.Int64 != 2000 {
 		t.Fatal("retried refund not applied", p.NetMinor, err)
 	}
@@ -439,7 +444,7 @@ func TestRefundBeforeGiftIsRetriedAfterGiftExists(t *testing.T) {
 	f.retryNow(t)
 	f.process(t)
 	assertEventProcessed(t, f, refund, true)
-	p, err := queries.New(f.service.DB).Projection(ctx, f.donorID)
+	p, err := queries.New(f.db).Projection(ctx, f.donorID)
 	if err != nil || p.NetMinor.Int64 != 0 || !p.FoundingAwardedAt.Valid {
 		t.Fatal("late refund not reconciled", p.NetMinor, err)
 	}
@@ -454,16 +459,16 @@ func TestOneTimeGiftIsPaidWhenItsChargeSucceeded(t *testing.T) {
 	f.charge(t, payment, charged)
 	event := f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
 	// The event is created after the Founding Donor cutoff, but the charge succeeded before it.
-	if _, err := f.service.DB.Exec(ctx, "UPDATE donor_stripe_events SET occurred_at=$2 WHERE stripe_event_id=$1", event, recognition.FoundingCutoff.Add(24*time.Hour)); err != nil {
+	if _, err := f.db.Exec(ctx, "UPDATE donor_stripe_events SET occurred_at=$2 WHERE stripe_event_id=$1", event, recognition.FoundingCutoff.Add(24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
 	var paid time.Time
-	if err := f.service.DB.QueryRow(ctx, "SELECT paid_at FROM donor_gifts WHERE stripe_object_id=$1", payment).Scan(&paid); err != nil || !paid.Equal(charged) {
+	if err := f.db.QueryRow(ctx, "SELECT paid_at FROM donor_gifts WHERE stripe_object_id=$1", payment).Scan(&paid); err != nil || !paid.Equal(charged) {
 		t.Fatal("gift not paid at its charge time", paid, err)
 	}
-	p, err := queries.New(f.service.DB).Projection(ctx, f.donorID)
+	p, err := queries.New(f.db).Projection(ctx, f.donorID)
 	if err != nil || !p.FoundingAwardedAt.Valid || !p.FoundingAwardedAt.Time.Equal(charged) {
 		t.Fatal("charge before the cutoff did not award Founding Donor", p.FoundingAwardedAt, err)
 	}

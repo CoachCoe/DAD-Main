@@ -9,9 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"impactgraph/donor-api/internal/credentials"
+	"impactgraph/donor-api/internal/dbroles"
+	"impactgraph/donor-api/internal/dbroles/dbrolestest"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -47,6 +50,45 @@ func database(t *testing.T) *pgxpool.Pool {
 	}
 	return pool
 }
+
+// as returns the test's pool acting as role, opened on first use, so the
+// code under test runs with exactly the privileges of the process that runs
+// it; fixtures and assertions use the owner's pool from database.
+func as(t *testing.T, role dbroles.Role) *pgxpool.Pool {
+	t.Helper()
+	rolePools.Lock()
+	defer rolePools.Unlock()
+	key := rolePool{t, role.Name}
+	if pool := rolePools.open[key]; pool != nil {
+		return pool
+	}
+	pool := dbrolestest.Open(t, role)
+	rolePools.open[key] = pool
+	t.Cleanup(func() {
+		rolePools.Lock()
+		defer rolePools.Unlock()
+		delete(rolePools.open, key)
+	})
+	return pool
+}
+
+type rolePool struct {
+	t    *testing.T
+	role string
+}
+
+var rolePools = struct {
+	sync.Mutex
+	open map[rolePool]*pgxpool.Pool
+}{open: map[rolePool]*pgxpool.Pool{}}
+
+// actAs makes the rest of tx run as role, after fixtures written as the
+// owner; RESET ROLE returns to the owner.
+func actAs(t *testing.T, tx pgx.Tx, role dbroles.Role) {
+	t.Helper()
+	mustExec(t, tx, "SET LOCAL ROLE "+pgx.Identifier{role.Name}.Sanitize())
+}
+
 func keyring(t *testing.T, value string) credentials.Keyring {
 	t.Helper()
 	keys, err := credentials.ParseKeyring(value)
@@ -111,6 +153,7 @@ func TestOpenSizesThePoolFromTheDatabaseURL(t *testing.T) {
 
 func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	now := time.Now().UTC()
 	token := link(t, pool, id, now)
@@ -125,7 +168,7 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 			defer wg.Done()
 			<-start
 			ctx := context.Background()
-			tx, err := pool.Begin(ctx)
+			tx, err := api.Begin(ctx)
 			if err != nil {
 				results <- err
 				return
@@ -159,18 +202,18 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 		t.Fatalf("success=%d denied=%d", successes, denied)
 	}
 	for session := range sessions {
-		got, err := authenticate(context.Background(), queries.New(pool), session, now)
+		got, err := authenticate(context.Background(), queries.New(api), session, now)
 		if err != nil || got.ID != id {
 			t.Fatalf("authentication: %v", err)
 		}
 		if len(session) != 43 {
 			t.Fatalf("token encoding changed")
 		}
-		if _, err = authenticate(context.Background(), queries.New(pool), session, time.Now().Add(30*24*time.Hour)); !errors.Is(err, ErrDenied) {
+		if _, err = authenticate(context.Background(), queries.New(api), session, time.Now().Add(30*24*time.Hour)); !errors.Is(err, ErrDenied) {
 			t.Fatal("session expiry boundary")
 		}
 	}
-	tx, err := pool.Begin(context.Background())
+	tx, err := api.Begin(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,11 +224,12 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 }
 func TestClaimRollbackLeavesProofUsable(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	id, _ := donor(t, pool)
 	now := time.Now().UTC()
 	token := link(t, pool, id, now)
 	ctx := context.Background()
-	tx, err := pool.Begin(ctx)
+	tx, err := api.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,10 +240,10 @@ func TestClaimRollbackLeavesProofUsable(t *testing.T) {
 	if err = tx.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = authenticate(ctx, queries.New(pool), tokens.Access, now); !errors.Is(err, ErrDenied) {
+	if _, err = authenticate(ctx, queries.New(api), tokens.Access, now); !errors.Is(err, ErrDenied) {
 		t.Fatalf("rolled back session: %v", err)
 	}
-	tx, err = pool.Begin(ctx)
+	tx, err = api.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +266,7 @@ func TestDisabledDonorCannotClaim(t *testing.T) {
 	if _, err := pool.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", id); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := pool.Begin(ctx)
+	tx, err := as(t, dbroles.API).Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +281,7 @@ func TestExpiredProofCannotCreateSession(t *testing.T) {
 	now := time.Now().UTC()
 	token := link(t, pool, id, now.Add(-15*time.Minute))
 	ctx := context.Background()
-	tx, err := pool.Begin(ctx)
+	tx, err := as(t, dbroles.API).Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -51,6 +52,7 @@ func TestConcurrentFinancialRefreshPreservesLongHistories(t *testing.T) {
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
+	worker := as(t, dbroles.ProjectionWorker)
 	start := time.Now()
 	var wg sync.WaitGroup
 	failures := make(chan error, donors*2)
@@ -60,7 +62,7 @@ func TestConcurrentFinancialRefreshPreservesLongHistories(t *testing.T) {
 			wg.Add(1)
 			go func(id pgtype.UUID, round int) {
 				defer wg.Done()
-				tx, err := pool.Begin(ctx)
+				tx, err := worker.Begin(ctx)
 				if err != nil {
 					failures <- err
 					return

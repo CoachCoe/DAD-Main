@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/stripe/stripe-go/v87"
+	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/payments"
 )
 
 func TestVerifiedInboxDurabilityAndConcurrentRedelivery(t *testing.T) {
 	pool := database(t)
+	api := as(t, dbroles.API)
 	ctx := context.Background()
 	id := testID(t)
 	eventID := "evt_" + id.String()
@@ -25,7 +27,7 @@ func TestVerifiedInboxDurabilityAndConcurrentRedelivery(t *testing.T) {
 	const secret = "whsec_public_integration_test"
 	now := time.Now()
 	signature := fmt.Sprintf("t=%d,v1=%x", now.Unix(), stripe.ComputeSignature(now, body, secret))
-	receiver := payments.Receiver{Secret: secret, Inbox: StripeInbox{DB: pool}}
+	receiver := payments.Receiver{Secret: secret, Inbox: StripeInbox{DB: api}}
 	t.Cleanup(func() {
 		if _, err := pool.Exec(ctx, "DELETE FROM donor_stripe_events WHERE stripe_event_id=$1", eventID); err != nil {
 			t.Error(err)

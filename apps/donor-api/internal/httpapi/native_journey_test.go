@@ -12,6 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"impactgraph/donor-api/internal/dbroles"
+	"impactgraph/donor-api/internal/dbroles/dbrolestest"
 	"impactgraph/donor-api/internal/httpapi"
 	"impactgraph/donor-api/internal/store"
 )
@@ -53,7 +55,8 @@ func TestAppSessionLifecycle(t *testing.T) {
 	})
 
 	const origin = "https://donor.example.org"
-	server := httpapi.NewServer("", httpapi.Services{Origin: origin, Account: store.AccountService{DB: pool}, Donor: store.DonorService{DB: pool, Origin: origin}, Push: store.PushService{DB: pool, Platforms: []string{"IOS"}}})
+	api := dbrolestest.Open(t, dbroles.API)
+	server := httpapi.NewServer("", httpapi.Services{Origin: origin, Account: store.AccountService{DB: api}, Donor: store.DonorService{DB: api, Origin: origin}, Push: store.PushService{DB: api, Platforms: []string{"IOS"}}})
 	call := func(method, path, body, session string) *httptest.ResponseRecorder {
 		t.Helper()
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
