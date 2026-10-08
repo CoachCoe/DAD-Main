@@ -142,8 +142,9 @@ func (s *StaffService) BeginSignIn(ctx context.Context) (Ceremony, error) {
 }
 
 // SignIn verifies a passkey assertion against its ceremony and returns a new
-// session token. A failure with a known passkey is audited against its owner;
-// a signature counter that fails to advance is treated as a cloned passkey.
+// session token. A failure with a known passkey is audited against its owner
+// with its reason. A signature counter that fails to advance is treated as a
+// cloned passkey; synced passkeys always report zero, which is accepted.
 func (s *StaffService) SignIn(ctx context.Context, ceremony string, response []byte) (string, error) {
 	assertion, err := protocol.ParseCredentialRequestResponseBytes(response)
 	if err != nil {
@@ -170,8 +171,17 @@ func (s *StaffService) SignIn(ctx context.Context, ceremony string, response []b
 			return err
 		}
 		_, passkey, err := s.WebAuthn.ValidatePasskeyLogin(func([]byte, []byte) (webauthn.User, error) { return user, nil }, session, assertion)
-		if err != nil || passkey.Authenticator.CloneWarning || user.staff.Disabled {
-			return auditStaff(ctx, q, pgtype.UUID{}, "staff.sign_in_failed", owner.String(), nil, now)
+		var reason string
+		switch {
+		case err != nil:
+			reason = "invalid"
+		case passkey.Authenticator.CloneWarning:
+			reason = "counter"
+		case user.staff.Disabled:
+			reason = "disabled"
+		}
+		if reason != "" {
+			return auditStaff(ctx, q, pgtype.UUID{}, "staff.sign_in_failed", owner.String(), map[string]string{"reason": reason}, now)
 		}
 		if err = q.RecordStaffPasskeyUse(ctx, queries.RecordStaffPasskeyUseParams{CredentialID: passkey.ID, SignCount: int64(passkey.Authenticator.SignCount),
 			UserVerified: passkey.Flags.UserVerified, BackupState: passkey.Flags.BackupState, LastUsedAt: timestamp(now)}); err != nil {
@@ -286,15 +296,22 @@ func (s *StaffService) Activate(ctx context.Context, ceremony string, response [
 	return token, nil
 }
 
-// register stores a verified new passkey and starts a session, or returns no
-// token when the attestation is rejected.
+// register stores a verified new passkey and starts a session, or audits the
+// failure and returns no token when the attestation is rejected or its
+// credential is registered already.
 func (s *StaffService) register(ctx context.Context, q *queries.Queries, user staffUser, session webauthn.SessionData, attestation *protocol.ParsedCredentialCreationData, now time.Time) (string, error) {
+	failed := func(reason string) (string, error) {
+		return "", auditStaff(ctx, q, pgtype.UUID{}, "staff.activation_failed", user.staff.ID.String(), map[string]string{"reason": reason}, now)
+	}
 	passkey, err := s.WebAuthn.CreateCredential(user, session, attestation)
 	if err != nil {
-		return "", nil
+		return failed("invalid")
 	}
 	// A credential registered to anyone already is rejected, not reassigned.
-	if _, err = q.StaffPasskeyOwner(ctx, passkey.ID); !errors.Is(err, pgx.ErrNoRows) {
+	switch _, err = q.StaffPasskeyOwner(ctx, passkey.ID); {
+	case err == nil:
+		return failed("credential_in_use")
+	case !errors.Is(err, pgx.ErrNoRows):
 		return "", err
 	}
 	id, err := NewID()
