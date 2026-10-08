@@ -73,15 +73,18 @@ it("lets the person retry after cancelling, and replaces a ceremony the server r
   expect(screen.getByRole("button", { name: "Create a passkey" })).toBeEnabled();
 });
 
-it("explains a used or expired invitation and a missing link", async () => {
+it("points a used or expired invitation to sign-in, then forgets it", async () => {
   window.history.replaceState(null, "", "/staff/activate#token=used-invitation");
   browser();
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: "Passkey, invitation, or session invalid or expired" }), { status: 401 })));
   const first = render(<StaffActivate />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("This invitation is unavailable, already used, or expired.");
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "This invitation has already been used or has expired. If you already created a passkey, sign in with it. Otherwise, ask a DAD administrator for a new invitation.");
+  expect(screen.getByRole("link", { name: "Staff sign-in" })).toHaveAttribute("href", "/staff/sign-in");
   expect(screen.queryByRole("button", { name: "Create a passkey" })).not.toBeInTheDocument();
+  expect(screen.queryByText(/Open this page from the private invitation link/)).not.toBeInTheDocument();
+  expect(sessionStorage.length).toBe(0);
   first.unmount();
-  sessionStorage.clear();
   window.history.replaceState(null, "", "/staff/activate");
   render(<StaffActivate />);
   expect(await screen.findByText(/Open this page from the private invitation link/)).toBeVisible();

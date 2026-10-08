@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { ApiError, api, classifyFailure, failureMessage } from "@/lib/api";
@@ -17,9 +18,7 @@ const unchanging = () => () => {};
 const general = (cause: unknown, fallback: string) =>
   ["offline", "rateLimited", "unconfigured"].includes(classifyFailure(cause)) ? failureMessage(cause, fallback) : fallback;
 
-const explainInvitation = (cause: unknown) => cause instanceof ApiError && cause.status === 401
-  ? "This invitation is unavailable, already used, or expired. Ask a DAD administrator for a new one."
-  : general(cause, "Your invitation could not be checked right now. Reload this page to try again.");
+const USED_INVITATION = "This invitation has already been used or has expired. If you already created a passkey, sign in with it. Otherwise, ask a DAD administrator for a new invitation.";
 
 function explainCreation(cause: unknown): string {
   switch (passkeyFailure(cause)) {
@@ -39,6 +38,17 @@ export default function Activate() {
   const [invitation, setInvitation] = useState<{ value: Invitation; at: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [used, setUsed] = useState(false);
+  // A refused invitation is forgotten, so this tab no longer offers it.
+  const refused = useCallback((cause: unknown) => {
+    if (!(cause instanceof ApiError && cause.status === 401)) {
+      setError(general(cause, "Your invitation could not be checked right now. Reload this page to try again."));
+      return;
+    }
+    setUsed(true);
+    setError(USED_INVITATION);
+    clear();
+  }, [clear]);
   const load = useCallback(async () => {
     const loaded = { value: await api<Invitation>("/donor/staff/activate/options", { method: "POST", body: JSON.stringify({ token }) }), at: Date.now() };
     setInvitation(loaded);
@@ -47,9 +57,9 @@ export default function Activate() {
   useEffect(() => {
     if (!token) return;
     let current = true;
-    load().catch((cause) => { if (current) setError(explainInvitation(cause)); });
+    load().catch((cause) => { if (current) refused(cause); });
     return () => { current = false; };
-  }, [token, load]);
+  }, [token, load, refused]);
   async function create() {
     if (busy || !invitation) return;
     setBusy(true); setError("");
@@ -65,11 +75,11 @@ export default function Activate() {
       setError(explainCreation(cause));
       setBusy(false);
       // An answered ceremony is spent, so another try needs a new one.
-      if (answered) load().catch((reload) => setError(explainInvitation(reload)));
+      if (answered) load().catch(refused);
     }
   }
   return <Page eyebrow="Staff" title="Activate your staff account">
-    {token === "" ? <p className="callout">Open this page from the private invitation link a DAD administrator sent you. If the link has expired, ask them for a replacement invitation.</p>
+    {used ? null : token === "" ? <p className="callout">Open this page from the private invitation link a DAD administrator sent you. If the link has expired, ask them for a replacement invitation.</p>
       : invitation && <>
         <p>This private invitation is for <strong>{invitation.value.name}</strong> ({invitation.value.email}). If that isn’t you, close this page and tell a DAD administrator.</p>
         <p>Create a passkey to finish setting up your account. Your device or password manager saves it, then asks for your fingerprint, face, screen lock, or security key each time you sign in. There is no password to remember.</p>
@@ -79,5 +89,6 @@ export default function Activate() {
           : <p className="callout">{UNSUPPORTED_MESSAGE}</p>}
       </>}
     <Announcer status={busy ? WAITING_MESSAGE : token && !invitation && !error ? "Checking your invitation…" : ""} alert={error} />
+    {used && <p><Link className="button" href="/staff/sign-in">Staff sign-in</Link></p>}
   </Page>;
 }
