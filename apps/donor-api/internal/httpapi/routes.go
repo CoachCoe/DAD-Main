@@ -51,6 +51,9 @@ func (a *api) routes() []route {
 		a.donorWrite("POST /donor/me/sessions/{session_id}/revoke", a.signOutSession),
 		a.donorWrite("POST /donor/me/sessions/revoke-others", a.signOutOthers),
 		a.donorWrite("POST /donor/me/preferences", a.savePreferences),
+		a.appWrite("POST /donor/me/push-device", a.registerPushDevice),
+		a.appWrite("POST /donor/me/push-device/unregister", a.unregisterPushDevice),
+		a.donorRead("GET /donor/me/conversions", a.conversions),
 		a.donorRead("GET /donor/me/sharing", a.sharing),
 		a.donorWrite("POST /donor/me/sharing", a.saveSharing),
 		a.donorRead("GET /donor/me/referral-code.svg", a.referralCode),
@@ -139,6 +142,19 @@ func (a *api) donorRead(pattern string, handler sessionHandler) route {
 
 func (a *api) donorWrite(pattern string, handler sessionHandler) route {
 	return route{pattern, donorAuth, a.guarded(a.Origin, accountLimit, true, signedIn(donorSession, handler))}
+}
+
+// appWrite routes act on the app installation behind the session, which a
+// browser does not have. The session is checked first, so an anonymous
+// request is unauthenticated, as on every other donor route.
+func (a *api) appWrite(pattern string, handler sessionHandler) route {
+	return route{pattern, donorAuth, a.guarded(a.Origin, accountLimit, true, signedIn(donorSession, func(w http.ResponseWriter, r *http.Request, session string) {
+		if !native(r) {
+			writeError(w, r, http.StatusForbidden, "Request origin is not allowed", nil)
+			return
+		}
+		handler(w, r, session)
+	}))}
 }
 
 // staffChallenge routes start passkey ceremonies. A page asks for one before

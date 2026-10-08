@@ -66,7 +66,7 @@ func appRequest(method, path, body string) *http.Request {
 	return r
 }
 
-const preferences = `{"version":0,"referral_emails":true,"marketing_emails":false}`
+const preferences = `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":false,"push_streak_milestone":true}`
 
 func TestDonorSessionSource(t *testing.T) {
 	for _, tc := range []struct {

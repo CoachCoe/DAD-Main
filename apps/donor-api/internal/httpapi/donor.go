@@ -36,6 +36,7 @@ type DonorSource interface {
 	Gifts(context.Context, string, int64) (store.GiftsPage, error)
 	Receipt(context.Context, string, pgtype.UUID) (store.Receipt, error)
 	AnnualSummary(context.Context, string, int) (store.AnnualSummary, error)
+	Conversions(context.Context, string, *time.Time) (store.Conversions, error)
 }
 
 const (
@@ -56,6 +57,8 @@ func donorStatus(err error) (int, string) {
 		return http.StatusConflict, "This is the session making the request. Sign out instead"
 	case errors.Is(err, store.ErrPreferenceConflict):
 		return http.StatusConflict, "Preferences changed. Refresh before saving again"
+	case errors.Is(err, store.ErrPushToken):
+		return http.StatusUnprocessableEntity, "The push token is not valid for this platform"
 	case errors.Is(err, store.ErrPublicName):
 		return http.StatusUnprocessableEntity, "Choose a public first name or nickname of 1 to 80 characters"
 	case errors.Is(err, pgx.ErrNoRows):
@@ -80,18 +83,25 @@ func (a *api) profile(w http.ResponseWriter, r *http.Request, session string) {
 
 func (a *api) savePreferences(w http.ResponseWriter, r *http.Request, session string) {
 	var body struct {
-		Version   *int32 `json:"version"`
-		Referral  *bool  `json:"referral_emails"`
-		Marketing *bool  `json:"marketing_emails"`
+		Version           *int32 `json:"version"`
+		Referral          *bool  `json:"referral_emails"`
+		Marketing         *bool  `json:"marketing_emails"`
+		ReferralConverted *bool  `json:"push_referral_converted"`
+		StreakAtRisk      *bool  `json:"push_streak_at_risk"`
+		StreakMilestone   *bool  `json:"push_streak_milestone"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.Version == nil || *body.Version < 0 || body.Referral == nil || body.Marketing == nil {
+	if body.Version == nil || *body.Version < 0 || body.Referral == nil || body.Marketing == nil ||
+		body.ReferralConverted == nil || body.StreakAtRisk == nil || body.StreakMilestone == nil {
 		invalidFields(w, r)
 		return
 	}
-	preferences := store.Preferences{Version: *body.Version, ReferralEmails: *body.Referral, MarketingEmails: *body.Marketing}
+	preferences := store.Preferences{
+		Version: *body.Version, ReferralEmails: *body.Referral, MarketingEmails: *body.Marketing,
+		PushReferralConverted: *body.ReferralConverted, PushStreakAtRisk: *body.StreakAtRisk, PushStreakMilestone: *body.StreakMilestone,
+	}
 	a.donor().serve(w, r, func(ctx context.Context) (any, error) { return a.Donor.SavePreferences(ctx, session, preferences) })
 }
 

@@ -19,7 +19,8 @@ import (
 // TestAppSessionLifecycle runs the donor app's sign-in against real session
 // storage: a claimed session's access token reads and writes, its refresh
 // token rotates, a reused refresh token or a sign-out from another session
-// ends it at once, and it ends when it expires.
+// ends it at once along with its push registration, and it ends when it
+// expires.
 func TestAppSessionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	dsn := os.Getenv("TEST_DATABASE_URL")
@@ -52,7 +53,7 @@ func TestAppSessionLifecycle(t *testing.T) {
 	})
 
 	const origin = "https://donor.example.org"
-	server := httpapi.NewServer("", httpapi.Services{Origin: origin, Account: store.AccountService{DB: pool}, Donor: store.DonorService{DB: pool, Origin: origin}})
+	server := httpapi.NewServer("", httpapi.Services{Origin: origin, Account: store.AccountService{DB: pool}, Donor: store.DonorService{DB: pool, Origin: origin}, Push: store.PushService{DB: pool, Platforms: []string{"IOS"}}})
 	call := func(method, path, body, session string) *httptest.ResponseRecorder {
 		t.Helper()
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -113,7 +114,7 @@ func TestAppSessionLifecycle(t *testing.T) {
 	if !strings.Contains(profile.Body.String(), email) {
 		t.Fatalf("profile is not the claimed donor's: %s", profile.Body)
 	}
-	expect("write with bearer", call("POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false}`, session.Access), http.StatusOK)
+	expect("write with bearer", call("POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":true}`, session.Access), http.StatusOK)
 	expect("refresh token as bearer", call("GET", "/donor/me/profile", "", session.Refresh), http.StatusUnauthorized)
 	expect("access token as refresh token", refresh(session.Access), http.StatusUnauthorized)
 	browserRefresh := httptest.NewRequest("POST", "/donor/refresh", strings.NewReader(`{"refresh_token":"`+session.Refresh+`"}`))
@@ -137,7 +138,12 @@ func TestAppSessionLifecycle(t *testing.T) {
 		t.Fatalf("listed %+v, want this phone first and the tablet", listed)
 	}
 	expect("sign out this session by ID", call("POST", "/donor/me/sessions/"+listed[0].ID.String()+"/revoke", "", session.Access), http.StatusConflict)
+	expect("register the tablet for notifications", call("POST", "/donor/me/push-device", `{"platform":"IOS","token":"`+strings.Repeat("0f", 32)+`","environment":"SANDBOX"}`, other.Access), http.StatusOK)
 	expect("sign out the tablet", call("POST", "/donor/me/sessions/"+listed[1].ID.String()+"/revoke", "", session.Access), http.StatusOK)
+	var registered int
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1 AND push_token IS NOT NULL", id).Scan(&registered); err != nil || registered != 0 {
+		t.Fatalf("the signed-out tablet kept its push token: %d %v", registered, err)
+	}
 	expect("tablet read after sign-out", call("GET", "/donor/me/profile", "", other.Access), http.StatusUnauthorized)
 	expect("tablet refresh after sign-out", refresh(other.Refresh), http.StatusUnauthorized)
 

@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "description": "The ImpactGraph (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=…` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`; giving, referral capture, partner signup, and every staff route are web-only.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"…\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `…+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
+    "description": "The ImpactGraph (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=…` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh and the push-device routes admit nothing else; giving, referral capture, partner signup, and every staff route are web-only.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"…\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `…+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
   },
   "servers": [
     {
@@ -1313,7 +1313,7 @@
       "post": {
         "operationId": "savePreferences",
         "summary": "Save notification preferences",
-        "description": "409 when `version` is stale: re-read the profile and retry.",
+        "description": "Replaces every notification choice at once. 409 when `version` is stale: re-read the profile and retry.",
         "tags": [
           "Donor"
         ],
@@ -1348,12 +1348,24 @@
                   },
                   "marketing_emails": {
                     "type": "boolean"
+                  },
+                  "push_referral_converted": {
+                    "type": "boolean"
+                  },
+                  "push_streak_at_risk": {
+                    "type": "boolean"
+                  },
+                  "push_streak_milestone": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "version",
                   "referral_emails",
-                  "marketing_emails"
+                  "marketing_emails",
+                  "push_referral_converted",
+                  "push_streak_at_risk",
+                  "push_streak_milestone"
                 ],
                 "additionalProperties": false
               }
@@ -1391,6 +1403,197 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/push-device": {
+      "post": {
+        "operationId": "registerPushDevice",
+        "summary": "Register this installation for app notifications",
+        "description": "Native requests only. Records the push token of the app installation behind the calling session, replacing any token the session held. Register at every launch, since platforms rotate tokens. A token another session holds, the donor's or anyone's, moves to this session: it names one installation. The token is removed when the session is signed out, revoked, or ends, so sign-in again means registering again. Notifications carry generic text, a `category` (`REFERRAL_CONVERTED`, `STREAK_AT_RISK`, or `STREAK_MILESTONE`) and an app `path` to open, never names or amounts; fetch details through the API. 503 with `PUSH_UNCONFIGURED` when this deployment does not deliver to the platform. 401 for a browser session's credential.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "IOS",
+                      "ANDROID"
+                    ]
+                  },
+                  "token": {
+                    "type": "string",
+                    "minLength": 32,
+                    "maxLength": 1024,
+                    "description": "For iOS, the APNs device token as hex (either case); for Android, the FCM registration token."
+                  },
+                  "environment": {
+                    "type": "string",
+                    "enum": [
+                      "SANDBOX",
+                      "PRODUCTION"
+                    ],
+                    "default": "PRODUCTION",
+                    "description": "iOS only: the APNs environment that issued the token (SANDBOX for development builds). Omit for Android."
+                  }
+                },
+                "required": [
+                  "platform",
+                  "token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The session's registration after the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushRegistration"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/push-device/unregister": {
+      "post": {
+        "operationId": "unregisterPushDevice",
+        "summary": "Stop app notifications to this installation",
+        "description": "Native requests only. Removes the calling session's push token, if any; the session stays signed in.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "native"
+        ],
+        "responses": {
+          "200": {
+            "description": "The session's registration after the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PushRegistration"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/conversions": {
+      "get": {
+        "operationId": "conversions",
+        "summary": "Recent referral conversions",
+        "description": "Referrals that converted: when each referred donor's first gift was paid, and its channel, newest first, at most 20. A referral whose gifts were all refunded no longer appears, matching the dashboard's counts. Nothing identifies the referred donor. Pass the newest `converted_at` already shown as `since` to fetch only newer ones, for example after a notification.",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "description": "Only conversions strictly after this RFC 3339 time.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -4964,6 +5167,18 @@
           "marketing_emails": {
             "type": "boolean"
           },
+          "push_referral_converted": {
+            "type": "boolean",
+            "description": "App notification when someone the donor invited makes their first gift. Starts on: the device's notification permission is the opt-in."
+          },
+          "push_streak_at_risk": {
+            "type": "boolean",
+            "description": "App notification when a declined monthly payment puts the donor's giving streak at risk. Starts on."
+          },
+          "push_streak_milestone": {
+            "type": "boolean",
+            "description": "App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on."
+          },
           "version": {
             "type": "integer",
             "format": "int32",
@@ -4978,8 +5193,91 @@
           "public_name",
           "referral_emails",
           "marketing_emails",
+          "push_referral_converted",
+          "push_streak_at_risk",
+          "push_streak_milestone",
           "version",
           "consent_version"
+        ],
+        "additionalProperties": false
+      },
+      "PushRegistration": {
+        "type": "object",
+        "description": "The calling session's push registration.",
+        "properties": {
+          "registered": {
+            "type": "boolean"
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "IOS",
+              "ANDROID",
+              null
+            ]
+          },
+          "environment": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "SANDBOX",
+              "PRODUCTION",
+              null
+            ],
+            "description": "The APNs environment for iOS; null for Android."
+          }
+        },
+        "required": [
+          "registered",
+          "platform",
+          "environment"
+        ],
+        "additionalProperties": false
+      },
+      "ConversionList": {
+        "type": "object",
+        "properties": {
+          "conversions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Conversion"
+            }
+          },
+          "more": {
+            "type": "boolean",
+            "description": "Whether older conversions after `since` were left out."
+          }
+        },
+        "required": [
+          "conversions",
+          "more"
+        ],
+        "additionalProperties": false
+      },
+      "Conversion": {
+        "type": "object",
+        "description": "A referral's first gift. It carries nothing about the referred donor.",
+        "properties": {
+          "converted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "LINK",
+              "IRL"
+            ]
+          }
+        },
+        "required": [
+          "converted_at",
+          "kind"
         ],
         "additionalProperties": false
       },

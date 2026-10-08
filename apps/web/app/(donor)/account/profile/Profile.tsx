@@ -33,7 +33,8 @@ export default function Profile() {
     if (!data) return;
     run(async () => {
       setData(await api<Schema<"Profile">>("/donor/me/preferences", { method: "POST", body: JSON.stringify({ version: data.version,
-        referral_emails: data.referral_emails, marketing_emails: data.marketing_emails } satisfies RequestBody<"/donor/me/preferences", "post">) }));
+        referral_emails: data.referral_emails, marketing_emails: data.marketing_emails, push_referral_converted: data.push_referral_converted,
+        push_streak_at_risk: data.push_streak_at_risk, push_streak_milestone: data.push_streak_milestone } satisfies RequestBody<"/donor/me/preferences", "post">) }));
       setMessage("Notification preferences saved.");
     }, "Preferences were not confirmed. Refresh to check the saved choices before retrying.");
   };

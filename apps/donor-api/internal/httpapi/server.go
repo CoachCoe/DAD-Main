@@ -42,6 +42,7 @@ type Services struct {
 	Donor           DonorSource
 	Dashboard       DashboardSource
 	Recurring       RecurringSource
+	Push            PushSource
 	Wallet          *wallet.Issuer
 
 	Staff        StaffSource

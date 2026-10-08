@@ -376,9 +376,69 @@ export interface paths {
         put?: never;
         /**
          * Save notification preferences
-         * @description 409 when `version` is stale: re-read the profile and retry.
+         * @description Replaces every notification choice at once. 409 when `version` is stale: re-read the profile and retry.
          */
         post: operations["savePreferences"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/push-device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register this installation for app notifications
+         * @description Native requests only. Records the push token of the app installation behind the calling session, replacing any token the session held. Register at every launch, since platforms rotate tokens. A token another session holds, the donor's or anyone's, moves to this session: it names one installation. The token is removed when the session is signed out, revoked, or ends, so sign-in again means registering again. Notifications carry generic text, a `category` (`REFERRAL_CONVERTED`, `STREAK_AT_RISK`, or `STREAK_MILESTONE`) and an app `path` to open, never names or amounts; fetch details through the API. 503 with `PUSH_UNCONFIGURED` when this deployment does not deliver to the platform. 401 for a browser session's credential.
+         */
+        post: operations["registerPushDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/push-device/unregister": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop app notifications to this installation
+         * @description Native requests only. Removes the calling session's push token, if any; the session stays signed in.
+         */
+        post: operations["unregisterPushDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/conversions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recent referral conversions
+         * @description Referrals that converted: when each referred donor's first gift was paid, and its channel, newest first, at most 20. A referral whose gifts were all refunded no longer appears, matching the dashboard's counts. Nothing identifies the referred donor. Pass the newest `converted_at` already shown as `since` to fetch only newer ones, for example after a notification.
+         */
+        get: operations["conversions"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1350,12 +1410,41 @@ export interface components {
             public_name: string | null;
             referral_emails: boolean;
             marketing_emails: boolean;
+            /** @description App notification when someone the donor invited makes their first gift. Starts on: the device's notification permission is the opt-in. */
+            push_referral_converted: boolean;
+            /** @description App notification when a declined monthly payment puts the donor's giving streak at risk. Starts on. */
+            push_streak_at_risk: boolean;
+            /** @description App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on. */
+            push_streak_milestone: boolean;
             /**
              * Format: int32
              * @description Optimistic concurrency version; send it back when saving preferences.
              */
             version: number;
             consent_version: string;
+        };
+        /** @description The calling session's push registration. */
+        PushRegistration: {
+            registered: boolean;
+            /** @enum {string|null} */
+            platform: "IOS" | "ANDROID" | null;
+            /**
+             * @description The APNs environment for iOS; null for Android.
+             * @enum {string|null}
+             */
+            environment: "SANDBOX" | "PRODUCTION" | null;
+        };
+        ConversionList: {
+            conversions: components["schemas"]["Conversion"][];
+            /** @description Whether older conversions after `since` were left out. */
+            more: boolean;
+        };
+        /** @description A referral's first gift. It carries nothing about the referred donor. */
+        Conversion: {
+            /** Format: date-time */
+            converted_at: string;
+            /** @enum {string} */
+            kind: "LINK" | "IRL";
         };
         /** @description One place the donor is signed in: a web browser (one per cookie) or an installation of the app. */
         DeviceSession: {
@@ -2785,6 +2874,9 @@ export interface operations {
                     version: number;
                     referral_emails: boolean;
                     marketing_emails: boolean;
+                    push_referral_converted: boolean;
+                    push_streak_at_risk: boolean;
+                    push_streak_milestone: boolean;
                 };
             };
         };
@@ -2805,6 +2897,98 @@ export interface operations {
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    registerPushDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    platform: "IOS" | "ANDROID";
+                    /** @description For iOS, the APNs device token as hex (either case); for Android, the FCM registration token. */
+                    token: string;
+                    /**
+                     * @description iOS only: the APNs environment that issued the token (SANDBOX for development builds). Omit for Android.
+                     * @default PRODUCTION
+                     * @enum {string}
+                     */
+                    environment?: "SANDBOX" | "PRODUCTION";
+                };
+            };
+        };
+        responses: {
+            /** @description The session's registration after the request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushRegistration"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    unregisterPushDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The session's registration after the request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushRegistration"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    conversions: {
+        parameters: {
+            query?: {
+                /** @description Only conversions strictly after this RFC 3339 time. */
+                since?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversionList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };
