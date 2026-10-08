@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"impactgraph/donor-api/db"
+	"impactgraph/donor-api/internal/dbroles"
 )
 
 var ErrAdoptionRequired = errors.New("existing donor database requires explicit baseline adoption")
@@ -48,10 +49,11 @@ func manifest(fsys fs.FS) ([]migration, error) {
 	return result, nil
 }
 
-// Apply runs every embedded migration the database lacks, in one transaction
-// under an advisory lock. A database that already holds the donor tables but
-// no history is adopted only when adopt is set and its schema matches the
-// baseline exactly.
+// Apply runs every embedded migration the database lacks, then brings the
+// process roles and their privileges to their declaration, in one
+// transaction under an advisory lock. A database that already holds the donor
+// tables but no history is adopted only when adopt is set and its schema
+// matches the baseline exactly.
 func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
 	files, err := manifest(db.Migrations)
 	if err != nil {
@@ -80,7 +82,7 @@ func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
 				return err
 			}
 		}
-		return nil
+		return dbroles.Reconcile(ctx, tx)
 	})
 }
 
