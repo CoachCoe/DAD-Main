@@ -64,7 +64,7 @@ The app registers its installation's push token on its own session with `POST
 long as the sign-in, and a token registered by another session moves to the new one.
 Each projection refresh queues push intents in the same transaction as the facts
 behind them, next to the email outbox: a referral conversion (the referral email's own
-condition), a failed latest renewal while the streak is at risk (the decision behind the
+condition, announced only within a day of the gift), a failed latest renewal while the streak is at risk (the decision behind the
 recovery email's "your streak is at risk"), and a streak milestone. Stable keys make
 each intent once: `push:referral:<referred donor>`, `push:streak-at-risk:<period>`,
 and `push:streak-milestone:<donor>:<run start>:<months>`. Only donors with a live
