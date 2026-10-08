@@ -141,10 +141,10 @@ func TestAdoptionPreservesExistingRecordsAndRejectsDrift(t *testing.T) {
 	}
 }
 
-// Password and authenticator-code credentials end with the passkey migration:
-// accounts survive, but their sessions and open invitations do not.
-func TestPasskeyMigrationRetiresPasswordCredentials(t *testing.T) {
-	pool, ctx := isolatedDatabase(t)
+// applyBefore records the embedded migrations preceding name as applied, so a
+// test can seed data the way that migration will find it.
+func applyBefore(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name string) {
+	t.Helper()
 	files, err := manifest(db.Migrations)
 	if err != nil {
 		t.Fatal(err)
@@ -153,8 +153,8 @@ func TestPasskeyMigrationRetiresPasswordCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, file := range files {
-		if file.name == "0007_staff_passkeys.sql" {
-			break
+		if file.name == name {
+			return
 		}
 		if _, err = pool.Exec(ctx, file.sql); err != nil {
 			t.Fatal(err)
@@ -163,9 +163,18 @@ func TestPasskeyMigrationRetiresPasswordCredentials(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err = pool.Exec(ctx, `INSERT INTO donor_staff(id,email,name,role,password_hash,totp_secret,totp_counter) VALUES('00000000-0000-4000-8000-000000000001','admin@example.org','Admin','ADMIN','$argon2id$legacy','\x00',7);
+	t.Fatalf("no migration %s", name)
+}
+
+// Password and authenticator-code credentials end with the passkey migration:
+// accounts survive, but their sessions and open invitations do not.
+func TestPasskeyMigrationRetiresPasswordCredentials(t *testing.T) {
+	pool, ctx := isolatedDatabase(t)
+	applyBefore(t, ctx, pool, "0007_staff_passkeys.sql")
+	_, err := pool.Exec(ctx, `INSERT INTO donor_staff(id,email,name,role,password_hash,totp_secret,totp_counter) VALUES('00000000-0000-4000-8000-000000000001','admin@example.org','Admin','ADMIN','$argon2id$legacy','\x00',7);
 INSERT INTO donor_staff_sessions(id,staff_id,token_hash,expires_at) VALUES('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','session',now()+interval '1 hour');
-INSERT INTO donor_staff_invites(id,staff_id,token_hash,expires_at,pending_secret) VALUES('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','invite',now()+interval '1 hour','\x00')`); err != nil {
+INSERT INTO donor_staff_invites(id,staff_id,token_hash,expires_at,pending_secret) VALUES('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','invite',now()+interval '1 hour','\x00')`)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err = Apply(ctx, pool, false); err != nil {
@@ -183,5 +192,33 @@ INSERT INTO donor_staff_invites(id,staff_id,token_hash,expires_at,pending_secret
 	}
 	if staff != 1 || credentialColumns != 0 || openSessions != 0 || openInvites != 0 {
 		t.Fatalf("got %d accounts, %d credential columns, %d open sessions, %d open invitations", staff, credentialColumns, openSessions, openInvites)
+	}
+}
+
+// A subscription synced before views read stored state keeps its row, with no
+// billing anchor until its next sync and no change held by the processor.
+func TestSubscriptionSyncMigrationKeepsSyncedRows(t *testing.T) {
+	pool, ctx := isolatedDatabase(t)
+	applyBefore(t, ctx, pool, "0009_subscription_sync.sql")
+	if _, err := pool.Exec(ctx, `INSERT INTO donors(id,email) VALUES('00000000-0000-4000-8000-000000000001','synced@example.org');
+INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001',3000,'MONTHLY');
+INSERT INTO donor_stripe_checkouts(id,checkout_id,request_hash,request_params,stripe_subscription_id,status) VALUES('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000002','hash','{}','sub_synced','COMPLETE');
+INSERT INTO donor_subscriptions(id,attempt_id,donor_id,status,period_end,observed_at) VALUES('00000000-0000-4000-8000-000000000004','00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','active','2027-02-01T00:00:00Z','2027-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(ctx, pool, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := Verify(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	var status string
+	var anchored, external bool
+	var observed time.Time
+	if err := pool.QueryRow(ctx, "SELECT status,billing_anchor IS NOT NULL,external_change,observed_at FROM donor_subscriptions").Scan(&status, &anchored, &external, &observed); err != nil {
+		t.Fatal(err)
+	}
+	if status != "active" || anchored || external || !observed.Equal(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("got %s, anchored %v, external %v, observed %s", status, anchored, external, observed)
 	}
 }

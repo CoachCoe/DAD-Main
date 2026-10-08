@@ -71,8 +71,9 @@ func reconcileSubscription(ctx context.Context, q *queries.Queries, gateway paym
 }
 
 // reconcileRemoteSubscription saves the processor's view of the attempt's
-// subscription, confirming any amount change, pause or resumption it shows.
-// Only a single-item monthly USD subscription is supported.
+// subscription, confirming any amount change, pause or resumption it shows,
+// with everything donor views read from it. Only a single-item monthly USD
+// subscription is supported.
 func reconcileRemoteSubscription(ctx context.Context, q *queries.Queries, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, remote payments.Object, now time.Time) (queries.DonorSubscription, error) {
 	item, price, err := monthlyItem(draft, attempt, remote)
 	if err != nil {
@@ -91,6 +92,10 @@ func reconcileRemoteSubscription(ctx context.Context, q *queries.Queries, draft 
 	atPeriodEnd := remote.BoolIs("cancel_at_period_end", true)
 	if !atPeriodEnd && !remote.BoolIs("cancel_at_period_end", false) {
 		return queries.DonorSubscription{}, payments.ErrFacts
+	}
+	anchor, err := remote.Unix("billing_cycle_anchor")
+	if err != nil {
+		return queries.DonorSubscription{}, err
 	}
 	cancelAt := !remote.Absent("cancel_at")
 	if cancelAt {
@@ -112,7 +117,8 @@ func reconcileRemoteSubscription(ctx context.Context, q *queries.Queries, draft 
 	if err != nil {
 		return queries.DonorSubscription{}, err
 	}
-	row, err := q.SaveSubscription(ctx, queries.SaveSubscriptionParams{ID: id, AttemptID: attempt.ID, DonorID: draft.DonorID, Status: status, PeriodEnd: timestamp(end), StopsAt: stops, ObservedAt: timestamp(now)})
+	external := !remote.Absent("schedule") || !remote.Absent("pending_update")
+	row, err := q.SaveSubscription(ctx, queries.SaveSubscriptionParams{ID: id, AttemptID: attempt.ID, DonorID: draft.DonorID, Status: status, PeriodEnd: timestamp(end), StopsAt: stops, BillingAnchor: timestamp(anchor), ExternalChange: external, ObservedAt: timestamp(now)})
 	if err != nil || !terminalSubscription(status) {
 		return row, err
 	}

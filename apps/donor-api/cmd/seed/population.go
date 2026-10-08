@@ -159,6 +159,7 @@ type subscription struct {
 	status    string
 	periodEnd time.Time
 	stopsAt   time.Time // zero when renewals continue
+	anchor    time.Time
 	observed  time.Time
 }
 
@@ -305,7 +306,7 @@ func (g *generator) monthly(c *checkout) {
 	d := c.donor
 	c.session, c.subscription = g.stripeID("cs_test_"), g.stripeID("sub_")
 	anchor := c.createdAt.Add(g.seconds(5 * time.Minute))
-	c.sub = &subscription{id: g.uuid(), status: "active"}
+	c.sub = &subscription{id: g.uuid(), status: "active", anchor: anchor}
 	pauseAt := -1
 	if g.r.Float64() < pauseShare {
 		pauseAt = 2 + g.r.IntN(12)

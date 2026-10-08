@@ -23,7 +23,7 @@ func paymentObject(t *testing.T, value map[string]any) payments.Object {
 	return out
 }
 func subscription(checkout string, start time.Time) map[string]any {
-	return map[string]any{"id": "sub_" + checkout, "livemode": false, "status": "active", "customer": "cus_fixture", "cancel_at_period_end": false, "cancel_at": nil, "metadata": map[string]any{"dad_checkout_id": checkout}, "items": map[string]any{"has_more": false, "data": []any{map[string]any{"id": "si_fixture", "quantity": 1, "current_period_start": start.Unix(), "current_period_end": start.Add(30 * 24 * time.Hour).Unix(), "price": map[string]any{"currency": "usd", "unit_amount": 3000, "product": "prod_fixture", "recurring": map[string]any{"interval": "month", "interval_count": 1}}}}}}
+	return map[string]any{"id": "sub_" + checkout, "livemode": false, "status": "active", "customer": "cus_fixture", "cancel_at_period_end": false, "cancel_at": nil, "billing_cycle_anchor": start.Unix(), "metadata": map[string]any{"dad_checkout_id": checkout}, "items": map[string]any{"has_more": false, "data": []any{map[string]any{"id": "si_fixture", "quantity": 1, "current_period_start": start.Unix(), "current_period_end": start.Add(30 * 24 * time.Hour).Unix(), "price": map[string]any{"currency": "usd", "unit_amount": 3000, "product": "prod_fixture", "recurring": map[string]any{"interval": "month", "interval_count": 1}}}}}}
 }
 func subscriptionItem(remote map[string]any) map[string]any {
 	return remote["items"].(map[string]any)["data"].([]any)[0].(map[string]any)

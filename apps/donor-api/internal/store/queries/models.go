@@ -313,12 +313,14 @@ type DonorStripeEvent struct {
 }
 
 type DonorSubscription struct {
-	AttemptID  pgtype.UUID        `json:"attempt_id"`
-	DonorID    pgtype.UUID        `json:"donor_id"`
-	Status     string             `json:"status"`
-	PeriodEnd  pgtype.Timestamptz `json:"period_end"`
-	StopsAt    pgtype.Timestamptz `json:"stops_at"`
-	ObservedAt pgtype.Timestamptz `json:"observed_at"`
-	ID         pgtype.UUID        `json:"id"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	AttemptID      pgtype.UUID        `json:"attempt_id"`
+	DonorID        pgtype.UUID        `json:"donor_id"`
+	Status         string             `json:"status"`
+	PeriodEnd      pgtype.Timestamptz `json:"period_end"`
+	StopsAt        pgtype.Timestamptz `json:"stops_at"`
+	ObservedAt     pgtype.Timestamptz `json:"observed_at"`
+	ID             pgtype.UUID        `json:"id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	BillingAnchor  pgtype.Timestamptz `json:"billing_anchor"`
+	ExternalChange bool               `json:"external_change"`
 }

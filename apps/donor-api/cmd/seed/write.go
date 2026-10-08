@@ -56,7 +56,7 @@ func (p *population) tables() ([]*table, error) {
 	checkouts := &table{name: "donor_checkouts", columns: []string{"id", "donor_id", "amount_minor", "currency", "frequency", "referrer_id", "referral_kind", "referral_expires_at", "created_at"}}
 	attempts := &table{name: "donor_stripe_checkouts", columns: []string{"id", "checkout_id", "request_hash", "request_params", "stripe_session_id", "stripe_subscription_id", "status", "created_at"}}
 	reservations := &table{name: "donor_recurring_reservations", columns: []string{"id", "donor_id", "attempt_id", "created_at"}}
-	subscriptions := &table{name: "donor_subscriptions", columns: []string{"id", "attempt_id", "donor_id", "status", "period_end", "stops_at", "observed_at", "created_at"}}
+	subscriptions := &table{name: "donor_subscriptions", columns: []string{"id", "attempt_id", "donor_id", "status", "period_end", "stops_at", "billing_anchor", "observed_at", "created_at"}}
 	cancellations := &table{name: "donor_cancellations", columns: []string{"id", "donor_id", "attempt_id", "confirmed_period_end", "completed_at", "created_at"}}
 	pauses := &table{name: "donor_pauses", columns: []string{"id", "donor_id", "attempt_id", "months", "starts_at", "resumes_at", "confirmed_at", "created_at"}}
 	events := &table{name: "donor_stripe_events", columns: []string{"id", "stripe_event_id", "event_type", "occurred_at", "data", "processed_at", "attempts", "available_at", "created_at"}}
@@ -100,7 +100,7 @@ func (p *population) tables() ([]*table, error) {
 				reservations.add(ids.uuid(), d.id, c.attempt, c.createdAt)
 			}
 			if s := c.sub; s != nil {
-				subscriptions.add(s.id, c.attempt, d.id, s.status, s.periodEnd, timeOrNull(s.stopsAt), s.observed, c.createdAt)
+				subscriptions.add(s.id, c.attempt, d.id, s.status, s.periodEnd, timeOrNull(s.stopsAt), s.anchor, s.observed, c.createdAt)
 			}
 			if x := c.cancellation; x != nil {
 				cancellations.add(x.id, d.id, c.attempt, x.periodEnd, x.completed, x.created)
