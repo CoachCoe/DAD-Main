@@ -3,14 +3,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
+import type { Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { formatDateTime } from "@/lib/dates";
 
-type Inquiries = { signups: { id: string; organization: string; name: string; email: string; website: string; message: string; at: string }[]; next_offset: number | null };
-
 export default function Inquiries() {
   const [offset, setOffset] = useState(0);
-  const { resource, data, reload } = useApiResource<Inquiries>(`/donor/staff/partners?offset=${offset}`);
+  const { resource, data, reload } = useApiResource<Schema<"PartnerPage">>(`/donor/staff/partners?offset=${offset}`);
   const messages = resourceMessages(resource, { loading: "Loading inquiries…",
     failure: "Partner inquiries could not be loaded right now. Please retry in a moment.",
     forbidden: "Partner inquiries require administrator access." });

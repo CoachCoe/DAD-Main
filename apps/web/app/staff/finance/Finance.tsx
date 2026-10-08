@@ -3,19 +3,17 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, ApiError, classifyFailure, unconfirmedMessage } from "@/lib/api";
+import { api, ApiError, classifyFailure, type RequestBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { formatMoney, parseDollars } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
 import { formatDate, formatDateTime } from "@/lib/dates";
 
-type Quote = ({ gift_id: string; donor_id: string; amount_minor: number; available_minor: number } | {
-  subscription: { id: string; amount_minor: number; period_end: string; stops_at: string | null } | null;
-}) & { observed_at?: string };
-type Action = { id: string; actor_id: string; kind: string; target_id: string; amount_minor: number | null; period_end: string | null; reason: string; status: string };
-type Confirmation = { amount_minor: number; reason: string } | { subscription_id: string; period_end: string; reason: string };
-type Result = { status?: string; subscription?: { stops_at: string | null } };
-type Loaded = { quote: Quote; pending: Action | null };
+type Quote = Schema<"RefundQuote"> | Schema<"RecurringDetails">;
+type Confirmation = RequestBody<"/donor/staff/donors/{donor_id}/gifts/{gift_id}/refund", "post">
+  | RequestBody<"/donor/staff/donors/{donor_id}/cancellation", "post">;
+type Result = Partial<Pick<Schema<"StaffRefund">, "status"> & Pick<Schema<"StaffCancellation">, "subscription">>;
+type Loaded = { quote: Quote; pending: Schema<"StaffAction"> | null };
 
 export default function Finance({ donor, gift }: { donor: string; gift: string }) {
   const path = `/donor/staff/donors/${encodeURIComponent(donor)}/${gift ? `gifts/${encodeURIComponent(gift)}/refund` : "cancellation"}`;
@@ -29,7 +27,7 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
       const quote = await api<Quote>(path, { signal });
       const target = "gift_id" in quote ? quote.gift_id : quote.subscription?.id;
       const kind = "gift_id" in quote ? "REFUND" : "CANCEL";
-      const pending = target ? (await api<{ action: Action | null }>(
+      const pending = target ? (await api<Schema<"PendingAction">>(
         `/donor/staff/donors/${encodeURIComponent(donor)}/actions/pending?${new URLSearchParams({ target_id: target, kind })}`, { signal },
       )).action : null;
       if (pending && ((pending.kind === "REFUND" && pending.amount_minor === null) || (pending.kind === "CANCEL" && pending.period_end === null))) {

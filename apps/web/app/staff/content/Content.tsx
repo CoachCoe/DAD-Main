@@ -3,14 +3,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, ApiError, type FieldError, failureMessage } from "@/lib/api";
+import { api, ApiError, type FieldError, failureMessage, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { formatDateTime } from "@/lib/dates";
 
-type Inventory = { sources: { id: string; name: string; sha256: string }[]; publications: { id: string; at: string }[] };
-
 export default function Content() {
-  const { resource, data, reload } = useApiResource<Inventory>("/donor/staff/content");
+  const { resource, data, reload } = useApiResource<Schema<"ContentInventory">>("/donor/staff/content");
   const [source, setSource] = useState<File | null>(null);
   const [initiatives, setInitiatives] = useState<File | null>(null);
   const [ledger, setLedger] = useState<File | null>(null);
@@ -30,7 +28,7 @@ export default function Content() {
     event.preventDefault(); if (!source || busy) return;
     if (source.size > 10 * 1024 * 1024) { setError("Source documents must be at most 10 MB."); return; }
     setBusy(true); setError(""); setMessage("");
-    try { const result = await api<{ id: string }>(`/donor/staff/content/sources?name=${encodeURIComponent(source.name)}`, { method: "POST", body: source }); setMessage(`Source stored: ${result.id}. Use this ID in the spreadsheet.`); reload(); }
+    try { const result = await api<Schema<"StoredSource">>(`/donor/staff/content/sources?name=${encodeURIComponent(source.name)}`, { method: "POST", body: source }); setMessage(`Source stored: ${result.id}. Use this ID in the spreadsheet.`); reload(); }
     catch (cause) { setError(rejected(cause, "Source upload was not confirmed. Check source encryption configuration, then refresh the inventory before retrying.")); }
     finally { setBusy(false); }
   }
@@ -39,9 +37,9 @@ export default function Content() {
     if (initiatives.size > 512 * 1024 || ledger.size > 512 * 1024) { setError("Each CSV must be at most 512 KB."); return; }
     setBusy(true); setError(""); setMessage(""); setRowErrors([]);
     try {
-      const result = await api<{ publication_id: string }>("/donor/staff/content/publish", { method: "POST", body: JSON.stringify({
+      const result = await api<Schema<"Publication">>("/donor/staff/content/publish", { method: "POST", body: JSON.stringify({
         initiatives_csv: await initiatives.text(), ledger_csv: await ledger.text(), as_of: asOf, cadence,
-      }) });
+      } satisfies Schema<"PublicationRequest">) });
       setMessage(`Published snapshot ${result.publication_id}. Public caches refresh within one minute.`); reload(); setConfirmed(false);
     } catch (cause) {
       if (cause instanceof ApiError) setRowErrors(cause.errors);

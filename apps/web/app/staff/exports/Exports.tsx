@@ -2,10 +2,11 @@
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
+import type { Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
 export default function Exports() {
-  const { resource, data, reload } = useApiResource<{ datasets: string[] }>("/donor/staff/exports");
+  const { resource, data, reload } = useApiResource<Schema<"ExportDatasets">>("/donor/staff/exports");
   const messages = resourceMessages(resource, { loading: "Checking export permissions…",
     failure: "Exports could not be loaded right now. Please retry in a moment.",
     forbidden: "Your role does not permit exports." });
