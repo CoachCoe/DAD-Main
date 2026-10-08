@@ -29,16 +29,22 @@ describe("security headers", () => {
       expect.arrayContaining(["X-Content-Type-Options", "X-Frame-Options", "Referrer-Policy", "Permissions-Policy", "Strict-Transport-Security"]));
   });
 
-  it.each(["/", "/ledger", "/donate", "/r/code", "/api/donor/me", "/accounts", "/account", "/account/dashboard", "/staff", "/staff/sign-in", "/staff/donors/abc", "/Account/dashboard"])(
-    "gives %s exactly one content security policy", async (path) => {
-      // Browsers enforce every CSP header they receive, so the static policy must stay off
-      // the paths where proxy.ts sets a nonce policy, and no path may be left with neither.
-      const groups = (await configuredHeaders()).filter((group) => group.headers.some((header) => header.key === "Content-Security-Policy"));
-      const fromConfig = groups.filter((group) => getPathMatch(group.source, { strict: true })(path) !== false).length;
-      const fromProxy = unstable_doesMiddlewareMatch({ config: proxyConfig, nextConfig, url: path })
-        && proxy(new NextRequest(`http://127.0.0.1:3000${path}`)).headers.has("Content-Security-Policy") ? 1 : 0;
-      expect(fromConfig + fromProxy).toBe(1);
-    });
+  it.each([
+    ["http://127.0.0.1:3000", "/"], ["http://127.0.0.1:3000", "/ledger"], ["http://127.0.0.1:3000", "/donate"], ["http://127.0.0.1:3000", "/r/code"],
+    ["http://127.0.0.1:3000", "/api/donor/me"], ["http://127.0.0.1:3000", "/accounts"], ["http://127.0.0.1:3000", "/account"],
+    ["http://127.0.0.1:3000", "/account/dashboard"], ["http://127.0.0.1:3000", "/Account/dashboard"], ["http://127.0.0.1:3000", "/staff"],
+    ["http://staff.localhost:3000", "/staff"], ["http://staff.localhost:3000", "/staff/sign-in"], ["http://staff.localhost:3000", "/staff/donors/abc"],
+    ["http://staff.localhost:3000", "/account/dashboard"], ["http://staff.localhost:3000", "/ledger"],
+  ])("gives %s%s exactly one content security policy", async (origin, path) => {
+    // Browsers enforce every CSP header they receive, so the static policy must stay off
+    // the paths where proxy.ts sets a nonce policy, and no path may be left with neither.
+    vi.stubEnv("DONOR_STAFF_ORIGIN", "http://staff.localhost:3000");
+    const groups = (await configuredHeaders()).filter((group) => group.headers.some((header) => header.key === "Content-Security-Policy"));
+    const fromConfig = groups.filter((group) => getPathMatch(group.source, { strict: true })(path) !== false).length;
+    const fromProxy = unstable_doesMiddlewareMatch({ config: proxyConfig, nextConfig, url: path })
+      && proxy(new NextRequest(`${origin}${path}`, { headers: { host: new URL(origin).host } })).headers.has("Content-Security-Policy") ? 1 : 0;
+    expect(fromConfig + fromProxy).toBe(1);
+  });
 
   it.each([
     ["X-Content-Type-Options", "nosniff"],

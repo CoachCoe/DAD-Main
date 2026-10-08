@@ -18,6 +18,12 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
+  // The static headers below are fixed at build time, so proxy.ts gets the same origins
+  // compiled in rather than reading a server environment that could disagree.
+  env: {
+    DONOR_PUBLIC_ORIGIN: process.env.DONOR_PUBLIC_ORIGIN ?? "",
+    DONOR_STAFF_ORIGIN: process.env.DONOR_STAFF_ORIGIN ?? "",
+  },
   // The API is proxied by app/api/[...path]/route.ts rather than a rewrite: with
   // output: standalone a rewrite destination is baked in at build time, so a runtime
   // API_BASE_URL was silently ignored.

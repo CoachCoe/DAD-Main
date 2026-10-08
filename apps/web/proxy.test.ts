@@ -1,14 +1,22 @@
 // @vitest-environment node
 import { NextRequest } from "next/server";
 import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import nextConfig from "./next.config";
 import { config, proxy } from "./proxy";
 
+const STAFF_ORIGIN = "http://staff.localhost:3000";
+beforeEach(() => vi.stubEnv("DONOR_STAFF_ORIGIN", STAFF_ORIGIN));
 afterEach(() => vi.unstubAllEnvs());
 
+/** A request to the host that serves path: staff pages on the staff host, the rest on the public one. */
+function request(path: string) {
+  const origin = /^\/staff/i.test(path) ? STAFF_ORIGIN : "http://127.0.0.1:3000";
+  return new NextRequest(`${origin}${path}`, { headers: { host: new URL(origin).host } });
+}
+
 function respond(path: string) {
-  const response = proxy(new NextRequest(`http://127.0.0.1:3000${path}`));
+  const response = proxy(request(path));
   const policy = response.headers.get("Content-Security-Policy");
   if (!policy) throw new Error("Missing policy");
   return { response, policy };
@@ -53,10 +61,58 @@ describe("signed-in surface policy", () => {
   });
 });
 
+describe("hosts", () => {
+  const visit = (url: string, headers: Record<string, string> = {}) => proxy(new NextRequest(url, { headers: { host: new URL(url).host, ...headers } }));
+  const answer = (response: Response) => response.status === 404 ? "404"
+    : response.headers.has("location") ? `redirect ${response.headers.get("location")}`
+    : response.headers.has("x-middleware-request-x-dad-unserved") ? "not found page" : "served";
+  const staff = "https://staff.dad.example.org";
+  const site = "https://dad.example.org";
+
+  it.each([
+    [`${staff}/staff`, "served"], [`${staff}/staff/sign-in`, "served"], [`${staff}/staff/donors/abc`, "served"],
+    [`${staff}/api/donor/staff/me`, "served"], [`${staff}/api/donor/staff/sign-in/options`, "served"], [`${staff}/_next/data/build/staff.json`, "served"],
+    [`${staff}/`, `redirect ${staff}/staff`], [`${staff}/ledger`, "404"], [`${staff}/account/dashboard`, "not found page"],
+    [`${staff}/api/donor/me`, "404"], [`${staff}/api/donor/stripe/webhook`, "404"],
+    [`${site}/`, "served"], [`${site}/account/dashboard`, "served"], [`${site}/api/donor/me`, "served"],
+    [`${site}/staff`, "not found page"], [`${site}/Staff/sign-in`, "not found page"], [`${site}/api/donor/staff/me`, "404"], [`${site}/api/donor/staff/sign-in`, "404"],
+  ])("answers %s with %s", (url, expected) => {
+    vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
+    expect(answer(visit(url))).toBe(expected);
+  });
+
+  it("serves no back office anywhere until a staff origin is set", () => {
+    vi.stubEnv("DONOR_STAFF_ORIGIN", "");
+    expect(answer(visit(`${site}/staff/sign-in`))).toBe("not found page");
+    expect(answer(visit(`${STAFF_ORIGIN}/staff/sign-in`))).toBe("not found page");
+  });
+
+  it("keeps the staff host out of search engines", async () => {
+    vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
+    expect(visit(`${staff}/staff/sign-in`).headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+    expect(await visit(`${staff}/robots.txt`).text()).toBe("User-agent: *\nDisallow: /\n");
+  });
+
+  it("lets a signed-in surface answer not found under its own frame and policy", () => {
+    vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
+    for (const url of [`${site}/Staff/sign-in`, `${staff}/account/dashboard`]) {
+      expect(visit(url).headers.get("Content-Security-Policy")).toMatch(/'nonce-[^']+' 'strict-dynamic'/);
+    }
+    expect(answer(visit(`${staff}/staff`, { "x-dad-unserved": "1" }))).toBe("served");
+  });
+
+  it("upgrades insecure requests by the origin of the host answering", () => {
+    vi.stubEnv("DONOR_PUBLIC_ORIGIN", "http://localhost:3000");
+    vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
+    expect(visit(`${staff}/staff`).headers.get("Content-Security-Policy")).toContain("upgrade-insecure-requests");
+    expect(visit("http://localhost:3000/account").headers.get("Content-Security-Policy")).not.toContain("upgrade-insecure-requests");
+  });
+});
+
 describe("proxy scope", () => {
   const sets = (url: string, headers?: Record<string, string>) =>
     unstable_doesMiddlewareMatch({ config, nextConfig, url, headers })
-    && proxy(new NextRequest(`http://127.0.0.1:3000${url}`)).headers.has("Content-Security-Policy");
+    && proxy(request(url)).headers.has("Content-Security-Policy");
 
   it.each(["/account", "/account/dashboard", "/account/sign-in", "/staff", "/staff/sign-in", "/staff/donors/abc", "/Staff/sign-in"])(
     "sets the nonce policy on %s", (url) => {
