@@ -40,13 +40,22 @@ type CheckoutGateway interface {
 	CreateCheckout(context.Context, []byte, string) (RemoteCheckout, error)
 }
 
+// ValidateOrigin accepts an exact HTTPS origin, or plain HTTP on a loopback
+// name for local runs.
 func ValidateOrigin(origin string) error {
 	u, err := url.Parse(origin)
 	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" ||
-		(u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {
+		(u.Scheme != "https" && !(u.Scheme == "http" && loopback(u.Hostname()))) {
 		return errors.New("DONOR_PUBLIC_ORIGIN must be an HTTPS origin (HTTP localhost for tests)")
 	}
 	return nil
+}
+
+// loopback reports a name browsers always resolve to this machine. Every
+// *.localhost name qualifies, which lets a local staff host differ from the
+// public one.
+func loopback(host string) bool {
+	return host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "127.0.0.1"
 }
 
 func ValidateRemoteCheckout(remote RemoteCheckout) error {
