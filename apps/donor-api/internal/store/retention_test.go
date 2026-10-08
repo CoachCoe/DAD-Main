@@ -19,8 +19,15 @@ type retentionFixture struct {
 	giver    pgtype.UUID
 }
 
+// touchPasses serializes retention tests: a pass deletes every touch past
+// retention in the shared database, not only the fixture's, so one test's pass
+// would delete another's touches between its inserts and its assertions.
+var touchPasses sync.Mutex
+
 func newRetentionFixture(t *testing.T) retentionFixture {
 	t.Helper()
+	touchPasses.Lock()
+	t.Cleanup(touchPasses.Unlock)
 	pool := database(t)
 	referrer, _ := donor(t, pool)
 	giver, _ := donor(t, pool)
@@ -105,6 +112,7 @@ func purgeAll(t *testing.T, pool *pgxpool.Pool, now time.Time, batch int32) [][]
 }
 
 func TestTouchPurgeDeletesOnlyUnconvertedTouchesPastRetention(t *testing.T) {
+	t.Parallel()
 	f := newRetentionFixture(t)
 	now := time.Now().UTC()
 	cutoff := now.AddDate(0, -touchRetentionMonths, 0)
@@ -149,10 +157,11 @@ func TestTouchPurgeDeletesOnlyUnconvertedTouchesPastRetention(t *testing.T) {
 }
 
 func TestTouchPurgeBatchesAreBoundedAndConcurrentPassesShareTheWork(t *testing.T) {
+	t.Parallel()
 	f := newRetentionFixture(t)
 	now := time.Now().UTC()
-	// Ancient capture times put these first in every pass's order.
-	start := time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Capture times older than any other fixture's put these first in a pass.
+	start := time.Date(1990, 1, 1, 0, 0, 0, 0, time.UTC)
 	var ids []pgtype.UUID
 	for i := range 40 {
 		at := start.Add(time.Duration(i) * time.Minute)
@@ -197,6 +206,7 @@ func TestTouchPurgeBatchesAreBoundedAndConcurrentPassesShareTheWork(t *testing.T
 }
 
 func TestTouchRetentionStartsAPassOnceAnInterval(t *testing.T) {
+	t.Parallel()
 	f := newRetentionFixture(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
