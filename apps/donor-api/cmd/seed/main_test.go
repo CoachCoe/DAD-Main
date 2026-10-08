@@ -22,6 +22,7 @@ import (
 
 	"impactgraph/donor-api/internal/httpapi"
 	"impactgraph/donor-api/internal/migrations"
+	"impactgraph/donor-api/internal/recognition"
 	"impactgraph/donor-api/internal/store"
 )
 
@@ -204,8 +205,13 @@ func TestInterruptedSeedLeavesNoMailToSend(t *testing.T) {
 func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 	pool, location := isolatedDatabase(t)
 	ctx := context.Background()
+	// A cutoff inside the seeded history awards some givers and not others,
+	// whichever side of the real cutoff the test runs on.
+	now := time.Now()
+	defer func(cutoff time.Time) { recognition.FoundingCutoff = cutoff }(recognition.FoundingCutoff)
+	recognition.FoundingCutoff = now.Add(-60 * 24 * time.Hour)
 	o := options{donors: 200, seed: 7, workers: 4}
-	pop, r, err := seed(ctx, pool, o, time.Now())
+	pop, r, err := seed(ctx, pool, o, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,16 +249,17 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 		}
 		return response.Code
 	}
-	checkedStreaks, referrers, subscriptions := 0, 0, 0
+	checkedStreaks, referrers, subscriptions, founders := 0, 0, 0, map[bool]int{}
 	for i, s := range sessions {
 		d := s.donor
 		var dashboard store.DonorDashboard
 		if status := get("/donor/me/dashboard", s.token, i%2 == 0, &dashboard); status != http.StatusOK || dashboard.State != "ready" {
 			t.Fatalf("donor %d dashboard: %d %+v", d.index, status, dashboard)
 		}
-		if !dashboard.FoundingDonor {
-			t.Errorf("donor %d gave before the cutoff but is not a founding donor", d.index)
+		if want := d.firstGift().paidAt.Before(recognition.FoundingCutoff); dashboard.FoundingDonor != want {
+			t.Errorf("donor %d founding donor %v, want %v", d.index, dashboard.FoundingDonor, want)
 		}
+		founders[dashboard.FoundingDonor]++
 		link, irl := d.referred["LINK"], d.referred["IRL"]
 		if got := dashboard.Referrals; got == nil || got.Link != link.count || got.LinkMinor != link.minor || got.IRL != irl.count || got.IRLMinor != irl.minor {
 			t.Errorf("donor %d referrals %+v, want link %+v irl %+v", d.index, got, link, irl)
@@ -297,8 +304,8 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 			}
 		}
 	}
-	if checkedStreaks < len(sessions)*9/10 || referrers == 0 || subscriptions == 0 {
-		t.Fatalf("too little coverage: %d streaks, %d referrers and %d monthly gifts among %d donors", checkedStreaks, referrers, subscriptions, len(sessions))
+	if checkedStreaks < len(sessions)*9/10 || referrers == 0 || subscriptions == 0 || founders[true] == 0 || founders[false] == 0 {
+		t.Fatalf("too little coverage: %d streaks, %d referrers, %d monthly gifts and founders %v among %d donors", checkedStreaks, referrers, subscriptions, founders, len(sessions))
 	}
 
 	name := pool.Config().ConnConfig.Database

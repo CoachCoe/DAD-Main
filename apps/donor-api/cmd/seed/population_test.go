@@ -4,8 +4,6 @@ import (
 	"math"
 	"testing"
 	"time"
-
-	"impactgraph/donor-api/internal/recognition"
 )
 
 var asOf = time.Date(2026, 10, 7, 15, 4, 5, 0, time.UTC)
@@ -174,9 +172,6 @@ func TestFactsKeepTheSchemaAndDomainRules(t *testing.T) {
 		}
 		if monthly > 1 || d.streak < 0 {
 			t.Fatalf("donor %d has %d monthly subscriptions and streak %d", d.index, monthly, d.streak)
-		}
-		if g := d.firstGift(); g != nil && !g.paidAt.Before(recognition.FoundingCutoff) {
-			t.Fatalf("donor %d gave after the founding cutoff", d.index)
 		}
 	}
 	for _, touch := range pop.touches {
