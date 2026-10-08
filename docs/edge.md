@@ -164,7 +164,7 @@ Put the whole staff host behind a **Cloudflare Access** self-hosted
 application that admits only named staff through the identity provider with MFA, with an
 eight-hour session to match staff sessions. Access is in front of, not instead of, the
 app's passkeys. Without Access, use a custom rule that issues a Managed
-Challenge on `http.host eq "staff.example.org" and not ip.src in $staff_networks`, or
+Challenge on `http.host eq "staff.donors.example.org" and not ip.src in $staff_networks`, or
 `INGRESS_STAFF_ACCESS`.
 
 Access protects the staff host only when the origin refuses requests that did not pass
