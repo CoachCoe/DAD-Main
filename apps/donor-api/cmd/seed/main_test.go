@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -188,11 +190,15 @@ func TestSeededDonorsAreServedFromTheirFacts(t *testing.T) {
 		t.Fatalf("too little coverage: %d streaks and %d referrers among %d donors", checkedStreaks, referrers, len(sessions))
 	}
 
-	if _, _, err = seed(ctx, pool, o, time.Now()); err == nil || !strings.Contains(err.Error(), "-append") {
-		t.Fatalf("a second population was seeded without -append: %v", err)
-	}
 	name := pool.Config().ConnConfig.Database
 	fixturePath := filepath.Join(t.TempDir(), "fixture.json")
+	refused := []string{"-database-url", location, "-confirm", name, "-donors", "10", "-sessions", "1", "-fixture", fixturePath}
+	if err = run(ctx, refused, io.Discard); err == nil || !strings.Contains(err.Error(), "-append") {
+		t.Fatalf("a second population was seeded without -append: %v", err)
+	}
+	if _, err = os.Stat(fixturePath); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a refused seed left its fixture behind: %v", err)
+	}
 	args := []string{"-database-url", location, "-confirm", name, "-donors", "60", "-append", "-sessions", "5", "-workers", "2", "-fixture", fixturePath}
 	if err = run(ctx, args, io.Discard); err != nil {
 		t.Fatal(err)

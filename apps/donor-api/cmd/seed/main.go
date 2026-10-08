@@ -88,6 +88,19 @@ func insideRepository(path string) (bool, error) {
 	}
 }
 
+// createFixture opens a new private file for session tokens, refusing an
+// existing file or one inside a working tree.
+func createFixture(path string) (*os.File, error) {
+	if inside, err := insideRepository(path); err != nil || inside {
+		return nil, errors.New("-fixture must be outside any git working tree")
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("create fixture: %w", err)
+	}
+	return file, nil
+}
+
 // guard returns how many seeded donors the database already holds, refusing
 // a database with any other donor, or a seeded one unless appending.
 func guard(ctx context.Context, pool *pgxpool.Pool, appendPopulation bool) (int, error) {
@@ -160,12 +173,8 @@ func run(ctx context.Context, args []string, out io.Writer) (err error) {
 	}
 	var fixtureFile *os.File
 	if o.fixture != "" {
-		inside, err := insideRepository(o.fixture)
-		if err != nil || inside {
-			return errors.New("-fixture must be outside any git working tree")
-		}
-		if fixtureFile, err = os.OpenFile(o.fixture, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err != nil {
-			return fmt.Errorf("create fixture: %w", err)
+		if fixtureFile, err = createFixture(o.fixture); err != nil {
+			return err
 		}
 		defer func() {
 			if closeErr := fixtureFile.Close(); err == nil {
@@ -192,17 +201,7 @@ func run(ctx context.Context, args []string, out io.Writer) (err error) {
 		return err
 	}
 	if fixtureFile != nil {
-		f := fixture{ReferralCodes: pop.referralCodes(fixtureCodes)}
-		sessions, err := pop.sessions(ctx, pool, o.sessions)
-		if err != nil {
-			return err
-		}
-		f.Sessions = make([]string, len(sessions))
-		for i, s := range sessions {
-			f.Sessions[i] = s.token
-		}
-		r.Sessions = len(sessions)
-		if err = json.NewEncoder(fixtureFile).Encode(f); err != nil {
+		if r.Sessions, err = pop.writeFixture(ctx, pool, o.sessions, fixtureFile); err != nil {
 			return err
 		}
 	}

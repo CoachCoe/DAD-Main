@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"slices"
 	"strings"
@@ -331,6 +332,20 @@ func (p *population) sessions(ctx context.Context, pool *pgxpool.Pool, n int) ([
 	}
 	_, err := pool.CopyFrom(ctx, pgx.Identifier{"donor_sessions"}, []string{"id", "donor_id", "token_hash", "expires_at"}, pgx.CopyFromRows(rows))
 	return sessions, err
+}
+
+// writeFixture signs in n donors and writes their tokens, with referral
+// codes, to w, returning how many sessions it created.
+func (p *population) writeFixture(ctx context.Context, pool *pgxpool.Pool, n int, w io.Writer) (int, error) {
+	sessions, err := p.sessions(ctx, pool, n)
+	if err != nil {
+		return 0, err
+	}
+	f := fixture{Sessions: make([]string, len(sessions)), ReferralCodes: p.referralCodes(fixtureCodes)}
+	for i, s := range sessions {
+		f.Sessions[i] = s.token
+	}
+	return len(sessions), json.NewEncoder(w).Encode(f)
 }
 
 // referralCodes draws n codes in proportion to sharer influence, so popular
