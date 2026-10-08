@@ -67,19 +67,22 @@ func latestSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UU
 	return attempt, err == nil && attempt.StripeSubscriptionID.Valid, err
 }
 
-// voiding reports whether the processor is voiding attempt's renewals: a sync
-// confirms a pause or resumption only once the processor shows it, and the
-// voiding lasts until its resumption date.
-func voiding(ctx context.Context, q *queries.Queries, attempt pgtype.UUID, now time.Time) (bool, error) {
+// pausedUntil returns when giving resumes if the processor is voiding
+// attempt's renewals, or nil: a sync confirms a pause or resumption only once
+// the processor shows it, and the voiding lasts until its resumption date.
+func pausedUntil(ctx context.Context, q *queries.Queries, attempt pgtype.UUID, now time.Time) (*time.Time, error) {
 	pause, err := q.LatestPause(ctx, attempt)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !pause.ConfirmedAt.Valid) {
-		return false, nil
+		return nil, nil
 	}
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	until, err := effectiveResume(ctx, q, pause)
-	return now.Before(until), err
+	if err != nil || !now.Before(until) {
+		return nil, err
+	}
+	return &until, nil
 }
 
 // AmountOptions offers the donor's next-renewal amount change.
@@ -90,11 +93,11 @@ func (s RecurringService) AmountOptions(ctx context.Context, token string) (Amou
 		if err != nil || schedule == nil {
 			return unavailable, err
 		}
-		paused, err := voiding(ctx, q, attempt.ID, now)
+		paused, err := pausedUntil(ctx, q, attempt.ID, now)
 		if err != nil {
 			return AmountOptions{}, err
 		}
-		if schedule.Status != "active" || schedule.StopsAt.Valid || schedule.ExternalChange || paused {
+		if schedule.Status != "active" || schedule.StopsAt.Valid || schedule.ExternalChange || paused != nil {
 			return unavailable, nil
 		}
 		draft, err := q.CheckoutDraft(ctx, attempt.CheckoutID)

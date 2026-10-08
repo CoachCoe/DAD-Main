@@ -419,8 +419,8 @@ func TestViewsServeSyncedStateWithoutCallingProcessor(t *testing.T) {
 	view := jsonView(t, details)
 	assertKeys(t, view, "mode", "observed_at", "state", "subscription")
 	sub := view["subscription"].(map[string]any)
-	assertKeys(t, sub, "id", "amount_minor", "currency", "status", "period_end", "stops_at")
-	if view["mode"] != "test" || view["state"] != "ready" || !jsonTime(t, view["observed_at"]).Equal(synced) || sub["id"] != r.attempt.String() || sub["amount_minor"] != float64(3000) || sub["currency"] != "USD" || sub["status"] != "active" || sub["stops_at"] != nil || !jsonTime(t, sub["period_end"]).Equal(r.end) {
+	assertKeys(t, sub, "id", "amount_minor", "currency", "status", "period_end", "resumes_at", "stops_at")
+	if view["mode"] != "test" || view["state"] != "ready" || !jsonTime(t, view["observed_at"]).Equal(synced) || sub["id"] != r.attempt.String() || sub["amount_minor"] != float64(3000) || sub["currency"] != "USD" || sub["status"] != "active" || sub["stops_at"] != nil || sub["resumes_at"] != nil || !jsonTime(t, sub["period_end"]).Equal(r.end) {
 		t.Fatalf("details: %v", view)
 	}
 	amount, err := service.AmountOptions(ctx, r.token)
@@ -674,6 +674,17 @@ func TestPauseOptionsPauseAndEarlyResume(t *testing.T) {
 	if again, err := r.service.PauseOptions(ctx, r.token); err != nil || len(jsonView(t, again)["options"].([]any)) != 0 || jsonView(t, again)["pause"] == nil {
 		t.Fatal("active pause still offered new pauses", again, err)
 	}
+	resumesAt := func() any {
+		t.Helper()
+		details, err := r.service.Details(ctx, r.token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return jsonView(t, details)["subscription"].(map[string]any)["resumes_at"]
+	}
+	if at := resumesAt(); at == nil || !jsonTime(t, at).Equal(request.ResumesAt) {
+		t.Fatal("details do not show the pause in effect", at)
+	}
 	resumable, err := r.service.ResumeOptions(ctx, r.token)
 	if err != nil {
 		t.Fatal(err)
@@ -697,6 +708,9 @@ func TestPauseOptionsPauseAndEarlyResume(t *testing.T) {
 	saved, err := r.service.ResumeOptions(ctx, r.token)
 	if err != nil || jsonView(t, saved)["state"] != "saved" {
 		t.Fatal("saved resumption not reported", saved, err)
+	}
+	if at := resumesAt(); at == nil || !jsonTime(t, at).Equal(r.end) {
+		t.Fatal("details do not show the earlier resumption", at)
 	}
 }
 

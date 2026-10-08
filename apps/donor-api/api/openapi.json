@@ -4988,6 +4988,14 @@
             "type": "string",
             "format": "date-time"
           },
+          "resumes_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When giving resumes after a confirmed pause in effect; null when not paused.",
+            "format": "date-time"
+          },
           "status": {
             "type": "string"
           },
@@ -5004,6 +5012,7 @@
           "currency",
           "id",
           "period_end",
+          "resumes_at",
           "status",
           "stops_at"
         ],

@@ -53,12 +53,14 @@ type RecurringDetails struct {
 	Subscription *Subscription `json:"subscription"`
 }
 type Subscription struct {
-	AmountMinor int64      `json:"amount_minor"`
-	Currency    string     `json:"currency"`
-	ID          string     `json:"id"`
-	PeriodEnd   time.Time  `json:"period_end"`
-	Status      string     `json:"status"`
-	StopsAt     *time.Time `json:"stops_at"`
+	AmountMinor int64     `json:"amount_minor"`
+	Currency    string    `json:"currency"`
+	ID          string    `json:"id"`
+	PeriodEnd   time.Time `json:"period_end"`
+	// ResumesAt is when giving resumes after a confirmed pause in effect.
+	ResumesAt *time.Time `json:"resumes_at"`
+	Status    string     `json:"status"`
+	StopsAt   *time.Time `json:"stops_at"`
 }
 type PauseView struct {
 	Confirmed bool      `json:"confirmed"`
@@ -98,7 +100,7 @@ func nextAmount(ctx context.Context, q *queries.Queries, draft queries.DonorChec
 	}
 	return amount, err
 }
-func subscriptionView(ctx context.Context, q *queries.Queries, attempt queries.DonorStripeCheckout, row queries.DonorSubscription) (RecurringDetails, error) {
+func subscriptionView(ctx context.Context, q *queries.Queries, attempt queries.DonorStripeCheckout, row queries.DonorSubscription, now time.Time) (RecurringDetails, error) {
 	draft, err := q.CheckoutDraft(ctx, attempt.CheckoutID)
 	if err != nil {
 		return RecurringDetails{}, err
@@ -110,6 +112,9 @@ func subscriptionView(ctx context.Context, q *queries.Queries, attempt queries.D
 	sub := &Subscription{ID: attempt.ID.String(), AmountMinor: amount, Currency: "USD", Status: row.Status, PeriodEnd: row.PeriodEnd.Time}
 	if row.StopsAt.Valid {
 		sub.StopsAt = &row.StopsAt.Time
+	}
+	if sub.ResumesAt, err = pausedUntil(ctx, q, attempt.ID, now); err != nil {
+		return RecurringDetails{}, err
 	}
 	return RecurringDetails{Mode: "test", ObservedAt: &row.ObservedAt.Time, State: "ready", Subscription: sub}, nil
 }
@@ -134,7 +139,7 @@ func syncedSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UU
 
 // storedDetails describes the donor's monthly gift as last synced. A started
 // monthly gift is preparing until its subscription is first synced.
-func storedDetails(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (RecurringDetails, error) {
+func storedDetails(ctx context.Context, q *queries.Queries, donor pgtype.UUID, now time.Time) (RecurringDetails, error) {
 	attempt, row, err := syncedSubscription(ctx, q, donor)
 	if err != nil {
 		return RecurringDetails{}, err
@@ -146,7 +151,7 @@ func storedDetails(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (
 		}
 		return RecurringDetails{Mode: "test", State: state}, nil
 	}
-	return subscriptionView(ctx, q, attempt, *row)
+	return subscriptionView(ctx, q, attempt, *row, now)
 }
 
 // prefetchSubscription reads the donor's latest subscription from the processor
@@ -315,8 +320,8 @@ func (s RecurringService) read(ctx context.Context, tx pgx.Tx, attempt queries.D
 
 // Details describes the donor's monthly gift as last synced from the processor.
 func (s RecurringService) Details(ctx context.Context, token string) (RecurringDetails, error) {
-	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (RecurringDetails, error) {
-		return storedDetails(ctx, q, d.ID)
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (RecurringDetails, error) {
+		return storedDetails(ctx, q, d.ID, now)
 	})
 }
 func (s RecurringService) Cancel(ctx context.Context, token string, r CancellationRequest) (RecurringDetails, error) {
@@ -407,7 +412,7 @@ func completeCancellation(ctx context.Context, tx pgx.Tx, donor pgtype.UUID, att
 	if _, err := refreshProjection(ctx, tx, donor, now); err != nil {
 		return RecurringDetails{}, err
 	}
-	return subscriptionView(ctx, q, attempt, row)
+	return subscriptionView(ctx, q, attempt, row, now)
 }
 func effectiveResume(ctx context.Context, q *queries.Queries, pause queries.DonorPause) (time.Time, error) {
 	resume, err := q.ResumptionForPause(ctx, pause.ID)
