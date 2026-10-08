@@ -38,7 +38,10 @@ require a reviewed migration, not a forced baseline stamp.
 `up` starts the API, web service, and nginx, not workers. Set `DONOR_GO_WORKERS_ENABLED=true`
 only when ready to process test payments and deliver configured email, then run
 `./scripts/deploy.sh workers`; the script refuses while the flag is unset. `down` stops
-services without deleting database volumes. `logs` follows service logs. No command
+services without deleting database volumes. `logs` follows service logs, which Docker's
+default `json-file` driver keeps without limit; they include nginx's access log of client
+addresses, so set rotation in the Docker daemon's `log-opts` and keep logs no longer than
+the approved retention policy allows. No command
 pushes images or activates live donations. `ENV_FILE` may be relative to the current
 directory. The web container runs with a read-only filesystem and tmpfs mounts for
 `/tmp` and `/app/.next/cache`. `up` and `reload-ingress` recreate nginx when its
@@ -68,20 +71,16 @@ of the web image as well as API settings, so rebuild the web image when either c
 Staff passkeys belong to the staff hostname; changing it means every staff member enrols
 again.
 
-Rate limits are per visitor. nginx overwrites `X-Real-IP` with the client address on every
-request (behind Cloudflare, from `CF-Connecting-IP` sent by Cloudflare's ranges only) and
-drops other forwarding headers. Production Compose gives the web service the fixed address
-`172.30.42.10` on the `172.30.42.0/24` network, sets the API's `DONOR_TRUSTED_PROXY_CIDRS`
-to that address, and defaults the web service's `DONOR_CLIENT_IP_HEADER` to `X-Real-IP`.
-Setting `DONOR_CLIENT_IP_HEADER` empty makes all visitors share the proxy's quota. Edit
-the Compose network if that range clashes on the host.
+Rate limits are per visitor. nginx sets `X-Real-IP` to the client address, which the API
+trusts only from the web container's fixed address `172.30.42.10`
+([edge](edge.md#client-address)). Setting `DONOR_CLIENT_IP_HEADER` empty makes all
+visitors share the proxy's quota. Edit the Compose network if `172.30.42.0/24` clashes on
+the host.
 
-The in-process limiter keeps a token bucket per client (IPv6 clients per /64) and per
-class, so a burst on one surface cannot starve another for visitors sharing an address:
-sign-in, claim links, and passkey answers 10 per minute, giving, referral capture, and
-partner signup 60, other donor actions 30, and staff actions and passkey challenges 60.
-Rejections carry an exact `Retry-After`.
-It tracks at most 65,536 buckets and evicts an existing bucket rather than refusing new
+The API's in-process limiter keeps a token bucket per client and per class, so a burst
+on one surface cannot starve another for visitors sharing an address; the classes and
+the limits at each layer are in [edge](edge.md#rate-limits). Rejections carry an exact
+`Retry-After`. It tracks at most 65,536 buckets and evicts an existing bucket rather than refusing new
 clients when full. It is the per-instance last line behind the nginx and Cloudflare
 limits. Capacity must still be validated against the agreed launch spike.
 

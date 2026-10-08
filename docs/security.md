@@ -61,9 +61,12 @@ the staff host and donor paths only on the public host, and marks the staff host
 client-chosen address headers; behind Cloudflare it takes the address from
 `CF-Connecting-IP` only from Cloudflare's published ranges and serves only connections
 with an Authenticated Origin Pulls certificate. Rate limits are layered: Cloudflare's
-distributed rules, nginx's per-client limits, and the API's per-instance buckets. Access
-logs record method, path, status, and timing, never query strings, cookies, or referral
-codes; nginx's error log can include a request line, so treat it as sensitive.
+distributed rules, nginx's per-client limits, and the API's per-instance buckets
+([edge](edge.md#rate-limits)). nginx's access log records the time, client address, host,
+method, path, status, response bytes, durations, and Cloudflare's `CF-Ray`, never query
+strings, cookies, or referral codes. Client addresses are personal data, so keep logs no
+longer than the approved retention policy allows ([operations](operations.md#database-and-containers)).
+nginx's error log can include a request line, so treat it as sensitive.
 
 Stripe handles all card entry. Signed webhooks are verified before persistence; only
 allowlisted event fields are stored. Retryable commands are recorded before provider
