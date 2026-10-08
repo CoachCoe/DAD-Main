@@ -11,7 +11,7 @@
     "test": "vitest",
     "test:e2e": "playwright test",
     "lint": "biome lint --error-on-warnings .",
-    "generate:api": "{ echo '// Generated from apps/donor-api/api/openapi.json; run `make generate` after changing it.'; openapi-typescript ../donor-api/api/openapi.json --empty-objects-unknown; } > lib/openapi.d.ts"
+    "generate:api": "{ echo '// Generated from apps/donor-api/api/openapi.json; run `make generate` after changing it.'; openapi-typescript ../donor-api/api/openapi.json --empty-objects-unknown; } > lib/openapi.d.ts.tmp && mv lib/openapi.d.ts.tmp lib/openapi.d.ts"
   },
   "dependencies": {
     "next": "16.4.0",

@@ -9,6 +9,7 @@ test-results/
 playwright-report/
 *.tsbuildinfo
 apps/web/next-env.d.ts
+apps/web/lib/openapi.d.ts.tmp
 .DS_Store
 
 # Local dev-server config for the agent preview pane.
