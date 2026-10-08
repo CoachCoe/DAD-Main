@@ -22,11 +22,13 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"os/signal"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -42,10 +44,6 @@ const (
 // that can never belong to a real visitor.
 var clientBase = netip.MustParseAddr("198.18.0.0")
 
-// streams selects the users' random streams away from those cmd/seed draws
-// codes from, which also seeds PCG with small integers.
-const streams = 0x6c6f616474657374
-
 // user is one simulated client: a browser or the donor app, signed in or not.
 type user struct {
 	r       *rand.Rand
@@ -59,7 +57,7 @@ type scenario struct {
 	weight   int
 	expect   int
 	signedIn bool // sent with the user's session; visitors are anonymous
-	build    func(u *user) (*http.Request, error)
+	build    func(u *user) *http.Request
 }
 
 type config struct {
@@ -84,8 +82,18 @@ var defaultMix = map[string]int{
 	"dashboard": 18, "gifts": 7, "sharing": 5, "profile": 4, "recurring": 4, "annual-summary": 2,
 }
 
-func get(target string) func(*user) (*http.Request, error) {
-	return func(*user) (*http.Request, error) { return http.NewRequest(http.MethodGet, target, nil) }
+// newRequest builds a request for a target parseTargets accepted, which
+// http.NewRequest cannot refuse.
+func newRequest(method, target string, body io.Reader) *http.Request {
+	r, err := http.NewRequest(method, target, body)
+	if err != nil {
+		panic(err)
+	}
+	return r
+}
+
+func get(target string) func(*user) *http.Request {
+	return func(*user) *http.Request { return newRequest(http.MethodGet, target, nil) }
 }
 
 // seededMix is the default mix against an API whose donors cmd/seed created.
@@ -93,31 +101,29 @@ func seededMix(api, origin string, f fixture, weights map[string]int) ([]scenari
 	if len(f.ReferralCodes) == 0 {
 		return nil, errors.New("the fixture holds no referral codes")
 	}
-	code := func(u *user) string { return f.ReferralCodes[u.r.IntN(len(f.ReferralCodes))] }
+	code := func(u *user) string { return url.PathEscape(f.ReferralCodes[u.r.IntN(len(f.ReferralCodes))]) }
 	year := strconv.Itoa(time.Now().Year())
 	all := []scenario{
-		{name: "referral-lookup", expect: http.StatusOK, build: func(u *user) (*http.Request, error) {
-			return http.NewRequest(http.MethodGet, api+"/donor/referrals/"+code(u), nil)
+		{name: "referral-lookup", expect: http.StatusOK, build: func(u *user) *http.Request {
+			return newRequest(http.MethodGet, api+"/donor/referrals/"+code(u), nil)
 		}},
-		{name: "referral-capture", expect: http.StatusOK, build: func(u *user) (*http.Request, error) {
+		{name: "referral-capture", expect: http.StatusOK, build: func(u *user) *http.Request {
 			kind := "LINK"
 			if u.r.IntN(3) == 0 {
 				kind = "IRL"
 			}
-			r, err := http.NewRequest(http.MethodPost, api+"/donor/referrals/"+code(u), strings.NewReader(`{"kind":"`+kind+`"}`))
-			if err == nil {
-				r.Header.Set("Origin", origin)
-				r.Header.Set("Content-Type", "application/json")
-			}
-			return r, err
+			r := newRequest(http.MethodPost, api+"/donor/referrals/"+code(u), strings.NewReader(`{"kind":"`+kind+`"}`))
+			r.Header.Set("Origin", origin)
+			r.Header.Set("Content-Type", "application/json")
+			return r
 		}},
-		{name: "referral-missing", expect: http.StatusNotFound, build: func(u *user) (*http.Request, error) {
+		{name: "referral-missing", expect: http.StatusNotFound, build: func(u *user) *http.Request {
 			// Issued codes encode 24 bytes; 32 can never name a referrer.
 			unknown := make([]byte, 32)
 			for i := range unknown {
 				unknown[i] = byte(u.r.Uint32())
 			}
-			return http.NewRequest(http.MethodGet, api+"/donor/referrals/"+base64.RawURLEncoding.EncodeToString(unknown), nil)
+			return newRequest(http.MethodGet, api+"/donor/referrals/"+base64.RawURLEncoding.EncodeToString(unknown), nil)
 		}},
 		{name: "content", expect: http.StatusOK, build: get(api + "/donor/public/content")},
 		{name: "dashboard", expect: http.StatusOK, signedIn: true, build: get(api + "/donor/me/dashboard")},
@@ -149,7 +155,8 @@ func seededMix(api, origin string, f fixture, weights map[string]int) ([]scenari
 	return mix, nil
 }
 
-// urlMix reads each target equally; scenarios are named by path.
+// urlMix reads each target equally; scenarios are named by host, path and
+// query.
 func urlMix(list string) ([]scenario, error) {
 	targets, err := parseTargets(list)
 	if err != nil {
@@ -158,7 +165,11 @@ func urlMix(list string) ([]scenario, error) {
 	mix := make([]scenario, len(targets))
 	for i, target := range targets {
 		u, _ := url.Parse(target)
-		mix[i] = scenario{name: u.Path, weight: 1, expect: http.StatusOK, signedIn: true, build: get(target)}
+		name := u.Host + u.RequestURI()
+		if slices.ContainsFunc(mix[:i], func(s scenario) bool { return s.name == name }) {
+			return nil, fmt.Errorf("target %s is listed twice", name)
+		}
+		mix[i] = scenario{name: name, weight: 1, expect: http.StatusOK, signedIn: true, build: get(target)}
 	}
 	return mix, nil
 }
@@ -198,14 +209,14 @@ type budgets struct {
 	scenarios map[string]time.Duration
 }
 
-// parseBudgets reads "250ms" or "250ms,dashboard=400ms"; 0 disables the default.
+// parseBudgets reads "250ms" or "250ms,dashboard=400ms"; 0 disables the
+// default. A name runs to the last "=", since -url names carry queries.
 func parseBudgets(list string) (budgets, error) {
 	b := budgets{scenarios: map[string]time.Duration{}}
 	for i, part := range strings.Split(list, ",") {
-		name, value, named := strings.Cut(strings.TrimSpace(part), "=")
-		if !named {
-			value = name
-		}
+		part = strings.TrimSpace(part)
+		cut := strings.LastIndex(part, "=")
+		name, value, named := part[:max(cut, 0)], part[cut+1:], cut >= 0
 		budget, err := time.ParseDuration(value)
 		if err != nil || budget < 0 || (named && budget == 0) || (!named && i > 0) {
 			return b, fmt.Errorf("invalid p99 budget %q", part)
@@ -272,7 +283,8 @@ type result struct {
 func milliseconds(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
 
 // summarize reports the histograms' combined counts and percentiles. A
-// percentile is the upper edge of the bucket holding it.
+// percentile is the upper edge of the bucket holding it, or the slowest
+// request if that is lower.
 func summarize(seconds float64, hs ...*histogram) stats {
 	var s stats
 	counts := make([]int64, buckets)
@@ -306,7 +318,7 @@ func summarize(seconds float64, hs ...*histogram) stats {
 		var count int64
 		for i, n := range counts {
 			if count += n; count >= threshold && threshold > 0 {
-				return milliseconds(time.Duration(i+1) * bucketWidth)
+				return milliseconds(min(time.Duration(i+1)*bucketWidth, time.Duration(slowest)))
 			}
 		}
 		return 0
@@ -319,9 +331,9 @@ func summarize(seconds float64, hs ...*histogram) stats {
 	return s
 }
 
-// load runs cfg's virtual users until the duration ends. Each picks scenarios
-// by weight. A request fails on a transport error, a status other than the
-// scenario's, a timeout, or a body over maxBodyBytes.
+// load runs cfg's virtual users until the duration ends or ctx is cancelled.
+// Each picks scenarios by weight. A request fails on a transport error, a
+// status other than the scenario's, a timeout, or a body over maxBodyBytes.
 func load(ctx context.Context, cfg config) result {
 	transport := &http.Transport{MaxIdleConns: cfg.concurrency, MaxIdleConnsPerHost: cfg.concurrency, MaxConnsPerHost: cfg.concurrency, IdleConnTimeout: 30 * time.Second}
 	defer transport.CloseIdleConnections()
@@ -342,7 +354,7 @@ func load(ctx context.Context, cfg config) result {
 	for i := range cfg.concurrency {
 		// App users are spread evenly through the numbering, so any concurrency
 		// gets close to the requested share.
-		u := &user{r: rand.New(rand.NewPCG(uint64(i), streams)), native: int(float64(i+1)*cfg.nativeShare) > int(float64(i)*cfg.nativeShare), address: clientAddress(uint32(i))}
+		u := &user{r: rand.New(rand.NewPCG(uint64(i), 0)), native: int(float64(i+1)*cfg.nativeShare) > int(float64(i)*cfg.nativeShare), address: clientAddress(uint32(i))}
 		wg.Go(func() {
 			for time.Now().Before(deadline) && ctx.Err() == nil {
 				pick := u.r.IntN(total)
@@ -351,13 +363,8 @@ func load(ctx context.Context, cfg config) result {
 					pick -= cfg.scenarios[index].weight
 					index++
 				}
-				s, h := cfg.scenarios[index], histograms[index]
-				request, err := s.build(u)
-				if err != nil {
-					h.transport.Add(1)
-					h.failed.Add(1)
-					continue
-				}
+				s := cfg.scenarios[index]
+				request := s.build(u).WithContext(ctx)
 				if s.signedIn && len(cfg.sessions) > 0 {
 					// Each signed-in request is a donor drawn from the fixture, so the
 					// whole seeded population is read, not one donor per user.
@@ -371,9 +378,7 @@ func load(ctx context.Context, cfg config) result {
 					}
 					request.Header.Set("X-Real-IP", address.String())
 				}
-				began := time.Now()
-				fetch(ctx, client, request, s.expect, h)
-				h.record(time.Since(began))
+				fetch(client, request, s.expect, histograms[index])
 			}
 		})
 	}
@@ -408,32 +413,37 @@ func authorize(r *http.Request, session string, native bool) {
 	}
 }
 
-func fetch(ctx context.Context, client *http.Client, request *http.Request, expect int, h *histogram) {
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
-	defer cancel()
-	response, err := client.Do(request.WithContext(ctx))
-	if err != nil {
-		h.failed.Add(1)
-		if errors.Is(err, context.DeadlineExceeded) || os.IsTimeout(err) {
-			h.timeouts.Add(1)
-		} else {
-			h.transport.Add(1)
+// fetch sends request and records its outcome, unless the run was
+// interrupted while it was in flight.
+func fetch(client *http.Client, request *http.Request, expect int, h *histogram) {
+	began := time.Now()
+	response, err := client.Do(request)
+	var size int64
+	if err == nil {
+		size, err = io.Copy(io.Discard, io.LimitReader(response.Body, maxBodyBytes+1))
+		if closeErr := response.Body.Close(); err == nil {
+			err = closeErr
 		}
+	}
+	if request.Context().Err() != nil {
 		return
 	}
-	count, readErr := io.Copy(io.Discard, io.LimitReader(response.Body, maxBodyBytes+1))
-	closeErr := response.Body.Close()
-	h.statuses[min(max(response.StatusCode, 0), len(h.statuses)-1)].Add(1)
-	switch {
-	case count > maxBodyBytes:
-		h.oversized.Add(1)
-		h.failed.Add(1)
-	case readErr != nil || closeErr != nil:
-		h.transport.Add(1)
-		h.failed.Add(1)
-	case response.StatusCode != expect:
-		h.failed.Add(1)
+	h.record(time.Since(began))
+	if response != nil {
+		h.statuses[min(max(response.StatusCode, 0), len(h.statuses)-1)].Add(1)
 	}
+	switch {
+	case os.IsTimeout(err):
+		h.timeouts.Add(1)
+	case err != nil:
+		h.transport.Add(1)
+	case size > maxBodyBytes:
+		h.oversized.Add(1)
+	case response.StatusCode != expect:
+	default:
+		return
+	}
+	h.failed.Add(1)
 }
 
 func readFixture(path string) (fixture, error) {
@@ -453,22 +463,36 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	api := flags.String("api", "http://127.0.0.1:8002", "API base URL for the seeded mix")
 	fixturePath := flags.String("fixture", "", "cmd/seed fixture; runs the seeded donor mix")
 	mix := flags.String("mix", "", "scenario weights overriding the default mix, such as dashboard=30,gifts=0")
-	origin := flags.String("origin", "http://localhost:3000", "browser Origin the API admits on referral captures")
+	origin := flags.String("origin", "http://localhost:3000", "browser Origin on referral captures; must equal the API's DONOR_PUBLIC_ORIGIN")
 	nativeShare := flags.Float64("native", 0.25, "share of signed-in users that are the donor app (bearer) rather than a browser (cookie)")
 	clientIPs := flags.Bool("client-ips", false, "send a distinct X-Real-IP per user and per captured visitor; the API must trust this host as a proxy")
 	targets := flags.String("url", "", "comma-separated endpoints read in equal measure instead of the seeded mix")
 	duration := flags.Duration("duration", time.Minute, "test duration (up to 1h)")
 	concurrency := flags.Int("concurrency", 16, "concurrent users (1–2048)")
 	maxP99 := flags.String("max-p99", "0", "p99 budget for every scenario, optionally with overrides: 250ms,dashboard=400ms (0 disables)")
-	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
-		return errors.New("invalid load-test arguments")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("unexpected arguments")
 	}
 	budget, err := parseBudgets(*maxP99)
-	if err != nil || *duration <= 0 || *duration > time.Hour || *concurrency < 1 || *concurrency > 2048 || *nativeShare < 0 || *nativeShare > 1 || (*targets == "") == (*fixturePath == "") {
+	if err != nil {
+		return err
+	}
+	if *duration <= 0 || *duration > time.Hour || *concurrency < 1 || *concurrency > 2048 || *nativeShare < 0 || *nativeShare > 1 || (*targets == "") == (*fixturePath == "") {
 		return errors.New("invalid load-test arguments; pass either -fixture or -url")
 	}
 	cfg := config{duration: *duration, concurrency: *concurrency, nativeShare: *nativeShare, clientIPs: *clientIPs}
 	if *targets != "" {
+		flags.Visit(func(f *flag.Flag) {
+			if slices.Contains([]string{"api", "mix", "origin", "native"}, f.Name) {
+				err = fmt.Errorf("-%s applies to the seeded mix, not -url", f.Name)
+			}
+		})
+		if err != nil {
+			return err
+		}
 		if cfg.scenarios, err = urlMix(*targets); err != nil {
 			return err
 		}
@@ -503,6 +527,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err := json.NewEncoder(out).Encode(r); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("load test interrupted: %w", err)
+	}
 	if r.Requests == 0 || r.Failed != 0 {
 		return errors.New("load test encountered failed requests")
 	}
@@ -515,7 +542,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 }
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Getenv, os.Stdout); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, os.Args[1:], os.Getenv, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

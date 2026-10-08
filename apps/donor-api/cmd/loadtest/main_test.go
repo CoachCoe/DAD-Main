@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -42,7 +43,8 @@ func TestLoadCountsOutcomesPerScenario(t *testing.T) {
 	if r.Requests == 0 || r.Requests != good.Load()+bad.Load() || cookies.Load() != r.Requests {
 		t.Fatalf("reported %d requests; server saw %d, %d with the session cookie", r.Requests, good.Load()+bad.Load(), cookies.Load())
 	}
-	ok, unavailable, large := r.Scenarios["/ok"], r.Scenarios["/unavailable"], r.Scenarios["/large"]
+	host := strings.TrimPrefix(server.URL, "http://")
+	ok, unavailable, large := r.Scenarios[host+"/ok"], r.Scenarios[host+"/unavailable"], r.Scenarios[host+"/large"]
 	if r.Failed != bad.Load() || ok.Failed != 0 || unavailable.Failed != unavailable.Requests || large.Errors["oversized"] != large.Requests {
 		t.Fatalf("failures misattributed: %+v", r)
 	}
@@ -52,7 +54,7 @@ func TestLoadCountsOutcomesPerScenario(t *testing.T) {
 	if ok.Requests == 0 || unavailable.Requests == 0 || large.Requests == 0 {
 		t.Fatal("the mix did not reach every scenario")
 	}
-	if r.P50ms > r.P95ms || r.P95ms > r.P99ms || r.P99ms > r.MaxMs+0.1 {
+	if r.P50ms > r.P95ms || r.P95ms > r.P99ms || r.P99ms > r.MaxMs {
 		t.Fatalf("percentiles out of order: %+v", r.stats)
 	}
 }
@@ -146,22 +148,65 @@ func TestRunEnforcesPerScenarioBudgets(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	targets := server.URL + "/fast," + server.URL + "/slow"
+	host := strings.TrimPrefix(server.URL, "http://")
+	targets := server.URL + "/fast?page=1," + server.URL + "/slow"
 	args := func(budget string) []string {
 		return []string{"-url", targets, "-duration", "200ms", "-concurrency", "2", "-max-p99", budget}
 	}
 	noEnv := func(string) string { return "" }
-	if err := run(context.Background(), args("1s"), noEnv, io.Discard); err != nil {
+	if err := run(context.Background(), args("1s,"+host+"/fast?page=1=1s"), noEnv, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(context.Background(), args("1s,/slow=5ms"), noEnv, io.Discard); err == nil || !strings.Contains(err.Error(), "/slow") {
+	if err := run(context.Background(), args("1s,"+host+"/slow=5ms"), noEnv, io.Discard); err == nil || !strings.Contains(err.Error(), "/slow") {
 		t.Fatalf("slow scenario passed its budget: %v", err)
 	}
-	if err := run(context.Background(), args("1s,/missing=5ms"), noEnv, io.Discard); err == nil {
-		t.Fatal("budget for an unknown scenario accepted")
+	for name, invalid := range map[string][]string{
+		"unknown budget":   args("1s," + host + "/missing=5ms"),
+		"neither mode":     {"-duration", "1s"},
+		"duplicate target": {"-url", server.URL + "/fast," + server.URL + "/fast"},
+		"seeded-only -mix": {"-url", targets, "-mix", "dashboard=1"},
+		"seeded-only -api": {"-url", targets, "-api", server.URL},
+	} {
+		if err := run(context.Background(), invalid, noEnv, io.Discard); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
-	if err := run(context.Background(), []string{"-duration", "1s"}, noEnv, io.Discard); err == nil {
-		t.Fatal("ran without -url or -fixture")
+	err := run(context.Background(), args("fast"), noEnv, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), `invalid p99 budget "fast"`) {
+		t.Fatalf("the budget error was not reported: %v", err)
+	}
+	err = run(context.Background(), []string{"-url", targets, "-origin", "https://donor.example.org"}, noEnv, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "-origin applies to the seeded mix") {
+		t.Fatalf("-origin was ignored with -url: %v", err)
+	}
+}
+
+// TestInterruptedRunReportsWhatCompleted cancels a run while requests are in
+// flight: they are neither failures nor latencies, and the partial result is
+// still written.
+func TestInterruptedRunReportsWhatCompleted(t *testing.T) {
+	var served atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if served.Add(1) > 20 {
+			<-r.Context().Done()
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		for served.Load() < 24 {
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+	}()
+	var out strings.Builder
+	err := run(ctx, []string{"-url", server.URL + "/", "-duration", "1m", "-concurrency", "4"}, func(string) string { return "" }, &out)
+	var r result
+	if jsonErr := json.Unmarshal([]byte(out.String()), &r); jsonErr != nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("interrupted run: %v, result %q", err, out.String())
+	}
+	if r.Requests != 20 || r.Failed != 0 {
+		t.Fatalf("interrupted requests were counted: %+v", r.stats)
 	}
 }
 
@@ -213,7 +258,7 @@ func TestParsersRejectUnsafeInput(t *testing.T) {
 	}
 }
 
-func TestSummarizeReportsBucketUpperEdges(t *testing.T) {
+func TestSummarizeReportsBucketEdgesUpToTheSlowest(t *testing.T) {
 	h := &histogram{}
 	for range 98 {
 		h.record(time.Millisecond)
@@ -223,5 +268,12 @@ func TestSummarizeReportsBucketUpperEdges(t *testing.T) {
 	s := summarize(2, h)
 	if s.Requests != 100 || s.P50ms != 1.1 || s.P95ms != 1.1 || s.P99ms != 50.1 || s.MaxMs != 70 || s.RequestsPerSecond != 50 {
 		t.Fatalf("summary %+v", s)
+	}
+	uniform := &histogram{}
+	for range 100 {
+		uniform.record(time.Millisecond)
+	}
+	if s = summarize(1, uniform); s.P50ms != 1 || s.P99ms != 1 || s.MaxMs != 1 {
+		t.Fatalf("percentiles exceed the slowest request: %+v", s)
 	}
 }
