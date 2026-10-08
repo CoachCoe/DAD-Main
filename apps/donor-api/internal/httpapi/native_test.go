@@ -346,7 +346,7 @@ func TestAppLogoutRevokesBearerWithoutCookies(t *testing.T) {
 // The app may call donor account routes only; giving, referral capture,
 // partner signup, and the back office stay on the web.
 func TestOnlyDonorAccountRoutesAdmitTheApp(t *testing.T) {
-	entries := map[string]bool{"POST /donor/login": true, "POST /donor/claim": true, "POST /donor/refresh": true, "POST /donor/email-change/confirm": true, "POST /donor/logout": true, "POST /donor/logout-all": true}
+	entries := map[string]bool{"POST /donor/login": true, "POST /donor/claim": true, "POST /donor/refresh": true, "POST /donor/email-change/confirm": true, "POST /donor/passkeys/sign-in/options": true, "POST /donor/passkeys/sign-in": true, "POST /donor/logout": true, "POST /donor/logout-all": true}
 	server := NewServer("", Services{})
 	for _, route := range allRoutes() {
 		if !strings.HasPrefix(route.pattern, "POST ") || route.auth == stripeAuth {

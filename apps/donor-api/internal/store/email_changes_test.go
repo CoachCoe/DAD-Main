@@ -169,3 +169,33 @@ func TestEmailChangeConflictsExpiryReplacementAndDeliveryRetry(t *testing.T) {
 		t.Fatal("expired proof accepted", err)
 	}
 }
+
+func TestEmailChangeRemovesPasskeys(t *testing.T) {
+	s, w, id, _, session, transport := changeFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	passkeys := donorPasskeyService(t)
+	passkeyDonorFor(t, pool, id)
+	key := newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID)
+	if err := registerPasskey(t, passkeys, session, key, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Request(ctx, session, "passkeys-"+id.String()+"@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	for stage, want := range []string{"NEW", "COMPLETED"} {
+		if worked, err := w.DeliverNext(ctx, time.Now()); err != nil || !worked {
+			t.Fatal(worked, err)
+		}
+		if got, err := s.Confirm(ctx, tokenFromMail(t, transport.messages[stage])); err != nil || got != want {
+			t.Fatal(got, err)
+		}
+	}
+	var left int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_passkeys WHERE donor_id=$1", id).Scan(&left); err != nil || left != 0 {
+		t.Fatal("passkeys survived the email change", left, err)
+	}
+	if _, err := donorSignIn(t, passkeys, key, Client{}); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatal("removed passkey signed in", err)
+	}
+}

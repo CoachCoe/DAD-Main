@@ -162,6 +162,12 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.Dashboard = store.DashboardReader{DB: pool}
 	services.Account = store.AccountService{DB: pool}
 	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
+	donorPasskeys, err := store.NewDonorPasskeyService(pool, services.Origin)
+	if err != nil {
+		pool.Close()
+		return services, release, errors.New("donor passkey configuration is invalid")
+	}
+	services.DonorPasskeys = donorPasskeys
 	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	services.Push = store.PushService{DB: pool, Platforms: slices.Collect(maps.Keys(notifications.Providers()))}

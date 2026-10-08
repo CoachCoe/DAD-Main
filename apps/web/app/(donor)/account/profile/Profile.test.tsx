@@ -13,6 +13,7 @@ it("saves app notification choices alongside the email ones", async () => {
   const fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url === "/api/donor/me/profile") return json(profile);
     if (url === "/api/donor/me/sessions") return json({ sessions: [] });
+    if (url === "/api/donor/me/passkeys") return json({ passkeys: [] });
     if (url === "/api/donor/me/preferences" && init?.method === "POST") return json({ ...profile, ...JSON.parse(String(init.body)), version: 4 });
     throw new Error(`unexpected ${url}`);
   });

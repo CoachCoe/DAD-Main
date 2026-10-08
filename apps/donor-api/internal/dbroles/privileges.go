@@ -62,6 +62,9 @@ var grants = map[string]map[Role]string{
 	"donor_push_notifications": {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", ProjectionWorker: "SELECT, INSERT", PushWorker: "SELECT, UPDATE",
 		Monitor: "SELECT (attempts, available_at, completed_at, expires_at)"},
 
+	"donor_passkeys":   {API: "SELECT, INSERT, UPDATE, DELETE"},
+	"donor_ceremonies": {API: "SELECT, INSERT, DELETE"},
+
 	"donor_staff":                {API: "SELECT, INSERT, UPDATE", StaffCLI: "SELECT, INSERT, UPDATE"},
 	"donor_staff_passkeys":       {API: "SELECT, INSERT, UPDATE, DELETE", StaffCLI: "SELECT, DELETE"},
 	"donor_staff_ceremonies":     {API: "SELECT, INSERT, DELETE"},

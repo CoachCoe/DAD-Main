@@ -40,6 +40,7 @@ type Services struct {
 	EmailConfigured bool
 	EmailChange     EmailChangeSource
 	Donor           DonorSource
+	DonorPasskeys   DonorPasskeySource
 	Dashboard       DashboardSource
 	Recurring       RecurringSource
 	Push            PushSource

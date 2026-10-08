@@ -1,5 +1,5 @@
 /**
- * Staff passkeys in the browser. Options and credentials cross the API as WebAuthn JSON,
+ * Passkeys in the browser, for donors and staff. Options and credentials cross the API as WebAuthn JSON,
  * with binary fields in base64url; browsers without the JSON helpers are converted here.
  */
 

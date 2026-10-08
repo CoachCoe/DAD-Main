@@ -174,6 +174,23 @@ type DonorPartnerSignup struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorPasskey struct {
+	ID                pgtype.UUID        `json:"id"`
+	DonorID           pgtype.UUID        `json:"donor_id"`
+	CredentialID      []byte             `json:"credential_id"`
+	PublicKey         []byte             `json:"public_key"`
+	SignCount         int64              `json:"sign_count"`
+	Transports        []string           `json:"transports"`
+	Aaguid            []byte             `json:"aaguid"`
+	AttestationFormat string             `json:"attestation_format"`
+	UserVerified      bool               `json:"user_verified"`
+	BackupEligible    bool               `json:"backup_eligible"`
+	BackupState       bool               `json:"backup_state"`
+	LastUsedAt        pgtype.Timestamptz `json:"last_used_at"`
+	Name              pgtype.Text        `json:"name"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorPause struct {
 	DonorID     pgtype.UUID        `json:"donor_id"`
 	AttemptID   pgtype.UUID        `json:"attempt_id"`

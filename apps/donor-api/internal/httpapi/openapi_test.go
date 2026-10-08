@@ -198,6 +198,11 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/me/recurring/resume":                            store.Resumption{},
 		"POST /donor/me/recurring/amount":                            store.AmountChange{},
 		"POST /donor/me/payment-method/setup":                        store.PaymentUpdate{},
+		"POST /donor/passkeys/sign-in/options":                       store.Ceremony{},
+		"GET /donor/me/passkeys":                                     store.PasskeyList{},
+		"POST /donor/me/passkeys/register/options":                   store.Ceremony{},
+		"POST /donor/me/passkeys/register":                           store.PasskeyList{},
+		"POST /donor/me/passkeys/{passkey_id}/delete":                store.PasskeyList{},
 		"POST /donor/staff/sign-in/options":                          store.Ceremony{},
 		"POST /donor/staff/activate/options":                         store.Invitation{},
 		"GET /donor/staff/me":                                        store.StaffView{},
@@ -223,6 +228,8 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/staff/content/publish":                          store.Publication{},
 	}
 	requests := map[string]any{
+		"POST /donor/passkeys/sign-in":                               donorPasskeySignInBody{},
+		"POST /donor/me/passkeys/register":                           registerPasskeyBody{},
 		"POST /donor/checkouts":                                      checkoutBody{},
 		"POST /donor/public/partner-signup":                          store.PartnerRequest{},
 		"POST /donor/me/recurring/cancel":                            cancelBody{},

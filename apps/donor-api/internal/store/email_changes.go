@@ -75,7 +75,7 @@ func (s EmailChangeService) Request(ctx context.Context, session, email string) 
 // Confirm redeems an email-change proof and returns the stage reached. Proof
 // from the current address issues the new address's confirmation ("NEW");
 // proof from the new address completes the change ("COMPLETED"), revoking
-// every session and sign-in link. The donor ID never changes.
+// every session, sign-in link, and passkey. The donor ID never changes.
 func (s EmailChangeService) Confirm(ctx context.Context, proof string) (string, error) {
 	var stage string
 	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
@@ -141,6 +141,11 @@ func completeEmailChange(ctx context.Context, q *queries.Queries, change queries
 		return err
 	}
 	if err := q.RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: change.DonorID, RevokedAt: timestamp(now)}); err != nil {
+		return err
+	}
+	// The email is the account's root credential, so changing it resets every
+	// other way in; passkeys also name the old address to their authenticators.
+	if _, err := q.DeleteAllDonorPasskeys(ctx, change.DonorID); err != nil {
 		return err
 	}
 	if err := q.ConsumeDonorLinks(ctx, queries.ConsumeDonorLinksParams{DonorID: change.DonorID, ConsumedAt: timestamp(now)}); err != nil {
