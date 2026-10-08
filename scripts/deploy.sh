@@ -35,7 +35,7 @@ case "${1:-help}" in
       printf 'Refusing to start workers: set DONOR_GO_WORKERS_ENABLED=true in %s first.\n' "$ENV_FILE" >&2
       exit 1
     fi
-    compose --profile workers up -d stripe-worker projection-worker login-email-worker email-change-worker message-worker
+    compose --profile workers up -d stripe-worker projection-worker login-email-worker email-change-worker message-worker push-worker
     ;;
   monitor) shift; compose run --rm --no-deps api monitor "$@" ;;
   rekey) shift; compose run --rm --no-deps api rekey "$@" ;;

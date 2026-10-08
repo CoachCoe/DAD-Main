@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/payments"
+	"impactgraph/donor-api/internal/push"
 	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/wallet"
 )
@@ -117,6 +120,10 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 			return services, release, fmt.Errorf("DONOR_CONTENT_ENCRYPTION_KEY %w", err)
 		}
 	}
+	notifications, err := push.FromEnvironment(getenv)
+	if err != nil {
+		return services, release, err
+	}
 	for _, feature := range []struct {
 		name    string
 		enabled bool
@@ -125,6 +132,8 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		{"account email (SMTP settings)", email != nil},
 		{"staff back office (DONOR_STAFF_ORIGIN)", services.StaffOrigin != ""},
 		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKeys.Configured()},
+		{"iOS app notifications (DONOR_PUSH_APNS_*)", notifications.APNs != nil},
+		{"Android app notifications (DONOR_PUSH_FCM_KEY_FILE)", notifications.FCM != nil},
 	} {
 		if !feature.enabled {
 			slog.Info("feature disabled until configured", "feature", feature.name)
@@ -154,6 +163,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
 	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
+	services.Push = store.PushService{DB: pool, Platforms: slices.Collect(maps.Keys(notifications.Providers()))}
 	if webhookSecret != "" {
 		services.Webhook = payments.Receiver{Secret: webhookSecret, Inbox: store.StripeInbox{DB: pool}}
 	}

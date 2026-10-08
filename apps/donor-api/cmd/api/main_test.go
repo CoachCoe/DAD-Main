@@ -46,6 +46,8 @@ func TestConfigureRejectsInvalidEnvironmentBeforeTheDatabase(t *testing.T) {
 		{"content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "short"}},
 		{"retired content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=,short"}},
 		{"partial SMTP", map[string]string{"DONOR_SMTP_HOST": "smtp.example.org"}},
+		{"partial APNs", map[string]string{"DONOR_PUSH_APNS_TEAM_ID": "TEAM123456"}},
+		{"unreadable FCM key", map[string]string{"DONOR_PUSH_FCM_KEY_FILE": "/nonexistent/firebase.json"}},
 	} {
 		getenv := func(name string) string { return cmp.Or(tc.env[name], base[name]) }
 		_, release, err := configure(context.Background(), getenv)

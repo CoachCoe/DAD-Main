@@ -28,8 +28,28 @@ func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
 			return env[name]
 		}
 		err := run(context.Background(), tc.args, getenv)
-		if _, ok := errors.AsType[configError](err); !ok || err.Error() == "worker database is unreachable" {
+		if !isConfigError(err) || err.Error() == "worker database is unreachable" {
 			t.Errorf("%s: got %v, want a configuration error", tc.name, err)
 		}
 	}
+}
+
+func TestPushWorkerRunsWithoutProvidersButRefusesPartialOnes(t *testing.T) {
+	if step, err := stepFor("push", nil, func(string) string { return "" }); err != nil || step == nil {
+		t.Fatalf("unconfigured push worker: %v", err)
+	}
+	partial := func(name string) string {
+		if name == "DONOR_PUSH_APNS_KEY_ID" {
+			return "ABC123DEFG"
+		}
+		return ""
+	}
+	if _, err := stepFor("push", nil, partial); !isConfigError(err) {
+		t.Fatalf("partial APNs settings: got %v, want a configuration error", err)
+	}
+}
+
+func isConfigError(err error) bool {
+	_, ok := errors.AsType[configError](err)
+	return ok
 }

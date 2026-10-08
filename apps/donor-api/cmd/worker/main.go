@@ -17,6 +17,7 @@ import (
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/payments"
+	"impactgraph/donor-api/internal/push"
 	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/store/queries"
 	"impactgraph/donor-api/internal/workers"
@@ -27,7 +28,7 @@ type configError string
 
 func (e configError) Error() string { return string(e) }
 
-var kinds = []string{"stripe", "projections", "login-email", "email-changes", "messages"}
+var kinds = []string{"stripe", "projections", "login-email", "email-changes", "messages", "push"}
 
 func run(ctx context.Context, args []string, getenv func(string) string) error {
 	flags := flag.NewFlagSet("donor-worker", flag.ContinueOnError)
@@ -109,6 +110,22 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 			refreshed, err := store.RefreshNextProjection(ctx, pool, now)
 			return purged || refreshed, err
 		}, nil
+	case "push":
+		config, err := push.FromEnvironment(getenv)
+		if err != nil {
+			return nil, configError(err.Error())
+		}
+		// Without a provider the worker still runs, so a deployment can start
+		// every worker: it completes notifications for unconfigured platforms
+		// as suppressed instead of letting them wait.
+		providers := config.Providers()
+		for platform, feature := range map[string]string{push.IOS: "iOS app notifications (DONOR_PUSH_APNS_*)", push.Android: "Android app notifications (DONOR_PUSH_FCM_KEY_FILE)"} {
+			if providers[platform] == nil {
+				slog.Info("feature disabled until configured", "feature", feature)
+			}
+		}
+		worker := store.PushWorker{DB: pool, Providers: providers}
+		return func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }, nil
 	}
 	settings, err := mail.FromEnvironment(getenv)
 	if err != nil || settings == nil {
