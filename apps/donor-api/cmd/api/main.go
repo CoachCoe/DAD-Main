@@ -111,9 +111,11 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if err = validateStaffOrigin(services.StaffOrigin, services.Origin, getenv); err != nil {
 		return services, release, err
 	}
-	contentKey := getenv("DONOR_CONTENT_ENCRYPTION_KEY")
-	if contentKey != "" && credentials.ValidateKey(contentKey) != nil {
-		return services, release, errors.New("DONOR_CONTENT_ENCRYPTION_KEY must be 32 bytes of URL-safe base64")
+	var contentKeys credentials.Keyring
+	if value := getenv("DONOR_CONTENT_ENCRYPTION_KEY"); value != "" {
+		if contentKeys, err = credentials.ParseKeyring(value); err != nil {
+			return services, release, fmt.Errorf("DONOR_CONTENT_ENCRYPTION_KEY %w", err)
+		}
 	}
 	for _, feature := range []struct {
 		name    string
@@ -122,7 +124,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		{"payments (STRIPE_SECRET_KEY)", gateway != nil},
 		{"account email (SMTP settings)", email != nil},
 		{"staff back office (DONOR_STAFF_ORIGIN)", services.StaffOrigin != ""},
-		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKey != ""},
+		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKeys.Configured()},
 	} {
 		if !feature.enabled {
 			slog.Info("feature disabled until configured", "feature", feature.name)
@@ -156,7 +158,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.Webhook = payments.Receiver{Secret: webhookSecret, Inbox: store.StripeInbox{DB: pool}}
 	}
 	if email != nil {
-		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKey: email.EncryptionKey}
+		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKeys: email.EncryptionKeys}
 	}
 	if services.StaffOrigin != "" {
 		staff, err := store.NewStaffService(pool, services.StaffOrigin)
@@ -166,7 +168,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		}
 		services.Staff, services.Admin, services.Exports = staff, staff, staff
 		services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
-		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKey: contentKey}
+		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKeys: contentKeys}
 	}
 	return services, pool.Close, nil
 }

@@ -14,7 +14,7 @@ import (
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-const emailTestKey = "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="
+var emailTestKeys, _ = credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
 
 type recordingMail struct {
 	mu       sync.Mutex
@@ -54,7 +54,7 @@ func emailFixture(t *testing.T) (LoginEmailWorker, pgtype.UUID, *recordingMail, 
 		t.Fatal(err)
 	}
 	transport := &recordingMail{}
-	return LoginEmailWorker{DB: pool, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: emailTestKey}, Origin: "https://donor.example.org", Transport: transport}, id, transport, now
+	return LoginEmailWorker{DB: pool, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys}, Origin: "https://donor.example.org", Transport: transport}, id, transport, now
 }
 func tokenFromMail(t *testing.T, m mail.Message) string {
 	t.Helper()
@@ -65,6 +65,29 @@ func tokenFromMail(t *testing.T, m mail.Message) string {
 	token, _, _ := strings.Cut(tail, "\n")
 	return token
 }
+
+// rotatedTestKeys prepends a new primary to emailTestKeys, as a key rotation does.
+func rotatedTestKeys(t *testing.T) credentials.Keyring {
+	t.Helper()
+	return keyring(t, "MTExMTExMTExMTExMTExMTExMTExMTExMTExMTExMTE=,MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+}
+
+func TestLoginLinkPreparedBeforeAKeyRotationIsStillSent(t *testing.T) {
+	w, id, transport, now := emailFixture(t)
+	ctx := context.Background()
+	if _, _, err := w.prepare(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	w.Settings.EncryptionKeys = rotatedTestKeys(t)
+	if worked, err := w.DeliverNext(ctx, now); err != nil || !worked || len(transport.messages) != 1 {
+		t.Fatal("link prepared under the previous key was not sent", worked, err)
+	}
+	link, err := queries.New(w.DB).LoginLink(ctx, HashToken(tokenFromMail(t, transport.messages[0])))
+	if err != nil || link.DonorID != id {
+		t.Fatal("sent link does not sign in", err)
+	}
+}
+
 func TestLoginEmailCommitsProofBeforeSendAndReusesItOnRetry(t *testing.T) {
 	w, id, transport, now := emailFixture(t)
 	ctx := context.Background()
@@ -86,7 +109,7 @@ func TestLoginEmailCommitsProofBeforeSendAndReusesItOnRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	token := tokenFromMail(t, transport.messages[0])
-	clear, err := credentials.Decrypt(encrypted, emailTestKey)
+	clear, err := emailTestKeys.Decrypt(encrypted)
 	if err != nil || string(clear) != token || strings.Contains(string(encrypted), token) || attempts != 1 || last != "DeliveryError" {
 		t.Fatal("unsafe retry state", err)
 	}
@@ -153,7 +176,7 @@ func TestLoginEmailSuppressesDisabledExpiredAndParksFailures(t *testing.T) {
 			case "five failures":
 				transport.failure = errors.New("SMTP failed")
 			case "bad key":
-				w.Settings.EncryptionKey = "not a key"
+				w.Settings.EncryptionKeys = credentials.Keyring{}
 			}
 			if mode == "bad key" {
 				if _, err := w.DeliverNext(ctx, now); err == nil {
@@ -201,7 +224,7 @@ func (b *blockingMail) Send(ctx context.Context, m mail.Message) error {
 }
 func TestSlowSendReleasesDonorLockAndKeepsJobClaimed(t *testing.T) {
 	queued := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC) // Isolates this queue from other tests' due work.
-	settings := mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: emailTestKey}
+	settings := mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys}
 	for _, kind := range []string{"login", "message"} {
 		t.Run(kind, func(t *testing.T) {
 			pool := database(t)

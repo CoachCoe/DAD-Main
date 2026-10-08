@@ -24,9 +24,10 @@ var ErrDelivery = errors.New("email delivery failed")
 var ErrConfiguration = errors.New("invalid email configuration")
 
 type Settings struct {
-	Host                                      string
-	Port                                      int
-	Username, Password, Sender, EncryptionKey string
+	Host                       string
+	Port                       int
+	Username, Password, Sender string
+	EncryptionKeys             credentials.Keyring
 }
 type Message struct{ From, To, Subject, Body, ID string }
 type Transport interface {
@@ -50,7 +51,7 @@ func (s Settings) Validate() error {
 	if err := s.validateServer(); err != nil {
 		return err
 	}
-	if credentials.ValidateKey(s.EncryptionKey) != nil {
+	if !s.EncryptionKeys.Configured() {
 		return ErrConfiguration
 	}
 	return nil

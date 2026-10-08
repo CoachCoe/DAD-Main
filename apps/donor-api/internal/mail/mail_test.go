@@ -98,7 +98,7 @@ func TestSMTPRefusesCleartextAndHonorsCancellation(t *testing.T) {
 				}
 				commands <- command
 			}()
-			transport := SMTPTransport{Settings: Settings{Host: host, Port: port, Username: "private-user", Password: "private-password", Sender: "sender@example.org", EncryptionKey: "configured"}}
+			transport := SMTPTransport{Settings: Settings{Host: host, Port: port, Username: "private-user", Password: "private-password", Sender: "sender@example.org"}}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			result := make(chan error, 1)
@@ -232,7 +232,7 @@ func TestSMTPDeliversOverVerifiedSTARTTLS(t *testing.T) {
 	port, _ := strconv.Atoi(portText)
 	sessions := make(chan fixtureSession, 1)
 	go func() { sessions <- serveSTARTTLS(listener, config) }()
-	transport := SMTPTransport{Settings: Settings{Host: host, Port: port, Username: "private-user", Password: "private-password", Sender: "DAD <sender@example.org>", EncryptionKey: "configured"}, RootCAs: roots}
+	transport := SMTPTransport{Settings: Settings{Host: host, Port: port, Username: "private-user", Password: "private-password", Sender: "DAD <sender@example.org>"}, RootCAs: roots}
 	message := Message{From: "DAD <sender@example.org>", To: "donor@example.org", Subject: "Receipt", Body: "Thank you\n.hidden line\n.", ID: "<dad-message-fixture@example.org>"}
 	if err = transport.Send(context.Background(), message); err != nil {
 		t.Fatal(err)

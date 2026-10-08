@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stripe/stripe-go/v87"
+	"impactgraph/donor-api/internal/credentials"
 	"impactgraph/donor-api/internal/httpapi"
 	"impactgraph/donor-api/internal/mail"
 	"impactgraph/donor-api/internal/payments"
@@ -211,7 +212,11 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 		t.Fatal("guest credit missing", string(body), err)
 	}
 	transport := &journeyMail{}
-	email := store.LoginEmailWorker{DB: pool, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="}, Origin: origin, Transport: transport}
+	keys, err := credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	email := store.LoginEmailWorker{DB: pool, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: keys}, Origin: origin, Transport: transport}
 	if worked, err := email.DeliverNext(ctx, time.Now().Add(time.Second)); err != nil || !worked {
 		t.Fatal(worked, err)
 	}

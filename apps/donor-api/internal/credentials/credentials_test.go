@@ -30,7 +30,11 @@ func TestLegacyCredentials(t *testing.T) {
 	if err = json.Unmarshal(data, &fixture); err != nil {
 		t.Fatal(err)
 	}
-	plaintext, err := Decrypt([]byte(fixture.Token), fixture.Key)
+	keys, err := ParseKeyring(fixture.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plaintext, err := keys.Decrypt([]byte(fixture.Token))
 	if err != nil || string(plaintext) != fixture.Plaintext {
 		t.Fatalf("legacy Fernet token rejected: %v", err)
 	}
@@ -39,19 +43,22 @@ func TestLegacyCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw[len(raw)-1] ^= 1
-	if _, err = Decrypt([]byte(base64.URLEncoding.EncodeToString(raw)), fixture.Key); !errors.Is(err, ErrInvalid) {
+	if _, err = keys.Decrypt([]byte(base64.URLEncoding.EncodeToString(raw))); !errors.Is(err, ErrInvalid) {
 		t.Fatal("tampered token accepted")
 	}
-	wrongKey := base64.URLEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32))
-	if _, err = Decrypt([]byte(fixture.Token), wrongKey); !errors.Is(err, ErrInvalid) {
+	wrongKey, err := ParseKeyring(base64.URLEncoding.EncodeToString(bytes.Repeat([]byte{42}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = wrongKey.Decrypt([]byte(fixture.Token)); !errors.Is(err, ErrInvalid) {
 		t.Fatal("wrong key accepted")
 	}
 	for _, input := range [][]byte{nil, {}, []byte("another public payload")} {
-		token, err := Encrypt(input, fixture.Key)
+		token, err := keys.Encrypt(input)
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := Decrypt(token, fixture.Key)
+		got, err := keys.Decrypt(token)
 		if err != nil || !bytes.Equal(got, input) {
 			t.Fatalf("Fernet roundtrip failed: %v", err)
 		}
@@ -68,14 +75,90 @@ func TestLegacyCredentials(t *testing.T) {
 	}
 }
 
-func TestValidateKeyRequiresThirtyTwoURLSafeBytes(t *testing.T) {
-	valid := base64.URLEncoding.EncodeToString(make([]byte, 32))
-	if err := ValidateKey(valid); err != nil {
-		t.Fatalf("valid key rejected: %v", err)
+func testKey(fill byte) string {
+	return base64.URLEncoding.EncodeToString(bytes.Repeat([]byte{fill}, 32))
+}
+
+func TestParseKeyringRequiresThirtyTwoURLSafeBytesInEveryPosition(t *testing.T) {
+	valid := testKey(0)
+	for _, value := range []string{valid, valid + "," + testKey(1), " " + valid + " , " + testKey(1) + " "} {
+		if keys, err := ParseKeyring(value); err != nil || !keys.Configured() {
+			t.Errorf("valid key list rejected: %v", err)
+		}
 	}
 	for _, invalid := range []string{"", "short", base64.URLEncoding.EncodeToString(make([]byte, 31)), base64.StdEncoding.EncodeToString([]byte(strings.Repeat("\xff", 32)))} {
-		if !errors.Is(ValidateKey(invalid), ErrInvalid) {
-			t.Errorf("key %q accepted", invalid)
+		for _, tc := range []struct {
+			value           string
+			position, count int
+		}{
+			{invalid, 1, 1},
+			{invalid + "," + valid, 1, 2},
+			{valid + "," + invalid, 2, 2},
+			{valid + "," + valid + "," + invalid, 3, 3},
+		} {
+			keys, err := ParseKeyring(tc.value)
+			keyErr, ok := errors.AsType[*KeyError](err)
+			if !ok || keyErr.Position != tc.position || keyErr.Count != tc.count || !errors.Is(err, ErrInvalid) || keys.Configured() {
+				t.Errorf("%q: got %v, want key %d of %d refused", tc.value, err, tc.position, tc.count)
+				continue
+			}
+			if invalid != "" && strings.Contains(err.Error(), invalid) {
+				t.Errorf("error %q repeats key material", err)
+			}
 		}
+	}
+}
+
+func TestKeyringEncryptsWithThePrimaryAndDecryptsWithAny(t *testing.T) {
+	old, err := ParseKeyring(testKey(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := ParseKeyring(testKey(2) + "," + testKey(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	newOnly, err := ParseKeyring(testKey(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := old.Encrypt([]byte("written before rotation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := rotated.Decrypt(legacy); err != nil || string(got) != "written before rotation" {
+		t.Fatalf("old-key token unreadable after prepending a key: %v", err)
+	}
+	if rotated.IsCurrent(legacy) || !old.IsCurrent(legacy) {
+		t.Fatal("old-key token reported on the wrong primary")
+	}
+	fresh, err := rotated.Encrypt([]byte("written after rotation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rotated.IsCurrent(fresh) {
+		t.Fatal("new token not on the primary key")
+	}
+	if got, err := newOnly.Decrypt(fresh); err != nil || string(got) != "written after rotation" {
+		t.Fatalf("new token needs a retired key: %v", err)
+	}
+	if _, err = old.Decrypt(fresh); !errors.Is(err, ErrInvalid) {
+		t.Fatal("new token decrypted without the new key")
+	}
+	if _, err = newOnly.Decrypt(legacy); !errors.Is(err, ErrInvalid) {
+		t.Fatal("old-key token decrypted after its key was removed")
+	}
+}
+
+func TestZeroKeyringIsUnconfigured(t *testing.T) {
+	var keys Keyring
+	if keys.Configured() || keys.IsCurrent([]byte("gAAAAA")) {
+		t.Fatal("zero keyring reported keys")
+	}
+	if _, err := keys.Encrypt([]byte("value")); !errors.Is(err, ErrInvalid) {
+		t.Fatal("zero keyring encrypted", err)
+	}
+	if _, err := keys.Decrypt([]byte("gAAAAA")); !errors.Is(err, ErrInvalid) {
+		t.Fatal("zero keyring decrypted", err)
 	}
 }

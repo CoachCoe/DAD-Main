@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"impactgraph/donor-api/internal/credentials"
 	"impactgraph/donor-api/internal/migrations"
 	"impactgraph/donor-api/internal/store/queries"
 )
@@ -45,6 +46,14 @@ func database(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	return pool
+}
+func keyring(t *testing.T, value string) credentials.Keyring {
+	t.Helper()
+	keys, err := credentials.ParseKeyring(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
 }
 func donor(t *testing.T, pool *pgxpool.Pool) (pgtype.UUID, string) {
 	t.Helper()

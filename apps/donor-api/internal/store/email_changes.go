@@ -20,16 +20,16 @@ var ErrEmailChangeConflict = errors.New("this address cannot replace the account
 const proofLifetime = 15 * time.Minute
 
 type EmailChangeService struct {
-	DB            *pgxpool.Pool
-	EncryptionKey string
+	DB             *pgxpool.Pool
+	EncryptionKeys credentials.Keyring
 }
 
-func emailChangeProof(key string) (string, []byte, error) {
+func emailChangeProof(keys credentials.Keyring) (string, []byte, error) {
 	proof, err := randomToken(32)
 	if err != nil {
 		return "", nil, err
 	}
-	encrypted, err := credentials.Encrypt([]byte(proof), key)
+	encrypted, err := keys.Encrypt([]byte(proof))
 	return HashToken(proof), encrypted, err
 }
 
@@ -52,7 +52,7 @@ func (s EmailChangeService) Request(ctx context.Context, session, email string) 
 		if donor.Email == email {
 			return struct{}{}, ErrEmailChangeConflict
 		}
-		hash, encrypted, err := emailChangeProof(s.EncryptionKey)
+		hash, encrypted, err := emailChangeProof(s.EncryptionKeys)
 		if err != nil {
 			return struct{}{}, err
 		}
@@ -121,7 +121,7 @@ func (s EmailChangeService) Confirm(ctx context.Context, proof string) (string, 
 // advanceEmailChange replaces the current address's proof with a fresh one
 // for the new address.
 func (s EmailChangeService) advanceEmailChange(ctx context.Context, q *queries.Queries, change queries.DonorEmailChange, now time.Time) error {
-	hash, encrypted, err := emailChangeProof(s.EncryptionKey)
+	hash, encrypted, err := emailChangeProof(s.EncryptionKeys)
 	if err != nil {
 		return err
 	}

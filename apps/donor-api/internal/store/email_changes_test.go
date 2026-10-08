@@ -26,8 +26,23 @@ func changeFixture(t *testing.T) (EmailChangeService, EmailChangeWorker, pgtype.
 		}
 	})
 	transport := &recordingMail{}
-	w := EmailChangeWorker{DB: pool, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: emailTestKey}, Origin: "https://donor.example.org", Transport: transport}
-	return EmailChangeService{DB: pool, EncryptionKey: emailTestKey}, w, id, email, session, transport
+	w := EmailChangeWorker{DB: pool, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys}, Origin: "https://donor.example.org", Transport: transport}
+	return EmailChangeService{DB: pool, EncryptionKeys: emailTestKeys}, w, id, email, session, transport
+}
+
+func TestEmailChangeRequestedBeforeAKeyRotationIsStillSent(t *testing.T) {
+	s, w, id, _, session, transport := changeFixture(t)
+	ctx := context.Background()
+	if err := s.Request(ctx, session, "rotated-"+id.String()+"@example.org"); err != nil {
+		t.Fatal(err)
+	}
+	w.Settings.EncryptionKeys = rotatedTestKeys(t)
+	if worked, err := w.DeliverNext(ctx, time.Now()); err != nil || !worked || len(transport.messages) != 1 {
+		t.Fatal("proof encrypted under the previous key was not sent", worked, err)
+	}
+	if stage, err := s.Confirm(ctx, tokenFromMail(t, transport.messages[0])); err != nil || stage != "NEW" {
+		t.Fatal("sent proof does not confirm", stage, err)
+	}
 }
 
 func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {

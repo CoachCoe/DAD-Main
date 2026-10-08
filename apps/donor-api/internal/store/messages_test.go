@@ -12,7 +12,7 @@ import (
 )
 
 func notificationWorker(f *workerFixture, transport *recordingMail) MessageWorker {
-	return MessageWorker{DB: f.service.DB, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKey: emailTestKey}, Origin: "https://donor.example.org", Transport: transport}
+	return MessageWorker{DB: f.service.DB, Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys}, Origin: "https://donor.example.org", Transport: transport}
 }
 func TestReceiptMessagePersistsBodyBeforeSendAndRetriesUnchanged(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
