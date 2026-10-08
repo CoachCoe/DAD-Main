@@ -59,6 +59,39 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 	}
 }
 
+// A referred donor whose gift is collected but not yet projected holds back
+// the referrer's totals; one who only started a checkout does not.
+func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	now := time.Now().UTC()
+	owner, giver, browser := testID(t), testID(t), testID(t)
+	for _, id := range []pgtype.UUID{owner, giver, browser} {
+		mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id.String()+"@example.org")
+		mustExec(t, tx, "INSERT INTO donor_metric_projections(id,donor_id,computed_at,next_refresh_at) VALUES($1,$2,$3,$3)", testID(t), id, now)
+	}
+	mustExec(t, tx, "UPDATE donor_metric_projections SET net_minor=0,current_streak=0,next_refresh_at=$2 WHERE donor_id=$1", owner, now.Add(time.Hour))
+	expires := now.Add(24 * time.Hour)
+	for _, id := range []pgtype.UUID{giver, browser} {
+		mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'ONE_TIME',$3,'LINK',$4)", id, id, owner, expires)
+	}
+	mustExec(t, tx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$2,$3,3000,'USD','ONE_TIME',$4,$5,'LINK')", testID(t), giver, "pi_"+giver.String(), now, owner)
+	q := queries.New(tx)
+	if result, err := dashboard(ctx, q, owner, now); err != nil || result.Referrals != nil {
+		t.Fatalf("totals shown while a referred gift awaits projection: %+v %v", result.Referrals, err)
+	}
+	mustExec(t, tx, "UPDATE donor_metric_projections SET referrer_id=$1,referral_kind='LINK',net_minor=3000,next_refresh_at=$3 WHERE donor_id=$2", owner, giver, now.Add(time.Hour))
+	result, err := dashboard(ctx, q, owner, now)
+	if err != nil || result.Referrals == nil || result.Referrals.Link != 1 || result.Referrals.TotalMinor != 3000 {
+		t.Fatalf("an unpaid referred checkout held back the totals: %+v %v", result.Referrals, err)
+	}
+}
+
 // The web dashboard reads these exact fields.
 func TestDashboardJSONContract(t *testing.T) {
 	at := time.Date(2027, 1, 2, 3, 4, 5, 0, time.UTC)

@@ -62,11 +62,15 @@ func (q *Queries) GiftHistory(ctx context.Context, donorID pgtype.UUID) ([]GiftH
 }
 
 const missingReferredProjection = `-- name: MissingReferredProjection :one
-SELECT EXISTS(SELECT 1 FROM donor_gifts g JOIN donor_checkouts c ON c.id=g.checkout_id
-LEFT JOIN donor_metric_projections p ON p.donor_id=g.donor_id
-WHERE c.referrer_id=$1 AND p.net_minor IS NULL)::boolean
+SELECT EXISTS(SELECT 1 FROM donor_checkouts c WHERE c.referrer_id=$1
+AND (SELECT p.net_minor FROM donor_metric_projections p WHERE p.donor_id=c.donor_id) IS NULL
+AND EXISTS(SELECT 1 FROM donor_gifts g WHERE g.checkout_id=c.id))::boolean
 `
 
+// Work stays proportional to the referrer's checkouts: a gift's donor is its
+// checkout's, and the scalar subquery (NULL for a missing row or a missing
+// net) is probed per checkout, where a join lets the planner scan every
+// gift or projection once a tree is large.
 func (q *Queries) MissingReferredProjection(ctx context.Context, referrerID pgtype.UUID) (bool, error) {
 	row := q.db.QueryRow(ctx, missingReferredProjection, referrerID)
 	var column_1 bool
