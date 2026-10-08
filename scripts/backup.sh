@@ -5,9 +5,11 @@ umask 077
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$root/.env.production}"
 [[ "$ENV_FILE" == /* ]] || ENV_FILE="$PWD/$ENV_FILE"
+DATABASE_ENV_FILE="${DATABASE_ENV_FILE:-$root/.env.database}"
+[[ "$DATABASE_ENV_FILE" == /* ]] || DATABASE_ENV_FILE="$PWD/$DATABASE_ENV_FILE"
 export ENV_FILE
 cd "$root"
-compose() { docker compose --env-file "$ENV_FILE" -f docker-compose.prod.yml "$@"; }
+compose() { docker compose --env-file "$ENV_FILE" --env-file "$DATABASE_ENV_FILE" -f docker-compose.prod.yml "$@"; }
 if [[ $# != 1 || "$1" != /* || -e "$1" ]]; then
   printf '%s\n' 'Usage: scripts/backup.sh /absolute/path/to/new-backup.dump (must not exist)' >&2
   exit 2

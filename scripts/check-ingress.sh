@@ -41,6 +41,8 @@ DONOR_PUBLIC_ORIGIN=https://public.test
 DONOR_STAFF_ORIGIN=https://staff.test
 INGRESS_TLS_DIR=$work/tls
 EOF
+# No database is involved, but Compose requires every service's database URL.
+grep -o 'DONOR_[A-Z_]*DATABASE_URL' docker-compose.prod.yml | sort -u | sed 's|$|=postgresql://check@postgres/check|' >> "$work/env"
 export ENV_FILE="$work/env"
 # Leaves the production subnet free for a real deployment on the same Docker host. The upper
 # half of the fixed edge subnet stands in for Cloudflare's ranges in the smoke test.

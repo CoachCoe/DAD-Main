@@ -65,9 +65,9 @@ jobs:
       - run: make check-ingress smoke-ingress
       - name: Validate production compose
         run: |
-          sed -e 's/^IMAGE_TAG=$/IMAGE_TAG=ci/' -e 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci/' \
-            .env.production.example > "$RUNNER_TEMP/ci.env"
-          ENV_FILE="$RUNNER_TEMP/ci.env" docker compose --env-file "$RUNNER_TEMP/ci.env" \
+          sed -e 's/^IMAGE_TAG=$/IMAGE_TAG=ci/' .env.production.example > "$RUNNER_TEMP/ci.env"
+          sed -e 's/^POSTGRES_PASSWORD=$/POSTGRES_PASSWORD=ci/' .env.database.example > "$RUNNER_TEMP/ci-database.env"
+          ENV_FILE="$RUNNER_TEMP/ci.env" docker compose --env-file "$RUNNER_TEMP/ci.env" --env-file "$RUNNER_TEMP/ci-database.env" \
             -f docker-compose.prod.yml --profile workers --profile maintenance config -q
       - run: make check-images
 
