@@ -100,7 +100,7 @@ pre { white-space: pre-wrap; }
 .quiet { min-height: 44px; padding-inline: var(--space-1); font-family: var(--font-sans); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
 .quiet:hover { color: var(--brand-ink); }
 /* Text-aligned with the link column it follows. */
-.links + .quiet { padding-inline: 0; }
+.links + .quiet { padding-inline: 0; border-inline-width: 0; }
 .danger { color: var(--fail); border-color: var(--fail-line); }
 .danger:hover { border-color: var(--fail); }
 :is(.button, .secondary, .quiet):disabled, .button[aria-disabled="true"] { opacity: .6; cursor: default; }
