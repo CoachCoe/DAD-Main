@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import Staff from "./Staff";
 
@@ -27,7 +27,7 @@ it("searches by the query in the URL and links each result to its own record", a
 it("does not search before a query is submitted", async () => {
   const fetch = serve(reply(200, { donors: [], next_offset: null }));
   render(<Staff q={null} />);
-  expect(await screen.findByText("Sam Support · SUPPORT")).toBeVisible();
+  expect(await screen.findByText("Signed in as Sam Support · SUPPORT")).toBeVisible();
   expect(fetch.mock.calls.some(([url]) => url.startsWith("/api/donor/staff/donors"))).toBe(false);
   expect(screen.queryByRole("heading", { name: "Donors" })).not.toBeInTheDocument();
 });
@@ -46,4 +46,17 @@ it("lists staff accounts for an administrator without a manual refresh", async (
   render(<Staff q={null} />);
   expect(await screen.findByText(/Fin Ance · f@example.org · FINANCE · Active/)).toBeVisible();
   expect(screen.queryByRole("button", { name: "Refresh staff accounts" })).not.toBeInTheDocument();
+});
+
+it("announces a sign-out and moves focus to signing in again", async () => {
+  const fetch = vi.fn(async (url: string) => url.startsWith("/api/donor/staff/me") ? reply(200, actor) : reply(200, { signed_out: true }));
+  vi.stubGlobal("fetch", fetch);
+  render(<Staff q={null} />);
+  const signOut = await screen.findByRole("button", { name: "Sign out" });
+  signOut.focus();
+  fireEvent.click(signOut);
+  const signIn = await screen.findByRole("link", { name: "Staff sign-in" });
+  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/sign-out", expect.objectContaining({ method: "POST" }));
+  await vi.waitFor(() => expect(signIn).toHaveFocus());
+  expect(screen.getByRole("status")).toHaveTextContent("You’ve signed out of DAD staff.");
 });

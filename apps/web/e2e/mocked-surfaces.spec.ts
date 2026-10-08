@@ -81,7 +81,7 @@ test("a staff page past sign-in is accessible", async ({ page }) => {
     permissions: ["data.export", "content.publish", "audit.read", "gift.refund", "gift.cancel", "staff.manage"],
   } }));
   await page.goto(staffURL("/staff"));
-  await expect(page.getByText("Ada Admin · ADMIN")).toBeVisible();
+  await expect(page.getByText("Signed in as Ada Admin · ADMIN")).toBeVisible();
   await expect(page.getByRole("button", { name: "Search donors" })).toBeVisible();
   await expectAccessible(page);
   expect(errors).toEqual([]);

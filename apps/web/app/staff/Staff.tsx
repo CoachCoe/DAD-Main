@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Form from "next/form";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
@@ -12,8 +12,12 @@ type Donors = { donors: { id: string; email: string; public_name: string | null;
 
 /** `q` is the submitted search, kept in the URL so Back from a donor record returns to it. */
 export default function Staff({ q }: { q: string | null }) {
-  const [signedOut, setSignedOut] = useState(false);
+  // "left" when this person chose to sign out, "expired" when the server ended the session.
+  const [signedOut, setSignedOut] = useState<"" | "left" | "expired">("");
   const { resource, data: actor, reload } = useApiResource<StaffMember>(signedOut ? null : "/donor/staff/me");
+  // Signing out removes the focused button, so focus moves to the way back in.
+  const signIn = useRef<HTMLAnchorElement>(null);
+  useEffect(() => { if (signedOut === "left") signIn.current?.focus(); }, [signedOut]);
   const [error, setError] = useState("");
   const [invitation, setInvitation] = useState("");
   const [email, setEmail] = useState("");
@@ -28,17 +32,20 @@ export default function Staff({ q }: { q: string | null }) {
     setBusy(true); setError("");
     try { await work(); }
     catch (cause) {
-      if (cause instanceof ApiError && cause.status === 401) setSignedOut(true);
+      if (cause instanceof ApiError && cause.status === 401) setSignedOut("expired");
       else if (cause instanceof ApiError && cause.status === 403) setError("Your staff role does not permit this action.");
       else setError(failureMessage(cause, "The request was not confirmed. Refresh to check its status before retrying."));
     } finally { setBusy(false); }
   }
   const manages = actor?.permissions.includes("staff.manage") ?? false;
   const { data: accounts, reload: reloadAccounts } = useApiResource<StaffMember[]>(manages && !signedOut ? "/donor/staff/accounts" : null);
-  const absent = signedOut || resource.state === "signedOut";
+  const absent = signedOut !== "" || resource.state === "signedOut";
   return <Page wide eyebrow="Staff" title="DAD staff back office"><p>Sandbox donor records. Staff access and actions are audited.</p>
-    {absent ? <p><Link className="button" href="/staff/sign-in">Staff sign-in</Link></p> : actor && <>
-      <p>{actor.name} · {actor.role}</p>
+    {absent ? <p><Link className="button" href="/staff/sign-in" ref={signIn}>Staff sign-in</Link></p> : actor && <>
+      <div className="actions">
+        <p>Signed in as {actor.name} · {actor.role}</p>
+        <button type="button" className="quiet" disabled={busy} onClick={() => action(async () => { await api("/donor/staff/sign-out", { method: "POST" }); setSignedOut("left"); })}>Sign out</button>
+      </div>
       <nav aria-label="Staff tools" className="links">
         {actor.permissions.includes("data.export") && <Link href="/staff/exports">Exports and enrolment queue</Link>}
         {actor.permissions.includes("content.publish") && <><Link href="/staff/content">Publish spreadsheet content</Link><Link href="/staff/partners">Partner inquiries</Link></>}
@@ -67,7 +74,7 @@ export default function Staff({ q }: { q: string | null }) {
             <button type="button" className="secondary danger" disabled={busy} onClick={() => action(async () => { await api(`/donor/staff/accounts/${account.id}/disable`, { method: "POST" }); reloadAccounts(); })}>Confirm disable {account.name}</button>
           </details>}
         </li>)}</ul>}
-        <form onSubmit={(event) => { event.preventDefault(); action(async () => { const result = await api<{ invitation_url: string }>("/donor/staff/accounts", { method: "POST", body: JSON.stringify({ email, name, role }) }); setInvitation(result.invitation_url); reloadAccounts(); }); }}>
+        <form className="divided" onSubmit={(event) => { event.preventDefault(); action(async () => { const result = await api<{ invitation_url: string }>("/donor/staff/accounts", { method: "POST", body: JSON.stringify({ email, name, role }) }); setInvitation(result.invitation_url); reloadAccounts(); }); }}>
           <fieldset disabled={busy}><legend>Invite individual staff member</legend>
             <label>Name<input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} required /></label>
             <label>Email<input type="email" value={email} maxLength={320} onChange={(event) => setEmail(event.target.value)} required /></label>
@@ -77,13 +84,10 @@ export default function Staff({ q }: { q: string | null }) {
         </form>
         {invitation && <p>Share this one-use, 24-hour link through your approved private channel: <code>{invitation}</code></p>}
       </section>}
-      <div className="actions">
-        <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh access</button>
-        <button type="button" className="quiet" disabled={busy} onClick={() => action(async () => { await api("/donor/staff/sign-out", { method: "POST" }); setSignedOut(true); })}>Sign out</button>
-      </div>
+      <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh access</button>
     </>}
     {(resource.state === "offline" || resource.state === "error") && <button type="button" className="secondary" onClick={reload}>Refresh access</button>}
-    <Announcer status={absent ? "" : busy ? "Working…" : invitation ? "Invitation created." : messages.status} alert={absent ? "" : error || messages.alert} />
+    <Announcer status={absent ? signedOut === "left" ? "You’ve signed out of DAD staff." : "" : busy ? "Working…" : invitation ? "Invitation created." : messages.status} alert={absent ? "" : error || messages.alert} />
   </Page>;
 }
 

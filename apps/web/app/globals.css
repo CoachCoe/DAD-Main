@@ -184,7 +184,9 @@ fieldset:disabled .segmented label { opacity: .6; cursor: default; }
 .page.narrow { max-width: 640px; }
 /* Vertical rhythm for stacked content. Zero specificity, so any component spacing wins;
    grid and flex children are untouched because only these flow containers apply it. */
-:where(.panel, .callout, form, fieldset, details) > * + * { margin-top: var(--space-4); }
+:where(.panel, .panel > section, .callout, form, fieldset, details) > * + * { margin-top: var(--space-4); }
+/* Sets a block apart from the list or text above it. */
+.divided { padding-top: var(--space-5); border-top: 1px solid var(--line); }
 :where(legend) + * { margin-top: 0; }
 :where(form > fieldset) + * { margin-top: var(--space-5); }
 :where(.panel, .panel > section) > h2:where(:not(:first-child)),
