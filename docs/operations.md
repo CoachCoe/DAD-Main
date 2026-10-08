@@ -7,7 +7,7 @@ these with a later production database or describe sandbox awards as real recogn
 
 Use a distinct PostgreSQL database and least-privilege credentials for each environment.
 Back up the database together with its separately stored encryption keys, then verify a
-restore. Losing staff, email, or content encryption keys makes their encrypted records
+restore. Losing the email or content encryption key makes its encrypted records
 unreadable. No automatic key-rotation or backup service is included.
 
 ```sh
@@ -38,8 +38,10 @@ directory. The web container runs with a read-only filesystem and tmpfs mounts f
 Cloudflare ranges without dropping connections.
 
 The API refuses to start with only one of `STRIPE_SECRET_KEY` and
-`STRIPE_WEBHOOK_SECRET`, with a malformed encryption key, or with a trusted proxy range
-broader than an IPv4 /8 or IPv6 /32. It logs which optional features are disabled.
+`STRIPE_WEBHOOK_SECRET`, with a malformed encryption key, with a trusted proxy range
+broader than an IPv4 /8 or IPv6 /32, with a `DONOR_STAFF_ORIGIN` that is not an exact
+HTTPS origin or shares the public host, or with the retired `DONOR_STAFF_ENCRYPTION_KEY`
+set but no staff origin. It logs which optional features are disabled.
 Workers that hit a database or provider failure log the error type and retry with
 exponential backoff up to one minute; persistent failures show up as queue age.
 
@@ -50,6 +52,13 @@ static pages; it also runs without Cloudflare. [Edge and ingress](edge.md) cover
 certificates, the Cloudflare configuration, and the limits at each layer. The web service
 publishes no host port and the API binds to loopback. Set the exact `DONOR_PUBLIC_ORIGIN`
 and `DONOR_STAFF_ORIGIN`. Configure database TLS for remote database connections.
+
+The back office has its own hostname, such as `staff.donors.example.org`. Point DNS for it
+at the ingress and include it in the TLS certificate; nginx forwards the original `Host`
+header, and the web server chooses what to serve by host. Both origins are build arguments
+of the web image as well as API settings, so rebuild the web image when either changes.
+Staff passkeys belong to the staff hostname; changing it means every staff member enrols
+again.
 
 Rate limits are per visitor. nginx overwrites `X-Real-IP` with the client address on every
 request (behind Cloudflare, from `CF-Connecting-IP` sent by Cloudflare's ranges only) and
@@ -72,7 +81,9 @@ through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is inte
 unconfigured. Readiness is not payment-provider acceptance or live-release authorization.
 
 Deploy migrations before new API or worker processes start; through `0006` they only
-add tables, columns, constraints, and indexes. Features that are not configured answer
+add tables, columns, constraints, and indexes. `0007` replaces staff passwords and TOTP
+with passkeys: it drops the credential columns and ends every staff session and open
+invitation, so staff must enrol again (see below). Features that are not configured answer
 503 with a `code` (`PAYMENTS_UNCONFIGURED`, `EMAIL_UNCONFIGURED`, or
 `SOURCE_STORAGE_UNCONFIGURED`) and are not logged as errors; a 503 without a code is a
 transient failure and is logged.
@@ -155,9 +166,28 @@ work. Test controlled mailboxes before inviting donors.
 
 ## Staff and content
 
-Provision the first administrator with `go run ./cmd/staff`; later access uses `/staff`.
-Require individual accounts and retain two administrators for recovery. Recovery revokes
-sessions and replaces credentials through a private invitation; it never disables MFA.
+Staff sign in with passkeys on the staff host. Provision the first administrator with
+`go run ./cmd/staff --email … --name …` (with the database and `DONOR_STAFF_ORIGIN`
+configured); later access uses `/staff`. Require individual accounts and retain two
+administrators, each with their own passkey, for recovery. An administrator's recovery
+action deletes the account's passkeys, revokes its sessions and invitations, and issues a
+private invitation from which the staff member creates a new passkey.
+
+When no administrator can sign in, an operator with database access runs break-glass
+recovery for an enabled administrator:
+
+```sh
+cd apps/donor-api
+go run ./cmd/staff --recover --email named.person@example.org
+```
+
+It works like the back-office recovery action and is audited as `staff.recovery_invited`
+with no actor. Protect the printed invitation, and review the audit history afterwards.
+
+After migration `0007`, every staff member enrols again: run break-glass recovery for one
+administrator, who creates a passkey from the printed invitation, then issues recovery
+invitations to the remaining staff from `/staff`. Invitations sent before the migration no
+longer work.
 
 At `/staff/content`, upload private source documents, then publish complete CSV snapshots.
 Sources are limited to 10 MB, encrypted, SHA-256 checked, and permission-protected.

@@ -97,6 +97,7 @@ jobs:
       DONOR_GO_DATABASE_URL: postgresql://go_test:go_test@localhost:5432/donor_go
       DONOR_API_BASE_URL: http://127.0.0.1:8002
       DONOR_PUBLIC_ORIGIN: http://127.0.0.1:3000
+      DONOR_STAFF_ORIGIN: http://staff.localhost:3000
       E2E_PRODUCTION: ${{ matrix.production }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

@@ -1,11 +1,30 @@
 # R1 security controls
 
 Donors authenticate through single-use, 15-minute email proof and hashed, revocable
-30-day sessions. Staff use individual Argon2id passwords plus six-digit TOTP, encrypted
-MFA secrets, consumed counters to prevent replay, persistent lockout, and eight-hour
-hashed sessions. Donor and staff cookies are separate, HttpOnly, and Secure on HTTPS.
-Staff cookies use SameSite=Strict; donor cookies use Lax. Anonymous login responses do
-not reveal whether an address exists.
+30-day sessions. Staff sign in with individual passkeys (WebAuthn, verified by
+go-webauthn) and receive eight-hour hashed sessions. Donor and staff cookies are
+separate, HttpOnly, and Secure on HTTPS. Staff cookies use SameSite=Strict; donor cookies
+use Lax. Anonymous login responses do not reveal whether an address exists.
+
+The back office runs on its own host, `DONOR_STAFF_ORIGIN`, which the API requires to
+differ from the public host. The web server answers only the back office and its API
+there, marked noindex, and none of it on the public host. The staff cookie is host-only
+(`__Host-dad_staff_session` over HTTPS), so it never reaches the public site, and a page
+on either host cannot pass the other's Origin check. The staff host is the passkey
+relying party: passkeys are bound to it and are useless to any other site.
+
+Staff sign-in is usernameless. The browser offers a discoverable passkey for the staff
+host, so there is no email field, no account enumeration, and no password to guess or
+lock out. Every challenge is random, held server-side in a single-use ceremony that
+expires after five minutes, and deleted when answered. The API verifies the challenge,
+origin, relying party, user verification (required), signature, and signature counter;
+a counter that fails to advance is treated as a cloned passkey and refused. A disabled
+account or an unknown passkey cannot sign in; failures with a known passkey are audited.
+Invitations expire after 24 hours, allow five attempts, and register a passkey bound to
+that account. Recovery deletes every passkey of the account, revokes its sessions and
+invitations, and issues a new invitation. Attestation is not requested, so the passkey
+provider (device, platform, or password manager) is not verified; passkeys are
+stored as public keys and need no encryption key.
 
 The R2 donor app uses neither cookies nor Origin. It sends `X-DAD-Client: native` on
 every request and authenticates with `Authorization: Bearer <session token>`. A request
@@ -30,9 +49,10 @@ from the session and database, never an email or customer ID supplied by the bro
 Financial mutations record their actor, target, reason, immutable command, and result.
 Staff recovery/role changes revoke sessions and preserve the last active administrator.
 
-Browser mutations require the configured exact Origin. Requests, pages, uploads,
-exports, password verification concurrency, and provider calls have bounded sizes or
-timeouts. The Next proxy exposes only `/donor/*`; it is not an arbitrary HTTP proxy.
+Browser mutations require the exact Origin of their surface: the public origin for donor
+and public routes, the staff origin for staff routes. Requests, pages, uploads, passkey
+responses, exports, and provider calls have bounded sizes or timeouts. The Next proxy
+exposes only `/donor/*`; it is not an arbitrary HTTP proxy.
 
 Browsers reach the web service only through nginx ([edge](edge.md)). It accepts TLS 1.2
 and 1.3 for the configured public and staff hosts only, serves back-office paths only on
@@ -64,8 +84,9 @@ Account and staff pages render per request with a nonce-based `'strict-dynamic'`
 policy set in `proxy.ts`; public pages keep a static policy that permits inline scripts
 so they can be cached. Each response carries exactly one policy. Public links into donor
 accounts use full-document navigation to install the nonce policy; staff entry is a
-direct document load. Any new public link into account or staff routes must use a native
-anchor rather than client routing. User content must never be inserted as
+direct document load on the staff host. Any new public link into account routes must use
+a native anchor rather than client routing. Both origins are compiled into the web build,
+so its host routing and headers always agree. User content must never be inserted as
 raw HTML. Account tokens use fragments removed before network requests.
 
 Release still needs verified legal/entity details, approved retention and incident

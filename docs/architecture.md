@@ -15,8 +15,10 @@ Browser → Next.js /api/donor/* → Go HTTP API → PostgreSQL
 The browser uses the same origin for API requests. In production it reaches Next.js
 through Cloudflare and an nginx ingress ([edge](edge.md)). The Go service owns authorization,
 validation, CSRF checks, and business rules. The Next proxy cannot grant permissions.
-Donor and staff cookies identify distinct server-side sessions. Staff require individual
-passwords and MFA; roles map to named permissions checked against current database state.
+Donor and staff cookies identify distinct server-side sessions. The web server answers
+two hosts: the public site on `DONOR_PUBLIC_ORIGIN` and the staff back office, alone, on
+`DONOR_STAFF_ORIGIN`. Staff sign in with individual passkeys for the staff host; roles
+map to named permissions checked against current database state.
 
 ## HTTP contract and native clients
 
@@ -27,11 +29,19 @@ client policy, or JSON shapes drift from the document. Errors are `{detail}` JSO
 an additive `code` for configuration states and `errors` for located spreadsheet
 problems. Money is integer cents and timestamps are RFC 3339.
 
+Staff routes admit mutations only from the staff origin; every other route admits only
+the public origin. Passkey ceremonies take two calls each. `POST
+/donor/staff/sign-in/options` returns a single-use `ceremony` ID and WebAuthn request
+options; `POST /donor/staff/sign-in` takes that ID with the browser's credential JSON and
+sets the staff cookie. Activation is the same pair under `/donor/staff/activate`, started
+with the invitation token, and also signs the new staff member in. Options and
+credentials use the WebAuthn JSON forms, with binary fields in base64url.
+
 The R2 app calls the API host directly with a bearer session instead of cookies (see
 [security](security.md)). Only donor account routes admit it; giving stays on the web.
 Every donor-facing URL is built in `internal/store/links.go`, which is the starting list
 for app/universal links (`/account/claim`, `/account/email-change`,
-`/account/payment-method`, `/r/{code}`). Passkeys and push-notification device
+`/account/payment-method`, `/r/{code}`). Donor passkeys and push-notification device
 registration are not built yet and need new store work.
 
 ## Financial consistency

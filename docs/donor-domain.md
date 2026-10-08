@@ -83,7 +83,7 @@ decision; existing awards remain permanent.
 
 Support can search/view donors and resend receipts/claim emails. Finance adds refunds,
 cancellations, and donor/financial exports. Administrator adds staff access management
-and approved content publishing. Require individual staff accounts and MFA. Enforce
+and approved content publishing. Require individual staff accounts and passkeys. Enforce
 named permissions server-side; audit actor, time, target, and result, with reasons for
 refunds and staff cancellation. No donor impersonation or access to card details.
 
@@ -103,7 +103,7 @@ unconfirmed. They must be verified before live donations.
 ## Implementation and release boundaries
 
 Go implements the donor API, Stripe inbox, recurring controls, projections, account
-email, notification outbox, staff MFA and permissions, audited refunds/cancellation,
+email, notification outbox, staff passkeys and permissions, audited refunds/cancellation,
 exports, private source documents, spreadsheet publication, and partner inquiries.
 TypeScript implements the public, donor, and staff web surfaces. See [architecture](architecture.md)
 and [operations](operations.md) for runtime behavior and instructions.

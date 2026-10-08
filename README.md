@@ -34,26 +34,30 @@ make web                      # terminal 2, with the same environment loaded
 ```
 
 Open http://localhost:3000. Without Stripe, SMTP, and encryption configuration, public
-pages and empty states work; giving, account email, and staff operations are unavailable.
+pages and empty states work; giving and account email are unavailable. The staff back
+office runs only on its own host, `DONOR_STAFF_ORIGIN`: locally
+http://staff.localhost:3000/staff, which browsers resolve to this machine.
 The frontend proxies `/api/donor/*` to `DONOR_API_BASE_URL`; the API listens on 8002.
 Do not put backend secrets in `NEXT_PUBLIC_*` variables.
 
-Use three independently generated encryption keys for email, staff MFA, and content:
+Use two independently generated encryption keys, for email and for content:
 
 ```sh
 openssl rand -base64 32 | tr '+/' '-_'
 ```
 
-After setting `DONOR_STAFF_ENCRYPTION_KEY`, provision the first named administrator:
+Staff sign in with passkeys. With `DONOR_STAFF_ORIGIN` set, provision the first named
+administrator:
 
 ```sh
 cd apps/donor-api
 go run ./cmd/staff --email named.person@example.org --name 'Named Person'
 ```
 
-The command prints a private, one-use invitation. Protect that output. It refuses if
-any staff account already exists. Later invitations and recovery use `/staff` and require
-administrator permission. Provision two individual administrators; do not share MFA.
+The command prints a private, one-use invitation to the staff host, where the
+administrator creates a passkey. Protect that output. It refuses if any staff account
+already exists. Later invitations and recovery use `/staff` and require administrator
+permission. Provision two individual administrators, each with their own passkey.
 
 ## Payments and workers
 
@@ -100,7 +104,10 @@ make test-browser-e2e
 Browser tests run against `next dev` by default; set `E2E_PRODUCTION=1` to run them
 against a production build (`npm run build && npm start`), where account and staff pages
 use the nonce-based CSP. Next allows
-one dev server per checkout, so stop any running `make web` first.
+one dev server per checkout, so stop any running `make web` first. Staff pages are tested
+on `DONOR_STAFF_ORIGIN` (default http://staff.localhost:3000) with Chromium's virtual
+authenticator; the staff journey provisions or recovers `e2e.administrator@example.org`
+with `cmd/staff`, so point `DONOR_GO_DATABASE_URL` at a synthetic database.
 
 `make test` checks Go formatting, vet, race-enabled tests, compilation, frontend lint,
 unit tests, generated route types, TypeScript, and the production build. Browser tests
