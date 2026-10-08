@@ -85,7 +85,7 @@ server {
     }
 
     # Regular expressions match in order, so the general allowlist comes last.
-    location ~ ^/api/donor/staff/(sign-in|provision|activate)$ {
+    location ~ ^/api/donor/staff/(sign-in|activate)(/options)?$ {
         limit_req zone=auth burst=20 nodelay;
         error_page 429 @auth_limited;
         proxy_pass http://web;
