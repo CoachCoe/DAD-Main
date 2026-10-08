@@ -7,7 +7,7 @@ import { api, ApiError, classifyFailure, unconfirmedMessage } from "@/lib/api";
 import { formatMoney, parseDollars } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
-import { formatDateTime } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 
 type Quote = ({ gift_id: string; donor_id: string; amount_minor: number; available_minor: number } | {
   subscription: { id: string; amount_minor: number; period_end: string; stops_at: string | null } | null;
@@ -87,7 +87,7 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
       }
       setMessage(result.status === "NOT_SUBMITTED" ? "No refund submitted. The available amount changed. Refresh and confirm a new request." :
         result.status ? `Stripe refund status: ${result.status}. Only successful refunds reduce collected totals.` :
-        `Cancellation confirmed at ${formatDateTime(result.subscription?.stops_at ?? "")}. Past gifts are not refunded.`);
+        `Cancellation confirmed: renewals stop ${formatDate(result.subscription?.stops_at ?? "")}. Past gifts are not refunded.`);
       reload();
     } catch (cause) {
       // Refused outright, so nothing is pending and the next attempt is a new request.
@@ -102,10 +102,12 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
     {resource.state === "signedOut" && donor && <p><Link className="button" href="/staff/sign-in">Staff sign-in</Link></p>}
     {quote && <>{"gift_id" in quote ? <p>Original gift: {formatMoney(quote.amount_minor)}. Available to refund: {formatMoney(quote.available_minor)} USD.
       {quote.observed_at && ` Last refund recorded ${formatDateTime(quote.observed_at)}.`}</p> :
-      quote.subscription ? <p>{formatMoney(quote.subscription.amount_minor)}/month. Next renewal: {formatDateTime(quote.subscription.period_end)}.{quote.subscription.stops_at && " Cancellation is already scheduled."}
-        {quote.observed_at && ` Last updated from Stripe ${formatDateTime(quote.observed_at)}.`}</p> : <p>No monthly gift is available.</p>}
+      quote.subscription ? <><p>{formatMoney(quote.subscription.amount_minor)}/month. {quote.subscription.stops_at
+        ? `Renewals stop ${formatDate(quote.subscription.stops_at)}.` : `Next renewal: ${formatDate(quote.subscription.period_end)}.`}</p>
+        {quote.observed_at && <p className="note">Last updated from Stripe <time dateTime={quote.observed_at}>{formatDateTime(quote.observed_at)}</time>.</p>}</>
+        : <p>No monthly gift is available.</p>}
       {confirmation ? <div className="callout"><h2 ref={step.heading} tabIndex={-1}>Confirm financial action</h2>
-        <p>{"amount_minor" in confirmation ? `Refund ${formatMoney(confirmation.amount_minor)} USD to the original payment method.` : `Stop future renewals at ${formatDateTime(confirmation.period_end)}. No refund is included.`}</p>
+        <p>{"amount_minor" in confirmation ? `Refund ${formatMoney(confirmation.amount_minor)} USD to the original payment method.` : `Stop future renewals at ${formatDate(confirmation.period_end)}. No refund is included.`}</p>
         <p>Reason: {confirmation.reason}</p>
         <div className="actions"><button type="button" className="secondary danger" disabled={busy} onClick={submit}>{busy ? "Checking action…" : requestKey ? "Retry original financial action" : "Confirm financial action"}</button>
         <button type="button" className="secondary" disabled={busy || requestKey !== null} onClick={() => setConfirmation(null)}>Back</button></div>

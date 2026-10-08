@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { formatDateTime } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import StaffFinancePage from "./Finance";
 
 const quote = { gift_id: "gift", donor_id: "donor", amount_minor: 3000, available_minor: 3000 };
@@ -130,6 +130,20 @@ it("dates a cancellation quote by its last Stripe sync", async () => {
     subscription: { id: "subscription", amount_minor: 3000, currency: "USD", status: "active", period_end: "2027-02-01T00:00:00Z", stops_at: null } }))
     .mockResolvedValueOnce(pending()));
   render(<StaffFinancePage donor="donor" gift="" />);
-  expect(await screen.findByText(new RegExp(`Last updated from Stripe ${formatDateTime(observed)}\\.`))).toBeVisible();
+  const synced = await screen.findByText(/Last updated from Stripe/);
+  expect(synced).toHaveTextContent(`Last updated from Stripe ${formatDateTime(observed)}.`);
+  expect(synced).toHaveClass("note");
+  expect(screen.getByText(`$30.00/month. Next renewal: ${formatDate("2027-02-01T00:00:00Z")}.`)).toBeVisible();
   expect(screen.getByRole("button", { name: "Review financial action" })).toBeEnabled();
+});
+
+it("says when renewals stop for a gift already ending", async () => {
+  const stops = "2027-02-01T00:00:00Z";
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response({ mode: "test", state: "ready", observed_at: "2027-01-02T15:04:00Z",
+    subscription: { id: "subscription", amount_minor: 3000, currency: "USD", status: "active", period_end: stops, stops_at: stops } }))
+    .mockResolvedValueOnce(pending()));
+  render(<StaffFinancePage donor="donor" gift="" />);
+  expect(await screen.findByText(`$30.00/month. Renewals stop ${formatDate(stops)}.`)).toBeVisible();
+  expect(screen.queryByText(/Next renewal/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Review financial action" })).not.toBeInTheDocument();
 });
