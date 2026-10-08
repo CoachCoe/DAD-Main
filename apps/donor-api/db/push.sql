@@ -11,7 +11,9 @@ UPDATE donor_sessions SET push_token=NULL,push_environment=NULL WHERE id=$1 AND 
 
 -- name: QueuePushIntents :exec
 -- Push intents follow the facts the projection just saved: a referral
--- conversion (the referral notice's own condition), a failed latest renewal
+-- conversion (the referral notice's own condition) whose first gift was paid
+-- or recorded since recent_since, so a referrer who installs the app later is
+-- not told of an old conversion as news, a failed latest renewal
 -- while the streak it threatens is at risk, and a streak milestone the caller
 -- computed, keyed by the run it belongs to. Only donors with a live device
 -- get one, so nothing accumulates for donors without the app.
@@ -21,6 +23,8 @@ WITH projection AS (
     SELECT p.referrer_id AS donor_id,'REFERRAL_CONVERTED' AS category,'push:referral:'||p.donor_id::text AS dedup_key,
         json_build_object('referred_id',p.donor_id::text,'kind',p.referral_kind) AS context
     FROM projection p WHERE p.referrer_id IS NOT NULL AND p.net_minor>0
+    AND EXISTS(SELECT 1 FROM donor_gifts g WHERE g.stripe_object_id=p.first_gift_id
+        AND greatest(g.paid_at,g.created_at)>sqlc.arg(recent_since)::timestamptz)
     UNION ALL
     SELECT p.donor_id,'STREAK_AT_RISK','push:streak-at-risk:'||b.id::text,json_build_object('period_id',b.id::text)
     FROM projection p CROSS JOIN LATERAL (

@@ -256,8 +256,11 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 	appDevice(t, tx, h.donor("alice"), push.IOS, iosToken, paid.Add(24*time.Hour))
 	h.gift(recognition.Gift{ID: "first", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid, Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "IRL", ExpiresAt: paid.Add(24 * time.Hour)}})
 	h.gift(recognition.Gift{ID: "unreferred", DonorID: "cara", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid})
+	// An old conversion is history, not news, for a referrer who installs the app later.
+	h.gift(recognition.Gift{ID: "old", DonorID: "dee", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid.Add(-48 * time.Hour), Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: paid}})
+	mustExec(t, tx, "UPDATE donor_gifts SET created_at=paid_at WHERE donor_id=$1", h.donor("dee"))
 	for _, at := range []time.Time{paid, paid.Add(time.Minute)} {
-		for _, name := range []string{"ben", "cara"} {
+		for _, name := range []string{"ben", "cara", "dee"} {
 			if _, err = refreshProjection(ctx, tx, h.donor(name), at); err != nil {
 				t.Fatal(err)
 			}

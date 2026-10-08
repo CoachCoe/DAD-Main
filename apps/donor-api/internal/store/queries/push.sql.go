@@ -167,6 +167,8 @@ WITH projection AS (
     SELECT p.referrer_id AS donor_id,'REFERRAL_CONVERTED' AS category,'push:referral:'||p.donor_id::text AS dedup_key,
         json_build_object('referred_id',p.donor_id::text,'kind',p.referral_kind) AS context
     FROM projection p WHERE p.referrer_id IS NOT NULL AND p.net_minor>0
+    AND EXISTS(SELECT 1 FROM donor_gifts g WHERE g.stripe_object_id=p.first_gift_id
+        AND greatest(g.paid_at,g.created_at)>$4::timestamptz)
     UNION ALL
     SELECT p.donor_id,'STREAK_AT_RISK','push:streak-at-risk:'||b.id::text,json_build_object('period_id',b.id::text)
     FROM projection p CROSS JOIN LATERAL (
@@ -175,9 +177,9 @@ WITH projection AS (
     ) b WHERE p.at_risk AND b.status='FAILED'
     UNION ALL
     SELECT $3::uuid,'STREAK_MILESTONE',
-        'push:streak-milestone:'||$3::text||':'||floor(extract(epoch FROM $4::timestamptz))::bigint::text||':'||$5::integer::text,
-        json_build_object('months',$5::integer)
-    WHERE $5::integer IS NOT NULL AND $4::timestamptz IS NOT NULL
+        'push:streak-milestone:'||$3::text||':'||floor(extract(epoch FROM $5::timestamptz))::bigint::text||':'||$6::integer::text,
+        json_build_object('months',$6::integer)
+    WHERE $6::integer IS NOT NULL AND $5::timestamptz IS NOT NULL
 )
 INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
 SELECT gen_random_uuid(),c.donor_id,c.category,c.dedup_key,c.context,$1::timestamptz,$2::timestamptz
@@ -191,12 +193,15 @@ type QueuePushIntentsParams struct {
 	AsOf         pgtype.Timestamptz `json:"as_of"`
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
 	DonorID      pgtype.UUID        `json:"donor_id"`
+	RecentSince  pgtype.Timestamptz `json:"recent_since"`
 	RunStartedAt pgtype.Timestamptz `json:"run_started_at"`
 	Milestone    pgtype.Int4        `json:"milestone"`
 }
 
 // Push intents follow the facts the projection just saved: a referral
-// conversion (the referral notice's own condition), a failed latest renewal
+// conversion (the referral notice's own condition) whose first gift was paid
+// or recorded since recent_since, so a referrer who installs the app later is
+// not told of an old conversion as news, a failed latest renewal
 // while the streak it threatens is at risk, and a streak milestone the caller
 // computed, keyed by the run it belongs to. Only donors with a live device
 // get one, so nothing accumulates for donors without the app.
@@ -205,6 +210,7 @@ func (q *Queries) QueuePushIntents(ctx context.Context, arg QueuePushIntentsPara
 		arg.AsOf,
 		arg.ExpiresAt,
 		arg.DonorID,
+		arg.RecentSince,
 		arg.RunStartedAt,
 		arg.Milestone,
 	)

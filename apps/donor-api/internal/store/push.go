@@ -115,7 +115,7 @@ func (s PushService) UnregisterDevice(ctx context.Context, token string) (PushRe
 
 // queuePushIntents queues the notifications the projection p calls for.
 func queuePushIntents(ctx context.Context, q *queries.Queries, p projection, now time.Time) error {
-	params := queries.QueuePushIntentsParams{DonorID: p.DonorID, AsOf: timestamp(now), ExpiresAt: timestamp(now.Add(pushLifetime))}
+	params := queries.QueuePushIntentsParams{DonorID: p.DonorID, AsOf: timestamp(now), ExpiresAt: timestamp(now.Add(pushLifetime)), RecentSince: timestamp(now.Add(-pushLifetime))}
 	if p.CurrentStreak.Valid && p.streakSince != nil && recognition.Milestone(int64(p.CurrentStreak.Int32)) {
 		params.Milestone = pgtype.Int4{Int32: p.CurrentStreak.Int32, Valid: true}
 		params.RunStartedAt = timestamp(*p.streakSince)
