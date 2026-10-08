@@ -36,7 +36,7 @@ func database(t *testing.T) *pgxpool.Pool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pool, err := Open(ctx, url)
+	pool, err := Open(ctx, url, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +86,9 @@ func TestOpenSizesThePoolFromTheDatabaseURL(t *testing.T) {
 	if strings.Contains(url, "?") {
 		separator = "&"
 	}
-	for dsn, want := range map[string]int32{url: defaultMaxConns, url + separator + "pool_max_conns=3": 3} {
+	for dsn, want := range map[string]int32{url: 7, url + separator + "pool_max_conns=3": 3} {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		pool, err := Open(ctx, dsn)
+		pool, err := Open(ctx, dsn, 7)
 		cancel()
 		if err != nil {
 			t.Fatal(err)

@@ -24,7 +24,7 @@ func run(args []string, getenv func(string) string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	pool, err := store.Open(ctx, dsn)
+	pool, err := store.Open(ctx, dsn, 2)
 	if err != nil {
 		return errors.New("migration database unavailable")
 	}

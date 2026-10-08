@@ -30,11 +30,9 @@ const uniqueViolation = "23505"
 // reconciliation, never a fresh request that could act twice.
 const commandRetryWindow = 23 * time.Hour
 
-// defaultMaxConns is each process's pool size unless the database URL sets
-// pool_max_conns.
-const defaultMaxConns = 10
-
-func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+// Open connects a process's pool of at most maxConns connections, sized for
+// its role, unless the database URL's pool_max_conns sets the size.
+func Open(ctx context.Context, dsn string, maxConns int32) (*pgxpool.Pool, error) {
 	if dsn == "" {
 		return nil, errors.New("donor database URL is required")
 	}
@@ -45,7 +43,7 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	// pgx's own pool_max_conns URL parameter sizes a deployment's pool; pgx
 	// keeps it as a runtime parameter only until the pool config consumes it.
 	if conn, err := pgx.ParseConfig(dsn); err != nil || conn.RuntimeParams["pool_max_conns"] == "" {
-		config.MaxConns = defaultMaxConns
+		config.MaxConns = maxConns
 	}
 	config.MinConns = 0
 	config.MaxConnLifetime = 30 * time.Minute

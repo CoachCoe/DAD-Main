@@ -51,7 +51,7 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 		return configError("DONOR_GO_DATABASE_URL is required")
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
-	pool, err := store.Open(startup, dsn)
+	pool, err := store.Open(startup, dsn, 2)
 	cancel()
 	if err != nil {
 		return configError("worker database is unreachable")

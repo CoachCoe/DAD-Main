@@ -37,7 +37,7 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	pool, err := store.Open(ctx, dsn)
+	pool, err := store.Open(ctx, dsn, 2)
 	if err != nil {
 		return errors.New("database is unavailable")
 	}

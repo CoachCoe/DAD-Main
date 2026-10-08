@@ -28,6 +28,10 @@ import (
 // write timeout instead of being cut off and left for reconciliation.
 const shutdownTimeout = 35 * time.Second
 
+// poolConns is the API's database pool. Load tests at 50,000 donors found a
+// 10-connection pool, not PostgreSQL, capped throughput; 40 doubled it.
+const poolConns = 40
+
 // trustedProxies parses DONOR_TRUSTED_PROXY_CIDRS. Ranges broader than a
 // private /8 (IPv4) or /32 (IPv6) are refused because trusting them would let
 // arbitrary clients choose their own rate-limit identity.
@@ -131,7 +135,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	}
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := store.Open(startup, dsn)
+	pool, err := store.Open(startup, dsn, poolConns)
 	if err != nil {
 		return services, release, errors.New("donor database startup failed")
 	}

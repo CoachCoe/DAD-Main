@@ -6,11 +6,15 @@ these with a later production database or describe sandbox awards as real recogn
 ## Database and containers
 
 Use a distinct PostgreSQL database and least-privilege credentials for each environment.
-Each API or worker process opens at most 10 connections; append `pool_max_conns=N` to
-`DONOR_GO_DATABASE_URL` to resize a process's pool, keeping the total across processes
-below the server's `max_connections`. Back up the database together with its separately
-stored encryption keys, then verify a restore. Losing the email or content encryption key
-makes its encrypted records
+Each process's database pool is sized for its role: the API opens up to 40 connections,
+and each worker, the monitor, migrations, and the staff command up to 2. A full
+deployment therefore needs about 54 of PostgreSQL's default 100 `max_connections`. When
+adding API replicas, raise `max_connections` (or put a pooler such as PgBouncer in front)
+so the total stays below it; `pool_max_conns=N` in `DONOR_GO_DATABASE_URL` overrides every
+process's size at once.
+
+Back up the database together with its separately stored encryption keys, then verify a
+restore. Losing the email or content encryption key makes its encrypted records
 unreadable. No automatic key-rotation or backup service is included.
 
 ```sh
@@ -262,7 +266,7 @@ referral codes repeated in proportion to how often each would be visited. Treat 
 credential. The sessions last 30 days; delete the fixture and drop the database after
 the run.
 
-Run the API as for production with a pool sized for the test, and run the projection
+Run the API as for production, and run the projection
 worker, since projections expire after a day and dashboards then wait for it. The
 recurring scenario reads Stripe when Stripe is configured, so the Makefile leaves it out
 (`LOAD_MIX=recurring=0`); include it with `LOAD_MIX=` only against an API without Stripe.
