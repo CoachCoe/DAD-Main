@@ -169,6 +169,34 @@ func TestGuardRefusesDatabasesThatMayBeLive(t *testing.T) {
 	}
 }
 
+// TestInterruptedSeedLeavesNoMailToSend cancels a seed once projections have
+// started queueing mail for its history.
+func TestInterruptedSeedLeavesNoMailToSend(t *testing.T) {
+	pool, _ := isolatedDatabase(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		for ctx.Err() == nil {
+			var queued bool
+			if pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM donor_messages)").Scan(&queued) == nil && queued {
+				cancel()
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	_, r, err := seed(ctx, pool, options{donors: 3000, seed: 2, workers: 1}, time.Now())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("the seed was not interrupted while projecting: %v", err)
+	}
+	var pending, due int
+	if err = pool.QueryRow(context.Background(), "SELECT (SELECT count(*) FROM donor_messages WHERE completed_at IS NULL),(SELECT count(*) FROM donor_metric_projections WHERE next_refresh_at<=now())").Scan(&pending, &due); err != nil {
+		t.Fatal(err)
+	}
+	if pending != 0 || r.SuppressedMessages == 0 || due == 0 {
+		t.Fatalf("interrupted with %d projections due: %d messages pending, %d suppressed", due, pending, r.SuppressedMessages)
+	}
+}
+
 // TestSeededDonorsAreServedFromTheirFacts seeds a small population and reads
 // every claimed donor's dashboard and monthly gift through the API, comparing
 // the projections the worker derived with what the generator meant the facts

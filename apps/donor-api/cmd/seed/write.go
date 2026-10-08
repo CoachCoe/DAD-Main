@@ -221,8 +221,8 @@ func checkoutRequest(d *donor, c *checkout) (string, []byte, error) {
 	return store.HashToken(preimage), encoded, err
 }
 
-// copyAll writes every table inside one transaction, so a failed seed
-// leaves no partial population behind.
+// copyAll writes every table and the seed marker in one transaction, so a
+// failed copy leaves nothing behind.
 func copyAll(ctx context.Context, pool *pgxpool.Pool, tables []*table) (map[string]int64, error) {
 	counts := map[string]int64{}
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {

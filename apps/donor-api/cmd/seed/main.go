@@ -20,9 +20,11 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -178,17 +180,15 @@ type report struct {
 
 // seed writes a population generated as of now into pool and derives its
 // projections, after checking the database may receive it.
-func seed(ctx context.Context, pool *pgxpool.Pool, o options, now time.Time) (*population, report, error) {
-	r := report{Donors: o.donors, Seed: o.seed}
-	if err := migrations.Verify(ctx, pool); err != nil {
+func seed(ctx context.Context, pool *pgxpool.Pool, o options, now time.Time) (pop *population, r report, err error) {
+	r = report{Donors: o.donors, Seed: o.seed}
+	if err = migrations.Verify(ctx, pool); err != nil {
 		return nil, r, fmt.Errorf("verify migrations (run them first): %w", err)
 	}
-	offset, err := guard(ctx, pool, o.appendPopulation)
-	if err != nil {
+	if r.Offset, err = guard(ctx, pool, o.appendPopulation); err != nil {
 		return nil, r, err
 	}
-	r.Offset = offset
-	pop := generate(o.donors, offset, o.seed, now)
+	pop = generate(o.donors, r.Offset, o.seed, now)
 	r.Shape = pop.shape()
 	tables, err := pop.tables()
 	if err != nil {
@@ -200,15 +200,17 @@ func seed(ctx context.Context, pool *pgxpool.Pool, o options, now time.Time) (*p
 		return nil, r, err
 	}
 	r.CopySeconds = time.Since(copied).Seconds()
+	// Every projection refreshed queues mail for the history just written, so
+	// suppress it however refreshing ends, interrupted included.
+	defer func() {
+		var suppressErr error
+		r.SuppressedMessages, suppressErr = suppressHistory(context.WithoutCancel(ctx), pool)
+		err = errors.Join(err, suppressErr)
+	}()
 	projected := time.Now()
-	if err = refreshProjections(ctx, pool, o.workers); err != nil {
-		return nil, r, err
-	}
-	if r.SuppressedMessages, err = suppressHistory(ctx, pool); err != nil {
-		return nil, r, err
-	}
+	err = refreshProjections(ctx, pool, o.workers)
 	r.ProjectionSeconds = time.Since(projected).Seconds()
-	return pop, r, nil
+	return pop, r, err
 }
 
 func run(ctx context.Context, args []string, out io.Writer) (err error) {
@@ -258,7 +260,9 @@ func run(ctx context.Context, args []string, out io.Writer) (err error) {
 }
 
 func main() {
-	if err := run(context.Background(), os.Args[1:], os.Stdout); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := run(ctx, os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
