@@ -63,6 +63,12 @@ export default function Profile() {
             <label className="choice"><input type="checkbox" checked={data.marketing_emails} onChange={(event) => setData({ ...data, marketing_emails: event.target.checked })} /> Send me DAD news and campaign updates</label>
           </fieldset>
           <p className="note">These choices are optional and start off. Gift records, account access, and essential payment notices are separate.</p>
+          <fieldset disabled={busy}><legend>DAD app notifications</legend>
+            <label className="choice"><input type="checkbox" checked={data.push_referral_converted} onChange={(event) => setData({ ...data, push_referral_converted: event.target.checked })} /> When someone I invited gives for the first time</label>
+            <label className="choice"><input type="checkbox" checked={data.push_streak_at_risk} onChange={(event) => setData({ ...data, push_streak_at_risk: event.target.checked })} /> When a declined payment puts my giving streak at risk</label>
+            <label className="choice"><input type="checkbox" checked={data.push_streak_milestone} onChange={(event) => setData({ ...data, push_streak_milestone: event.target.checked })} /> When my giving streak reaches a milestone</label>
+          </fieldset>
+          <p className="note">App notifications reach only phones where you signed in to the DAD app and allowed its notifications. They start on and never show names or amounts.</p>
           <button className="button" disabled={busy} type="submit">{busy ? "Saving…" : "Save preferences"}</button>
         </form>
         <details><summary>Change account email</summary>

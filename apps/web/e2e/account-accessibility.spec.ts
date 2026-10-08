@@ -8,7 +8,8 @@ const dashboard = {
 };
 const profiles = {
   "/account/dashboard": { endpoint: "dashboard", data: dashboard },
-  "/account/profile": { endpoint: "profile", data: { email: "browser-test@example.org", public_name: "Alex", version: 1, referral_emails: true, marketing_emails: false } },
+  "/account/profile": { endpoint: "profile", data: { email: "browser-test@example.org", public_name: "Alex", version: 1, referral_emails: true, marketing_emails: false,
+    push_referral_converted: true, push_streak_at_risk: true, push_streak_milestone: false } },
   "/account/share": { endpoint: "sharing", data: { public_name: "Alex", link: "https://dad.example/r/browser-test", irl_link: "https://dad.example/r/browser-test?via=irl" } },
 };
 
