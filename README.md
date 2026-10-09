@@ -170,12 +170,15 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 
 ## Layout
 
-- `apps/donor-api/cmd`: API, workers, migrations, database login provisioning, administrator bootstrap, monitoring, key rotation, load testing.
+- `apps/donor-api/cmd`: API, workers, migrations, database login provisioning, administrator bootstrap, monitoring, key rotation, load-test seeding and load testing.
 - `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, push, credentials.
 - `apps/donor-api/db`: versioned SQL migrations and sqlc queries.
 - `apps/donor-api/api`: the OpenAPI contract for web and native clients, checked by tests.
+- `apps/donor-api/testdata`: recognition scenarios and fixtures shared by tests.
+- `apps/donor-api/tools`: a module pinning the staticcheck build `make lint-go` runs.
 - `apps/web`: public website, donor account, staff interface, browser and unit tests.
 - `deploy/nginx`: the production ingress configuration.
+- `scripts`: deployment, backup, restore verification, and ingress checks.
 - `docs`: product rules, architecture, operations, and security guidance.
 
 [Contributing](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [MIT license](LICENSE)

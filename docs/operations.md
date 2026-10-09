@@ -9,8 +9,8 @@ Use a distinct PostgreSQL database and cluster for each environment. Every proce
 connects with its own login, which holds only what that process needs
 ([database roles](#database-roles)). Each process's database pool is sized for its role:
 the API opens up to 40 connections, and each worker, the monitor, migrations, the staff
-command, and `rekey` up to 2. A full deployment therefore needs about 56 of PostgreSQL's
-default 100 `max_connections`. When adding API replicas, raise `max_connections` (or put a
+command, and `rekey` up to 2. A full deployment therefore needs up to 58 of PostgreSQL's
+default 100 `max_connections`, or 60 while a migration runs. When adding API replicas, raise `max_connections` (or put a
 pooler such as PgBouncer in front) so the total stays below it; `pool_max_conns=N` in a
 process's database URL overrides its size.
 
@@ -41,7 +41,7 @@ refuse database credentials in `ENV_FILE`. Both may be relative to the current d
 `migrate` starts PostgreSQL, applies embedded forward SQL migrations, and brings the
 process roles and their privileges to their declaration. `provision-roles` then creates or
 updates each process's login ([database roles](#database-roles)). An existing
-pre-rewrite database at `0030_donor_public_content` requires `./scripts/deploy.sh adopt`
+pre-rewrite database, one whose `alembic_version` table holds `0030_donor_public_content`, requires `./scripts/deploy.sh adopt`
 instead of the initial migrate step. Adoption compares the complete donor schema, records
 the baseline checksum, and preserves data. Stop all older API/worker processes before
 adoption; never run two versions of financial writers. Unsupported or divergent schemas
@@ -385,7 +385,7 @@ signed assertion for an access token and caches it until five minutes before exp
 Delivery reaches each live app session holding a token once; a retry after a partial
 failure sends only to the rest. A token the provider reports unregistered or invalid is
 removed from its session without retry. Throttling, outages, and network failures retry
-with the mail backoff, doubling from two minutes up to an hour, or after the provider's
+with the financial-message backoff, doubling from two minutes up to an hour, or after the provider's
 `Retry-After` if longer, and park after five attempts. A provider refusing the
 credentials or the request (`ProviderRejected`) parks the notification at once without
 touching tokens, since every send would fail the same way: fix the key, team, topic,
@@ -685,7 +685,8 @@ dry run, and remove them again.
 
 ## Backup and restore drill
 
-With PostgreSQL running and `ENV_FILE` pointing to the Compose environment:
+With PostgreSQL running, `ENV_FILE` pointing to the Compose environment, and
+`DATABASE_ENV_FILE` to the database logins (default `.env.database`):
 
 ```sh
 ./scripts/backup.sh /secure/backups/dad-2026-10-04.dump
