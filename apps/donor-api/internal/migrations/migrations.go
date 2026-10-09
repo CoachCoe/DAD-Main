@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,6 +24,10 @@ var ErrSchemaMismatch = errors.New("existing donor schema does not match the R1 
 type migration struct{ name, sql, checksum string }
 
 var migrationName = regexp.MustCompile(`^\d{4}_[a-z0-9_]+\.sql$`)
+
+// embedded is the binary's own manifest, read and hashed once, since readiness
+// probes verify it on every request.
+var embedded = sync.OnceValues(func() ([]migration, error) { return manifest(db.Migrations) })
 
 func manifest(fsys fs.FS) ([]migration, error) {
 	paths, err := fs.Glob(fsys, "migrations/*.sql")
@@ -55,7 +60,7 @@ func manifest(fsys fs.FS) ([]migration, error) {
 // tables but no history is adopted only when adopt is set and its schema
 // matches the baseline exactly.
 func Apply(ctx context.Context, pool *pgxpool.Pool, adopt bool) error {
-	files, err := manifest(db.Migrations)
+	files, err := embedded()
 	if err != nil {
 		return err
 	}
@@ -147,7 +152,7 @@ func apply(ctx context.Context, tx pgx.Tx, file migration, baseline, adopt bool)
 // Verify reports whether the database has applied exactly the embedded
 // migrations, which every service requires before it starts.
 func Verify(ctx context.Context, pool *pgxpool.Pool) error {
-	files, err := manifest(db.Migrations)
+	files, err := embedded()
 	if err != nil {
 		return err
 	}
