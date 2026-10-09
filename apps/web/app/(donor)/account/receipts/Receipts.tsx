@@ -16,7 +16,8 @@ export default function Receipts({ gift, year, defaultYear, latestYear }: { gift
   const path = gift ? `/donor/me/receipts/${encodeURIComponent(gift)}` : year ? `/donor/me/annual-summary/${year}` : null;
   const { resource, data: document, failed, reload } = useApiResource<Schema<"Receipt"> | Schema<"AnnualSummary">>(path);
   const messages = resourceMessages(resource, { loading: "Loading gift records…",
-    failure: "This gift record could not be loaded. Check the year and try again in a moment." });
+    failure: "This record could not be loaded right now. Please try again in a moment.",
+    notFound: gift ? "There is no gift record at this link. Choose a gift from My giving." : "There is no summary for that year. Choose a year in which you gave." });
   const active = path !== null;
   return <Page eyebrow="My account" title="Gift records and annual summaries" back={{ href: "/account/giving", label: "My giving" }}>
     <p className="callout"><strong>Sandbox only — not a tax receipt. No real donation was collected.</strong></p>

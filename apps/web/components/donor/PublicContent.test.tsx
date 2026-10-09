@@ -32,6 +32,14 @@ it("labels illustrative figures alongside real figures and their as-of date", as
   expect(screen.getByText("Source document retained by DAD and available on request.")).toBeInTheDocument();
 });
 
+it("names a count of one in the singular", async () => {
+  respond({ ...published, ledger: [{ id: "snapshot:0", metric: "Partners onboarded", value: 1, unit: "PARTNERS", illustrative: false },
+    { id: "snapshot:1", metric: "People reached", value: 1, unit: "PEOPLE", illustrative: false }] });
+  render(await LedgerPage());
+  expect(screen.getByText("1 partner")).toBeInTheDocument();
+  expect(screen.getByText("1 person")).toBeInTheDocument();
+});
+
 it("fetches the configured API with a one-minute shared cache", async () => {
   vi.stubEnv("DONOR_API_BASE_URL", "http://api.internal:8002");
   respond(published);

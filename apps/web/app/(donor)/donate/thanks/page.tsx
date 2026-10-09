@@ -20,7 +20,7 @@ function giftFrom(params: Record<string, string | string[] | undefined>): Gift |
 
 export default async function ThankYouPage({ searchParams }: PageProps<"/donate/thanks">) {
   const gift = giftFrom(await searchParams);
-  return <Page eyebrow="Gift received" title="Thank you for joining the beginning">
+  return <Page eyebrow="Your gift" title="Thank you for joining the beginning">
     {gift && <p>Your gift: <GiftFraming minor={gift.minor} monthly={gift.frequency === "MONTHLY"} /></p>}
     <p>DAD launches in April 2027. A first gift completed before launch earns a permanent Founding Donor badge.</p>
     <div className="callout highlight">

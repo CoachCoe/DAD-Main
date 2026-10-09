@@ -12,13 +12,22 @@ export function ContentUnavailable() {
   </div>;
 }
 
+const counted: Record<Exclude<Schema<"LedgerFigure">["unit"], "USD_CENTS">, [string, string]> = {
+  PEOPLE: ["person", "people"], INITIATIVES: ["initiative", "initiatives"], PARTNERS: ["partner", "partners"],
+};
+
+function figure({ value, unit }: Schema<"LedgerFigure">) {
+  if (unit === "USD_CENTS") return formatMoney(value);
+  return `${value.toLocaleString("en-US")} ${counted[unit][value === 1 ? 0 : 1]}`;
+}
+
 export function Ledger({ content }: { content: Schema<"PublicContent"> }) {
   return <>
     {content.ledger_as_of && <p className="note">As of <time dateTime={content.ledger_as_of}>{formatDay(content.ledger_as_of)}</time> · Updated {content.cadence}.</p>}
     {content.ledger.length ? <div className="metrics">{content.ledger.map((item) => <article key={item.id} className={item.illustrative ? "metric illustrative" : "metric"}>
       <h2>{item.metric}</h2>
       {/* The label sits on the figure itself, so no crop or screenshot can separate them. */}
-      <p className="metricValue">{item.unit === "USD_CENTS" ? formatMoney(item.value) : `${item.value.toLocaleString("en-US")} ${item.unit.toLowerCase()}`}
+      <p className="metricValue">{figure(item)}
         {item.illustrative && <span className="badge">Illustrative</span>}</p>
       <p>{item.illustrative ? <strong>Illustrative figure — not a reported outcome</strong> : "Source document retained by DAD and available on request."}</p>
     </article>)}</div> : <p className="callout">No ledger figures have been published yet. Figures will appear with their source records and an as-of date.</p>}
