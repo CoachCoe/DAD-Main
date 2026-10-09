@@ -1,7 +1,7 @@
 # R1 security controls
 
-Donors authenticate through single-use, 15-minute email proof and hashed, revocable
-sessions: a 30-day cookie in browsers, a rotating token pair in the app. Staff sign in with individual passkeys (WebAuthn, verified by
+Donors authenticate through single-use, 15-minute email proof, or a passkey they added
+while signed in, and hashed, revocable sessions: a 30-day cookie in browsers, a rotating token pair in the app. Staff sign in with individual passkeys (WebAuthn, verified by
 go-webauthn) and receive eight-hour hashed sessions. Donor and staff cookies are
 separate, HttpOnly, and Secure on HTTPS. Staff cookies use SameSite=Strict; donor cookies
 use Lax. Anonymous login responses do not reveal whether an address exists.
@@ -36,6 +36,19 @@ defines are stored with a passkey. Recovery deletes every passkey of the account
 invitations, and issues a new invitation. Attestation is not requested, so the passkey
 provider (device, platform, or password manager) is not verified; passkeys are
 stored as public keys and need no encryption key.
+
+Donor passkeys follow the same ceremony rules on the public host, which is their relying
+party; a public origin addressed by IP cannot be one, so such a deployment runs without
+them. Sign-in is usernameless and requires a discoverable, user-verifying passkey; any
+answer spends its challenge, refused ones included, and a disabled donor or unknown passkey
+cannot sign in. A passkey sign-in is a session like a claim, recorded in
+`donor_session_events`. Only a signed-in donor can add a passkey: the creation options
+exclude the passkeys they already hold, the answer must come from the session that began
+the ceremony, and a passkey registered to any account is refused. Adding one emails the
+donor an essential notice that removing the passkey cannot withdraw. Donors list and
+remove their passkeys on the profile, where an ID that is not theirs is not found.
+Completing an email change removes every passkey with every session, because the email is
+the account's root credential; signing out everywhere keeps them.
 
 The R2 donor app uses neither cookies nor Origin. It sends `X-DAD-Client: native` on
 every request and authenticates with `Authorization: Bearer <access token>`. A request
@@ -73,8 +86,8 @@ use recorded at most every five minutes. They end one by its random session ID, 
 unrelated to any token, and an ID that is not theirs is not found. Sign-ins and
 sign-outs of other sessions are recorded in `donor_session_events`. Native requests are
 rate limited in the same classes, refreshes in the account class rather than the
-sign-in budget. Only donor account routes admit the app (sign-in, claim, refresh,
-email-change confirmation, sign-out, `/donor/me/*`); giving, referral capture, partner
+sign-in budget. Only donor account routes admit the app (sign-in, claim, passkey sign-in,
+refresh, email-change confirmation, sign-out, `/donor/me/*`); giving, referral capture, partner
 signup, and all staff routes stay browser-only, and staff sessions are never accepted as
 bearer tokens. The app must keep its tokens in the platform keychain/keystore and send
 one refresh at a time. The Next proxy does not forward `Authorization` or
