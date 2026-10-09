@@ -191,6 +191,12 @@ func checkoutDraft(ctx context.Context, q *queries.Queries, donor queries.Donor,
 	return draft, nil
 }
 
+// checkoutLifetime is how long a hosted checkout stays open. An unpaid monthly
+// checkout holds the donor's recurring reservation until it expires, so it is
+// kept short; Stripe accepts no less than 30 minutes, and the margin lets a
+// retried request still meet that.
+const checkoutLifetime = time.Hour
+
 // checkoutParams are the hosted checkout parameters frozen with an attempt,
 // so a retried request sends the processor exactly the same thing.
 func checkoutParams(site publicSite, email string, draft queries.InsertCheckoutParams, request payments.CheckoutRequest) ([]byte, error) {
@@ -208,7 +214,8 @@ func checkoutParams(site publicSite, email string, draft queries.InsertCheckoutP
 	price := map[string]any{"currency": "usd", "unit_amount": request.Amount, "product_data": map[string]string{"name": name}}
 	params := map[string]any{"mode": mode, "customer_email": email, "client_reference_id": checkoutID.String(), "metadata": metadata,
 		"line_items": []any{map[string]any{"price_data": price, "quantity": 1}}, "allowed_payment_method_types": []string{"card"},
-		"success_url": site.checkoutReturn(request.Amount, request.Frequency), "cancel_url": site.donate()}
+		"success_url": site.checkoutReturn(request.Amount, request.Frequency), "cancel_url": site.donate(),
+		"expires_at": draft.CreatedAt.Time.Add(checkoutLifetime).Unix()}
 	if monthly {
 		price["recurring"] = map[string]string{"interval": "month"}
 		params["subscription_data"] = map[string]any{"metadata": metadata}

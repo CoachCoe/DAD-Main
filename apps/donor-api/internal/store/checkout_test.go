@@ -89,6 +89,10 @@ func TestCheckoutRetriesAndReservations(t *testing.T) {
 	if params["customer"] != nil || params["customer_email"] != request.Email || params["mode"] != "subscription" || params["payment_method_types"] != nil || params["allowed_payment_method_types"].([]any)[0] != "card" {
 		t.Fatalf("wrong guest parameters: %v", params)
 	}
+	// Stripe accepts an expiry 30 minutes to 24 hours ahead; a shorter one frees the reservation sooner.
+	if expires := time.Unix(int64(params["expires_at"].(float64)), 0); expires.Before(time.Now().Add(55*time.Minute)) || expires.After(time.Now().Add(65*time.Minute)) {
+		t.Fatalf("checkout expires at %v, want about an hour from now", expires)
+	}
 	repeated, err := service.BeginCheckout(ctx, request)
 	if err != nil || repeated != result || len(gateway.calls) != 2 {
 		t.Fatal("completed creation not reused")
