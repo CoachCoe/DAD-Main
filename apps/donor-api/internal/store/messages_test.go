@@ -3,12 +3,14 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/mail"
+	"impactgraph/donor-api/internal/recognition"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -141,5 +143,59 @@ func TestReferralSuppressionRechecksPreferencesAfterRendering(t *testing.T) {
 	var reason string
 	if err = f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1", f.donorID).Scan(&reason); err != nil || reason != "opted_out" {
 		t.Fatal(reason, err)
+	}
+}
+
+func TestAnnualSummaryIsRenderedAndSentAndAnInvalidYearIsHeldBack(t *testing.T) {
+	f := newWorkerFixture(t, "MONTHLY")
+	result := f.checkout(t)
+	ctx := context.Background()
+	paid := time.Now().Add(-24 * time.Hour)
+	f.receive(t, "invoice.payment_succeeded", invoice(result.CheckoutID, "in_"+result.CheckoutID, paid, true))
+	f.process(t)
+	year := paid.In(recognition.NewYork).Year()
+	q := queries.New(f.db)
+	for _, y := range []int{year, 2025} {
+		if err := queueMessage(ctx, q, f.donorID, "ANNUAL", fmt.Sprintf("annual-test:%s:%d", f.donorID, y), map[string]any{"year": y}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	transport := &recordingMail{}
+	w := notificationWorker(t, transport)
+	var summary *mail.Message
+	for range 20 {
+		worked, err := w.DeliverNext(ctx, time.Now().Add(time.Second))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, m := range transport.messages {
+			if m.Subject == "Your DAD sandbox annual summary" {
+				summary = &transport.messages[i]
+			}
+		}
+		if !worked {
+			break
+		}
+	}
+	if summary == nil {
+		t.Fatal("annual summary never sent")
+	}
+	for _, want := range []string{fmt.Sprintf("annual summary — %d", year), "NOT A TAX RECEIPT", "Collected: $30.00 USD", "Net: $30.00 USD"} {
+		if !strings.Contains(summary.Body, want) {
+			t.Fatalf("summary lacks %q:\n%s", want, summary.Body)
+		}
+	}
+	var attempts int32
+	var lastError string
+	if err := f.db.QueryRow(ctx, "SELECT attempts,coalesce(last_error,'') FROM donor_messages WHERE dedup_key=$1", fmt.Sprintf("annual-test:%s:2025", f.donorID)).Scan(&attempts, &lastError); err != nil {
+		t.Fatal(err)
+	}
+	if attempts == 0 || lastError != "InvalidMessage" {
+		t.Fatal("a summary for a year before giving began was not held back as invalid", attempts, lastError)
+	}
+	for _, m := range transport.messages {
+		if strings.Contains(m.Body, "annual summary — 2025") {
+			t.Fatal("summary for an invalid year sent")
+		}
 	}
 }
