@@ -229,8 +229,10 @@ router fetches the same URLs with an `RSC` header for a different payload, which
 Cloudflare does not vary on, hence the exclusion. `/_next/static/*` is cached by default
 and immutable. `/r/{code}`, `/ledger`, `/initiatives/*`, `/donate/thanks`, `/account`,
 and `/staff` are rendered per request (`private, no-store`) and are never cached. A
-referral landing (`/r/{code}`) therefore always costs one render and one API lookup at
-the origin: it is the hottest origin path during a referral spike.
+referral landing (`/r/{code}`) therefore always costs one render and one referral
+capture at the origin: it is the hottest origin path during a referral spike. The
+referrer's name it shows is looked up once a minute per code and web process, not per
+visit; an unknown code is looked up every time.
 
 ## Scaling beyond one origin
 

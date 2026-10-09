@@ -1,19 +1,17 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { cache } from "react";
 import type { ResponseBody } from "@/lib/api";
-import { trustedClientIp } from "@/lib/clientIp";
 import { donorApiBase } from "@/lib/donorApi";
 import ReferralLanding, { type Referrer } from "./ReferralLanding";
 
-// Shared by generateMetadata and the page so one visit costs one lookup.
+// Shared by generateMetadata and the page so one visit costs one lookup. A found name is
+// also shared across visitors for a minute, so a viral link costs the API one lookup a
+// minute rather than one a visit; Next caches only 200s, so unknown codes are not stored.
+// The request carries no per-visitor header, which would split the cache by visitor.
 const lookUp = cache(async (code: string): Promise<Referrer> => {
-  const forwarded = new Headers({ accept: "application/json" });
-  const client = trustedClientIp(await headers());
-  if (client) forwarded.set("x-real-ip", client);
   try {
     const response = await fetch(`${donorApiBase()}/donor/referrals/${encodeURIComponent(code)}`, {
-      cache: "no-store", headers: forwarded, signal: AbortSignal.timeout(3_000),
+      headers: { accept: "application/json" }, next: { revalidate: 60 }, signal: AbortSignal.timeout(3_000),
     });
     if (response.status === 404) return { state: "unavailable" };
     if (!response.ok) return { state: "unknown" };

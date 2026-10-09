@@ -515,7 +515,7 @@ Treat it as a credential. The sessions last 30 days; delete the fixture and drop
 database after the run.
 
 Run the API as for production, and run the projection worker alone, since projections
-expire after a day and dashboards then wait for it. Never run the message worker against
+fall due at their next boundary and dashboards then wait for it. Never run the message worker against
 a seeded database; with Compose, start only
 `docker compose --env-file .env.production --env-file .env.database -f docker-compose.prod.yml --profile workers up -d projection-worker`.
 Every scenario but referral capture only reads, including recurring, so Stripe
