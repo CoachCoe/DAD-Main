@@ -120,3 +120,21 @@ it("refuses a body larger than the API accepts without contacting it", async () 
   expect(response.status).toBe(413);
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it("refuses an oversized body that declares no length", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const chunk = new Uint8Array(1 << 20);
+  let sent = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (sent++ > 12) controller.close(); else controller.enqueue(chunk);
+    },
+  });
+  const request = new NextRequest("http://localhost:3000/api/donor/staff/content/sources", { method: "POST", body, duplex: "half" } as ConstructorParameters<typeof NextRequest>[1]);
+  expect(request.headers.get("content-length")).toBeNull();
+  const response = await POST(request, context("donor", "staff", "content", "sources"));
+  expect(response.status).toBe(413);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(sent).toBeLessThan(13);
+});
