@@ -60,3 +60,21 @@ it("announces a sign-out and moves focus to signing in again", async () => {
   await vi.waitFor(() => expect(signIn).toHaveFocus());
   expect(screen.getByRole("status")).toHaveTextContent("You’ve signed out of DAD staff.");
 });
+
+const admin = { ...actor, id: "staff-admin", name: "Ada Admin", role: "ADMIN", permissions: ["donor.read", "staff.manage"] };
+const colleague = { id: "staff-2", email: "c@example.org", name: "Cy Colleague", role: "SUPPORT", active: true, disabled: false, permissions: [] };
+
+it("announces each account action by what it did", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/donor/staff/me" ? reply(200, admin)
+    : url === "/api/donor/staff/accounts" ? reply(200, [admin, colleague]) : reply(200, { ...colleague, role: "FINANCE" })));
+  render(<Staff q={null} />);
+  fireEvent.change(await screen.findByRole("combobox", { name: "New role for Cy Colleague" }), { target: { value: "FINANCE" } });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm role change" }));
+  expect(await screen.findByText("Cy Colleague’s role changed to FINANCE.")).toHaveAttribute("role", "status");
+});
+
+it("says when staff accounts cannot be loaded", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => url === "/api/donor/staff/me" ? reply(200, admin) : reply(503, { detail: "Unavailable" })));
+  render(<Staff q={null} />);
+  expect(await screen.findByText("Staff accounts could not be loaded right now. Please retry in a moment.")).toHaveAttribute("role", "alert");
+});
