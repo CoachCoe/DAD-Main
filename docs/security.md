@@ -4,7 +4,8 @@ Donors authenticate through single-use, 15-minute email proof, or a passkey they
 while signed in, and hashed, revocable sessions: a 30-day cookie in browsers, a rotating token pair in the app. Staff sign in with individual passkeys (WebAuthn, verified by
 go-webauthn) and receive eight-hour hashed sessions. Donor and staff cookies are
 separate, HttpOnly, and Secure on HTTPS. Staff cookies use SameSite=Strict; donor cookies
-use Lax. Anonymous login responses do not reveal whether an address exists.
+use Lax. Anonymous login responses do not reveal whether an address exists, and a donor receives at
+most one sign-in link a minute and five an hour however many addresses ask.
 
 The back office runs on its own host, `DONOR_STAFF_ORIGIN`, which the API requires to
 be neither the public host nor a parent domain of it, since a site may use passkeys for

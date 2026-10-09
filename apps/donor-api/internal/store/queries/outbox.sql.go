@@ -136,6 +136,7 @@ const queueLoginEmail = `-- name: QueueLoginEmail :exec
 INSERT INTO donor_login_emails (id,donor_id,available_at,created_at,return_path)
 SELECT $1,$2,$3,$3,$4 WHERE NOT EXISTS
 (SELECT 1 FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 minute')
+AND (SELECT count(*) FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 hour')<5
 `
 
 type QueueLoginEmailParams struct {
@@ -145,6 +146,8 @@ type QueueLoginEmailParams struct {
 	ReturnPath  pgtype.Text        `json:"return_path"`
 }
 
+// At most one sign-in link a minute and five an hour per donor, so requests from
+// many addresses cannot flood an inbox.
 func (q *Queries) QueueLoginEmail(ctx context.Context, arg QueueLoginEmailParams) error {
 	_, err := q.db.Exec(ctx, queueLoginEmail,
 		arg.ID,

@@ -338,3 +338,34 @@ func TestLoginLinkReturnsOnlyToAllowedPages(t *testing.T) {
 		})
 	}
 }
+
+func TestLoginLinksAreLimitedPerDonorPerHour(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	id, email := donor(t, pool)
+	accountCleanup(t, pool, id)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	start := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	queued := func() int {
+		var n int
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM donor_login_emails WHERE donor_id=$1", id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for minute := range 12 {
+		if err = queueLoginEmail(ctx, queries.New(tx), email, "", start.Add(time.Duration(minute)*2*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := queued(); n != 5 {
+		t.Fatalf("%d links queued within an hour, want 5", n)
+	}
+	if err = queueLoginEmail(ctx, queries.New(tx), email, "", start.Add(time.Hour+time.Second)); err != nil || queued() != 6 {
+		t.Fatal("a link was refused once the earliest left the hour", err)
+	}
+}

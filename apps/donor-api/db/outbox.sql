@@ -31,9 +31,12 @@ WHERE NOT EXISTS(SELECT 1 FROM donor_messages m WHERE m.dedup_key=c.dedup_key)
 ON CONFLICT(dedup_key) DO NOTHING;
 
 -- name: QueueLoginEmail :exec
+-- At most one sign-in link a minute and five an hour per donor, so requests from
+-- many addresses cannot flood an inbox.
 INSERT INTO donor_login_emails (id,donor_id,available_at,created_at,return_path)
 SELECT $1,$2,$3,$3,sqlc.narg(return_path) WHERE NOT EXISTS
-(SELECT 1 FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 minute');
+(SELECT 1 FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 minute')
+AND (SELECT count(*) FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 hour')<5;
 
 -- name: DueProjectionDonor :one
 SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
