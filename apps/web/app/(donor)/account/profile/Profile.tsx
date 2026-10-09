@@ -47,6 +47,10 @@ export default function Profile() {
       setNewEmail("");
     }, "We couldn’t request the change right now. Please retry in a moment.");
   };
+  const logout = () => run(async () => {
+    await api("/donor/logout", { method: "POST" });
+    setSignedOut(true);
+  }, "Sign-out was not confirmed. Please retry.");
   const logoutAll = () => run(async () => {
     await api("/donor/logout-all", { method: "POST" });
     setSignedOut(true);
@@ -79,6 +83,7 @@ export default function Profile() {
         </details>
         <Passkeys onSignedOut={markSignedOut} />
         <Sessions onSignedOut={markSignedOut} />
+        <button type="button" className="secondary" disabled={busy} onClick={logout}>Sign out of this device</button>
         <details><summary>Sign out on every device</summary>
           <p>This ends all existing donor sessions, including this one. You can sign in again with a new email link. Your passkeys are kept, so remove any you don’t recognize under Passkeys first.</p>
           <button type="button" className="secondary danger" disabled={busy} onClick={logoutAll}>Confirm sign out everywhere</button>
