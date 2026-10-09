@@ -1,4 +1,3 @@
-STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
 SQLC := sqlc/sqlc:1.31.1@sha256:70f53171d27b2424e9358869975455a6e955a5aa8e58a998a270a6e34e525537
 GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts
@@ -59,8 +58,10 @@ test-browser-e2e:
 
 lint: lint-go lint-web lint-scripts
 
+# staticcheck is pinned in apps/donor-api/tools/go.mod with a newer x/tools than its
+# release requires, which is what reads the export data of the Go release CI uses.
 lint-go:
-	cd apps/donor-api && go run $(STATICCHECK) ./... && go run $(GOVULNCHECK) ./...
+	cd apps/donor-api && go tool -modfile=tools/go.mod staticcheck ./... && go run $(GOVULNCHECK) ./...
 
 lint-web:
 	cd apps/web && npm audit --omit=dev --audit-level=high

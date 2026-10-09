@@ -16,7 +16,7 @@ publish blockchain transactions. The enrolment export is an inactive R2 stub.
 
 ## Local setup
 
-Requires Go 1.27.1, Node 22.13+ (or Node 24), npm, and Docker Compose, which runs
+Requires Go 1.27.2, Node 22.13+ (or Node 24), npm, and Docker Compose, which runs
 PostgreSQL 16 on 127.0.0.1.
 Commands below run from the repository root. The local database uses port 55432.
 
