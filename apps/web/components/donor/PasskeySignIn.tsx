@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { ApiError, api, failureMessage } from "@/lib/api";
-import { type Ceremony, choosePasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, passkeysSupported, WAITING_MESSAGE } from "@/lib/passkeys";
+import { type Ceremony, choosePasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, usePasskeysSupported, WAITING_MESSAGE } from "@/lib/passkeys";
 
-const unchanging = () => () => {};
 
 function explain(cause: unknown): string {
   switch (passkeyFailure(cause)) {
@@ -22,7 +21,7 @@ function explain(cause: unknown): string {
 /** Signs in with a passkey the donor added on their profile; email links remain the way in for everyone else. */
 export function PasskeySignIn() {
   // Email sign-in always works, so a browser without passkeys simply isn't offered this.
-  const supported = useSyncExternalStore(unchanging, passkeysSupported, () => false);
+  const supported = usePasskeysSupported(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!supported) return null;

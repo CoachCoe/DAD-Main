@@ -1,10 +1,10 @@
 "use client";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { ApiError, api, classifyFailure, failureMessage, type Schema } from "@/lib/api";
-import { type Ceremony, createPasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, passkeysSupported, UNSUPPORTED_MESSAGE, WAITING_MESSAGE } from "@/lib/passkeys";
+import { type Ceremony, createPasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, usePasskeysSupported, UNSUPPORTED_MESSAGE, WAITING_MESSAGE } from "@/lib/passkeys";
 import { useHashToken } from "@/lib/useHashToken";
 
 type Invitation = Ceremony<PublicKeyCredentialCreationOptionsJSON> & Pick<Schema<"Invitation">, "email" | "name">;
@@ -13,7 +13,6 @@ type Invitation = Ceremony<PublicKeyCredentialCreationOptionsJSON> & Pick<Schema
 // is made, so a slow reader is not left holding a passkey the server will refuse.
 const FRESH_FOR_MS = 3 * 60_000;
 
-const unchanging = () => () => {};
 
 const general = (cause: unknown, fallback: string) =>
   ["offline", "rateLimited", "unconfigured"].includes(classifyFailure(cause)) ? failureMessage(cause, fallback) : fallback;
@@ -33,8 +32,7 @@ function explainCreation(cause: unknown): string {
 
 export default function Activate() {
   const { token, clear } = useHashToken("dad.staff.invitation");
-  // The server cannot know the browser, so it renders as supported and the client corrects it.
-  const supported = useSyncExternalStore(unchanging, passkeysSupported, () => true);
+  const supported = usePasskeysSupported(true);
   const [invitation, setInvitation] = useState<{ value: Invitation; at: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

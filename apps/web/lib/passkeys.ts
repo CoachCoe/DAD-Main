@@ -3,6 +3,7 @@
  * with binary fields in base64url; browsers without the JSON helpers are converted here.
  */
 
+import { useSyncExternalStore } from "react";
 import type { Schema } from "./api";
 
 /** The contract types options only as an object; the DOM's WebAuthn JSON types describe them. */
@@ -10,6 +11,16 @@ export type Ceremony<Options> = Omit<Schema<"Ceremony">, "options"> & { options:
 
 export function passkeysSupported(): boolean {
   return typeof PublicKeyCredential === "function" && typeof navigator.credentials?.create === "function";
+}
+
+const unchanging = () => () => {};
+
+/**
+ * Whether this browser can use passkeys. The server cannot know, so it renders serverAnswer
+ * and the browser corrects it after hydration.
+ */
+export function usePasskeysSupported(serverAnswer: boolean): boolean {
+  return useSyncExternalStore(unchanging, passkeysSupported, () => serverAnswer);
 }
 
 function decode(value: string): ArrayBuffer {

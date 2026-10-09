@@ -1,11 +1,10 @@
 "use client";
-import { useState, useSyncExternalStore } from "react";
+import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { ApiError, api, classifyFailure, failureMessage } from "@/lib/api";
-import { type Ceremony, choosePasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, passkeysSupported, UNSUPPORTED_MESSAGE, WAITING_MESSAGE } from "@/lib/passkeys";
+import { type Ceremony, choosePasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, usePasskeysSupported, UNSUPPORTED_MESSAGE, WAITING_MESSAGE } from "@/lib/passkeys";
 
-const unchanging = () => () => {};
 
 function explain(cause: unknown): string {
   switch (passkeyFailure(cause)) {
@@ -21,8 +20,7 @@ function explain(cause: unknown): string {
 }
 
 export default function SignIn() {
-  // The server cannot know the browser, so it renders as supported and the client corrects it.
-  const supported = useSyncExternalStore(unchanging, passkeysSupported, () => true);
+  const supported = usePasskeysSupported(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function signIn() {

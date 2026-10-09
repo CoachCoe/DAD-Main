@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { api, ApiError, failureMessage, type Schema } from "@/lib/api";
 import { formatDate, formatDateTime } from "@/lib/dates";
-import { type Ceremony, createPasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, passkeysSupported, UNSUPPORTED_MESSAGE, WAITING_MESSAGE } from "@/lib/passkeys";
+import { type Ceremony, createPasskey, NO_SUITABLE_PASSKEY_MESSAGE, passkeyFailure, usePasskeysSupported, UNSUPPORTED_MESSAGE, WAITING_MESSAGE } from "@/lib/passkeys";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
 type Passkey = Schema<"PasskeyInfo">;
 type PasskeyList = Schema<"PasskeyList">;
 
-const unchanging = () => () => {};
 const MAX_NAME = 64;
 const label = (passkey: Passkey) => passkey.name || "Passkey";
 
@@ -27,7 +26,7 @@ function explainAdd(cause: unknown): string {
 
 /** Passkeys that sign the donor in without an email link, with a way to add or remove them. */
 export function Passkeys({ onSignedOut }: { onSignedOut: () => void }) {
-  const supported = useSyncExternalStore(unchanging, passkeysSupported, () => true);
+  const supported = usePasskeysSupported(true);
   const { resource, data, failed, reload, setData } = useApiResource<PasskeyList>("/donor/me/passkeys");
   const [busy, setBusy] = useState(false);
   const [prompting, setPrompting] = useState(false);
