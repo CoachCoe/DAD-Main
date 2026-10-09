@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { api, failureMessage, type RequestBody, type Schema } from "@/lib/api";
+import { GiftFraming } from "@/components/donor/GiftFraming";
 import { formatDollars, MAX_GIFT_MINOR, MIN_GIFT_MINOR, monthlyFraming, parseDollars } from "@/lib/money";
 
 const presets = [3000, 9000, 15000];
@@ -29,6 +30,8 @@ export default function Donate() {
   const [amountInvalid, setAmountInvalid] = useState(false);
   const amountInput = useRef<HTMLInputElement>(null);
   const attempt = useRef<{ payload: string; key: string } | null>(null);
+  const parsed = parseDollars(amount);
+  const chosen = parsed !== null && parsed >= MIN_GIFT_MINOR && parsed <= MAX_GIFT_MINOR ? parsed : null;
 
   useEffect(() => {
     const choice = remembered();
@@ -109,9 +112,10 @@ export default function Donate() {
         </div>
         <label>{monthly ? "Monthly amount (USD)" : "One-time amount (USD)"}
           <input ref={amountInput} inputMode="decimal" required value={amount}
-            aria-invalid={amountInvalid || undefined} aria-describedby={amountInvalid ? "donate-error" : undefined}
+            aria-invalid={amountInvalid || undefined} aria-describedby={amountInvalid ? "donate-error" : chosen ? "donate-amount" : undefined}
             onChange={(event) => edit(() => setAmount(event.target.value))} />
         </label>
+        {chosen && <p id="donate-amount">You’ll give <GiftFraming minor={chosen} monthly={monthly} /></p>}
       </fieldset>
       <label>Email
         <input type="email" autoComplete="email" maxLength={320} required value={email} disabled={busy}
