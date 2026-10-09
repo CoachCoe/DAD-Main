@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { api, ApiError, failureMessage, unconfirmedMessage } from "@/lib/api";
+import { useFocusOnSuccess } from "@/lib/useStepFocus";
 
 const initial = { organization: "", name: "", email: "", website: "", message: "", contact_consent: false };
 
@@ -12,6 +13,7 @@ export default function Partners() {
   const [frozen, setFrozen] = useState<typeof initial | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const heading = useFocusOnSuccess(done);
   const [error, setError] = useState("");
   const key = useRef<string | null>(null);
   async function submit(event: React.FormEvent) {
@@ -27,7 +29,7 @@ export default function Partners() {
     }
     finally { setBusy(false); }
   }
-  return <Page eyebrow="Partners" title="Partner with DAD">
+  return <Page eyebrow="Partners" title="Partner with DAD" heading={heading}>
     <p className="lead">Help shape initiatives for our April 2027 launch. This is an interest form; partner accounts arrive at R2.</p>
     <p className="note">Sandbox preview: use test contact details. <Link href="/legal">Legal and privacy status</Link>.</p>
     {!done && <form onSubmit={submit}>

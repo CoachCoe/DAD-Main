@@ -7,7 +7,7 @@ import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, ApiError, type RequestBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
-import { useStepFocus } from "@/lib/useStepFocus";
+import { useFocusOnSuccess, useStepFocus } from "@/lib/useStepFocus";
 import { formatDate } from "@/lib/dates";
 
 type Dates = Schema<"PauseOption">;
@@ -26,6 +26,7 @@ export default function PauseGiving() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const step = useStepFocus(choice !== null);
+  const heading = useFocusOnSuccess(message !== "");
   const messages = resourceMessages(resource, { loading: "Checking pause dates…",
     failure: "We could not confirm your pause dates right now. Please refresh in a moment." });
 
@@ -46,7 +47,7 @@ export default function PauseGiving() {
       else setError(unconfirmedMessage(cause, "Pause is not confirmed. Retry the same request, or refresh to check its status."));
     } finally { setBusy(false); }
   }
-  return <Page eyebrow="My account" title="Pause monthly giving" back={{ href: "/account/recurring", label: "Manage monthly giving" }}>
+  return <Page eyebrow="My account" title="Pause monthly giving" back={{ href: "/account/recurring", label: "Manage monthly giving" }} heading={heading}>
     {signedOut || resource.state === "signedOut" ? <SignInPrompt>Sign in to manage your giving</SignInPrompt> : <>
       {data?.pause ? <div className="callout">
         {!message && <p>{data.pause.confirmed ? "Pause confirmed." : "Pause not yet confirmed."}</p>}

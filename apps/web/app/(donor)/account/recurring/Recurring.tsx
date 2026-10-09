@@ -8,7 +8,7 @@ import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, ApiError, type RequestBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
-import { useStepFocus } from "@/lib/useStepFocus";
+import { useFocusOnSuccess, useStepFocus } from "@/lib/useStepFocus";
 import { formatDate, formatDateTime } from "@/lib/dates";
 
 type Subscription = Schema<"Subscription">;
@@ -44,6 +44,7 @@ export default function RecurringGiving() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const step = useStepFocus(confirming);
+  const heading = useFocusOnSuccess(Boolean(message && data?.subscription?.stops_at));
   const messages = resourceMessages(resource, { loading: "Checking your monthly gift…",
     failure: "We could not confirm your billing details right now. Please refresh in a moment." });
 
@@ -67,7 +68,7 @@ export default function RecurringGiving() {
   const subscription = data?.subscription;
   const preparing = data?.state === "preparing";
   const changeable = subscription && !subscription.stops_at && !paused(subscription) && !settingUp(subscription.status);
-  return <Page eyebrow="My account" title="My monthly giving" back={{ href: "/account/giving", label: "My giving" }}>
+  return <Page eyebrow="My account" title="My monthly giving" back={{ href: "/account/giving", label: "My giving" }} heading={heading}>
     {signedOut || resource.state === "signedOut" ? <SignInPrompt>Sign in to manage your giving</SignInPrompt> : <>
       {preparing && <div className="callout">
         <p>{preparingCopy}</p>

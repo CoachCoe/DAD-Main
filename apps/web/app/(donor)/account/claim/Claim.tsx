@@ -7,6 +7,7 @@ import { Page } from "@/components/donor/Page";
 import type { SignInReturn } from "@/components/donor/SignInForm";
 import { api, failureMessage, type RequestBody } from "@/lib/api";
 import { useHashToken } from "@/lib/useHashToken";
+import { useFocusOnSuccess } from "@/lib/useStepFocus";
 
 // Where an emailed link may send a donor once signed in (the API's own list). Anything else
 // is ignored, so a crafted link cannot redirect anywhere else.
@@ -16,6 +17,7 @@ export default function Claim() {
   const { token, next, clear } = useHashToken();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const heading = useFocusOnSuccess(done);
   const [error, setError] = useState("");
 
   async function claim() {
@@ -32,7 +34,7 @@ export default function Claim() {
     } finally { setBusy(false); }
   }
 
-  return <Page eyebrow="My account" title={done ? "You’re signed in" : "Claim your donor account"}>
+  return <Page eyebrow="My account" title={done ? "You’re signed in" : "Claim your donor account"} heading={heading}>
     {done ? <>
       <p className="lead">Your dashboard and giving streak are ready. Choose a public nickname whenever you’d like your referral link and code.</p>
       <Link className="button full" href="/account/dashboard">View my dashboard</Link>

@@ -23,6 +23,7 @@ it("requires explicit confirmation and sends the displayed billing boundary", as
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(
     `Renewals cancelled. Your last monthly gift period ends ${formatDate(subscription.period_end)}; no further gifts will be charged.`));
   expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "My monthly giving" })).toHaveFocus());
   expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ subscription_id: "owned-id", period_end: subscription.period_end });
   expect(fetch.mock.calls[1][1].headers["Idempotency-Key"]).toMatch(/^[a-f0-9-]{36}$/);
 });
