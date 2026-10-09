@@ -6,6 +6,7 @@
 node_modules/
 .next/
 coverage/
+*.log
 test-results/
 playwright-report/
 *.tsbuildinfo

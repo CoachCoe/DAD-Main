@@ -2,7 +2,9 @@
 .github
 .claude
 docs
-var
+*.log
+**/*.log
+**/coverage
 **/.env
 **/.env.*
 !.env.example
