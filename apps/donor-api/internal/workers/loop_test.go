@@ -10,7 +10,7 @@ import (
 func TestOnceAndError(t *testing.T) {
 	for _, failure := range []error{nil, errors.New("failed")} {
 		count := 0
-		err := Run(context.Background(), true, time.Hour, func(ctx context.Context) (bool, error) {
+		err := Run(context.Background(), true, time.Hour, StepBudget, func(ctx context.Context) (bool, error) {
 			count++
 			if _, ok := ctx.Deadline(); !ok {
 				t.Error("unbounded step")
@@ -22,13 +22,28 @@ func TestOnceAndError(t *testing.T) {
 		}
 	}
 }
+func TestEachStepGetsTheBudgetItWasGiven(t *testing.T) {
+	for _, budget := range []time.Duration{StepBudget, ProcessorStepBudget} {
+		started := time.Now()
+		var deadline time.Time
+		if err := Run(context.Background(), true, time.Hour, budget, func(ctx context.Context) (bool, error) {
+			deadline, _ = ctx.Deadline()
+			return true, nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if remaining := deadline.Sub(started); remaining < budget || remaining > budget+time.Second {
+			t.Fatalf("step budget %v, want %v", remaining, budget)
+		}
+	}
+}
 func TestCancellationInterruptsIdle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	called := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, false, time.Hour, func(context.Context) (bool, error) { close(called); return false, nil })
+		done <- Run(ctx, false, time.Hour, StepBudget, func(context.Context) (bool, error) { close(called); return false, nil })
 	}()
 	<-called
 	cancel()
@@ -48,7 +63,7 @@ func TestContinuousModeBacksOffAndRecoversFromFailures(t *testing.T) {
 	var calls []time.Time
 	done := make(chan error, 1)
 	go func() {
-		done <- Run(ctx, false, 50*time.Millisecond, func(context.Context) (bool, error) {
+		done <- Run(ctx, false, 50*time.Millisecond, StepBudget, func(context.Context) (bool, error) {
 			calls = append(calls, time.Now())
 			switch len(calls) {
 			case 1, 2, 3:

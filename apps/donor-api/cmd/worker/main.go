@@ -80,7 +80,11 @@ func run(ctx context.Context, args []string, getenv func(string) string) error {
 	if err != nil {
 		return err
 	}
-	return workers.Run(ctx, *once, 2*time.Second, step)
+	budget := workers.StepBudget
+	if *kind == "stripe" {
+		budget = workers.ProcessorStepBudget
+	}
+	return workers.Run(ctx, *once, 2*time.Second, budget, step)
 }
 
 type deliverer interface {
