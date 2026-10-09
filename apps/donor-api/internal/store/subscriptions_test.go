@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -230,5 +231,63 @@ func TestInvoiceConfirmsPendingAmountWithoutRepricingPriorPeriod(t *testing.T) {
 	var total int64
 	if err := f.db.QueryRow(ctx, "SELECT sum(amount_minor) FROM donor_gifts WHERE donor_id=$1", f.donorID).Scan(&total); err != nil || total != 12000 {
 		t.Fatal("invoice effective boundary changed", total, err)
+	}
+}
+
+func TestExpiredCheckoutReleasesItsReservationButNeverUndoesACompletion(t *testing.T) {
+	ctx := context.Background()
+	reservations := func(f *workerFixture) int {
+		var n int
+		if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_recurring_reservations WHERE donor_id=$1", f.donorID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	attemptStatus := func(f *workerFixture, checkout string) string {
+		var status string
+		if err := f.db.QueryRow(ctx, "SELECT status FROM donor_stripe_checkouts WHERE checkout_id=$1", checkout).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		return status
+	}
+	sessionOf := func(f *workerFixture, checkout string) string {
+		var session pgtype.Text
+		if err := f.db.QueryRow(ctx, "SELECT stripe_session_id FROM donor_stripe_checkouts WHERE checkout_id=$1", checkout).Scan(&session); err != nil || !session.Valid {
+			t.Fatal("checkout has no session", err)
+		}
+		return session.String
+	}
+
+	f := newWorkerFixture(t, "MONTHLY")
+	result := f.checkout(t)
+	again := f.request
+	again.RequestID = testID(t)
+	if _, err := f.service.BeginCheckout(ctx, again); !errors.Is(err, payments.ErrCheckoutConflict) {
+		t.Fatal("second monthly checkout allowed while the first is open", err)
+	}
+	foreign := f.receive(t, "checkout.session.expired", map[string]any{"id": "cs_someone_else", "status": "expired", "metadata": map[string]any{"dad_checkout_id": result.CheckoutID}})
+	f.process(t)
+	assertEventProcessed(t, f, foreign, false)
+	if reservations(f) != 1 {
+		t.Fatal("an expiry for another session released the reservation")
+	}
+	expired := f.receive(t, "checkout.session.expired", map[string]any{"id": sessionOf(f, result.CheckoutID), "status": "expired", "metadata": map[string]any{"dad_checkout_id": result.CheckoutID}})
+	f.process(t)
+	assertEventProcessed(t, f, expired, true)
+	if attemptStatus(f, result.CheckoutID) != "EXPIRED" || reservations(f) != 0 {
+		t.Fatal("expiry did not end the attempt and release its reservation")
+	}
+	if _, err := f.service.BeginCheckout(ctx, again); err != nil {
+		t.Fatal("monthly checkout refused after the open one expired", err)
+	}
+
+	done := newWorkerFixture(t, "MONTHLY")
+	finished := done.checkout(t)
+	mustExec(t, done.db, "UPDATE donor_stripe_checkouts SET status='COMPLETE' WHERE checkout_id=$1", finished.CheckoutID)
+	late := done.receive(t, "checkout.session.expired", map[string]any{"id": sessionOf(done, finished.CheckoutID), "status": "expired", "metadata": map[string]any{"dad_checkout_id": finished.CheckoutID}})
+	done.process(t)
+	assertEventProcessed(t, done, late, true)
+	if attemptStatus(done, finished.CheckoutID) != "COMPLETE" || reservations(done) != 1 {
+		t.Fatal("a late expiry undid a completed checkout")
 	}
 }
