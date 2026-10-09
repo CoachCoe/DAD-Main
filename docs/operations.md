@@ -310,7 +310,12 @@ Run projection, login-email, email-changes, and message workers separately. Emai
 use the same mail configuration, require current-address proof before new-address proof,
 and park delivery after five failures. Requesting a replacement invalidates prior proofs.
 Projection refresh handles grace expiry, recurring boundaries, permanent recognition,
-and prior-year summaries. A donor whose facts cannot be projected is deferred with
+and prior-year summaries. A projection is recomputed when facts that change it arrive and
+at its next time boundary: a due date, period end, grace deadline, pause, cancellation,
+refund, or New Year in New York, and at least every 30 days. A release that changes
+recognition, or the messages and push intents queued with it, raises `projectionRules` in
+`internal/store/financial.go`; the projection worker then recomputes every older
+projection whenever no projection is due. A donor whose facts cannot be projected is deferred with
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
 The projection worker also applies referral-touch retention ([donor domain](donor-domain.md#referrals)):

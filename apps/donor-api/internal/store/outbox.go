@@ -44,14 +44,18 @@ func refreshProjection(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.
 	return result, queuePushIntents(ctx, q, result, now)
 }
 
-// RefreshNextProjection refreshes the donor whose projection is due soonest.
-// A donor whose facts cannot be projected is deferred with backoff and its
-// failure recorded for the monitor, so it cannot hold up every other donor.
+// RefreshNextProjection refreshes the donor whose projection is due soonest,
+// or else one computed under earlier rules. A donor whose facts cannot be
+// projected is deferred with backoff and its failure recorded for the monitor,
+// so it cannot hold up every other donor.
 func RefreshNextProjection(ctx context.Context, pool *pgxpool.Pool, now time.Time) (bool, error) {
 	worked := false
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		q := queries.New(tx)
 		id, err := q.DueProjectionDonor(ctx, timestamp(now))
+		if errors.Is(err, pgx.ErrNoRows) {
+			id, err = q.OutdatedProjectionDonor(ctx, queries.OutdatedProjectionDonorParams{RulesVersion: projectionRules, ComputedAt: timestamp(now)})
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -70,7 +74,7 @@ func RefreshNextProjection(ctx context.Context, pool *pgxpool.Pool, now time.Tim
 		if !ok {
 			return refreshErr
 		}
-		return q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: text(category), AsOf: timestamp(now)})
+		return q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: text(category), AsOf: timestamp(now), RulesVersion: projectionRules})
 	})
 	return worked && err == nil, err
 }

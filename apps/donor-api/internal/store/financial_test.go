@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"impactgraph/donor-api/internal/recognition"
 	"impactgraph/donor-api/internal/store/queries"
 )
 
@@ -92,13 +93,13 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	if err != nil || refunded.NetMinor.Int64 != 3000 || refunded.CurrentStreak.Int32 != 0 || refunded.BestStreak != 2 || !refunded.FoundingAwardedAt.Time.Equal(initial.FoundingAwardedAt.Time) {
 		t.Fatalf("wrong refunded projection: %+v %v", refunded, err)
 	}
-	stale, err := dashboard(ctx, q, referrerID, now.Add(24*time.Hour))
+	stale, err := dashboard(ctx, q, referrerID, now.Add(maxRefreshInterval))
 	if err != nil || stale.Referrals != nil || stale.Streak != nil {
 		t.Fatal("stale values exposed")
 	}
 	// An unobserved renewal keeps the current count through its grace window.
 	due, err := projectFacts(ctx, q, donorID, mar)
-	if err != nil || !due.CurrentStreak.Valid || due.CurrentStreak.Int32 != 0 || due.AtRisk || !due.NextRefreshAt.Time.Equal(mar.Add(24*time.Hour)) {
+	if err != nil || !due.CurrentStreak.Valid || due.CurrentStreak.Int32 != 0 || due.AtRisk || !due.NextRefreshAt.Time.Equal(mar.Add(recognition.Grace)) {
 		t.Fatalf("unobserved renewal: %+v %v", due, err)
 	}
 	// Missing renewal history past grace cannot manufacture a zero streak.

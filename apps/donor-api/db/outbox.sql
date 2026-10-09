@@ -40,11 +40,18 @@ SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
 WHERE p.next_refresh_at<=$1 ORDER BY p.next_refresh_at
 LIMIT 1 FOR UPDATE OF d SKIP LOCKED;
 
+-- name: OutdatedProjectionDonor :one
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.rules_version<$1 AND p.computed_at<=$2
+LIMIT 1 FOR UPDATE OF d SKIP LOCKED;
+
 -- name: SeedProjection :exec
 INSERT INTO donor_metric_projections (id,donor_id,computed_at,next_refresh_at)
 VALUES ($1,$2,$3,$3) ON CONFLICT (donor_id) DO NOTHING;
 
 -- name: DeferProjection :exec
-UPDATE donor_metric_projections SET refresh_failures=refresh_failures+1,refresh_error=$2,
+-- A deferred projection takes the current rules version, so it waits out its
+-- backoff instead of being picked up again at once as outdated.
+UPDATE donor_metric_projections SET refresh_failures=refresh_failures+1,refresh_error=$2,rules_version=sqlc.arg(rules_version),
 next_refresh_at=sqlc.arg(as_of)::timestamptz+least(power(2,refresh_failures)*interval '5 minutes',interval '1 day')
 WHERE donor_id=$1;

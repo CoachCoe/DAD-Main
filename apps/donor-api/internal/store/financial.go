@@ -165,10 +165,20 @@ type projection struct {
 	streakSince *time.Time
 }
 
+// projectionRules versions the rules a projection follows: recognition and
+// the messages and push intents queued with it. Raise it with any change to
+// them, so every saved projection is recomputed under the new rules.
+const projectionRules = 1
+
+// maxRefreshInterval bounds the wait for a projection's next time boundary.
+// Facts that change a projection refresh it when they arrive, so this is a
+// backstop, not a schedule.
+const maxRefreshInterval = 30 * 24 * time.Hour
+
 // projectFacts recomputes and saves the donor's recognition projection
 // under the donor lock.
 func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (projection, error) {
-	out := queries.SaveProjectionParams{DonorID: id, ComputedAt: timestamp(now), NextRefreshAt: timestamp(now.Add(24 * time.Hour))}
+	out := queries.SaveProjectionParams{DonorID: id, ComputedAt: timestamp(now), NextRefreshAt: timestamp(now.Add(maxRefreshInterval)), RulesVersion: projectionRules}
 	if _, err := q.LockDonor(ctx, id); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
@@ -249,6 +259,10 @@ func nextRefresh(out queries.SaveProjectionParams, h history, refundBoundaries, 
 	}
 	if out.GraceEndsAt.Valid {
 		boundaries = append(boundaries, out.GraceEndsAt.Time)
+	}
+	// A year's summary is queued once that year ends in New York.
+	if len(h.Gifts) > 0 {
+		boundaries = append(boundaries, time.Date(now.In(recognition.NewYork).Year()+1, 1, 1, 0, 0, 0, 0, recognition.NewYork))
 	}
 	next := out.NextRefreshAt
 	for _, b := range boundaries {

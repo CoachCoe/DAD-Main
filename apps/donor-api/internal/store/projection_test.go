@@ -353,3 +353,70 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 		t.Fatalf("corrected donor not recovered: %+v %v", bad, err)
 	}
 }
+
+func TestProjectionWaitsForItsNextBoundaryAndSummarizesAtNewYear(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	h := newHistoryFixture(t, tx)
+	paid := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
+	h.gift(recognition.Gift{ID: "june", DonorID: "ana", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid})
+	donor := h.donor("ana")
+	summer := paid.Add(time.Hour)
+	if p, err := projectFacts(ctx, h.q, donor, summer); err != nil || !p.NextRefreshAt.Time.Equal(summer.Add(maxRefreshInterval)) || p.RulesVersion != projectionRules {
+		t.Fatalf("a projection with no boundary ahead waits the full interval: %+v %v", p, err)
+	}
+	newYear := time.Date(2028, 1, 1, 0, 0, 0, 0, recognition.NewYork)
+	december, err := refreshProjection(ctx, tx, donor, newYear.Add(-10*24*time.Hour))
+	if err != nil || !december.NextRefreshAt.Time.Equal(newYear) {
+		t.Fatalf("New Year is not a boundary: %+v %v", december, err)
+	}
+	summaries := func() int {
+		var n int
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 AND dedup_key=$2", donor, "annual:"+donor.String()+":2027").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if summaries() != 0 {
+		t.Fatal("2027 summarized before the year ended")
+	}
+	if _, err = refreshProjection(ctx, tx, donor, newYear); err != nil || summaries() != 1 {
+		t.Fatal("2027 not summarized at New Year", err)
+	}
+}
+
+func TestProjectionsFromEarlierRulesAreRecomputed(t *testing.T) {
+	pool := database(t)
+	worker := as(t, dbroles.ProjectionWorker)
+	ctx := context.Background()
+	// A historical clock keeps other tests' projections out of this queue.
+	now := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	outdated, recent := testID(t), testID(t)
+	t.Cleanup(func() {
+		for _, sql := range []string{"DELETE FROM donor_messages WHERE donor_id=ANY($1)", "DELETE FROM donor_metric_projections WHERE donor_id=ANY($1)", "DELETE FROM donors WHERE id=ANY($1)"} {
+			if _, err := pool.Exec(context.Background(), sql, []pgtype.UUID{outdated, recent}); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	for id, computed := range map[pgtype.UUID]time.Time{outdated: now.Add(-24 * time.Hour), recent: now.Add(time.Hour)} {
+		mustExec(t, pool, "INSERT INTO donors(id,email,created_at) VALUES($1,$2,$3)", id, id.String()+"@example.org", now)
+		mustExec(t, pool, "INSERT INTO donor_metric_projections(id,donor_id,computed_at,next_refresh_at,rules_version) VALUES($1,$2,$3,$4,$5)",
+			testID(t), id, computed, now.AddDate(0, 6, 0), projectionRules-1)
+	}
+	if worked, err := RefreshNextProjection(ctx, worker, now); err != nil || !worked {
+		t.Fatal("projection from earlier rules not recomputed", worked, err)
+	}
+	if worked, err := RefreshNextProjection(ctx, worker, now); err != nil || worked {
+		t.Fatal("recomputed twice, or a projection computed after the clock taken", worked, err)
+	}
+	p, err := queries.New(pool).Projection(ctx, outdated)
+	if err != nil || p.RulesVersion != projectionRules || !p.ComputedAt.Time.Equal(now) {
+		t.Fatalf("outdated projection: %+v %v", p, err)
+	}
+}

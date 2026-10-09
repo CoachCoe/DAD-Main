@@ -12,19 +12,27 @@ import (
 )
 
 const deferProjection = `-- name: DeferProjection :exec
-UPDATE donor_metric_projections SET refresh_failures=refresh_failures+1,refresh_error=$2,
-next_refresh_at=$3::timestamptz+least(power(2,refresh_failures)*interval '5 minutes',interval '1 day')
+UPDATE donor_metric_projections SET refresh_failures=refresh_failures+1,refresh_error=$2,rules_version=$3,
+next_refresh_at=$4::timestamptz+least(power(2,refresh_failures)*interval '5 minutes',interval '1 day')
 WHERE donor_id=$1
 `
 
 type DeferProjectionParams struct {
 	DonorID      pgtype.UUID        `json:"donor_id"`
 	RefreshError pgtype.Text        `json:"refresh_error"`
+	RulesVersion int32              `json:"rules_version"`
 	AsOf         pgtype.Timestamptz `json:"as_of"`
 }
 
+// A deferred projection takes the current rules version, so it waits out its
+// backoff instead of being picked up again at once as outdated.
 func (q *Queries) DeferProjection(ctx context.Context, arg DeferProjectionParams) error {
-	_, err := q.db.Exec(ctx, deferProjection, arg.DonorID, arg.RefreshError, arg.AsOf)
+	_, err := q.db.Exec(ctx, deferProjection,
+		arg.DonorID,
+		arg.RefreshError,
+		arg.RulesVersion,
+		arg.AsOf,
+	)
 	return err
 }
 
@@ -65,6 +73,24 @@ func (q *Queries) InsertFinancialMessage(ctx context.Context, arg InsertFinancia
 		arg.AvailableAt,
 	)
 	return err
+}
+
+const outdatedProjectionDonor = `-- name: OutdatedProjectionDonor :one
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.rules_version<$1 AND p.computed_at<=$2
+LIMIT 1 FOR UPDATE OF d SKIP LOCKED
+`
+
+type OutdatedProjectionDonorParams struct {
+	RulesVersion int32              `json:"rules_version"`
+	ComputedAt   pgtype.Timestamptz `json:"computed_at"`
+}
+
+func (q *Queries) OutdatedProjectionDonor(ctx context.Context, arg OutdatedProjectionDonorParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, outdatedProjectionDonor, arg.RulesVersion, arg.ComputedAt)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const queueFinancialIntents = `-- name: QueueFinancialIntents :exec

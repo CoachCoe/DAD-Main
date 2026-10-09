@@ -160,6 +160,7 @@ type DonorMetricProjection struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	RefreshFailures   int32              `json:"refresh_failures"`
 	RefreshError      pgtype.Text        `json:"refresh_error"`
+	RulesVersion      int32              `json:"rules_version"`
 }
 
 type DonorPartnerSignup struct {
