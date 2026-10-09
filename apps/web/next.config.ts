@@ -37,9 +37,6 @@ const nextConfig: NextConfig = {
       fallback: [],
     };
   },
-  // The API is proxied by app/api/[...path]/route.ts rather than a rewrite: with
-  // output: standalone a rewrite destination is baked in at build time, so a runtime
-  // API_BASE_URL was silently ignored.
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

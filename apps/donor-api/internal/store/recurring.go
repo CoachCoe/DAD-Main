@@ -40,9 +40,6 @@ type AmountRequest struct {
 	EffectiveAt          time.Time
 }
 
-// The JSON views below are the web client's contract. Fields stay in
-// alphabetical order so responses match the original map encoding byte for byte.
-
 // RecurringDetails describes the donor's monthly gift. State is omitted only by
 // a staff quote for a donor without one.
 type RecurringDetails struct {

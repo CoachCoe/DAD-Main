@@ -42,8 +42,6 @@ func (s ContentService) AuthorizeSourceUpload(ctx context.Context, token string)
 	return nil
 }
 
-// Content views keep alphabetical field order so responses match the original
-// map encoding byte for byte.
 type PublicationSummary struct {
 	At pgtype.Timestamptz `json:"at"`
 	ID pgtype.UUID        `json:"id"`
