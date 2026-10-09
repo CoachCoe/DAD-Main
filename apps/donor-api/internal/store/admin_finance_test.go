@@ -40,12 +40,12 @@ func (g *refundGateway) CreateRefund(_ context.Context, payment string, amount i
 	return g.refund, nil
 }
 
-func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
+// refundFixture is a donor with one paid $30 monthly gift and a finance
+// service whose processor the test controls.
+func refundFixture(t *testing.T) (StaffFinanceService, *refundGateway, *workerFixture, pgtype.UUID) {
+	t.Helper()
 	pool := database(t)
-	api := as(t, dbroles.API)
 	ctx := context.Background()
-	_, finance := staffFixture(t, pool, "FINANCE")
-	_, support := staffFixture(t, pool, "SUPPORT")
 	f := newWorkerFixture(t, "MONTHLY")
 	checkout := f.checkout(t)
 	invoiceID := "in_finance_" + f.donorID.String()
@@ -65,8 +65,17 @@ func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 			}
 		}
 	})
-	gateway := &refundGateway{t: t, loseAcknowledgement: true}
-	s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: gateway, Origin: "https://example.org"}
+	gateway := &refundGateway{t: t}
+	return StaffFinanceService{Staff: &StaffService{DB: as(t, dbroles.API)}, Gateway: gateway, Origin: "https://example.org"}, gateway, f, giftID
+}
+
+func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	_, finance := staffFixture(t, pool, "FINANCE")
+	_, support := staffFixture(t, pool, "SUPPORT")
+	s, gateway, f, giftID := refundFixture(t)
+	gateway.loseAcknowledgement = true
 	r := StaffFinancialRequest{RequestID: testID(t), DonorID: f.donorID, TargetID: giftID, Amount: 1000, Reason: "Donor requested partial refund"}
 	if _, err := s.Refund(ctx, support, r); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatal("support permitted refund", err)
@@ -139,5 +148,24 @@ func TestStaffRefundCallsProcessorOutsideDonorLock(t *testing.T) {
 	var status string
 	if err = pool.QueryRow(ctx, "SELECT status FROM donor_staff_actions WHERE id=$1", r.RequestID).Scan(&status); err != nil || status != "OBSERVED" {
 		t.Fatal("staff action not completed", status, err)
+	}
+}
+
+func TestStaffRefundRefusesMoreThanTheGiftAndASecondWhileOneIsPending(t *testing.T) {
+	ctx := context.Background()
+	_, finance := staffFixture(t, database(t), "FINANCE")
+	s, gateway, f, giftID := refundFixture(t)
+	request := func(amount int64) StaffFinancialRequest {
+		return StaffFinancialRequest{RequestID: testID(t), DonorID: f.donorID, TargetID: giftID, Amount: amount, Reason: "Donor requested a refund"}
+	}
+	if _, err := s.Refund(ctx, finance, request(3001)); !errors.Is(err, ErrStaffConflict) || gateway.creates != 0 {
+		t.Fatal("refund above the gift authorized", err, gateway.creates)
+	}
+	gateway.loseAcknowledgement = true
+	if _, err := s.Refund(ctx, finance, request(1000)); !errors.Is(err, payments.ErrProcessorUnavailable) {
+		t.Fatal(err)
+	}
+	if _, err := s.Refund(ctx, finance, request(1000)); !errors.Is(err, ErrStaffConflict) || gateway.creates != 1 {
+		t.Fatal("second refund authorized while the first is unsettled", err, gateway.creates)
 	}
 }
