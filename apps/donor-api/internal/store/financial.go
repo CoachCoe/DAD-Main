@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"maps"
 	"math"
@@ -170,15 +171,27 @@ type projection struct {
 // them, so every saved projection is recomputed under the new rules.
 const projectionRules = 1
 
-// maxRefreshInterval bounds the wait for a projection's next time boundary.
-// Facts that change a projection refresh it when they arrive, so this is a
-// backstop, not a schedule.
-const maxRefreshInterval = 30 * 24 * time.Hour
+// A projection waits at most refreshCap for its next time boundary. Facts that
+// change a projection refresh it when they arrive, so this is a backstop, not a
+// schedule.
+const (
+	minRefreshInterval = 25 * 24 * time.Hour
+	maxRefreshInterval = 35 * 24 * time.Hour
+)
+
+// refreshCap is the donor's own wait between minRefreshInterval and
+// maxRefreshInterval, taken from the random part of their ID, so projections
+// computed together, as after a rules version bump, fall due over ten days
+// rather than at once.
+func refreshCap(donor pgtype.UUID) time.Duration {
+	spread := uint64((maxRefreshInterval - minRefreshInterval) / time.Second)
+	return minRefreshInterval + time.Duration(binary.BigEndian.Uint64(donor.Bytes[8:])%spread)*time.Second
+}
 
 // projectFacts recomputes and saves the donor's recognition projection
 // under the donor lock.
 func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (projection, error) {
-	out := queries.SaveProjectionParams{DonorID: id, ComputedAt: timestamp(now), NextRefreshAt: timestamp(now.Add(maxRefreshInterval)), RulesVersion: projectionRules}
+	out := queries.SaveProjectionParams{DonorID: id, ComputedAt: timestamp(now), NextRefreshAt: timestamp(now.Add(refreshCap(id))), RulesVersion: projectionRules}
 	if _, err := q.LockDonor(ctx, id); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}

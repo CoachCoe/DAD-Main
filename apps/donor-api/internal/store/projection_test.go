@@ -367,7 +367,7 @@ func TestProjectionWaitsForItsNextBoundaryAndSummarizesAtNewYear(t *testing.T) {
 	h.gift(recognition.Gift{ID: "june", DonorID: "ana", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid})
 	donor := h.donor("ana")
 	summer := paid.Add(time.Hour)
-	if p, err := projectFacts(ctx, h.q, donor, summer); err != nil || !p.NextRefreshAt.Time.Equal(summer.Add(maxRefreshInterval)) || p.RulesVersion != projectionRules {
+	if p, err := projectFacts(ctx, h.q, donor, summer); err != nil || !p.NextRefreshAt.Time.Equal(summer.Add(refreshCap(donor))) || p.RulesVersion != projectionRules {
 		t.Fatalf("a projection with no boundary ahead waits the full interval: %+v %v", p, err)
 	}
 	newYear := time.Date(2028, 1, 1, 0, 0, 0, 0, recognition.NewYork)
@@ -418,5 +418,22 @@ func TestProjectionsFromEarlierRulesAreRecomputed(t *testing.T) {
 	p, err := queries.New(pool).Projection(ctx, outdated)
 	if err != nil || p.RulesVersion != projectionRules || !p.ComputedAt.Time.Equal(now) {
 		t.Fatalf("outdated projection: %+v %v", p, err)
+	}
+}
+
+func TestRefreshCapsSpreadDonorsComputedTogether(t *testing.T) {
+	days := map[int]int{}
+	for range 10_000 {
+		id := testID(t)
+		wait := refreshCap(id)
+		if wait < minRefreshInterval || wait >= maxRefreshInterval || refreshCap(id) != wait {
+			t.Fatal("cap outside its range or not stable for a donor", wait)
+		}
+		days[int((wait-minRefreshInterval)/(24*time.Hour))]++
+	}
+	for day := range 10 {
+		if days[day] < 800 || days[day] > 1200 {
+			t.Fatal("donors computed together fall due unevenly", days)
+		}
 	}
 }

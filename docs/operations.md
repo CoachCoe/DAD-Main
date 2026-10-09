@@ -312,7 +312,8 @@ and park delivery after five failures. Requesting a replacement invalidates prio
 Projection refresh handles grace expiry, recurring boundaries, permanent recognition,
 and prior-year summaries. A projection is recomputed when facts that change it arrive and
 at its next time boundary: a due date, period end, grace deadline, pause, cancellation,
-refund, or New Year in New York, and at least every 30 days. A release that changes
+refund, or New Year in New York, and at least every 25 to 35 days, a span fixed per
+donor so that projections computed together fall due over ten days. A release that changes
 recognition, or the messages and push intents queued with it, raises `projectionRules` in
 `internal/store/financial.go`; the projection worker then recomputes every older
 projection whenever no projection is due. A donor whose facts cannot be projected is deferred with
