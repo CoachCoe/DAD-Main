@@ -429,7 +429,7 @@ footer a:hover { color: var(--paper); }
 .hero .note { font-size: var(--text-sm); }
 .hero .secondary { color: var(--paper); border-color: var(--ghost-line-dark); }
 .hero .secondary:hover { border-color: var(--paper); }
-.hero .button:focus-visible { outline-color: var(--paper); }
+:is(.header, .hero) .button:focus-visible { outline-color: var(--paper); }
 .heroFacts { padding: var(--space-1) var(--space-5); border: 1px solid var(--dkline); border-radius: var(--radius-card); background: var(--dk-scrim); }
 .heroFacts dl > div { padding: var(--space-4) 0; border-bottom: 1px solid var(--dkline); }
 .heroFacts dl > div:last-child { border-bottom: 0; }
