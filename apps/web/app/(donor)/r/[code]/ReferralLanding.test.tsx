@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import ReferralLanding from "./ReferralLanding";
 
@@ -26,9 +26,12 @@ it("holds a tap made before the referral is saved, rather than losing the attrib
 });
 
 it("never names an earlier first-touch referrer returned by the capture", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ captured: true, public_name: "Earlier Referrer" })));
+  let captured = () => {};
+  const applied = new Promise<void>((resolve) => { captured = resolve; });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => { captured(); return { captured: true, public_name: "Earlier Referrer" }; } }));
   render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
-  await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+  await applied;
+  await act(async () => {});
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sam invited you to DAD");
   expect(screen.queryByText(/Earlier Referrer/)).not.toBeInTheDocument();
 });
