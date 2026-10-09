@@ -87,6 +87,48 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 		t.Fatal("incomplete export not audited", err)
 	}
 }
+func TestReferralExportCarriesTheReferralTypeOnEveryRow(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	actor, admin := staffFixture(t, pool, "ADMIN")
+	referrer, _ := donor(t, pool)
+	kinds := map[string]string{}
+	for _, kind := range []string{"LINK", "IRL"} {
+		referred, _ := donor(t, pool)
+		kinds[referred.String()] = kind
+		mustExec(t, pool, "INSERT INTO donor_metric_projections(id,donor_id,referrer_id,referral_kind,net_minor,computed_at,next_refresh_at) VALUES($1,$2,$3,$4,3000,now(),now())",
+			testID(t), referred, referrer, kind)
+	}
+	var body bytes.Buffer
+	if err := (&StaffService{DB: as(t, dbroles.API)}).Export(ctx, admin, "referrals", &body); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := csv.NewReader(&body).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	column := slices.Index(rows[0], "referral_kind")
+	for _, row := range rows[1:] {
+		if row[column] != "LINK" && row[column] != "IRL" {
+			t.Fatalf("referral exported without its type: %v", row)
+		}
+		if want, ok := kinds[row[0]]; ok {
+			if row[column] != want || row[1] != referrer.String() {
+				t.Fatalf("referral exported as %v, want %s from %s", row, want, referrer)
+			}
+			delete(kinds, row[0])
+		}
+	}
+	if len(kinds) != 0 {
+		t.Fatal("referrals missing from export", kinds)
+	}
+	var completed bool
+	var count int
+	if err = pool.QueryRow(ctx, "SELECT (details->>'completed')::bool,(details->>'row_count')::int FROM donor_staff_audit WHERE actor_id=$1 AND action='data.export_finished' AND target='referrals'", actor).Scan(&completed, &count); err != nil || !completed || count != len(rows)-1 {
+		t.Fatal("finished export not audited with its row count", completed, count, err)
+	}
+}
+
 func TestSafeCSVCellNeutralizesTextButNotNumbers(t *testing.T) {
 	for _, c := range []struct {
 		in   any
