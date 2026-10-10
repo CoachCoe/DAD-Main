@@ -82,7 +82,7 @@ it("moves focus to the start of the new page of gifts", async () => {
   render(<GivingPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
   expect(await screen.findByRole("button", { name: "Newer gifts" })).toBeVisible();
-  expect(screen.getByRole("heading", { name: "Gifts" })).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Gifts" })).toHaveFocus());
   expect(screen.getByText(/Refunded \$10\.00/)).toBeVisible();
   expect(fetch.mock.calls[1][0]).toBe("/api/donor/me/gifts?offset=50");
 });
