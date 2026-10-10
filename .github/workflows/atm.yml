@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: CoachCoe/atm
-          ref: 9101335c21e560ab23d6e3f8205bc109047178c5
+          ref: 3d5179a41ada263c554987cf499878b955ff0147
           path: atm
           persist-credentials: false
           token: ${{ secrets.ATM_READ_TOKEN || github.token }}
@@ -98,7 +98,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: CoachCoe/atm
-          ref: 9101335c21e560ab23d6e3f8205bc109047178c5
+          ref: 3d5179a41ada263c554987cf499878b955ff0147
           path: atm
           persist-credentials: false
           token: ${{ secrets.ATM_READ_TOKEN || github.token }}
