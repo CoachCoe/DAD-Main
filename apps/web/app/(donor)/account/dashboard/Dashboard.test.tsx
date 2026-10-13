@@ -10,6 +10,19 @@ function respond(value: unknown) {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => value }));
 }
 
+it("reserves the metric layout without announcing unverified results", async () => {
+  let resolve!: (response: { ok: boolean; json: () => Promise<typeof data> }) => void;
+  vi.stubGlobal("fetch", vi.fn(() => new Promise((done) => { resolve = done; })));
+  const { container } = render(<DashboardPage />);
+  expect(container.querySelectorAll('[aria-hidden="true"] .metricSkeleton')).toHaveLength(5);
+  expect(screen.getByRole("status")).toHaveTextContent("Loading your dashboard");
+  expect(screen.queryByRole("heading", { name: "Link Referrals" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Earned")).not.toBeInTheDocument();
+  resolve({ ok: true, json: async () => data });
+  expect(await screen.findByText("$123.45")).toBeVisible();
+  expect(container.querySelectorAll(".metricSkeleton")).toHaveLength(0);
+});
+
 it("shows the five elements with separate channels and collected-dollar breakdown", async () => {
   respond(data); render(<DashboardPage />);
   expect(await screen.findByRole("heading", { name: "Link Referrals" })).toBeVisible();

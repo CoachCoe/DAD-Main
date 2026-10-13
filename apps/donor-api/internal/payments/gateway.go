@@ -43,8 +43,80 @@ type StaffFinanceGateway interface {
 // read-only, so the daily reconciliation job can diff them against the
 // database without any mutating call. A fake satisfies it in tests.
 type ReconcileGateway interface {
+	ListInvoicePayments(context.Context, string, string) ([]Object, error)
 	ListChargesByCreated(context.Context, time.Time, time.Time) ([]Object, error)
 	ListRefundsByCreated(context.Context, time.Time, time.Time) ([]Object, error)
+	RetrievePaymentIntent(context.Context, string) (Object, error)
+	RetrieveRefund(context.Context, string) (Object, error)
+}
+
+func (g *StripeGateway) ListInvoicePayments(ctx context.Context, invoice, payment string) ([]Object, error) {
+	if (invoice == "") == (payment == "") {
+		return nil, ErrFacts
+	}
+	if err := WaitReconciliationRead(ctx); err != nil {
+		return nil, err
+	}
+	params := &stripe.InvoicePaymentListParams{Status: stripe.String("paid"), ListParams: stripe.ListParams{Limit: stripe.Int64(100)}}
+	if invoice != "" {
+		params.Invoice = stripe.String(invoice)
+	} else {
+		params.Payment = &stripe.InvoicePaymentListPaymentParams{Type: stripe.String("payment_intent"), PaymentIntent: stripe.String(payment)}
+	}
+	page := g.client.V1InvoicePayments.List(ctx, params)
+	if page.Err() != nil {
+		return nil, ErrProcessorUnavailable
+	}
+	raw, err := rawObject(page.LastResponse())
+	if err != nil || !raw.BoolIs("has_more", false) || raw.Absent("data") {
+		return nil, ErrFacts
+	}
+	rows, err := raw.Array("data")
+	if err != nil || len(rows) > 100 {
+		return nil, ErrFacts
+	}
+	for i, row := range rows {
+		if !row.BoolIs("livemode", false) {
+			return nil, ErrFacts
+		}
+		facts := Object{}
+		for _, key := range []string{"id", "invoice", "amount_paid", "currency", "status", "livemode", "created"} {
+			facts[key] = row[key]
+		}
+		payment, err := row.Object("payment")
+		if err != nil || row.Text("invoice") == "" || payment.Text("payment_intent") == "" {
+			return nil, ErrFacts
+		}
+		reference := Object{"type": payment["type"], "payment_intent": payment["payment_intent"]}
+		facts["payment"], err = json.Marshal(reference)
+		if err != nil {
+			return nil, ErrFacts
+		}
+		rows[i] = facts
+	}
+	return rows, nil
+}
+
+// WaitReconciliationRead leaves provider capacity for workers and staff commands.
+func WaitReconciliationRead(ctx context.Context) error {
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func ReconciliationFacts(o Object) Object {
+	out := Object{}
+	for _, key := range []string{"id", "payment_intent", "amount", "amount_captured", "currency", "status", "paid", "captured", "livemode", "created"} {
+		if value, ok := o[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 // StripeGateway calls Stripe in test mode. A failed call is reported as
@@ -249,6 +321,9 @@ func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time,
 	result := []Object{}
 	after := ""
 	for range 100 {
+		if err := WaitReconciliationRead(ctx); err != nil {
+			return nil, err
+		}
 		page := list(ctx, created, after)
 		if page.Err() != nil {
 			return nil, ErrProcessorUnavailable
@@ -266,7 +341,9 @@ func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time,
 				return nil, ErrFacts
 			}
 		}
-		result = append(result, rows...)
+		for _, row := range rows {
+			result = append(result, ReconciliationFacts(row))
+		}
 		if raw.BoolIs("has_more", false) {
 			return result, nil
 		}

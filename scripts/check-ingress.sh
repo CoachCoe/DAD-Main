@@ -118,6 +118,9 @@ EOF
   page() { local h; h="$(headers "$1")"; printf '%s %s' "$(awk 'NR == 1 { print $2 }' <<< "$h")" "$(header content-type "$h")"; }
   check 'public home page is HTML' '200 text/html; charset=utf-8' "$(page https://public.test/)"
   check 'staff sign-in page is HTML' '200 text/html; charset=utf-8' "$(page https://staff.test/staff/sign-in)"
+  for host in public.test staff.test; do
+    check "$host serves the tab icon" '200 image/svg+xml' "$(page "https://$host/icon.svg")"
+  done
   check 'public host hides the staff sign-in page' 404 "$(page https://public.test/staff/sign-in | cut -d' ' -f1)"
   check 'staff host hides public pages' 404 "$(page https://staff.test/how-it-works | cut -d' ' -f1)"
   check 'staff host sends / to the back office' https://staff.test/staff \
@@ -215,10 +218,10 @@ done
 check 'public 404 is JSON' '{"detail":"Not found"}' "$(client https://public.test/staff)"
 body="$(client https://staff.test/)"
 check 'staff host serves /' staff.test "$(field host "$body")"
-for path in /staff /staff/donors/1 /api/donor/staff/me /_next/static/app.js /robots.txt; do
+for path in /staff /staff/donors/1 /api/donor/staff/me /_next/static/app.js /robots.txt /icon.svg; do
   check "staff host serves $path" 200 "$(status "https://staff.test$path")"
 done
-for path in /donate /r/abc /account/sign-in /api/donor/me/profile /api/donor/stripe/webhook /api/donor/staffing; do
+for path in /donate /r/abc /account/sign-in /api/donor/me/profile /api/donor/stripe/webhook /api/donor/staffing /icon.svg/extra; do
   check "staff host hides $path" 404 "$(status "https://staff.test$path")"
 done
 check 'staff host is not indexed, with one header' 'noindex, nofollow' \

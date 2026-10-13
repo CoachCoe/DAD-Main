@@ -72,7 +72,7 @@ export default function PauseGiving() {
           </div>
         </div>}
       </>}
-      <p className="note">Your streak ends at the first skipped renewal. Your Founding Donor badge stays yours.
+      <p className="note">Your streak is frozen during a pause of up to three months and continues when giving resumes. Your Founding Donor badge stays yours.
         Pausing does not refund gifts or forgive an outstanding invoice. Sandbox only: these controls affect test subscriptions.</p>
       <Announcer status={messages.status || message} alert={error || messages.alert} />
       {(failed || error) && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh pause dates</button>}

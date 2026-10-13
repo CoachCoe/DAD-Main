@@ -118,6 +118,9 @@ Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURE
 
 Some migrations and releases need more:
 
+- The release that binds donor passkey registration to its originating session rejects
+  registrations started on an older image. These challenges last five minutes; donors
+  can restart registration after the upgrade. Existing passkeys and sessions still work.
 - `0007_staff_passkeys` replaces staff passwords and authenticator codes with passkeys.
   It deletes the old credentials and ends every staff session and open invitation, so
   every staff member enrols again: run break-glass recovery
@@ -129,6 +132,8 @@ Some migrations and releases need more:
 - `0009_subscription_sync` adds the billing anchor that dates paused renewals. A
   subscription synced before it shows no anchor until the Stripe worker next syncs it, so
   start the workers promptly after `up`.
+- `0015_pending_refund_reconciliation` indexes unsettled refunds for bounded batch reads.
+  Index creation blocks refund writes; migrate at a quiet time on a large database.
 - The release that introduces [database roles](#database-roles) runs each process as its
   own login, and the processes refuse to start as the schema owner. Before step 2, create
   `.env.database` from `.env.database.example`: move `POSTGRES_USER`, `POSTGRES_PASSWORD`,
@@ -303,19 +308,42 @@ recorded.
 - **Schedule.** Run it ~00:30 America/New_York, once yesterday's New York calendar day has
   closed. New York is the system's authoritative civil-time zone, so the day finance reasons
   about and the day the job reconciles are the same. The NY-day bounds are converted to a UTC
-  `created` range for Stripe and a `paid_at`/`observed_at` range for the database.
-- **Grace margin.** `--max-lag` (default 30m) keeps a charge or refund created in the last
-  30 minutes of the window from being flagged as missing, so a webhook still legitimately
-  in flight is not mistaken for a lost one. A dropped event is the signal, not a late one.
+  `created` range for Stripe. Database rows match by processor ID across day boundaries;
+  local `paid_at`/`observed_at` rows also receive a reverse provider check when needed.
+  Older pending or action-required refunds are checked daily until their terminal status
+  is recorded, so a dropped status-update event cannot leave them unsettled indefinitely.
+- **Processing delay.** `--max-lag` (default 30m) requires waiting until the window's end
+  plus that delay. Earlier runs fail. Once settled, the entire window is checked,
+  including its final 30 minutes; repeating an older day cannot hide a dropped event.
 - **Scope.** R1 reconciles charges and refunds only. Invoices, billing periods and
   subscriptions are a phase-2 concern and are deliberately not reconciled yet; the role's
   SELECT grant on `donor_billing_periods` and `donor_billing_observations` leaves the seam.
 - **Output and alarm.** The job prints one aggregate JSON object — counts per discrepancy
   class (`missing_gifts`, `missing_refunds`, `amount_mismatches`, `status_mismatches`,
-  `db_without_stripe`), the window, and ids only, never donor identifiers or payloads — and
+  `db_without_stripe`, `currency_mismatches`, `invalid_objects`), the window, and ids only,
+  never donor identifiers or payloads — and
   exits non-zero when any discrepancy count is greater than zero, so a CloudWatch alarm fires
   on the exit code. A clean day prints the JSON and exits 0. It holds no state and writes no
-  report, so a re-run of the same day is safe and deterministic.
+  report, so a re-run is safe and compares the latest available processor and database
+  state. Failed and uncollected charges do not require gifts. Captured amounts, currency,
+  and refund statuses must agree; malformed facts cannot produce a clean verdict.
+- **Bounds and account scope.** Window records are limited to 10,000 per side; exceeding
+  that fails, so use smaller explicit `--since`/`--until` ranges. Older unsettled refunds
+  are read in pages of 100, up to 100,000 records, with full discrepancy counts and
+  bounded identifier lists. The report includes `pending_refunds_checked` and
+  `pending_refund_batches` for these additional reads. The default job deadline remains
+  60 seconds; use `--timeout 15m` for a large backlog (allowed range 1s to 1h).
+  Deadline or provider failure produces a nonzero exit and no partial verdict.
+  Reads are sequential with a 100 ms pause before each provider request, leaving capacity
+  for workers and staff. A longer run holds a read-only snapshot, so schedule backlog
+  checks away from peak traffic and monitor database transaction age.
+  The job audits the entire configured Stripe test account. Unrelated collected payments
+  in a shared account are flagged too; use a dedicated account for DAD acceptance.
+  For legacy invoice gifts missing a PaymentIntent ID, the job uses Stripe's read-only
+  Invoice Payments API to prove the link in either direction, including across day
+  boundaries. It does not backfill or alter the stored gift. A missing proof is flagged;
+  multiple payments, partial allocations, unsupported payment types, or truncated lists
+  fail for operator review. The configured test key needs Invoice Payments read access.
 - **Read-only.** The job is strictly read-only against both Stripe (List/Retrieve only) and
   the database (its `dad_reconcile` role has SELECT alone). It never repairs, deletes or
   writes any financial fact.

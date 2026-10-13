@@ -109,3 +109,43 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 		t.Fatalf("missing history: %+v %v", late, err)
 	}
 }
+
+func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	q := queries.New(tx)
+	donor, checkout, attempt := testID(t), testID(t), testID(t)
+	jan := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	feb, apr, jun := jan.AddDate(0, 1, 0), jan.AddDate(0, 3, 0), jan.AddDate(0, 5, 0)
+	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", donor, donor.String()+"@example.org")
+	mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES($1,$2,3000,'MONTHLY')", checkout, donor)
+	mustExec(t, tx, "INSERT INTO donor_stripe_checkouts(id,checkout_id,request_hash,request_params,status) VALUES($1,$2,$3,'{}','COMPLETE')", attempt, checkout, attempt.String())
+	mustExec(t, tx, "INSERT INTO donor_subscriptions(id,attempt_id,donor_id,status,period_end,observed_at) VALUES($1,$2,$3,'active',$4,$5)", testID(t), attempt, donor, jun, apr)
+	mustExec(t, tx, "INSERT INTO donor_pauses(id,donor_id,attempt_id,months,starts_at,resumes_at,confirmed_at) VALUES($1,$2,$3,2,$4,$5,$4)", testID(t), donor, attempt, feb, apr)
+	var refundedGift pgtype.UUID
+	for i, due := range []time.Time{jan, apr, apr.AddDate(0, 1, 0)} {
+		period, gift := testID(t), testID(t)
+		mustExec(t, tx, "INSERT INTO donor_billing_periods(id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status) VALUES($1,$2,$3,$4,'sub_paused',$5,$6,'PAID')", period, donor, checkout, "in_"+period.String(), due, due.AddDate(0, 1, 0))
+		mustExec(t, tx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,period_id) VALUES($1,$2,$3,$4,3000,'USD','MONTHLY',$5,$6)", gift, donor, checkout, "in_"+period.String(), due, period)
+		if i == 1 {
+			refundedGift = gift
+		}
+	}
+	observed := jun.Add(-time.Hour)
+	refund := testID(t)
+	mustExec(t, tx, "INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,3000,'USD','SUCCEEDED',$4)", refund, refundedGift, "re_"+refund.String(), observed)
+	got, err := projectFacts(ctx, q, donor, observed)
+	if err != nil || !got.CurrentStreak.Valid || got.CurrentStreak.Int32 != 1 || got.BestStreak != 3 {
+		t.Fatal("projection lost the attained best across a pause", got, err)
+	}
+	mustExec(t, tx, "UPDATE donor_subscriptions SET stops_at=$2 WHERE donor_id=$1", donor, jun)
+	got, err = projectFacts(ctx, q, donor, jun)
+	if err != nil || !got.CurrentStreak.Valid || got.CurrentStreak.Int32 != 0 || got.BestStreak != 3 {
+		t.Fatal("later cancellation changed the historical pause", got, err)
+	}
+}

@@ -9,6 +9,13 @@ import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { formatDateTime } from "@/lib/dates";
 
+function LoadingMetric({ title, children, detail = false }: { title: string; children: React.ReactNode; detail?: boolean }) {
+  return <article className="metric"><h2>{title}</h2>
+    <p className="metricValue"><span className="metricSkeleton" /></p><p>{children}</p>
+    {detail && <p className="metricSkeletonDetail"><span>View Link and IRL breakdown</span><span>+</span></p>}
+  </article>;
+}
+
 export default function Dashboard() {
   const { resource, data, failed, reload } = useApiResource<Schema<"DonorDashboard">>("/donor/me/dashboard");
   const messages = resourceMessages(resource, { loading: "Loading your dashboard…",
@@ -19,6 +26,17 @@ export default function Dashboard() {
   return <Page wide eyebrow="My account" title="Your circle’s impact">
     <p className="note">DAD launches in April 2027. This preview shows test payments and simulated recognition only.</p>
     {resource.state === "signedOut" ? <SignInPrompt>Sign in to view your dashboard</SignInPrompt> : <>
+      {(resource.state === "loading" || data?.state === "preparing") && <>
+        <div className="metrics pair" aria-hidden="true">
+          <LoadingMetric title="Link Referrals">People who gave after opening your link.</LoadingMetric>
+          <LoadingMetric title="IRL Referrals">People who gave after scanning your code.</LoadingMetric>
+        </div>
+        <div className="metrics" aria-hidden="true">
+          <LoadingMetric title="Money raised because of you" detail>Collected test gifts after successful refunds.</LoadingMetric>
+          <LoadingMetric title="Giving streak">Consecutive months with a successful monthly gift. One-time gifts don’t change it.</LoadingMetric>
+          <LoadingMetric title="Recognition"><span className="metricSkeletonCopy">Your first gift came before launch. The badge is permanent. Sandbox recognition only.</span></LoadingMetric>
+        </div>
+      </>}
       {data?.state === "ready" && <>
         {data.streak?.at_risk && <div className="callout warn">
           <p>Your streak is at risk: your latest monthly payment didn’t go through.
@@ -50,7 +68,7 @@ export default function Dashboard() {
         </div>
         {!data.founding_donor && <p className="note">Founding Donor badge: not yet earned. A first gift completed before DAD launches on 22 April 2027 earns it permanently.</p>}
       </>}
-      <Announcer status={messages.status || updating} alert={messages.alert} />
+      <Announcer status={messages.status || updating} alert={messages.alert} statusShownElsewhere={resource.state === "loading"} />
       {(failed || updating) && <button type="button" className="secondary" onClick={reload}>Refresh dashboard</button>}
       <nav aria-label="Account" className="links">
         <Link href="/account/share">Share and invite</Link>

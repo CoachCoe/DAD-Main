@@ -79,9 +79,12 @@ likewise keeps the current count, not at risk, for those 14 days; after that the
 is unknown until the facts arrive. Later recovery starts at one. Retain the
 historical best. A cancellation ends continuity at the first skipped renewal, not
 immediately. A deliberate donor-initiated pause instead freezes the streak for up to
-three months from the pause: a renewal skipped by the pause within that window neither
+three calendar months from the pause, using the billing anniversary or the last day of
+the target month: a renewal skipped by the pause within that window neither
 resets the streak nor marks it at risk, and a resumption inside the window continues the
-streak from where it was. Only after the three-month cap does normal lapse behavior
+streak from where it was. A renewal due on the resume date gets the usual 14-day grace;
+skipped renewals do not increase the count. Cancellation during a pause still ends
+continuity at its confirmed stopping date. Only after the three-month cap does normal lapse behavior
 resume. Amount changes do not break continuity. Partial refunds retain
 the period if recurring funds remain; full refunds disqualify it unless another qualifying
 recurring payment covers it. Recalculate subsequent continuity rather than erasing every

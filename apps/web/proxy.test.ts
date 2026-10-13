@@ -73,6 +73,7 @@ describe("hosts", () => {
   it.each([
     [`${staff}/staff`, "served"], [`${staff}/staff/sign-in`, "served"], [`${staff}/staff/donors/abc`, "served"],
     [`${staff}/api/donor/staff/me`, "served"], [`${staff}/api/donor/staff/sign-in/options`, "served"], [`${staff}/_next/data/build/staff.json`, "served"],
+    [`${staff}/icon.svg?v=1`, "served"], [`${staff}/icon.svg/extra`, "staff not found"], [`${site}/icon.svg`, "served"],
     [`${staff}/`, `redirect ${staff}/staff`], [`${staff}/ledger`, "staff not found"], [`${staff}/account/dashboard`, "staff not found"], [`${staff}/Staff/sign-in`, "staff not found"],
     [`${staff}/api/donor/me`, "404"], [`${staff}/api/donor/stripe/webhook`, "404"],
     [`${site}/`, "served"], [`${site}/account/dashboard`, "served"], [`${site}/api/donor/me`, "served"],

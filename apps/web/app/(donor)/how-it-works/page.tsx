@@ -16,7 +16,7 @@ export default function HowItWorks() {
     <p>After giving, claim your account to share your personal link or show your referral code on your phone. A Link Referral begins with a shared link; an IRL Referral begins when someone scans your code. Your dashboard counts them separately, once a first gift completes.</p>
     <p>Your circle includes only people you personally refer. Attributed dollars reflect money actually collected, less successful refunds.</p>
     <h2>Streaks and recognition</h2>
-    <p>Successful monthly gifts build your streak; one-time gifts contribute money but do not. A failed payment has a recovery grace period before a streak resets.</p>
+    <p>Successful monthly gifts build your streak; one-time gifts contribute money but do not. A failed renewal has 14 days to recover before your active streak resets. Pausing for up to three months freezes your streak; it continues when monthly giving resumes. Cancellation ends it at the first skipped renewal. Your historical best stays recorded.</p>
     <p>DAD launches on 22 April 2027. A first gift completed before launch earns a permanent Founding Donor badge.</p>
     <h2>Clear records, honest limits</h2>
     <p>The impact ledger is updated by staff on a stated cadence. Figures carry an as-of date, illustrative figures are labeled, and reported figures cite a source document.</p>

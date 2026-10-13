@@ -113,7 +113,7 @@ make test
 make lint
 make check-ingress smoke-ingress check-images
 (cd apps/web && npx playwright install chromium)
-make test-browser-e2e
+DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" make test-browser-e2e
 ```
 
 Browser tests run against `next dev` by default; set `E2E_PRODUCTION=1` to run them
@@ -126,12 +126,16 @@ with `cmd/staff`, so point `DONOR_GO_DATABASE_URL` at a synthetic database.
 
 `make test` checks Go formatting, vet, race-enabled tests, compilation, frontend lint,
 unit tests, generated route types, TypeScript, and the production build. Browser tests
-start a local Go API and Next server. Use a synthetic application database and no live
+start a local Go API and Next server on 127.0.0.1:8002 and 127.0.0.1:3000, with matching
+origins regardless of the local application's origin settings. They require a database
+named `donor_go` and refuse the application database. Stop any running `make api` as
+well as `make web` before testing, so a test cannot reuse an application server.
+Use a synthetic application database and no live
 SMTP settings for those tests. `make lint` runs staticcheck, govulncheck, `npm audit`, and
 shellcheck when installed. `make check-ingress` runs `nginx -t` on the production ingress
 in both modes; `make smoke-ingress` checks its hosts, client addresses, body sizes, and
 rate limits in front of a stub web service; `make check-images` builds both production
-images and serves the web image through nginx. CI runs all of these through the same
+images, verifies the deployment commands are included, and serves the web image through nginx. CI runs all of these through the same
 `make` targets, with PostgreSQL and Chromium, and also validates the production Compose
 file. CI runs browser tests in both development and production modes. `npm start` serves
 the standalone build and copies its static assets first, matching the container's server.
@@ -170,7 +174,7 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 
 ## Layout
 
-- `apps/donor-api/cmd`: API, workers, migrations, database login provisioning, administrator bootstrap, monitoring, key rotation, load-test seeding and load testing.
+- `apps/donor-api/cmd`: API, workers, migrations, database login provisioning, administrator bootstrap, monitoring, reconciliation, key rotation, load-test seeding and load testing.
 - `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, push, credentials.
 - `apps/donor-api/db`: versioned SQL migrations and sqlc queries.
 - `apps/donor-api/api`: the OpenAPI contract for web and native clients, checked by tests.

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { Page } from "@playwright/test";
-import { databaseAs } from "./database";
+import { databaseAs } from "../test-support/database";
 
 /** The back office has its own host; browsers resolve every *.localhost name to loopback. */
 export const staffOrigin = process.env.DONOR_STAFF_ORIGIN ?? "http://staff.localhost:3000";

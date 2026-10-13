@@ -42,6 +42,8 @@ it("retains the private invitation through StrictMode effect replay, clears the 
 
 it("creates a passkey and finishes activation with the same ceremony", async () => {
   window.history.replaceState(null, "", "/staff/activate#token=kept-invitation");
+  const assign = vi.fn();
+  vi.stubGlobal("location", { ...window.location, assign });
   const create = browser();
   const fetch = vi.fn(async (url: string) => url.endsWith("/options") ? invitation("ceremony-1") : new Response(JSON.stringify({ activated: true }), { status: 200 }));
   vi.stubGlobal("fetch", fetch);
@@ -52,6 +54,7 @@ it("creates a passkey and finishes activation with the same ceremony", async () 
   expect(fetch.mock.calls[1][0]).toBe("/api/donor/staff/activate");
   expect(JSON.parse((fetch.mock.calls[1] as unknown as [string, RequestInit])[1].body as string)).toEqual({ ceremony: "ceremony-1", credential: { id: "new-passkey", type: "public-key" } });
   expect(sessionStorage.length).toBe(0);
+  await vi.waitFor(() => expect(assign).toHaveBeenCalledWith("/staff"));
 });
 
 it("lets the person retry after cancelling, and replaces a ceremony the server refused", async () => {

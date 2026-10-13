@@ -90,7 +90,7 @@ func TestReplayMatchesExhaustiveHistory(t *testing.T) {
 		random.Shuffle(len(refunds), func(i, j int) { refunds[i], refunds[j] = refunds[j], refunds[i] })
 		for _, previous := range []int64{0, 3, 24} {
 			want := exhaustiveBest(h, refunds, now, previous)
-			got, err := replayBest(context.Background(), "donor", h, refunds, now, previous)
+			got, err := replayBest(context.Background(), "donor", h, refunds, now, previous, nil, nil)
 			if err != nil || got != want {
 				t.Fatalf("case %d prior %d: got %d, want %d: %v", i, previous, got, want, err)
 			}
@@ -102,7 +102,7 @@ func TestReplayHonorsCancellation(t *testing.T) {
 	h, r, now := replayFixture(120, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := replayBest(ctx, "donor", h, r, now, 120); !errors.Is(err, context.Canceled) {
+	if _, err := replayBest(ctx, "donor", h, r, now, 120, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 }
@@ -112,11 +112,23 @@ func BenchmarkHistoricalBest(b *testing.B) {
 	for _, previous := range []int64{0, 120} {
 		b.Run(fmt.Sprintf("prior-%d", previous), func(b *testing.B) {
 			for b.Loop() {
-				got, err := replayBest(context.Background(), "donor", h, r, now, previous)
+				got, err := replayBest(context.Background(), "donor", h, r, now, previous, nil, nil)
 				if err != nil || got != 120 {
 					b.Fatal(got, err)
 				}
 			}
 		})
+	}
+}
+
+func TestReplayKeepsBestAcrossPauseBeforeAFullRefund(t *testing.T) {
+	h, _, now := replayFixture(5, nil)
+	pauses := []recognition.Pause{{Start: h.Periods[0].EndsAt, End: h.Periods[3].DueAt}}
+	h.Periods = append(h.Periods[:1:1], h.Periods[3:]...)
+	h.Gifts = append(h.Gifts[:1:1], h.Gifts[3:]...)
+	r := recognition.Refund{ID: "refund", GiftID: h.Gifts[1].ID, Amount: 3000, Currency: "USD", Status: "SUCCEEDED", UpdatedAt: now}
+	got, err := replayBest(context.Background(), "donor", h, []recognition.Refund{r}, now, 0, nil, pauses)
+	if err != nil || got != 3 {
+		t.Fatal("refund erased the pre-refund best across a pause", got, err)
 	}
 }
