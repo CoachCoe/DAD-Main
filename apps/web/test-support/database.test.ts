@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
-import { databaseAs } from "./e2e/database";
+import { databaseAs } from "./database";
 
 afterEach(() => vi.unstubAllEnvs());
 

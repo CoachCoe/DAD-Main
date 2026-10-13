@@ -1,5 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
-import { databaseAs } from "./e2e/database";
+import { databaseAs } from "./test-support/database";
 import { staffOrigin } from "./e2e/staff";
 
 // E2E_PRODUCTION=1 runs the suite against an optimized build instead of the dev server,
