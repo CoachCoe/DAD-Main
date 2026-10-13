@@ -10,11 +10,12 @@ LOAD_MIX ?=
 LOAD_ORIGIN ?= http://localhost:3000
 LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -origin "$(LOAD_ORIGIN)" -client-ips
 
-.PHONY: install db-up migrate provision api donor-go web dev worker reconcile test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
+.PHONY: install db-up migrate provision api donor-go web dev worker reconcile test test-api test-donor-go test-web test-ledger test-browser-e2e lint lint-go lint-web lint-ledger lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 
 install:
 	cd apps/donor-api && go mod download
 	cd apps/web && npm ci
+	cd apps/atm-ledger && npm ci
 
 db-up:
 	docker compose up -d --wait postgres
@@ -48,7 +49,7 @@ check-generated: generate
 	@test -z "$$(git status --porcelain -- $(GENERATED))" || \
 		{ git status --porcelain -- $(GENERATED); echo "Generated code differs from its sources; run make generate and commit the result." >&2; exit 1; }
 
-test: test-donor-go test-web
+test: test-donor-go test-web test-ledger
 
 test-api test-donor-go:
 	cd apps/donor-api && test -z "$$(gofmt -l .)" && go vet ./... && go test -race ./... && go build ./...
@@ -59,7 +60,14 @@ test-web:
 test-browser-e2e:
 	cd apps/web && npm run test:e2e
 
-lint: lint-go lint-web lint-scripts
+test-ledger:
+	cd apps/atm-ledger && npm run typecheck && npm test && npm run build
+	node --test scripts/atm-ledger.test.mjs
+
+lint: lint-go lint-web lint-ledger lint-scripts
+
+lint-ledger:
+	cd apps/atm-ledger && npm run lint && npm audit --audit-level=high
 
 # staticcheck is pinned in apps/donor-api/tools/go.mod with a newer x/tools than its
 # release requires, which is what reads the export data of the Go release CI uses.

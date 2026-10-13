@@ -1,6 +1,7 @@
 .git
 .github
 .claude
+.worktrees
 docs
 *.log
 **/*.log

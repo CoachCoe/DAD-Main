@@ -6,6 +6,30 @@ on:
   push:
     branches: [dev, main]
   workflow_dispatch:
+    inputs:
+      ledger_operation:
+        description: Ledger operation (administrative operations require an authorized owner)
+        type: choice
+        options: [validate, migrate, triage, history, recover]
+        default: validate
+      finding:
+        type: string
+        description: Finding ID for audited triage
+      severity:
+        type: choice
+        options: [unassessed, low, medium, high, critical]
+        default: medium
+      disposition:
+        type: choice
+        options: [untriaged, confirmed, resolved, dismissed]
+        default: resolved
+      note_digest:
+        type: string
+        description: SHA-256 of the retained private review note (never its contents)
+
+env:
+  ATM_LEDGER_URL: ${{ vars.ATM_LEDGER_URL }}
+  ATM_LEDGER_BACKEND: ${{ vars.ATM_LEDGER_BACKEND || 'git' }}
 
 permissions:
   contents: read
@@ -18,10 +42,16 @@ concurrency:
 jobs:
   validate:
     if: >-
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
-      (github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'))
+      vars.ATM_LEDGER_BACKEND != 'paused' &&
+      (github.event_name != 'workflow_dispatch' || inputs.ledger_operation == 'validate') &&
+      ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')))
     runs-on: ubuntu-24.04
     timeout-minutes: 100
+    permissions:
+      contents: read
+      id-token: write
+    environment: atm-ledger-reader
     outputs:
       revision: ${{ steps.candidate.outputs.revision }}
       artifact_id: ${{ steps.evidence.outputs.artifact-id }}
@@ -47,6 +77,7 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.ATM_READ_TOKEN || github.token }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: vars.ATM_LEDGER_BACKEND != 'durable'
         with:
           ref: atm-state
           path: state
@@ -58,6 +89,12 @@ jobs:
         working-directory: atm
       - run: npx playwright install --with-deps chromium
         working-directory: atm
+      - name: Read durable ledger snapshot
+        if: vars.ATM_LEDGER_BACKEND == 'durable'
+        run: |
+          node candidate/scripts/atm-ledger.mjs snapshot state atm
+          mkdir -p "$RUNNER_TEMP/atm"
+          cp state/snapshot.json "$RUNNER_TEMP/atm/snapshot.json"
       - name: Validate isolated candidate
         env:
           CANDIDATE: ${{ steps.candidate.outputs.revision }}
@@ -80,6 +117,7 @@ jobs:
           path: |
             ${{ runner.temp }}/atm/evidence.atm
             ${{ runner.temp }}/atm/proposal.json
+            ${{ runner.temp }}/atm/snapshot.json
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
@@ -91,6 +129,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      id-token: write
+    environment: atm-ledger-publisher
     outputs:
       verdict: ${{ steps.publish.outputs.verdict }}
     steps:
@@ -103,9 +143,16 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.ATM_READ_TOKEN || github.token }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: vars.ATM_LEDGER_BACKEND != 'durable'
         with:
           ref: atm-state
           path: state
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: vars.ATM_LEDGER_BACKEND == 'durable'
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -122,7 +169,12 @@ jobs:
           EXECUTION: ${{ github.run_id }}:${{ github.run_attempt }}
           ARTIFACT_ID: ${{ needs.validate.outputs.artifact_id }}
           ARTIFACT_DIGEST: ${{ needs.validate.outputs.artifact_digest }}
+          ATM_PROPOSAL_DIR: proposal
         run: |
+          if [ "$ATM_LEDGER_BACKEND" = durable ]; then
+            node control/scripts/atm-ledger.mjs publish proposal atm
+            exit
+          fi
           node atm/scripts/github-ci.js publish \
             --source "$SOURCE" --execution "$EXECUTION" --revision "$CANDIDATE" \
             --state state/ledger.json --proposal proposal/proposal.json \
@@ -140,7 +192,7 @@ jobs:
   acceptance:
     name: ATM acceptance
     needs: [validate, persist]
-    if: ${{ always() }}
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.ledger_operation == 'validate') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
@@ -155,3 +207,50 @@ jobs:
           test "$PERSISTENCE" = success
           test "$VERDICT" = eligible
           echo 'ATM acceptance passed. This does not authorize production deployment.'
+
+  ledger-admin:
+    if: github.event_name == 'workflow_dispatch' && inputs.ledger_operation != 'validate'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: atm-ledger-admin
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: control
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: CoachCoe/atm
+          ref: 3d5179a41ada263c554987cf499878b955ff0147
+          path: atm
+          persist-credentials: false
+          token: ${{ secrets.ATM_READ_TOKEN || github.token }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - name: Perform authorized ledger operation
+        env:
+          OPERATION: ${{ inputs.ledger_operation }}
+          ATM_FINDING: ${{ inputs.finding }}
+          ATM_SEVERITY: ${{ inputs.severity }}
+          ATM_DISPOSITION: ${{ inputs.disposition }}
+          ATM_NOTE_DIGEST: ${{ inputs.note_digest }}
+          ATM_LEGACY_REPO: control
+        run: |
+          if [ "$OPERATION" = migrate ]; then
+            export ATM_LEGACY_REVISION
+            ATM_LEGACY_REVISION="$(git -C control rev-parse origin/atm-state)"
+          fi
+          node control/scripts/atm-ledger.mjs "$OPERATION" "$RUNNER_TEMP/ledger-operation" atm
+      - name: Retain verified history export
+        if: inputs.ledger_operation == 'history'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: atm-ledger-history-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ledger-operation/history.json
+          if-no-files-found: error
