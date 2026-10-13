@@ -48,6 +48,20 @@ SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
 WHERE p.rules_version<$1 AND p.computed_at<=$2
 LIMIT 1 FOR UPDATE OF d SKIP LOCKED;
 
+-- name: DueProjectionDonors :many
+-- Batch claim of the due-soonest donors; LIMIT bounds one step's work so
+-- replicas claim disjoint donors and scale linearly instead of one per txn.
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.next_refresh_at<=$1 ORDER BY p.next_refresh_at
+LIMIT sqlc.arg(batch)::int FOR UPDATE OF d SKIP LOCKED;
+
+-- name: OutdatedProjectionDonors :many
+-- Batch claim of donors computed under earlier rules; LIMIT bounds one step's
+-- work so replicas claim disjoint donors and scale linearly.
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.rules_version<$1 AND p.computed_at<=$2
+LIMIT sqlc.arg(batch)::int FOR UPDATE OF d SKIP LOCKED;
+
 -- name: SeedProjection :exec
 INSERT INTO donor_metric_projections (id,donor_id,computed_at,next_refresh_at)
 VALUES ($1,$2,$3,$3) ON CONFLICT (donor_id) DO NOTHING;

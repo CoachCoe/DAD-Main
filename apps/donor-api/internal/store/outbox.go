@@ -44,39 +44,62 @@ func refreshProjection(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.
 	return result, queuePushIntents(ctx, q, result, now)
 }
 
+// ProjectionBatch bounds how many due donors one RefreshDueProjections step
+// claims. It is large enough to amortize transaction round trips across a
+// backlog, small enough to keep one transaction's FOR UPDATE lock set and step
+// time well within the worker's StepBudget.
+const ProjectionBatch = 64
+
 // RefreshNextProjection refreshes the donor whose projection is due soonest,
-// or else one computed under earlier rules. A donor whose facts cannot be
-// projected is deferred with backoff and its failure recorded for the monitor,
-// so it cannot hold up every other donor.
+// or else one computed under earlier rules. It is a thin wrapper over
+// RefreshDueProjections for callers that advance the queue one donor at a time.
 func RefreshNextProjection(ctx context.Context, pool *pgxpool.Pool, now time.Time) (bool, error) {
-	worked := false
+	n, err := RefreshDueProjections(ctx, pool, now, 1)
+	return n > 0, err
+}
+
+// RefreshDueProjections claims up to batch donors whose projections are due
+// soonest, or else donors computed under earlier rules when none are due, and
+// refreshes each in one outer transaction. Every donor is refreshed in its own
+// savepoint, so a donor whose facts cannot be projected is deferred with
+// backoff and its failure recorded for the monitor rather than aborting the
+// batch. It returns the number of donors claimed.
+func RefreshDueProjections(ctx context.Context, pool *pgxpool.Pool, now time.Time, batch int) (int, error) {
+	processed := 0
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		id, err := q.DueProjectionDonor(ctx, timestamp(now))
-		if errors.Is(err, pgx.ErrNoRows) {
-			id, err = q.OutdatedProjectionDonor(ctx, queries.OutdatedProjectionDonorParams{RulesVersion: projectionRules, ComputedAt: timestamp(now)})
-		}
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
+		ids, err := q.DueProjectionDonors(ctx, queries.DueProjectionDonorsParams{NextRefreshAt: timestamp(now), Batch: int32(batch)})
 		if err != nil {
 			return err
 		}
-		worked = true
-		refreshErr := pgx.BeginFunc(ctx, tx, func(work pgx.Tx) error {
-			_, err := refreshProjection(ctx, work, id, now)
-			return err
-		})
-		if refreshErr == nil {
-			return nil
+		if len(ids) == 0 {
+			ids, err = q.OutdatedProjectionDonors(ctx, queries.OutdatedProjectionDonorsParams{RulesVersion: projectionRules, ComputedAt: timestamp(now), Batch: int32(batch)})
+			if err != nil {
+				return err
+			}
 		}
-		category, ok := projectionFailure(refreshErr)
-		if !ok {
-			return refreshErr
+		for _, id := range ids {
+			refreshErr := pgx.BeginFunc(ctx, tx, func(work pgx.Tx) error {
+				_, err := refreshProjection(ctx, work, id, now)
+				return err
+			})
+			if refreshErr != nil {
+				category, ok := projectionFailure(refreshErr)
+				if !ok {
+					return refreshErr
+				}
+				if err := q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: text(category), AsOf: timestamp(now), RulesVersion: projectionRules}); err != nil {
+					return err
+				}
+			}
+			processed++
 		}
-		return q.DeferProjection(ctx, queries.DeferProjectionParams{DonorID: id, RefreshError: text(category), AsOf: timestamp(now), RulesVersion: projectionRules})
+		return nil
 	})
-	return worked && err == nil, err
+	if err != nil {
+		return 0, err
+	}
+	return processed, nil
 }
 
 // projectionFailure classifies errors that retrying cannot fix until the

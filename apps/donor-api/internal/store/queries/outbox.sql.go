@@ -49,6 +49,39 @@ func (q *Queries) DueProjectionDonor(ctx context.Context, nextRefreshAt pgtype.T
 	return id, err
 }
 
+const dueProjectionDonors = `-- name: DueProjectionDonors :many
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.next_refresh_at<=$1 ORDER BY p.next_refresh_at
+LIMIT $2::int FOR UPDATE OF d SKIP LOCKED
+`
+
+type DueProjectionDonorsParams struct {
+	NextRefreshAt pgtype.Timestamptz `json:"next_refresh_at"`
+	Batch         int32              `json:"batch"`
+}
+
+// Batch claim of the due-soonest donors; LIMIT bounds one step's work so
+// replicas claim disjoint donors and scale linearly instead of one per txn.
+func (q *Queries) DueProjectionDonors(ctx context.Context, arg DueProjectionDonorsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, dueProjectionDonors, arg.NextRefreshAt, arg.Batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertFinancialMessage = `-- name: InsertFinancialMessage :exec
 INSERT INTO donor_messages (id,donor_id,kind,dedup_key,context,available_at)
 VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (dedup_key) DO NOTHING
@@ -91,6 +124,40 @@ func (q *Queries) OutdatedProjectionDonor(ctx context.Context, arg OutdatedProje
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const outdatedProjectionDonors = `-- name: OutdatedProjectionDonors :many
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.rules_version<$1 AND p.computed_at<=$2
+LIMIT $3::int FOR UPDATE OF d SKIP LOCKED
+`
+
+type OutdatedProjectionDonorsParams struct {
+	RulesVersion int32              `json:"rules_version"`
+	ComputedAt   pgtype.Timestamptz `json:"computed_at"`
+	Batch        int32              `json:"batch"`
+}
+
+// Batch claim of donors computed under earlier rules; LIMIT bounds one step's
+// work so replicas claim disjoint donors and scale linearly.
+func (q *Queries) OutdatedProjectionDonors(ctx context.Context, arg OutdatedProjectionDonorsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, outdatedProjectionDonors, arg.RulesVersion, arg.ComputedAt, arg.Batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const queueFinancialIntents = `-- name: QueueFinancialIntents :exec
