@@ -31,20 +31,44 @@ WHERE NOT EXISTS(SELECT 1 FROM donor_messages m WHERE m.dedup_key=c.dedup_key)
 ON CONFLICT(dedup_key) DO NOTHING;
 
 -- name: QueueLoginEmail :exec
+-- At most one sign-in link a minute and five an hour per donor, so requests from
+-- many addresses cannot flood an inbox.
 INSERT INTO donor_login_emails (id,donor_id,available_at,created_at,return_path)
 SELECT $1,$2,$3,$3,sqlc.narg(return_path) WHERE NOT EXISTS
-(SELECT 1 FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 minute');
+(SELECT 1 FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 minute')
+AND (SELECT count(*) FROM donor_login_emails WHERE donor_id=$2 AND created_at>$3::timestamptz-interval '1 hour')<5;
 
 -- name: DueProjectionDonor :one
 SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
 WHERE p.next_refresh_at<=$1 ORDER BY p.next_refresh_at
 LIMIT 1 FOR UPDATE OF d SKIP LOCKED;
 
+-- name: OutdatedProjectionDonor :one
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.rules_version<$1 AND p.computed_at<=$2
+LIMIT 1 FOR UPDATE OF d SKIP LOCKED;
+
+-- name: DueProjectionDonors :many
+-- Batch claim of the due-soonest donors; LIMIT bounds one step's work so
+-- replicas claim disjoint donors and scale linearly instead of one per txn.
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.next_refresh_at<=$1 ORDER BY p.next_refresh_at
+LIMIT sqlc.arg(batch)::int FOR UPDATE OF d SKIP LOCKED;
+
+-- name: OutdatedProjectionDonors :many
+-- Batch claim of donors computed under earlier rules; LIMIT bounds one step's
+-- work so replicas claim disjoint donors and scale linearly.
+SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
+WHERE p.rules_version<$1 AND p.computed_at<=$2
+LIMIT sqlc.arg(batch)::int FOR UPDATE OF d SKIP LOCKED;
+
 -- name: SeedProjection :exec
 INSERT INTO donor_metric_projections (id,donor_id,computed_at,next_refresh_at)
 VALUES ($1,$2,$3,$3) ON CONFLICT (donor_id) DO NOTHING;
 
 -- name: DeferProjection :exec
-UPDATE donor_metric_projections SET refresh_failures=refresh_failures+1,refresh_error=$2,
+-- A deferred projection takes the current rules version, so it waits out its
+-- backoff instead of being picked up again at once as outdated.
+UPDATE donor_metric_projections SET refresh_failures=refresh_failures+1,refresh_error=$2,rules_version=sqlc.arg(rules_version),
 next_refresh_at=sqlc.arg(as_of)::timestamptz+least(power(2,refresh_failures)*interval '5 minutes',interval '1 day')
 WHERE donor_id=$1;

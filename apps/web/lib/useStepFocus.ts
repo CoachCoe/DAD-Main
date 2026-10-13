@@ -18,3 +18,14 @@ export function useStepFocus<Trigger extends HTMLElement = HTMLButtonElement>(ac
   }, [active]);
   return { heading, trigger };
 }
+
+/**
+ * When an action succeeds and its control disappears, move focus to the page heading so
+ * keyboard and screen-reader users are not left at the top of the document; the outcome
+ * itself is announced by the page's live region.
+ */
+export function useFocusOnSuccess(succeeded: boolean) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { if (succeeded) heading.current?.focus(); }, [succeeded]);
+  return heading;
+}

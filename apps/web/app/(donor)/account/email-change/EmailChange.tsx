@@ -6,6 +6,7 @@ import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { api, failureMessage, type RequestBody, type ResponseBody } from "@/lib/api";
 import { useHashToken } from "@/lib/useHashToken";
+import { useFocusOnSuccess } from "@/lib/useStepFocus";
 
 const outcomes: Record<string, string> = {
   COMPLETED: "Your email has changed and all devices have been signed out.",
@@ -17,6 +18,7 @@ export default function EmailChange() {
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState("");
   const [error, setError] = useState("");
+  const heading = useFocusOnSuccess(stage !== "");
   async function confirm() {
     if (busy || !proof) return;
     setBusy(true); setError("");
@@ -27,7 +29,7 @@ export default function EmailChange() {
     } catch (cause) { setError(failureMessage(cause, "The change was not confirmed. Please retry in a moment.")); }
     finally { setBusy(false); }
   }
-  return <Page eyebrow="My account" title="Confirm your email change">
+  return <Page eyebrow="My account" title="Confirm your email change" heading={heading}>
     {stage === "COMPLETED" ? <Link className="button" href="/account/sign-in">Sign in using your new address</Link>
       : stage === "NEW" ? null
       : <><p>Continue only if you requested this email change. Both your current and new addresses must be verified. Finishing the change signs out all devices.</p>

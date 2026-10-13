@@ -353,3 +353,195 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 		t.Fatalf("corrected donor not recovered: %+v %v", bad, err)
 	}
 }
+
+func TestRefreshDueProjectionsBatchesDonors(t *testing.T) {
+	pool := database(t)
+	worker := as(t, dbroles.ProjectionWorker)
+	ctx := context.Background()
+	// A historical clock keeps other tests' due projections out of this queue.
+	now := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	due := []pgtype.UUID{testID(t), testID(t), testID(t)}
+	outdated := testID(t)
+	ids := append(append([]pgtype.UUID{}, due...), outdated)
+	t.Cleanup(func() {
+		for _, sql := range []string{
+			"DELETE FROM donor_messages WHERE donor_id=ANY($1)",
+			"DELETE FROM donor_metric_projections WHERE donor_id=ANY($1)",
+			"DELETE FROM donors WHERE id=ANY($1)",
+		} {
+			if _, err := pool.Exec(context.Background(), sql, ids); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	for i, id := range due {
+		mustExec(t, pool, "INSERT INTO donors(id,email,created_at) VALUES($1,$2,$3)", id, id.String()+"@example.org", now)
+		// Staggered next_refresh_at, all in the past, so all are due at now.
+		mustExec(t, pool, "INSERT INTO donor_metric_projections(id,donor_id,computed_at,next_refresh_at) VALUES($1,$2,$3,$4)",
+			testID(t), id, now, now.Add(time.Duration(i-len(due))*time.Hour))
+	}
+	// A donor computed under earlier rules, not yet due, to exercise the fallback.
+	mustExec(t, pool, "INSERT INTO donors(id,email,created_at) VALUES($1,$2,$3)", outdated, outdated.String()+"@example.org", now)
+	mustExec(t, pool, "INSERT INTO donor_metric_projections(id,donor_id,computed_at,next_refresh_at,rules_version) VALUES($1,$2,$3,$4,$5)",
+		testID(t), outdated, now.Add(-24*time.Hour), now.AddDate(0, 6, 0), projectionRules-1)
+
+	// One batch claims and refreshes every due donor.
+	processed, err := RefreshDueProjections(ctx, worker, now, 16)
+	if err != nil || processed != len(due) {
+		t.Fatalf("due batch: processed %d want %d: %v", processed, len(due), err)
+	}
+	q := queries.New(pool)
+	for _, id := range due {
+		p, err := q.Projection(ctx, id)
+		if err != nil || !p.NetMinor.Valid || !p.ComputedAt.Time.Equal(now) || p.RefreshError.Valid {
+			t.Fatalf("due donor not refreshed: %+v %v", p, err)
+		}
+	}
+
+	// With no due donors left, the batch falls back to the outdated donor.
+	processed, err = RefreshDueProjections(ctx, worker, now, 16)
+	if err != nil || processed != 1 {
+		t.Fatalf("outdated fallback: processed %d want 1: %v", processed, err)
+	}
+	o, err := q.Projection(ctx, outdated)
+	if err != nil || o.RulesVersion != projectionRules || !o.ComputedAt.Time.Equal(now) {
+		t.Fatalf("outdated donor not recomputed: %+v %v", o, err)
+	}
+
+	// Nothing left to do.
+	if processed, err = RefreshDueProjections(ctx, worker, now, 16); err != nil || processed != 0 {
+		t.Fatalf("expected an empty batch: processed %d: %v", processed, err)
+	}
+}
+
+func TestRefreshDueProjectionsDefersPoisonedDonorInBatch(t *testing.T) {
+	pool := database(t)
+	worker := as(t, dbroles.ProjectionWorker)
+	ctx := context.Background()
+	// A historical clock keeps other tests' due projections out of this queue.
+	now := time.Date(2000, 1, 2, 0, 0, 0, 0, time.UTC)
+	poisoned, healthy := testID(t), testID(t)
+	checkout, gift := testID(t), testID(t)
+	t.Cleanup(func() {
+		for _, sql := range []string{
+			"DELETE FROM donor_messages WHERE donor_id=ANY($1)",
+			"DELETE FROM donor_refunds WHERE gift_id IN (SELECT id FROM donor_gifts WHERE donor_id=ANY($1))",
+			"DELETE FROM donor_gifts WHERE donor_id=ANY($1)",
+			"DELETE FROM donor_checkouts WHERE donor_id=ANY($1)",
+			"DELETE FROM donor_metric_projections WHERE donor_id=ANY($1)",
+			"DELETE FROM donors WHERE id=ANY($1)",
+		} {
+			if _, err := pool.Exec(context.Background(), sql, []pgtype.UUID{poisoned, healthy}); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	for i, id := range []pgtype.UUID{poisoned, healthy} {
+		mustExec(t, pool, "INSERT INTO donors(id,email,created_at) VALUES($1,$2,$3)", id, id.String()+"@example.org", now)
+		mustExec(t, pool, "INSERT INTO donor_metric_projections(id,donor_id,computed_at,next_refresh_at) VALUES($1,$2,$3,$4)",
+			testID(t), id, now, now.Add(time.Duration(i-2)*time.Hour))
+	}
+	// A succeeded refund larger than its gift cannot be projected.
+	mustExec(t, pool, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')", checkout, poisoned)
+	mustExec(t, pool, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)", gift, poisoned, checkout, "pi_"+gift.String(), now.Add(-48*time.Hour))
+	mustExec(t, pool, "INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,9000,'USD','SUCCEEDED',$4)", testID(t), gift, "re_"+gift.String(), now.Add(-24*time.Hour))
+
+	// One poisoned donor in the batch is deferred; the healthy one still refreshes.
+	processed, err := RefreshDueProjections(ctx, worker, now, 16)
+	if err != nil || processed != 2 {
+		t.Fatalf("batch: processed %d want 2: %v", processed, err)
+	}
+	q := queries.New(pool)
+	bad, err := q.Projection(ctx, poisoned)
+	if err != nil || bad.RefreshFailures != 1 || bad.RefreshError.String != "InvalidFacts" || !bad.NextRefreshAt.Time.Equal(now.Add(5*time.Minute)) || bad.NetMinor.Valid {
+		t.Fatalf("poisoned donor not deferred (unknown, not zero): %+v %v", bad, err)
+	}
+	good, err := q.Projection(ctx, healthy)
+	if err != nil || !good.NetMinor.Valid || !good.ComputedAt.Time.Equal(now) || good.RefreshError.Valid {
+		t.Fatalf("healthy donor blocked by poisoned batch member: %+v %v", good, err)
+	}
+}
+
+func TestProjectionWaitsForItsNextBoundaryAndSummarizesAtNewYear(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	h := newHistoryFixture(t, tx)
+	paid := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
+	h.gift(recognition.Gift{ID: "june", DonorID: "ana", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid})
+	donor := h.donor("ana")
+	summer := paid.Add(time.Hour)
+	if p, err := projectFacts(ctx, h.q, donor, summer); err != nil || !p.NextRefreshAt.Time.Equal(summer.Add(refreshCap(donor))) || p.RulesVersion != projectionRules {
+		t.Fatalf("a projection with no boundary ahead waits the full interval: %+v %v", p, err)
+	}
+	newYear := time.Date(2028, 1, 1, 0, 0, 0, 0, recognition.NewYork)
+	december, err := refreshProjection(ctx, tx, donor, newYear.Add(-10*24*time.Hour))
+	if err != nil || !december.NextRefreshAt.Time.Equal(newYear) {
+		t.Fatalf("New Year is not a boundary: %+v %v", december, err)
+	}
+	summaries := func() int {
+		var n int
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 AND dedup_key=$2", donor, "annual:"+donor.String()+":2027").Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if summaries() != 0 {
+		t.Fatal("2027 summarized before the year ended")
+	}
+	if _, err = refreshProjection(ctx, tx, donor, newYear); err != nil || summaries() != 1 {
+		t.Fatal("2027 not summarized at New Year", err)
+	}
+}
+
+func TestProjectionsFromEarlierRulesAreRecomputed(t *testing.T) {
+	pool := database(t)
+	worker := as(t, dbroles.ProjectionWorker)
+	ctx := context.Background()
+	// A historical clock keeps other tests' projections out of this queue.
+	now := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	outdated, recent := testID(t), testID(t)
+	t.Cleanup(func() {
+		for _, sql := range []string{"DELETE FROM donor_messages WHERE donor_id=ANY($1)", "DELETE FROM donor_metric_projections WHERE donor_id=ANY($1)", "DELETE FROM donors WHERE id=ANY($1)"} {
+			if _, err := pool.Exec(context.Background(), sql, []pgtype.UUID{outdated, recent}); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	for id, computed := range map[pgtype.UUID]time.Time{outdated: now.Add(-24 * time.Hour), recent: now.Add(time.Hour)} {
+		mustExec(t, pool, "INSERT INTO donors(id,email,created_at) VALUES($1,$2,$3)", id, id.String()+"@example.org", now)
+		mustExec(t, pool, "INSERT INTO donor_metric_projections(id,donor_id,computed_at,next_refresh_at,rules_version) VALUES($1,$2,$3,$4,$5)",
+			testID(t), id, computed, now.AddDate(0, 6, 0), projectionRules-1)
+	}
+	if worked, err := RefreshNextProjection(ctx, worker, now); err != nil || !worked {
+		t.Fatal("projection from earlier rules not recomputed", worked, err)
+	}
+	if worked, err := RefreshNextProjection(ctx, worker, now); err != nil || worked {
+		t.Fatal("recomputed twice, or a projection computed after the clock taken", worked, err)
+	}
+	p, err := queries.New(pool).Projection(ctx, outdated)
+	if err != nil || p.RulesVersion != projectionRules || !p.ComputedAt.Time.Equal(now) {
+		t.Fatalf("outdated projection: %+v %v", p, err)
+	}
+}
+
+func TestRefreshCapsSpreadDonorsComputedTogether(t *testing.T) {
+	days := map[int]int{}
+	for range 10_000 {
+		id := testID(t)
+		wait := refreshCap(id)
+		if wait < minRefreshInterval || wait >= maxRefreshInterval || refreshCap(id) != wait {
+			t.Fatal("cap outside its range or not stable for a donor", wait)
+		}
+		days[int((wait-minRefreshInterval)/(24*time.Hour))]++
+	}
+	for day := range 10 {
+		if days[day] < 800 || days[day] > 1200 {
+			t.Fatal("donors computed together fall due unevenly", days)
+		}
+	}
+}

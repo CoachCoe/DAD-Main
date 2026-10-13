@@ -1,4 +1,3 @@
-STATICCHECK := honnef.co/go/tools/cmd/staticcheck@v0.8.1
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
 SQLC := sqlc/sqlc:1.31.1@sha256:70f53171d27b2424e9358869975455a6e955a5aa8e58a998a270a6e34e525537
 GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts
@@ -11,7 +10,7 @@ LOAD_MIX ?=
 LOAD_ORIGIN ?= http://localhost:3000
 LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -origin "$(LOAD_ORIGIN)" -client-ips
 
-.PHONY: install db-up migrate provision api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
+.PHONY: install db-up migrate provision api donor-go web dev worker reconcile test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 
 install:
 	cd apps/donor-api && go mod download
@@ -38,6 +37,9 @@ dev:
 worker:
 	cd apps/donor-api && go run ./cmd/worker --kind "$(KIND)"
 
+reconcile:
+	cd apps/donor-api && go run ./cmd/reconcile $(RECONCILE_ARGS)
+
 generate:
 	docker run --rm -v "$(CURDIR)/apps/donor-api:/src" -w /src $(SQLC) generate
 	cd apps/web && npm run --silent generate:api
@@ -59,8 +61,10 @@ test-browser-e2e:
 
 lint: lint-go lint-web lint-scripts
 
+# staticcheck is pinned in apps/donor-api/tools/go.mod with a newer x/tools than its
+# release requires, which is what reads the export data of the Go release CI uses.
 lint-go:
-	cd apps/donor-api && go run $(STATICCHECK) ./... && go run $(GOVULNCHECK) ./...
+	cd apps/donor-api && go tool -modfile=tools/go.mod staticcheck ./... && go run $(GOVULNCHECK) ./...
 
 lint-web:
 	cd apps/web && npm audit --omit=dev --audit-level=high

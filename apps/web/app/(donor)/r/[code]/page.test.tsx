@@ -2,7 +2,6 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import ReferralPage, { generateMetadata } from "./page";
 
-vi.mock("next/headers", () => ({ headers: async () => new Headers({ "x-ingress-client": "203.0.113.9" }) }));
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 function lookUp(status: number, body: unknown) {
@@ -16,7 +15,6 @@ const props = (code: string, query: Record<string, string> = {}) => ({ params: P
 
 it("names the referrer on the server for the first render and the share preview", async () => {
   vi.stubEnv("DONOR_API_BASE_URL", "http://api.test:8002");
-  vi.stubEnv("DONOR_CLIENT_IP_HEADER", "x-ingress-client");
   const fetch = lookUp(200, { public_name: "Sam" });
   const metadata = await generateMetadata(props("abc"));
   expect(metadata.title).toBe("Sam invited you to DAD");
@@ -26,7 +24,8 @@ it("names the referrer on the server for the first render and the share preview"
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sam invited you to DAD");
   const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
   expect(url).toBe("http://api.test:8002/donor/referrals/abc");
-  expect(new Headers(init.headers).get("x-real-ip")).toBe("203.0.113.9");
+  expect(init.next).toEqual({ revalidate: 60 });
+  expect([...new Headers(init.headers).keys()]).toEqual(["accept"]);
   const capture = fetch.mock.calls.find(([target]) => target.startsWith("/api/")) as unknown as [string, RequestInit];
   expect(JSON.parse(String(capture[1].body))).toEqual({ kind: "IRL" });
 });

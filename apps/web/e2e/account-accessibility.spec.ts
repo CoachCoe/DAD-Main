@@ -17,6 +17,7 @@ const thisBrowser = { id: "0b8e7c52-3f0e-4c8a-9d51-2f1e6a7b8c9d", client: "BROWS
   created_at: "2026-10-01T12:00:00Z", last_used_at: "2026-10-08T12:00:00Z", current: true };
 const phone = { id: "5d2c1b0a-9e8f-4a7b-8c6d-5e4f3a2b1c0d", client: "APP", platform: "IOS", label: "Alex’s iPhone",
   created_at: "2026-09-20T12:00:00Z", last_used_at: "2026-10-07T09:30:00Z", current: false };
+const passkeys = { passkeys: [{ id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", name: "Work laptop", created_at: "2026-09-21T12:00:00Z", last_used_at: null }] };
 
 // These isolate authenticated rendering; Go journey tests exercise real session authorization.
 for (const [path, fixture] of Object.entries(profiles)) {
@@ -25,6 +26,7 @@ for (const [path, fixture] of Object.entries(profiles)) {
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route(`**/api/donor/me/${fixture.endpoint}`, (route) => route.fulfill({ json: fixture.data }));
     await page.route("**/api/donor/me/sessions", (route) => route.fulfill({ json: { sessions: [thisBrowser, phone] } }));
+    await page.route("**/api/donor/me/passkeys", (route) => route.fulfill({ json: passkeys }));
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText(/Loading (your dashboard|profile|your sharing details)/)).toHaveCount(0);
@@ -50,6 +52,7 @@ test("the profile lists where the donor is signed in and signs out another devic
   let revoked = 0;
   await page.route("**/api/donor/me/profile", (route) => route.fulfill({ json: profiles["/account/profile"].data }));
   await page.route("**/api/donor/me/sessions", (route) => route.fulfill({ json: { sessions: [thisBrowser, phone] } }));
+  await page.route("**/api/donor/me/passkeys", (route) => route.fulfill({ json: passkeys }));
   await page.route(`**/api/donor/me/sessions/${phone.id}/revoke`, async (route) => {
     expect(route.request().method()).toBe("POST");
     revoked += 1;

@@ -55,7 +55,13 @@ which the web profile page shows. Only donor account routes admit the app; givin
 on the web.
 Every donor-facing URL is built in `internal/store/links.go`, which is the starting list
 for app/universal links (`/account/claim`, `/account/email-change`,
-`/account/payment-method`, `/r/{code}`). Donor passkeys are not built yet.
+`/account/payment-method`, `/r/{code}`).
+
+Donors may also add passkeys on their profile and sign in with one instead of an email
+link. The relying party is the public host, so a passkey made on the site also signs the
+app in once `/.well-known` names the app (see [operations](operations.md#app-associations));
+the ceremonies mirror staff sign-in under `/donor/passkeys/sign-in` and
+`/donor/me/passkeys/register`, and [security](security.md) describes their rules.
 
 ## App notifications
 

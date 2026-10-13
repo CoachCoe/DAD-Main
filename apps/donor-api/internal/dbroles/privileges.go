@@ -23,7 +23,7 @@ const lock = "SELECT, UPDATE (id)"
 // TestCatalogMatchesTheDeclaration fails until it has one.
 var grants = map[string]map[Role]string{
 	// Every process verifies the migration history at startup.
-	"donor_schema_migrations": {API: "SELECT", StripeWorker: "SELECT", ProjectionWorker: "SELECT", LoginEmailWorker: "SELECT", EmailChangeWorker: "SELECT", MessageWorker: "SELECT", PushWorker: "SELECT", Monitor: "SELECT", StaffCLI: "SELECT", Rekey: "SELECT"},
+	"donor_schema_migrations": {API: "SELECT", StripeWorker: "SELECT", ProjectionWorker: "SELECT", LoginEmailWorker: "SELECT", EmailChangeWorker: "SELECT", MessageWorker: "SELECT", PushWorker: "SELECT", Monitor: "SELECT", StaffCLI: "SELECT", Rekey: "SELECT", ReconcileJob: "SELECT"},
 	"donors":                  {API: "SELECT, INSERT, UPDATE", StripeWorker: lock, ProjectionWorker: lock, LoginEmailWorker: lock, EmailChangeWorker: lock, MessageWorker: lock, PushWorker: lock},
 
 	"donor_sessions":       {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT", ProjectionWorker: "SELECT", PushWorker: "SELECT, UPDATE"},
@@ -37,14 +37,14 @@ var grants = map[string]map[Role]string{
 	"donor_preferences":       {API: "SELECT, INSERT, UPDATE", MessageWorker: "SELECT", PushWorker: "SELECT"},
 	"donor_preference_events": {API: "SELECT, INSERT"},
 
-	"donor_checkouts":              {API: "SELECT, INSERT", StripeWorker: "SELECT", ProjectionWorker: "SELECT"},
+	"donor_checkouts":              {API: "SELECT, INSERT", StripeWorker: "SELECT", ProjectionWorker: "SELECT", ReconcileJob: "SELECT"},
 	"donor_stripe_checkouts":       {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE", MessageWorker: "SELECT", PushWorker: "SELECT"},
-	"donor_stripe_events":          {API: "SELECT, INSERT", StripeWorker: "SELECT, UPDATE", Monitor: "SELECT (attempts, available_at, processed_at)"},
-	"donor_gifts":                  {API: lock, StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT"},
-	"donor_billing_periods":        {API: "SELECT", StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT", PushWorker: "SELECT"},
-	"donor_billing_observations":   {API: "SELECT", StripeWorker: "SELECT, INSERT"},
-	"donor_refunds":                {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT"},
-	"donor_refund_observations":    {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", ProjectionWorker: "SELECT"},
+	"donor_stripe_events":          {API: "SELECT, INSERT", StripeWorker: "SELECT, UPDATE", Monitor: "SELECT (attempts, available_at, processed_at)", ReconcileJob: "SELECT"},
+	"donor_gifts":                  {API: lock, StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT", ReconcileJob: "SELECT"},
+	"donor_billing_periods":        {API: "SELECT", StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT", PushWorker: "SELECT", ReconcileJob: "SELECT"},
+	"donor_billing_observations":   {API: "SELECT", StripeWorker: "SELECT, INSERT", ReconcileJob: "SELECT"},
+	"donor_refunds":                {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT", ReconcileJob: "SELECT"},
+	"donor_refund_observations":    {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", ProjectionWorker: "SELECT", ReconcileJob: "SELECT"},
 	"donor_subscriptions":          {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT", PushWorker: "SELECT", Monitor: "SELECT (observed_at, period_end, status)"},
 	"donor_subscription_leases":    {API: "SELECT, INSERT, UPDATE, DELETE"},
 	"donor_recurring_reservations": {API: "SELECT, INSERT, DELETE", StripeWorker: "SELECT, DELETE"},
@@ -61,6 +61,9 @@ var grants = map[string]map[Role]string{
 		Monitor: "SELECT (attempts, available_at, completed_at)"},
 	"donor_push_notifications": {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", ProjectionWorker: "SELECT, INSERT", PushWorker: "SELECT, UPDATE",
 		Monitor: "SELECT (attempts, available_at, completed_at, expires_at)"},
+
+	"donor_passkeys":   {API: "SELECT, INSERT, UPDATE, DELETE"},
+	"donor_ceremonies": {API: "SELECT, INSERT, DELETE"},
 
 	"donor_staff":                {API: "SELECT, INSERT, UPDATE", StaffCLI: "SELECT, INSERT, UPDATE"},
 	"donor_staff_passkeys":       {API: "SELECT, INSERT, UPDATE, DELETE", StaffCLI: "SELECT, DELETE"},

@@ -121,6 +121,11 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if err != nil {
 		return services, release, err
 	}
+	// A WebAuthn relying party is a domain name, so a public site addressed by
+	// IP, as in CI's browser tests, runs without donor passkeys.
+	publicHost, _ := url.Parse(services.Origin)
+	_, ipErr := netip.ParseAddr(publicHost.Hostname())
+	passkeys := ipErr != nil
 	for _, feature := range []struct {
 		name    string
 		enabled bool
@@ -131,6 +136,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKeys.Configured()},
 		{"iOS app notifications (DONOR_PUSH_APNS_*)", notifications.APNs != nil},
 		{"Android app notifications (DONOR_PUSH_FCM_KEY_FILE)", notifications.FCM != nil},
+		{"donor passkeys (a DONOR_PUBLIC_ORIGIN host name, not an IP address)", passkeys},
 	} {
 		if !feature.enabled {
 			slog.Info("feature disabled until configured", "feature", feature.name)
@@ -162,6 +168,14 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.Dashboard = store.DashboardReader{DB: pool}
 	services.Account = store.AccountService{DB: pool}
 	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
+	if passkeys {
+		donorPasskeys, err := store.NewDonorPasskeyService(pool, services.Origin)
+		if err != nil {
+			pool.Close()
+			return services, release, fmt.Errorf("donor passkeys: %w", err)
+		}
+		services.DonorPasskeys = donorPasskeys
+	}
 	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	services.Push = store.PushService{DB: pool, Platforms: slices.Collect(maps.Keys(notifications.Providers()))}

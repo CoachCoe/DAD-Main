@@ -13,6 +13,7 @@ it("saves app notification choices alongside the email ones", async () => {
   const fetch = vi.fn((url: string, init?: RequestInit) => {
     if (url === "/api/donor/me/profile") return json(profile);
     if (url === "/api/donor/me/sessions") return json({ sessions: [] });
+    if (url === "/api/donor/me/passkeys") return json({ passkeys: [] });
     if (url === "/api/donor/me/preferences" && init?.method === "POST") return json({ ...profile, ...JSON.parse(String(init.body)), version: 4 });
     throw new Error(`unexpected ${url}`);
   });
@@ -30,4 +31,19 @@ it("saves app notification choices alongside the email ones", async () => {
   expect(JSON.parse(String(saved?.[1]?.body))).toEqual({ version: 3, referral_emails: false, marketing_emails: false,
     push_referral_converted: true, push_streak_at_risk: true, push_streak_milestone: false });
   expect(milestone).not.toBeChecked();
+});
+
+it("signs out of this device only", async () => {
+  const fetch = vi.fn((url: string, init?: RequestInit) => {
+    if (url === "/api/donor/me/profile") return json(profile);
+    if (url === "/api/donor/me/sessions") return json({ sessions: [] });
+    if (url === "/api/donor/me/passkeys") return json({ passkeys: [] });
+    if (url === "/api/donor/logout" && init?.method === "POST") return json({ signed_out: true });
+    throw new Error(`unexpected ${url}`);
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<Profile />);
+  fireEvent.click(await screen.findByRole("button", { name: "Sign out of this device" }));
+  expect(await screen.findByRole("link", { name: "Sign in to manage your profile" })).toBeVisible();
+  expect(fetch.mock.calls.some(([url]) => url === "/api/donor/logout-all")).toBe(false);
 });

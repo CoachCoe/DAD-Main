@@ -152,7 +152,7 @@ func (q *Queries) PeriodHistory(ctx context.Context, donorID pgtype.UUID) ([]Don
 }
 
 const projection = `-- name: Projection :one
-SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error FROM donor_metric_projections WHERE donor_id=$1
+SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version FROM donor_metric_projections WHERE donor_id=$1
 `
 
 func (q *Queries) Projection(ctx context.Context, donorID pgtype.UUID) (DonorMetricProjection, error) {
@@ -175,6 +175,7 @@ func (q *Queries) Projection(ctx context.Context, donorID pgtype.UUID) (DonorMet
 		&i.CreatedAt,
 		&i.RefreshFailures,
 		&i.RefreshError,
+		&i.RulesVersion,
 	)
 	return i, err
 }
@@ -302,14 +303,14 @@ func (q *Queries) RefundObservations(ctx context.Context, arg RefundObservations
 const saveProjection = `-- name: SaveProjection :exec
 INSERT INTO donor_metric_projections
 (id,donor_id,referrer_id,referral_kind,first_gift_id,net_minor,founding_awarded_at,
- best_streak,current_streak,at_risk,grace_ends_at,computed_at,next_refresh_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+ best_streak,current_streak,at_risk,grace_ends_at,computed_at,next_refresh_at,rules_version)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 ON CONFLICT (donor_id) DO UPDATE SET
 referrer_id=EXCLUDED.referrer_id,referral_kind=EXCLUDED.referral_kind,first_gift_id=EXCLUDED.first_gift_id,
 net_minor=EXCLUDED.net_minor,founding_awarded_at=EXCLUDED.founding_awarded_at,
 best_streak=EXCLUDED.best_streak,current_streak=EXCLUDED.current_streak,at_risk=EXCLUDED.at_risk,
 grace_ends_at=EXCLUDED.grace_ends_at,computed_at=EXCLUDED.computed_at,next_refresh_at=EXCLUDED.next_refresh_at,
-refresh_failures=0,refresh_error=NULL
+rules_version=EXCLUDED.rules_version,refresh_failures=0,refresh_error=NULL
 `
 
 type SaveProjectionParams struct {
@@ -326,6 +327,7 @@ type SaveProjectionParams struct {
 	GraceEndsAt       pgtype.Timestamptz `json:"grace_ends_at"`
 	ComputedAt        pgtype.Timestamptz `json:"computed_at"`
 	NextRefreshAt     pgtype.Timestamptz `json:"next_refresh_at"`
+	RulesVersion      int32              `json:"rules_version"`
 }
 
 func (q *Queries) SaveProjection(ctx context.Context, arg SaveProjectionParams) error {
@@ -343,6 +345,7 @@ func (q *Queries) SaveProjection(ctx context.Context, arg SaveProjectionParams) 
 		arg.GraceEndsAt,
 		arg.ComputedAt,
 		arg.NextRefreshAt,
+		arg.RulesVersion,
 	)
 	return err
 }

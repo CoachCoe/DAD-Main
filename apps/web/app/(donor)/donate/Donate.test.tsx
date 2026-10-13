@@ -32,6 +32,19 @@ describe("sandbox giving", () => {
     expect(screen.getByRole("button", { name: "$30 once" })).toBeVisible();
   });
 
+  it("restates a custom amount with its daily framing, and a one-time amount without", () => {
+    render(<Donate />);
+    const amount = screen.getByLabelText("Monthly amount (USD)");
+    fireEvent.change(amount, { target: { value: "45" } });
+    expect(screen.getByText(/^You’ll give/)).toHaveTextContent("You’ll give $45/month · about $1.50 a day");
+    expect(amount).toHaveAccessibleDescription(/\$45\/month/);
+    fireEvent.change(amount, { target: { value: "0.10" } });
+    expect(screen.queryByText(/^You’ll give/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: "One time" }));
+    fireEvent.change(screen.getByLabelText("One-time amount (USD)"), { target: { value: "45" } });
+    expect(screen.getByText(/^You’ll give/)).toHaveTextContent("You’ll give $45 once");
+  });
+
   it("marks exactly the chosen preset as pressed", () => {
     render(<Donate />);
     const ninety = screen.getByRole("button", { name: "$90/month · about $3 a day" });

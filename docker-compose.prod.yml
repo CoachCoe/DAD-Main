@@ -77,6 +77,7 @@ services:
       DONOR_MONITOR_DATABASE_URL: ${DONOR_MONITOR_DATABASE_URL:?set DONOR_MONITOR_DATABASE_URL}
       DONOR_STAFF_CLI_DATABASE_URL: ${DONOR_STAFF_CLI_DATABASE_URL:?set DONOR_STAFF_CLI_DATABASE_URL}
       DONOR_REKEY_DATABASE_URL: ${DONOR_REKEY_DATABASE_URL:?set DONOR_REKEY_DATABASE_URL}
+      DONOR_RECONCILE_DATABASE_URL: ${DONOR_RECONCILE_DATABASE_URL:?set DONOR_RECONCILE_DATABASE_URL}
 
   monitor:
     <<: *donor
@@ -84,6 +85,15 @@ services:
     profiles: [maintenance]
     environment:
       DONOR_MONITOR_DATABASE_URL: ${DONOR_MONITOR_DATABASE_URL:?set DONOR_MONITOR_DATABASE_URL}
+
+  # Daily read-only reconciliation of Stripe charges and refunds against the
+  # database. STRIPE_SECRET_KEY is inherited via env_file like every *donor service.
+  reconcile:
+    <<: *donor
+    command: [reconcile]
+    profiles: [maintenance]
+    environment:
+      DONOR_RECONCILE_DATABASE_URL: ${DONOR_RECONCILE_DATABASE_URL:?set DONOR_RECONCILE_DATABASE_URL}
 
   staff:
     <<: *donor
@@ -160,6 +170,9 @@ services:
       args:
         DONOR_PUBLIC_ORIGIN: ${DONOR_PUBLIC_ORIGIN:?set DONOR_PUBLIC_ORIGIN}
         DONOR_STAFF_ORIGIN: ${DONOR_STAFF_ORIGIN:?set DONOR_STAFF_ORIGIN}
+        DONOR_IOS_APP_ID: ${DONOR_IOS_APP_ID-}
+        DONOR_ANDROID_APP_PACKAGE: ${DONOR_ANDROID_APP_PACKAGE-}
+        DONOR_ANDROID_APP_CERT_SHA256: ${DONOR_ANDROID_APP_CERT_SHA256-}
     environment:
       DONOR_API_BASE_URL: http://api:8002
       # nginx overwrites this header with the client address on every request. No host

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"reflect"
@@ -22,6 +24,7 @@ type problem struct {
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	data, err := json.Marshal(body)
 	if err != nil {
+		slog.Error("response encoding failed", "cause", fmt.Sprintf("%T", err))
 		status = http.StatusInternalServerError
 		w.Header().Set("Cache-Control", "no-store")
 		data = []byte(`{"detail":"Response unavailable"}`)

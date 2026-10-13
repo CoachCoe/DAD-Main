@@ -243,6 +243,8 @@ headers="$(client -D - -o "/tmp/limited" -X POST https://public.test/api/donor/l
 check 'sign-in 429 has Retry-After' 60 "$(header retry-after "$headers")"
 check 'sign-in 429 is not cacheable' no-store "$(header cache-control "$headers")"
 check 'sign-in 429 body is JSON' '{"detail":"Too many requests"}' "$(compose exec -T web cat /tmp/limited)"
+check 'passkey sign-in shares the sign-in limit' '429 429' \
+  "$(status -X POST https://public.test/api/donor/passkeys/sign-in/options) $(status -X POST https://public.test/api/donor/passkeys/sign-in)"
 headers="$(client -D - -o /dev/null -X POST https://staff.test/api/donor/staff/sign-in | tr -d '\r')"
 check 'staff host 429 is not indexed' '429 noindex, nofollow' \
   "$(awk 'NR == 1 { print $2 }' <<< "$headers") $(header x-robots-tag "$headers")"

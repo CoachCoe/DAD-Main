@@ -1,0 +1,157 @@
+name: ATM validation
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialize state changes. A replaced pending run never produces a passing gate.
+concurrency:
+  group: atm-findings-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    outputs:
+      revision: ${{ steps.candidate.outputs.revision }}
+      artifact_id: ${{ steps.evidence.outputs.artifact-id }}
+      artifact_digest: ${{ steps.evidence.outputs.artifact-digest }}
+    steps:
+      - name: Pin candidate
+        id: candidate
+        env:
+          CANDIDATE: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          [[ "$CANDIDATE" =~ ^[a-f0-9]{40}$ ]]
+          echo "revision=$CANDIDATE" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ steps.candidate.outputs.revision }}
+          path: candidate
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: CoachCoe/atm
+          ref: 3d5179a41ada263c554987cf499878b955ff0147
+          path: atm
+          persist-credentials: false
+          token: ${{ secrets.ATM_READ_TOKEN || github.token }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: atm-state
+          path: state
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+        working-directory: atm
+      - run: npx playwright install --with-deps chromium
+        working-directory: atm
+      - name: Validate isolated candidate
+        env:
+          CANDIDATE: ${{ steps.candidate.outputs.revision }}
+          SOURCE: github:${{ github.repository }}
+          EXECUTION: ${{ github.run_id }}:${{ github.run_attempt }}
+        # Keep detailed errors out of the public Actions log. The encrypted
+        # bundle contains declared evidence; never upload the whole run folder.
+        run: |
+          mkdir -p "$RUNNER_TEMP/atm"
+          node atm/scripts/github-ci.js run \
+            --repo candidate --revision "$CANDIDATE" --source "$SOURCE" \
+            --state state/ledger.json --execution "$EXECUTION" \
+            --public-key atm/integrations/github/impactgraph-evidence.pub.pem \
+            --output "$RUNNER_TEMP/atm" > "$RUNNER_TEMP/atm-console.log" 2>&1
+      - name: Retain encrypted evidence and public proposal
+        id: evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: atm-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/atm/evidence.atm
+            ${{ runner.temp }}/atm/proposal.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  persist:
+    needs: validate
+    if: ${{ always() && needs.validate.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      verdict: ${{ steps.publish.outputs.verdict }}
+    steps:
+      # This fresh runner never builds or executes candidate code.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: CoachCoe/atm
+          ref: 3d5179a41ada263c554987cf499878b955ff0147
+          path: atm
+          persist-credentials: false
+          token: ${{ secrets.ATM_READ_TOKEN || github.token }}
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: atm-state
+          path: state
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.validate.outputs.artifact_id }}
+          path: proposal
+          merge-multiple: true
+      - name: Verify and persist verdict
+        id: publish
+        env:
+          CANDIDATE: ${{ needs.validate.outputs.revision }}
+          SOURCE: github:${{ github.repository }}
+          EXECUTION: ${{ github.run_id }}:${{ github.run_attempt }}
+          ARTIFACT_ID: ${{ needs.validate.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ needs.validate.outputs.artifact_digest }}
+        run: |
+          node atm/scripts/github-ci.js publish \
+            --source "$SOURCE" --execution "$EXECUTION" --revision "$CANDIDATE" \
+            --state state/ledger.json --proposal proposal/proposal.json \
+            --bundle proposal/evidence.atm --artifact-id "$ARTIFACT_ID" \
+            --artifact-digest "$ARTIFACT_DIGEST" --output "$RUNNER_TEMP/verdict"
+          cd state
+          git config user.name 'ATM quality gate'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ledger.json
+          git commit -m "Record ATM validation $EXECUTION"
+          # No force-push: a concurrent triage/state change fails closed.
+          git push origin HEAD:refs/heads/atm-state
+          echo "verdict=$(cat "$RUNNER_TEMP/verdict")" >> "$GITHUB_OUTPUT"
+
+  acceptance:
+    name: ATM acceptance
+    needs: [validate, persist]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Require validated, retained and persisted acceptance
+        env:
+          VALIDATION: ${{ needs.validate.result }}
+          PERSISTENCE: ${{ needs.persist.result }}
+          VERDICT: ${{ needs.persist.outputs.verdict }}
+        run: |
+          test "$VALIDATION" = success
+          test "$PERSISTENCE" = success
+          test "$VERDICT" = eligible
+          echo 'ATM acceptance passed. This does not authorize production deployment.'

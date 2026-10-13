@@ -9,8 +9,8 @@ Use a distinct PostgreSQL database and cluster for each environment. Every proce
 connects with its own login, which holds only what that process needs
 ([database roles](#database-roles)). Each process's database pool is sized for its role:
 the API opens up to 40 connections, and each worker, the monitor, migrations, the staff
-command, and `rekey` up to 2. A full deployment therefore needs about 56 of PostgreSQL's
-default 100 `max_connections`. When adding API replicas, raise `max_connections` (or put a
+command, and `rekey` up to 2. A full deployment therefore needs up to 58 of PostgreSQL's
+default 100 `max_connections`, or 60 while a migration runs. When adding API replicas, raise `max_connections` (or put a
 pooler such as PgBouncer in front) so the total stays below it; `pool_max_conns=N` in a
 process's database URL overrides its size.
 
@@ -41,7 +41,7 @@ refuse database credentials in `ENV_FILE`. Both may be relative to the current d
 `migrate` starts PostgreSQL, applies embedded forward SQL migrations, and brings the
 process roles and their privileges to their declaration. `provision-roles` then creates or
 updates each process's login ([database roles](#database-roles)). An existing
-pre-rewrite database at `0030_donor_public_content` requires `./scripts/deploy.sh adopt`
+pre-rewrite database, one whose `alembic_version` table holds `0030_donor_public_content`, requires `./scripts/deploy.sh adopt`
 instead of the initial migrate step. Adoption compares the complete donor schema, records
 the baseline checksum, and preserves data. Stop all older API/worker processes before
 adoption; never run two versions of financial writers. Unsupported or divergent schemas
@@ -156,6 +156,7 @@ schema.
 | `dad_worker_messages` | Message worker | `DONOR_WORKER_MESSAGES_DATABASE_URL` | Financial mail queue; reads the facts a message renders |
 | `dad_worker_push` | Push worker | `DONOR_WORKER_PUSH_DATABASE_URL` | Push queue and session push tokens; reads the facts it rechecks |
 | `dad_monitor` | Monitor | `DONOR_MONITOR_DATABASE_URL` | Reads queue status columns only: no addresses, bodies, tokens, or payloads |
+| `dad_reconcile` | `reconcile` | `DONOR_RECONCILE_DATABASE_URL` | Reads financial facts to reconcile Stripe charges and refunds against the database; SELECT only, no writes |
 | `dad_staff_cli` | Staff command | `DONOR_STAFF_CLI_DATABASE_URL` | Staff accounts, invitations, passkeys, sessions; writes audit records |
 | `dad_rekey` | `rekey` | `DONOR_REKEY_DATABASE_URL` | Reads and rewrites the encrypted columns and their ids only |
 
@@ -198,8 +199,8 @@ else. Connection limits assume one instance of each process, as Compose runs the
 one-off run of a process, such as the Stripe worker's `--retry-event`, shares its login's
 limit, and more replicas of a process need a higher limit than provisioning sets.
 
-Under Compose, `./scripts/deploy.sh monitor`, `rekey`, and `staff` run those commands as
-their own services with their own logins, and the Stripe worker's retry runs as
+Under Compose, `./scripts/deploy.sh monitor`, `reconcile`, `rekey`, and `staff` run those
+commands as their own services with their own logins, and the Stripe worker's retry runs as
 `docker compose … run --rm stripe-worker worker --kind stripe --retry-event evt_example --once`
 with both environment files.
 
@@ -287,6 +288,41 @@ go run ./cmd/worker --kind stripe --retry-event evt_example --once
 `--once` processes at most one eligible event, which may not be the reset event. Keep the
 worker running to drain the queue. Never delete financial facts to make a retry succeed.
 
+### Daily Stripe reconciliation
+
+The monitor only sees the `donor_stripe_events` inbox, so a webhook Stripe never delivered
+leaves no row to alarm on. The `reconcile` command closes that gap: once a day it lists the
+charges and refunds Stripe reports and diffs them against the gifts and refunds the database
+recorded.
+
+```sh
+./scripts/deploy.sh reconcile                 # yesterday, full New York calendar day
+./scripts/deploy.sh reconcile --date 2027-03-01   # re-run a specific day deterministically
+```
+
+- **Schedule.** Run it ~00:30 America/New_York, once yesterday's New York calendar day has
+  closed. New York is the system's authoritative civil-time zone, so the day finance reasons
+  about and the day the job reconciles are the same. The NY-day bounds are converted to a UTC
+  `created` range for Stripe and a `paid_at`/`observed_at` range for the database.
+- **Grace margin.** `--max-lag` (default 30m) keeps a charge or refund created in the last
+  30 minutes of the window from being flagged as missing, so a webhook still legitimately
+  in flight is not mistaken for a lost one. A dropped event is the signal, not a late one.
+- **Scope.** R1 reconciles charges and refunds only. Invoices, billing periods and
+  subscriptions are a phase-2 concern and are deliberately not reconciled yet; the role's
+  SELECT grant on `donor_billing_periods` and `donor_billing_observations` leaves the seam.
+- **Output and alarm.** The job prints one aggregate JSON object — counts per discrepancy
+  class (`missing_gifts`, `missing_refunds`, `amount_mismatches`, `status_mismatches`,
+  `db_without_stripe`), the window, and ids only, never donor identifiers or payloads — and
+  exits non-zero when any discrepancy count is greater than zero, so a CloudWatch alarm fires
+  on the exit code. A clean day prints the JSON and exits 0. It holds no state and writes no
+  report, so a re-run of the same day is safe and deterministic.
+- **Read-only.** The job is strictly read-only against both Stripe (List/Retrieve only) and
+  the database (its `dad_reconcile` role has SELECT alone). It never repairs, deletes or
+  writes any financial fact.
+- **Remediation is manual.** When the job flags a missing gift or refund, re-send the event
+  in Stripe, then run `worker --kind stripe --retry-event evt_example --once` to process it.
+  Never delete financial facts to make a reconciliation pass.
+
 Financial commands retain immutable inputs and processor idempotency keys. Unknown
 requests older than 23 hours require reconciliation. Hosted card-setup retries stop
 before their fixed expiry; an old unknown request is not permission to create a new one.
@@ -310,7 +346,13 @@ Run projection, login-email, email-changes, and message workers separately. Emai
 use the same mail configuration, require current-address proof before new-address proof,
 and park delivery after five failures. Requesting a replacement invalidates prior proofs.
 Projection refresh handles grace expiry, recurring boundaries, permanent recognition,
-and prior-year summaries. A donor whose facts cannot be projected is deferred with
+and prior-year summaries. A projection is recomputed when facts that change it arrive and
+at its next time boundary: a due date, period end, grace deadline, pause, cancellation,
+refund, or New Year in New York, and at least every 25 to 35 days, a span fixed per
+donor so that projections computed together fall due over ten days. A release that changes
+recognition, or the messages and push intents queued with it, raises `projectionRules` in
+`internal/store/financial.go`; the projection worker then recomputes every older
+projection whenever no projection is due. A donor whose facts cannot be projected is deferred with
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
 The projection worker also applies referral-touch retention ([donor domain](donor-domain.md#referrals)):
@@ -379,7 +421,7 @@ signed assertion for an access token and caches it until five minutes before exp
 Delivery reaches each live app session holding a token once; a retry after a partial
 failure sends only to the rest. A token the provider reports unregistered or invalid is
 removed from its session without retry. Throttling, outages, and network failures retry
-with the mail backoff, doubling from two minutes up to an hour, or after the provider's
+with the financial-message backoff, doubling from two minutes up to an hour, or after the provider's
 `Retry-After` if longer, and park after five attempts. A provider refusing the
 credentials or the request (`ProviderRejected`) parks the notification at once without
 touching tokens, since every send would fail the same way: fix the key, team, topic,
@@ -390,6 +432,26 @@ notification as suppressed (`opted_out`, `referral_no_longer_qualifies`,
 `payment_recovered`, `streak_ended`, `no_device`, and similar) otherwise. Local tests
 use a fake provider and local HTTP servers; they do not prove acceptance by Apple or
 Google, which needs real accounts, a signed build, and physical devices.
+
+## App associations
+
+The web app serves `/.well-known/apple-app-site-association` and
+`/.well-known/assetlinks.json` on the public host, so the donor app opens the account
+pages donors reach from emails and referral links, and passkeys donors add on the site
+also sign the app in. Both files are prerendered from build arguments; with none set
+they answer 404, and a malformed value fails the build rather than publish an
+association Apple or Google would reject and cache.
+
+| Variable | Meaning |
+|---|---|
+| `DONOR_IOS_APP_ID` | `<team ID>.<bundle ID>`, the same values as `DONOR_PUSH_APNS_TEAM_ID` and `DONOR_PUSH_APNS_TOPIC`. |
+| `DONOR_ANDROID_APP_PACKAGE` | The Android app's package name. |
+| `DONOR_ANDROID_APP_CERT_SHA256` | Comma-separated SHA-256 fingerprints of the app's signing certificates, colon-separated hex, from Play Console, App integrity. Include the upload key's while testing sideloaded builds. |
+
+Set them in the deployment environment before building the web image, and rebuild it
+when they change. Apple's CDN caches the iOS file for up to a day, so allow that long
+after a change before testing on a device. The iOS app needs the Associated Domains
+entitlement with `applinks:` and `webcredentials:` entries for the public host.
 
 ## Staff and content
 
@@ -489,8 +551,9 @@ referrers, and referral codes repeated in proportion to how often each would be 
 Treat it as a credential. The sessions last 30 days; delete the fixture and drop the
 database after the run.
 
-Run the API as for production, and run the projection worker alone, since projections
-expire after a day and dashboards then wait for it. Never run the message worker against
+Run the API as for production, and run the projection worker alone, with
+`DONOR_GO_WORKERS_ENABLED=true`, since projections fall due at their next boundary and
+dashboards then wait for it. Never run the message worker against
 a seeded database; with Compose, start only
 `docker compose --env-file .env.production --env-file .env.database -f docker-compose.prod.yml --profile workers up -d projection-worker`.
 Every scenario but referral capture only reads, including recurring, so Stripe
@@ -658,7 +721,8 @@ dry run, and remove them again.
 
 ## Backup and restore drill
 
-With PostgreSQL running and `ENV_FILE` pointing to the Compose environment:
+With PostgreSQL running, `ENV_FILE` pointing to the Compose environment, and
+`DATABASE_ENV_FILE` to the database logins (default `.env.database`):
 
 ```sh
 ./scripts/backup.sh /secure/backups/dad-2026-10-04.dump

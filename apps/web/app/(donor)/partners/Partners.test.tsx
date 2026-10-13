@@ -19,6 +19,7 @@ it("accepts a bare domain and sends it as an HTTPS address", async () => {
   render(<Partners />);
   fill();
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("inquiry was received"));
+  await waitFor(() => expect(screen.getByRole("heading", { level: 1 })).toHaveFocus());
   expect(JSON.parse(fetch.mock.calls[0][1].body).website).toBe("https://example.org");
 });
 

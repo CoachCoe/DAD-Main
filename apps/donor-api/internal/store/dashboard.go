@@ -13,8 +13,7 @@ import (
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-// DonorDashboard is the web dashboard contract. Fields stay in alphabetical
-// order so responses match the original map encoding byte for byte.
+// DonorDashboard is the web dashboard contract.
 type DonorDashboard struct {
 	ComputedAt    time.Time        `json:"computed_at"`
 	FoundingDonor bool             `json:"founding_donor"`

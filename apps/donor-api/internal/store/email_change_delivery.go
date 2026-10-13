@@ -82,7 +82,7 @@ func (w EmailChangeWorker) claim(ctx context.Context, site publicSite, now time.
 		body := "Someone signed in to your DAD account requested changing its email to " + job.NewEmail + ". Confirm only if you requested this change."
 		if job.Stage == "NEW" {
 			recipient = job.NewEmail
-			body = "Confirm this address to finish changing your DAD account email. This will sign out every existing session."
+			body = "Confirm this address to finish changing your DAD account email. This will sign out every existing session and remove your passkeys."
 		}
 		if err = q.ClaimEmailChangeDelivery(ctx, queries.ClaimEmailChangeDeliveryParams{ID: job.ID, AvailableAt: timestamp(now.Add(deliveryLease))}); err != nil {
 			return err

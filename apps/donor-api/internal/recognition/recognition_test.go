@@ -134,6 +134,30 @@ func TestFoundingQualifiedAtUsesEarliestQualifyingGift(t *testing.T) {
 	}
 }
 
+func TestPauseFreezeCapIsHalfOpenAtTheConstant(t *testing.T) {
+	due := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	ends := time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)
+	gifts := []Gift{{ID: "g1", DonorID: "ben", Amount: 3000, PaidAt: due, Frequency: "MONTHLY", PeriodID: "jan", Currency: "USD"}}
+	periods := []Period{{ID: "jan", DonorID: "ben", DueAt: due, EndsAt: ends, Status: "EXPECTED"}}
+	pauses := []Pause{{Start: ends, End: ends.Add(365 * 24 * time.Hour)}}
+
+	within := ends.Add(PauseFreeze - time.Nanosecond)
+	got, err := GivingStreak(gifts, nil, periods, "ben", within, 0, nil, pauses)
+	if err != nil {
+		t.Fatalf("within cap: unexpected error %v", err)
+	}
+	if got.Current != 1 {
+		t.Fatalf("within cap: current = %d, want 1 (streak frozen)", got.Current)
+	}
+
+	// At exactly Start+PauseFreeze the freeze has expired (half-open), so the
+	// unobserved renewal past grace is incomplete rather than frozen.
+	at := ends.Add(PauseFreeze)
+	if _, err = GivingStreak(gifts, nil, periods, "ben", at, 0, nil, pauses); !errors.Is(err, ErrIncomplete) {
+		t.Fatalf("at cap: err = %v, want ErrIncomplete (freeze expired)", err)
+	}
+}
+
 func TestMilestonesAreThreeAndSixMonthsThenEveryYear(t *testing.T) {
 	var got []int64
 	for months := int64(0); months <= 48; months++ {

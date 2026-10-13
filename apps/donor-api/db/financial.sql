@@ -31,14 +31,14 @@ SELECT * FROM donor_metric_projections WHERE donor_id=$1;
 -- name: SaveProjection :exec
 INSERT INTO donor_metric_projections
 (id,donor_id,referrer_id,referral_kind,first_gift_id,net_minor,founding_awarded_at,
- best_streak,current_streak,at_risk,grace_ends_at,computed_at,next_refresh_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+ best_streak,current_streak,at_risk,grace_ends_at,computed_at,next_refresh_at,rules_version)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 ON CONFLICT (donor_id) DO UPDATE SET
 referrer_id=EXCLUDED.referrer_id,referral_kind=EXCLUDED.referral_kind,first_gift_id=EXCLUDED.first_gift_id,
 net_minor=EXCLUDED.net_minor,founding_awarded_at=EXCLUDED.founding_awarded_at,
 best_streak=EXCLUDED.best_streak,current_streak=EXCLUDED.current_streak,at_risk=EXCLUDED.at_risk,
 grace_ends_at=EXCLUDED.grace_ends_at,computed_at=EXCLUDED.computed_at,next_refresh_at=EXCLUDED.next_refresh_at,
-refresh_failures=0,refresh_error=NULL;
+rules_version=EXCLUDED.rules_version,refresh_failures=0,refresh_error=NULL;
 
 -- name: ReferralTotals :one
 SELECT count(*) FILTER (WHERE referral_kind='LINK' AND net_minor>0)::bigint AS link_count,

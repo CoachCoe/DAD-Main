@@ -108,3 +108,14 @@ func TestConfigureConnectsAsTheAPIRole(t *testing.T) {
 		}
 	}
 }
+
+func TestConfigureOffersDonorPasskeysOnlyOnAHostName(t *testing.T) {
+	for origin, want := range map[string]bool{"http://localhost:3000": true, "https://dad.example.org": true, "http://127.0.0.1:3000": false} {
+		env := map[string]string{"DONOR_API_DATABASE_URL": dbrolestest.URL(t, dbroles.API), "DONOR_ALLOW_OWNER_CONNECTION": "true", "DONOR_PUBLIC_ORIGIN": origin}
+		services, release, err := configure(context.Background(), func(name string) string { return env[name] })
+		release()
+		if err != nil || (services.DonorPasskeys != nil) != want {
+			t.Errorf("%s: got passkeys %v, err %v; want passkeys %v", origin, services.DonorPasskeys != nil, err, want)
+		}
+	}
+}

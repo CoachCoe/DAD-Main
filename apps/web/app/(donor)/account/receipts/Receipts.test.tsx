@@ -41,3 +41,9 @@ it.each([["1999"], ["9999"], ["20x7"], [["2027", "2026"]]])("ignores an out-of-r
   expect(screen.getByLabelText("Calendar year")).toBeVisible();
   expect(fetch).not.toHaveBeenCalled();
 });
+
+it("says when a linked gift record does not exist, rather than blaming the year", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({ detail: "Record not found" }) }));
+  render(<Receipts gift="missing" defaultYear={2026} latestYear={2026} />);
+  expect(await screen.findByText("There is no gift record at this link. Choose a gift from My giving.")).toHaveAttribute("role", "alert");
+});

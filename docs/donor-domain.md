@@ -10,7 +10,7 @@ contract, not a claim that every capability is already shipped.
 ## Giving and identity
 
 Stripe processes USD donations through hosted checkout. Monthly giving is preselected:
-$30, $90, or $150, or a custom amount of at least $1 in whole cents. Daily copy says
+$30, $90, or $150, or a custom amount from $1 to $999,999.99 in whole cents. Daily copy says
 "about" and the monthly charge has equal visual weight. One-time presets use the same
 amounts without daily framing. DAD absorbs fees; there is no cover-fees prompt.
 
@@ -77,8 +77,12 @@ retain the current count as at risk, increment once when recovered within grace,
 reset the active streak to zero after grace. A renewal not yet reported by the processor
 likewise keeps the current count, not at risk, for those 14 days; after that the streak
 is unknown until the facts arrive. Later recovery starts at one. Retain the
-historical best. An intentional pause/cancellation ends continuity at the first skipped
-renewal, not immediately. Amount changes do not break continuity. Partial refunds retain
+historical best. A cancellation ends continuity at the first skipped renewal, not
+immediately. A deliberate donor-initiated pause instead freezes the streak for up to
+three months from the pause: a renewal skipped by the pause within that window neither
+resets the streak nor marks it at risk, and a resumption inside the window continues the
+streak from where it was. Only after the three-month cap does normal lapse behavior
+resume. Amount changes do not break continuity. Partial refunds retain
 the period if recurring funds remain; full refunds disqualify it unless another qualifying
 recurring payment covers it. Recalculate subsequent continuity rather than erasing every
 later month. Staff corrections are for documented system errors and must be audited.

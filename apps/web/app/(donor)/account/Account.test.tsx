@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import ClaimPage from "./claim/Claim";
 import { SignInForm } from "@/components/donor/SignInForm";
@@ -66,10 +66,12 @@ it("tells a donor who is already signed in, and stays silent for a visitor", asy
   expect(await screen.findByText(/already signed in as/)).toHaveTextContent("donor@example.org");
   expect(screen.getByRole("link", { name: "Go to my dashboard" })).toHaveAttribute("href", "/account/dashboard");
   unmount();
-  const fetch = vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) });
-  vi.stubGlobal("fetch", fetch);
+  let refused = () => {};
+  const answered = new Promise<void>((resolve) => { refused = resolve; });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => { refused(); return { detail: "Sign in required" }; } }));
   const { container } = render(<AlreadySignedIn />);
-  await waitFor(() => expect(fetch).toHaveBeenCalled());
+  await answered;
+  await act(async () => {});
   expect(container).toBeEmptyDOMElement();
 });
 
@@ -82,7 +84,7 @@ it("moves focus to the start of the new page of gifts", async () => {
   render(<GivingPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
   expect(await screen.findByRole("button", { name: "Newer gifts" })).toBeVisible();
-  expect(screen.getByRole("heading", { name: "Gifts" })).toHaveFocus();
+  await waitFor(() => expect(screen.getByRole("heading", { name: "Gifts" })).toHaveFocus());
   expect(screen.getByText(/Refunded \$10\.00/)).toBeVisible();
   expect(fetch.mock.calls[1][0]).toBe("/api/donor/me/gifts?offset=50");
 });

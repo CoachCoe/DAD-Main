@@ -39,6 +39,14 @@ type StaffFinanceGateway interface {
 	CreateRefund(context.Context, string, int64, string) (Object, error)
 }
 
+// ReconcileGateway lists the charges and refunds Stripe created in a window,
+// read-only, so the daily reconciliation job can diff them against the
+// database without any mutating call. A fake satisfies it in tests.
+type ReconcileGateway interface {
+	ListChargesByCreated(context.Context, time.Time, time.Time) ([]Object, error)
+	ListRefundsByCreated(context.Context, time.Time, time.Time) ([]Object, error)
+}
+
 // StripeGateway calls Stripe in test mode. A failed call is reported as
 // ErrProcessorUnavailable, never as the SDK error, which can carry donor inputs.
 type StripeGateway struct{ client *stripe.Client }
@@ -183,6 +191,80 @@ func (g *StripeGateway) ListPaymentRefunds(ctx context.Context, payment string) 
 		rows, err := raw.Array("data")
 		if err != nil || len(rows) > 100 {
 			return nil, ErrFacts
+		}
+		result = append(result, rows...)
+		if raw.BoolIs("has_more", false) {
+			return result, nil
+		}
+		if !raw.BoolIs("has_more", true) || len(rows) == 0 {
+			return nil, ErrFacts
+		}
+		last := rows[len(rows)-1].Text("id")
+		if last == "" || last == after {
+			return nil, ErrFacts
+		}
+		after = last
+	}
+	return nil, ErrProcessorUnavailable
+}
+
+// ListChargesByCreated lists every charge Stripe created in [start, end],
+// read-only, for the daily reconciliation job. It pages exactly as
+// ListPaymentRefunds does and rejects any live-mode object, so this test-only
+// build never reconciles a live fact.
+func (g *StripeGateway) ListChargesByCreated(ctx context.Context, start, end time.Time) ([]Object, error) {
+	return g.listByCreated(ctx, start, end, func(ctx context.Context, created *stripe.RangeQueryParams, after string) listPage {
+		params := &stripe.ChargeListParams{CreatedRange: created, ListParams: stripe.ListParams{Limit: stripe.Int64(100)}}
+		if after != "" {
+			params.StartingAfter = stripe.String(after)
+		}
+		return g.client.V1Charges.List(ctx, params)
+	})
+}
+
+// ListRefundsByCreated lists every refund Stripe created in [start, end],
+// read-only, with the same discipline as ListChargesByCreated.
+func (g *StripeGateway) ListRefundsByCreated(ctx context.Context, start, end time.Time) ([]Object, error) {
+	return g.listByCreated(ctx, start, end, func(ctx context.Context, created *stripe.RangeQueryParams, after string) listPage {
+		params := &stripe.RefundListParams{CreatedRange: created, ListParams: stripe.ListParams{Limit: stripe.Int64(100)}}
+		if after != "" {
+			params.StartingAfter = stripe.String(after)
+		}
+		return g.client.V1Refunds.List(ctx, params)
+	})
+}
+
+// listPage is the subset of the SDK's V1List iterator the paging loop reads,
+// satisfied by both V1List[*Charge] and V1List[*Refund].
+type listPage interface {
+	Err() error
+	LastResponse() *stripe.APIResponse
+}
+
+// listByCreated runs the shared bounded paging loop ListPaymentRefunds proved:
+// Limit 100, a created range, starting_after, has_more termination, and the
+// non-advancing-cursor guard. Each returned object must be livemode:false.
+func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time, list func(context.Context, *stripe.RangeQueryParams, string) listPage) ([]Object, error) {
+	created := &stripe.RangeQueryParams{GreaterThanOrEqual: start.Unix(), LesserThanOrEqual: end.Unix()}
+	result := []Object{}
+	after := ""
+	for range 100 {
+		page := list(ctx, created, after)
+		if page.Err() != nil {
+			return nil, ErrProcessorUnavailable
+		}
+		raw, err := rawObject(page.LastResponse())
+		if err != nil {
+			return nil, err
+		}
+		rows, err := raw.Array("data")
+		if err != nil || len(rows) > 100 {
+			return nil, ErrFacts
+		}
+		for _, row := range rows {
+			if !row.BoolIs("livemode", false) {
+				return nil, ErrFacts
+			}
 		}
 		result = append(result, rows...)
 		if raw.BoolIs("has_more", false) {

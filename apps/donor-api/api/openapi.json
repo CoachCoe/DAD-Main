@@ -808,7 +808,7 @@
       "post": {
         "operationId": "confirmEmailChange",
         "summary": "Confirm an email change step",
-        "description": "Needs only the emailed proof. Completion revokes every session, including the app's; it never issues one, so sign in again afterwards.",
+        "description": "Needs only the emailed proof. Completion revokes every session, including the app's, and removes every passkey; it never issues a session, so sign in again afterwards.",
         "tags": [
           "Account"
         ],
@@ -999,7 +999,7 @@
             "$ref": "#/components/responses/Unavailable"
           }
         },
-        "description": "Ends every session of the donor, this one included."
+        "description": "Ends every session of the donor, this one included. Passkeys are kept; remove them with POST /donor/me/passkeys/{passkey_id}/delete."
       }
     },
     "/donor/me/sessions": {
@@ -4622,6 +4622,394 @@
           }
         }
       }
+    },
+    "/donor/passkeys/sign-in/options": {
+      "post": {
+        "operationId": "beginDonorPasskeySignIn",
+        "summary": "Begin a passkey sign-in",
+        "description": "Issues a usernameless WebAuthn challenge that any of the donor's passkeys for the public origin may answer, in a browser or, through its associated domain, the app. Pass `options` to `PublicKeyCredential.parseRequestOptionsFromJSON` and `navigator.credentials.get`, then answer within five minutes. No body.",
+        "tags": [
+          "Account"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Ceremony"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/passkeys/sign-in": {
+      "post": {
+        "operationId": "finishDonorPasskeySignIn",
+        "summary": "Finish a passkey sign-in",
+        "description": "Verifies the assertion (challenge, origin, relying party, user verification, and signature) and signs the donor in, as a claim does. Each ceremony is answered once. 401 covers an unknown passkey, a disabled account, a signature counter that went backwards, and an unknown, expired, or used ceremony alike.",
+        "tags": [
+          "Account"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ceremony": {
+                    "type": "string",
+                    "minLength": 32,
+                    "maxLength": 128,
+                    "description": "The `ceremony` from the matching options response."
+                  },
+                  "credential": {
+                    "type": "object",
+                    "description": "The browser's `PublicKeyCredential` as JSON (`credential.toJSON()`), with base64url binary fields; at most 64 KiB."
+                  },
+                  "device_name": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Native requests only, optional: the device's user-visible name, shown to the donor in their session list. Control and formatting characters are removed. Ignored for browser requests."
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "IOS",
+                      "ANDROID"
+                    ],
+                    "description": "Native requests only, optional. Ignored for browser requests."
+                  }
+                },
+                "required": [
+                  "ceremony",
+                  "credential"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "description": "Browser request: the session is set only as the `dad_donor_session` cookie.",
+                      "properties": {
+                        "signed_in": {
+                          "type": "boolean",
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "signed_in"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "$ref": "#/components/schemas/NativeSession",
+                      "description": "Native request."
+                    }
+                  ]
+                }
+              }
+            },
+            "headers": {
+              "Set-Cookie": {
+                "description": "Browser requests only.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/passkeys": {
+      "get": {
+        "operationId": "donorPasskeys",
+        "summary": "The donor's passkeys",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/passkeys/register/options": {
+      "post": {
+        "operationId": "beginDonorPasskeyRegister",
+        "summary": "Begin adding a passkey",
+        "description": "Issues WebAuthn creation options requiring a discoverable, user-verifying passkey, excluding those the donor already holds. Pass `options` to `PublicKeyCredential.parseCreationOptionsFromJSON` and `navigator.credentials.create`, then answer within five minutes. No body.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreationCeremony"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/passkeys/register": {
+      "post": {
+        "operationId": "finishDonorPasskeyRegister",
+        "summary": "Finish adding a passkey",
+        "description": "Verifies the attestation, stores the passkey, and emails the donor an essential notice naming it. 401 covers a rejected attestation, a passkey already registered to any account, a ceremony begun by another donor, and an unknown, expired, or used ceremony alike, as well as a missing session.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ceremony": {
+                    "type": "string",
+                    "minLength": 32,
+                    "maxLength": 128,
+                    "description": "The `ceremony` from the matching options response."
+                  },
+                  "credential": {
+                    "type": "object",
+                    "description": "The browser's `PublicKeyCredential` as JSON (`credential.toJSON()`), with base64url binary fields; at most 64 KiB."
+                  },
+                  "name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 64,
+                    "description": "Optional label to tell passkeys apart, such as the device or password manager. Plain text without control characters."
+                  }
+                },
+                "required": [
+                  "ceremony",
+                  "credential"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The donor's passkeys after the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/passkeys/{passkey_id}/delete": {
+      "post": {
+        "operationId": "deleteDonorPasskey",
+        "summary": "Remove a passkey",
+        "description": "The passkey stops signing in at once. Sessions it already started are not ended; see POST /donor/me/sessions/revoke-others. 404 when the ID is not one of the donor's passkeys.",
+        "tags": [
+          "Account"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "parameters": [
+          {
+            "name": "passkey_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The donor's passkeys after the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeyList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7203,6 +7591,78 @@
           "name",
           "email",
           "contact_consent"
+        ],
+        "additionalProperties": false
+      },
+      "PasskeyInfo": {
+        "type": "object",
+        "description": "A passkey the donor can sign in with. Credential material is never returned.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Opaque ID for POST /donor/me/passkeys/{passkey_id}/delete."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64,
+            "description": "The donor's label for the passkey, if they gave one."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The last sign-in with this passkey; null if it has never signed in."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at",
+          "last_used_at"
+        ],
+        "additionalProperties": false
+      },
+      "PasskeyList": {
+        "type": "object",
+        "properties": {
+          "passkeys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PasskeyInfo"
+            },
+            "description": "Oldest first."
+          }
+        },
+        "required": [
+          "passkeys"
+        ],
+        "additionalProperties": false
+      },
+      "CreationCeremony": {
+        "type": "object",
+        "properties": {
+          "ceremony": {
+            "type": "string",
+            "description": "Single-use ID to send back with the credential."
+          },
+          "options": {
+            "type": "object",
+            "description": "PublicKeyCredentialCreationOptionsJSON."
+          }
+        },
+        "required": [
+          "ceremony",
+          "options"
         ],
         "additionalProperties": false
       }

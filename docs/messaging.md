@@ -12,6 +12,7 @@ configured provider before enabling live donations. SMTP delivery is at least on
 | Referral converted | First qualifying referred gift; direct referrer | Optional; recheck referral-email preference before sending | `internal/store/messages.go` |
 | Account claim/sign-in | Requested access or initial checkout claim; address owner | Essential authentication; single-use link, 15-minute expiry | `internal/store/email.go` |
 | Email change | Signed-in request, then current-address confirmation; current/new address respectively | Essential security confirmation; two single-use proofs, each valid 15 minutes | `internal/store/email_change_delivery.go` |
+| Passkey added | A passkey is registered; the account's address at send time | Essential security notice; names the passkey and when it was added, links to the profile, and is sent even if the passkey is removed first | `internal/store/donor_passkeys.go` and `messages.go` |
 | Enrolment confirmation | Program submission; enrolled person | R2 activation only; final preference classification requires approval | Prepared copy below; no R1 sending trigger |
 
 Implementation paths are relative to `apps/donor-api`. Marketing consent is independent

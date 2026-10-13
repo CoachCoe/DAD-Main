@@ -186,16 +186,22 @@ func TestRunEnforcesPerScenarioBudgets(t *testing.T) {
 // still written.
 func TestInterruptedRunReportsWhatCompleted(t *testing.T) {
 	var served atomic.Int64
+	inFlight := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if served.Add(1) > 20 {
+		switch n := served.Add(1); {
+		case n == 24:
+			close(inFlight)
+			fallthrough
+		case n > 20:
 			<-r.Context().Done()
 		}
 	}))
 	defer server.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		for served.Load() < 24 {
-			time.Sleep(time.Millisecond)
+		select {
+		case <-inFlight:
+		case <-time.After(10 * time.Second):
 		}
 		cancel()
 	}()

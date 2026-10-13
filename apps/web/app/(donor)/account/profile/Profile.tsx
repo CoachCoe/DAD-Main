@@ -7,6 +7,7 @@ import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { api, ApiError, failureMessage, type RequestBody, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { Passkeys } from "./Passkeys";
 import { Sessions } from "./Sessions";
 
 export default function Profile() {
@@ -46,6 +47,10 @@ export default function Profile() {
       setNewEmail("");
     }, "We couldn’t request the change right now. Please retry in a moment.");
   };
+  const logout = () => run(async () => {
+    await api("/donor/logout", { method: "POST" });
+    setSignedOut(true);
+  }, "Sign-out was not confirmed. Please retry.");
   const logoutAll = () => run(async () => {
     await api("/donor/logout-all", { method: "POST" });
     setSignedOut(true);
@@ -72,13 +77,15 @@ export default function Profile() {
           <button className="button" disabled={busy} type="submit">{busy ? "Saving…" : "Save preferences"}</button>
         </form>
         <details><summary>Change account email</summary>
-          <p>You must confirm both addresses. Completing the change signs out every device. Existing accounts will not be merged.</p>
+          <p>You must confirm both addresses. Completing the change signs out every device and removes your passkeys. Existing accounts will not be merged.</p>
           <form onSubmit={changeEmail}><label>New email address<input type="email" autoComplete="email" maxLength={320} required value={newEmail} onChange={(event) => setNewEmail(event.target.value)} disabled={busy} /></label>
             <button type="submit" className="secondary" disabled={busy}>Send confirmation to current address</button></form>
         </details>
+        <Passkeys onSignedOut={markSignedOut} />
         <Sessions onSignedOut={markSignedOut} />
+        <button type="button" className="secondary" disabled={busy} onClick={logout}>Sign out of this device</button>
         <details><summary>Sign out on every device</summary>
-          <p>This ends all existing donor sessions, including this one. You can sign in again with a new email link.</p>
+          <p>This ends all existing donor sessions, including this one. You can sign in again with a new email link. Your passkeys are kept, so remove any you don’t recognize under Passkeys first.</p>
           <button type="button" className="secondary danger" disabled={busy} onClick={logoutAll}>Confirm sign out everywhere</button>
         </details>
       </>}

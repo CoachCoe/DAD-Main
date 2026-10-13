@@ -14,9 +14,6 @@ import (
 	"impactgraph/donor-api/internal/store/queries"
 )
 
-// Staff views below keep alphabetical field order so responses match the
-// original map encoding byte for byte.
-
 type DonorSummary struct {
 	Claimed    bool        `json:"claimed"`
 	Disabled   bool        `json:"disabled"`

@@ -59,3 +59,25 @@ it("returns focus to the review control when backing out of confirmation", async
   fireEvent.click(screen.getByRole("button", { name: "Back" }));
   expect(screen.getByRole("button", { name: "Review amount change" })).toHaveFocus();
 });
+
+it("states every amount with its daily framing and marks a typed preset as chosen", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(options)));
+  render(<AmountPage />);
+  expect(await screen.findByText(/Your next monthly amount/)).toHaveTextContent("$30/month · about $1 a day");
+  fireEvent.change(screen.getByLabelText("Monthly amount in USD"), { target: { value: "90" } });
+  expect(screen.getByRole("button", { name: "$90/month · about $3 a day" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByText(/^New amount:/)).toHaveTextContent("$90/month · about $3 a day");
+  fireEvent.click(screen.getByRole("button", { name: "Review amount change" }));
+  expect(screen.getByText(/^From /)).toHaveTextContent("From $30/month · about $1 a day to $90/month · about $3 a day");
+});
+
+it("explains an unchanged amount separately from one out of range", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(options)));
+  render(<AmountPage />);
+  fireEvent.change(await screen.findByLabelText("Monthly amount in USD"), { target: { value: "30" } });
+  fireEvent.click(screen.getByRole("button", { name: "Review amount change" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("already your monthly amount");
+  fireEvent.change(screen.getByLabelText("Monthly amount in USD"), { target: { value: "0.50" } });
+  fireEvent.click(screen.getByRole("button", { name: "Review amount change" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("between $1 and $999,999.99");
+});

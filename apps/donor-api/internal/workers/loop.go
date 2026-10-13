@@ -8,8 +8,13 @@ import (
 )
 
 const (
-	stepTimeout = 2 * time.Minute
-	maxBackoff  = time.Minute
+	// StepBudget bounds one step of a worker whose external calls are short.
+	StepBudget = 2 * time.Minute
+	// ProcessorStepBudget covers a Stripe event's worst case, up to five
+	// processor requests that each may time out after 15 s and retry twice, so
+	// a slow processor ends in a recorded failure rather than an expired step.
+	ProcessorStepBudget = 5 * time.Minute
+	maxBackoff          = time.Minute
 )
 
 // Run repeats step until ctx ends. Each step owns one transaction; cancellation
@@ -20,13 +25,13 @@ const (
 // failing step is logged and retried with exponential backoff, so a transient
 // database or provider outage does not stop the worker; persistent failures
 // surface through queue age in the monitor.
-func Run(ctx context.Context, once bool, idle time.Duration, step func(context.Context) (bool, error)) error {
+func Run(ctx context.Context, once bool, idle, budget time.Duration, step func(context.Context) (bool, error)) error {
 	failures := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		work, cancel := context.WithTimeout(ctx, stepTimeout)
+		work, cancel := context.WithTimeout(ctx, budget)
 		worked, err := step(work)
 		cancel()
 		if once {

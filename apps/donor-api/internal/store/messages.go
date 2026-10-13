@@ -177,6 +177,19 @@ func renderMessage(ctx context.Context, q *queries.Queries, job queries.DonorMes
 			return "", "", err
 		}
 		return "Your DAD test payment needs attention", "Your monthly test payment was declined. Your giving streak is at risk.\nThe recovery grace period ends " + iso(period.DueAt.Time.Add(recognition.Grace)) + ".\nUpdate your payment method securely: " + site.paymentMethod() + "\nIf signed out, request a sign-in link for the email used to give, then return to payment methods.\nUpdating a card does not itself confirm payment recovery. Stripe's retry sequence handles collection.\nThis essential payment notice concerns sandbox giving, not a real charge.\n", nil
+	case "PASSKEY_ADDED":
+		added := data.Text("added_at")
+		if added == "" {
+			return "", "", payments.ErrFacts
+		}
+		passkey := "A passkey"
+		if name := data.Text("name"); name != "" {
+			passkey += " named \"" + name + "\""
+		}
+		return "A passkey was added to your DAD account", passkey + " was added to your DAD account at " + added + ". It can sign in to your account without an email link.\n\n" +
+			"If you added it, there is nothing to do.\n" +
+			"If you did not, sign in with an email link, remove the passkey from your profile, and choose Sign out on every device: " + site.profile() + "\n\n" +
+			"This is an essential account security notice. It is sent whenever a passkey is added and cannot be turned off.\n", nil
 	default:
 		return "", "", payments.ErrFacts
 	}
@@ -251,7 +264,7 @@ func (w MessageWorker) prepare(ctx context.Context, site publicSite, now time.Ti
 	return id, worked, nil
 }
 
-// DeliverNext renders and sends the next due financial or referral message.
+// DeliverNext renders and sends the next due financial, referral, or account notice.
 // It reports whether it found work.
 func (w MessageWorker) DeliverNext(ctx context.Context, now time.Time) (bool, error) {
 	site, err := mailSite(w.Settings, w.Origin, w.Transport)

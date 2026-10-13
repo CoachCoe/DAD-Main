@@ -109,7 +109,7 @@ before each costs a signature check.
 
 | Class | Paths (POST unless noted) | Cloudflare per IP | nginx per IP | API per client |
 | --- | --- | --- | --- | --- |
-| Auth | `/api/donor/login`, `/claim`, `/email-change/confirm`; `/api/donor/staff/sign-in`, `/activate`, and their `/options` | 30/min, block 10 min | 20/min, burst 20 | 10/min |
+| Auth | `/api/donor/login`, `/claim`, `/email-change/confirm`, `/passkeys/sign-in`; `/api/donor/staff/sign-in`, `/activate`; and each sign-in and activation's `/options` | 30/min, block 10 min | 20/min, burst 20 | 10/min |
 | Visitor | `/api/donor/checkouts`, `/api/donor/referrals/{code}`, `/api/donor/public/partner-signup` | 240/min, block 1 min | 120/min, burst 60 | 60/min |
 | General | pages, assets, other API calls | 1,200/min uncached, challenge | 30/s, burst 300 | account writes 30/min, staff writes 60/min |
 | Stripe webhook | `/api/donor/stripe/webhook` | skipped | 20/s, burst 500 | signature verified |
@@ -120,8 +120,8 @@ nginx also caps each client at 100 concurrent requests and answers rejections wi
 an IPv6 client by its /64, which one subscriber typically holds whole
 (`deploy/nginx/conf/client-key.js`, run by the image's njs module). The general zone tracks
 about half a million clients before evicting the least recent. Bodies are
-limited to 256 KiB (the API's JSON and webhook limit), except staff source uploads and
-publications at 10 MiB. Exports stream unbuffered.
+limited to 256 KiB (the API's JSON and webhook limit), except staff source uploads at
+10 MiB and publications, which nginx admits at 10 MiB and the API refuses above 8 MiB. Exports stream unbuffered.
 
 ## Cloudflare configuration
 
@@ -198,7 +198,8 @@ Counted per IP, with a custom JSON response
 `{"detail":"Too many requests"}` and status 429 where the plan allows:
 
 1. Auth: `http.request.method eq "POST" and http.request.uri.path in {"/api/donor/login"
-   "/api/donor/claim" "/api/donor/email-change/confirm" "/api/donor/staff/sign-in"
+   "/api/donor/claim" "/api/donor/email-change/confirm" "/api/donor/passkeys/sign-in"
+   "/api/donor/passkeys/sign-in/options" "/api/donor/staff/sign-in"
    "/api/donor/staff/sign-in/options" "/api/donor/staff/activate"
    "/api/donor/staff/activate/options"}` — 30 per minute, Block for 10 minutes.
 2. Visitor: `http.request.method eq "POST" and (http.request.uri.path in
@@ -229,8 +230,10 @@ router fetches the same URLs with an `RSC` header for a different payload, which
 Cloudflare does not vary on, hence the exclusion. `/_next/static/*` is cached by default
 and immutable. `/r/{code}`, `/ledger`, `/initiatives/*`, `/donate/thanks`, `/account`,
 and `/staff` are rendered per request (`private, no-store`) and are never cached. A
-referral landing (`/r/{code}`) therefore always costs one render and one API lookup at
-the origin: it is the hottest origin path during a referral spike.
+referral landing (`/r/{code}`) therefore always costs one render and one referral
+capture at the origin: it is the hottest origin path during a referral spike. The
+referrer's name it shows is looked up once a minute per code and web process, not per
+visit; an unknown code is looked up every time.
 
 ## Scaling beyond one origin
 

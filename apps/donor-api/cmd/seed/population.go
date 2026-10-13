@@ -93,10 +93,11 @@ type donor struct {
 
 	// Expected dashboard figures, derived from how the facts were generated
 	// rather than by the projection code, so tests can compare the two.
-	referred    map[string]referralTally // by referral kind
-	streak      int
-	atRisk      bool
-	streakKnown bool
+	referred      map[string]referralTally // by referral kind
+	streak        int
+	atRisk        bool
+	streakKnown   bool
+	streakUnknown bool // a pause past its freeze cap leaves the streak incomplete
 }
 
 type referralTally struct{ count, minor int64 }
@@ -276,8 +277,9 @@ func (g *generator) join(d *donor, sharers *sharerPool) {
 			sharers.add(d)
 		}
 	}
-	// The oracle does not model how a fully refunded renewal breaks a streak.
-	d.streakKnown = true
+	// The oracle does not model how a fully refunded renewal breaks a streak,
+	// nor a pause past its freeze cap, which recognition reads as incomplete.
+	d.streakKnown = !d.streakUnknown
 	for _, gift := range d.gifts() {
 		g.maybeRefund(gift)
 		if r := gift.refund; gift.frequency == "MONTHLY" && r != nil && r.status == "SUCCEEDED" && r.amount == gift.amount {
@@ -403,9 +405,21 @@ func (g *generator) monthly(c *checkout) {
 		c.sub.periodEnd = c.sub.stopsAt
 	}
 	stopped := !c.sub.stopsAt.IsZero() && !c.sub.stopsAt.After(g.now) && c.sub.stopsAt.Equal(lastEnds)
+	// A donor-initiated pause whose start is the last elapsed renewal boundary
+	// freezes the giving streak for [starts, starts+PauseFreeze): within that
+	// window continuity is preserved and not at risk (recognition's frozen case).
+	// Once g.now reaches the cap the freeze no longer protects the boundary, so
+	// the unobserved renewal reads as incomplete history and the dashboard shows
+	// no streak (recognition's ErrIncomplete), which the oracle cannot predict.
+	// Cancellation still ends continuity at 0.
 	paused := c.pause != nil && !g.now.Before(c.pause.starts) && g.now.Before(c.pause.resumes) && c.pause.starts.Equal(lastEnds)
-	if stopped || paused {
+	frozen := paused && g.now.Before(c.pause.starts.Add(recognition.PauseFreeze))
+	if stopped {
 		run, d.atRisk = 0, false
+	} else if frozen {
+		d.atRisk = false
+	} else if paused {
+		d.streakUnknown = true
 	}
 	d.streak = run
 }

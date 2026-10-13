@@ -37,11 +37,24 @@ const HOP_BY_HOP = new Set([
 // body is consumed, so an early 401 or 422 would surface as an unreachable API.
 const MAX_BODY_BYTES = 10 << 20;
 
-async function readBody(request: NextRequest): Promise<ArrayBuffer | null> {
-  const declared = Number(request.headers.get("content-length") ?? 0);
-  if (declared > MAX_BODY_BYTES) return null;
-  const body = await request.arrayBuffer();
-  return body.byteLength > MAX_BODY_BYTES ? null : body;
+// Counted as it arrives, since a chunked body declares no length.
+async function readBody(request: NextRequest): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return null;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  const reader = request.body?.getReader();
+  for (let read = await reader?.read(); read && !read.done; read = await reader?.read()) {
+    size += read.value.byteLength;
+    if (size > MAX_BODY_BYTES) {
+      await reader?.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(read.value);
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return body;
 }
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
