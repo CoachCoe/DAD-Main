@@ -118,6 +118,9 @@ Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURE
 
 Some migrations and releases need more:
 
+- The release that binds donor passkey registration to its originating session rejects
+  registrations started on an older image. These challenges last five minutes; donors
+  can restart registration after the upgrade. Existing passkeys and sessions still work.
 - `0007_staff_passkeys` replaces staff passwords and authenticator codes with passkeys.
   It deletes the old credentials and ends every staff session and open invitation, so
   every staff member enrols again: run break-glass recovery

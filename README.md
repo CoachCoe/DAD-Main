@@ -131,7 +131,7 @@ SMTP settings for those tests. `make lint` runs staticcheck, govulncheck, `npm a
 shellcheck when installed. `make check-ingress` runs `nginx -t` on the production ingress
 in both modes; `make smoke-ingress` checks its hosts, client addresses, body sizes, and
 rate limits in front of a stub web service; `make check-images` builds both production
-images and serves the web image through nginx. CI runs all of these through the same
+images, verifies the deployment commands are included, and serves the web image through nginx. CI runs all of these through the same
 `make` targets, with PostgreSQL and Chromium, and also validates the production Compose
 file. CI runs browser tests in both development and production modes. `npm start` serves
 the standalone build and copies its static assets first, matching the container's server.
@@ -170,7 +170,7 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 
 ## Layout
 
-- `apps/donor-api/cmd`: API, workers, migrations, database login provisioning, administrator bootstrap, monitoring, key rotation, load-test seeding and load testing.
+- `apps/donor-api/cmd`: API, workers, migrations, database login provisioning, administrator bootstrap, monitoring, reconciliation, key rotation, load-test seeding and load testing.
 - `apps/donor-api/internal`: HTTP, domain rules, persistence, Stripe, email, push, credentials.
 - `apps/donor-api/db`: versioned SQL migrations and sqlc queries.
 - `apps/donor-api/api`: the OpenAPI contract for web and native clients, checked by tests.

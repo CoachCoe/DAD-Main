@@ -9,6 +9,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/api ./cmd/api && \
     CGO_ENABLED=0 go build -trimpath -o /out/migrate ./cmd/migrate && \
     CGO_ENABLED=0 go build -trimpath -o /out/provision ./cmd/provision && \
     CGO_ENABLED=0 go build -trimpath -o /out/monitor ./cmd/monitor && \
+    CGO_ENABLED=0 go build -trimpath -o /out/reconcile ./cmd/reconcile && \
     CGO_ENABLED=0 go build -trimpath -o /out/staff ./cmd/staff && \
     CGO_ENABLED=0 go build -trimpath -o /out/rekey ./cmd/rekey
 
