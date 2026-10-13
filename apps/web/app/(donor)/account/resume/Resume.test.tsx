@@ -14,6 +14,7 @@ it("requires explicit confirmation and sends the displayed renewal date", async 
   fireEvent.click(await screen.findByRole("button", { name: "Resume at next renewal" }));
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(screen.getByText(/does not charge you immediately/)).toBeVisible();
+  expect(screen.getByText(/Resuming within three months of your pause continues your existing streak/)).toBeVisible();
   expect(screen.getByRole("heading", { name: "Confirm resumption" })).toHaveFocus();
   fireEvent.click(screen.getByRole("button", { name: "Confirm resume giving" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Resumption confirmed for"));

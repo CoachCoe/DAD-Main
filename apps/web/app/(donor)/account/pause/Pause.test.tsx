@@ -17,7 +17,7 @@ it("requires confirmation of the exact skipped and resumed renewal dates", async
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("heading", { name: "Confirm your pause" })).toHaveFocus();
   expect(screen.getByText((_, node) => node?.tagName === "P" && node.textContent === `Giving automatically resumes ${formatDate(dates.resumes_at)}.`)).toBeVisible();
-  expect(screen.getByText(/streak ends at the first skipped renewal/)).toBeVisible();
+  expect(screen.getByText(/streak is frozen during a pause of up to three months and continues when giving resumes/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Confirm pause" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Pause confirmed."));
   expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ subscription_id: "owned", ...dates });

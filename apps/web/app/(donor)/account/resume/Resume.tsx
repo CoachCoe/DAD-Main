@@ -54,8 +54,8 @@ export default function Resume() {
             </div>
           </div> : <button type="button" ref={step.trigger} className="button" onClick={() => setConfirming(true)}>Resume at next renewal</button>}
         </>}
-        <p className="note">If you already skipped a renewal, your streak restarts only after a successful recurring charge.
-          If no renewal was skipped, successful giving can continue the existing streak.</p>
+        <p className="note">Resuming within three months of your pause continues your existing streak.
+          Your next successful monthly gift adds to it; skipped renewals do not count as gifts.</p>
       </>}
       <Announcer status={messages.status || message} alert={error || messages.alert} />
       {(failed || error || data?.state === "saved") && <button type="button" className="secondary" disabled={busy} onClick={reload}>Refresh resumption status</button>}
