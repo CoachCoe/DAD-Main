@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "source": "github:CoachCoe/ImpactGraph",
-  "sequence": 6,
+  "sequence": 7,
   "findings": [
     {
       "id": "0528857cd2a7017bebf104ee",
@@ -69,6 +69,15 @@
       "bundleSha256": "28bde042d080db61417b4cecf67fa5a771093e3e5e19a94d72d764dcb05646c8",
       "artifactId": "11832330931",
       "artifactDigest": "8890bb0a1d134d879dd3a6844a620431364d664d779b479ffbee3472bb7b18e3",
+      "eligible": false
+    },
+    {
+      "execution": "38432553104:1",
+      "runId": "atm-20261013165214-10005e63",
+      "revision": "bfdd69a0cbe2e7c4c0814840e9b700e52b7487fd",
+      "bundleSha256": "72135ec78e115bcc421d3501dd69fa314b4d5d8e8bfe2735d2db718354c1f6f3",
+      "artifactId": "11832337732",
+      "artifactDigest": "7401634a5dbc238d48b252880f1b86073308f0cf44cbcb00fe6acd4171ebf95c",
       "eligible": false
     }
   ]
