@@ -303,19 +303,33 @@ recorded.
 - **Schedule.** Run it ~00:30 America/New_York, once yesterday's New York calendar day has
   closed. New York is the system's authoritative civil-time zone, so the day finance reasons
   about and the day the job reconciles are the same. The NY-day bounds are converted to a UTC
-  `created` range for Stripe and a `paid_at`/`observed_at` range for the database.
-- **Grace margin.** `--max-lag` (default 30m) keeps a charge or refund created in the last
-  30 minutes of the window from being flagged as missing, so a webhook still legitimately
-  in flight is not mistaken for a lost one. A dropped event is the signal, not a late one.
+  `created` range for Stripe. Database rows match by processor ID across day boundaries;
+  local `paid_at`/`observed_at` rows also receive a reverse provider check when needed.
+  Older pending or action-required refunds are checked daily until their terminal status
+  is recorded, so a dropped status-update event cannot leave them unsettled indefinitely.
+- **Processing delay.** `--max-lag` (default 30m) requires waiting until the window's end
+  plus that delay. Earlier runs fail. Once settled, the entire window is checked,
+  including its final 30 minutes; repeating an older day cannot hide a dropped event.
 - **Scope.** R1 reconciles charges and refunds only. Invoices, billing periods and
   subscriptions are a phase-2 concern and are deliberately not reconciled yet; the role's
   SELECT grant on `donor_billing_periods` and `donor_billing_observations` leaves the seam.
 - **Output and alarm.** The job prints one aggregate JSON object — counts per discrepancy
   class (`missing_gifts`, `missing_refunds`, `amount_mismatches`, `status_mismatches`,
-  `db_without_stripe`), the window, and ids only, never donor identifiers or payloads — and
+  `db_without_stripe`, `currency_mismatches`, `invalid_objects`), the window, and ids only,
+  never donor identifiers or payloads — and
   exits non-zero when any discrepancy count is greater than zero, so a CloudWatch alarm fires
   on the exit code. A clean day prints the JSON and exits 0. It holds no state and writes no
-  report, so a re-run of the same day is safe and deterministic.
+  report, so a re-run is safe and compares the latest available processor and database
+  state. Failed and uncollected charges do not require gifts. Captured amounts, currency,
+  and refund statuses must agree; malformed facts cannot produce a clean verdict.
+- **Bounds and account scope.** Each side is limited to 10,000 records and the run to
+  60 seconds; exceeding either fails, so use smaller explicit `--since`/`--until` ranges.
+  Reads are sequential with a 100 ms pause before each provider request, leaving capacity
+  for workers and staff. Resolve a large backlog of unsettled refunds before retrying.
+  The job audits the entire configured Stripe test account. Unrelated collected payments
+  in a shared account are flagged too; use a dedicated account for DAD acceptance.
+  Legacy invoice gifts without a stored PaymentIntent cannot receive a reverse charge
+  check and are reported for operator review.
 - **Read-only.** The job is strictly read-only against both Stripe (List/Retrieve only) and
   the database (its `dad_reconcile` role has SELECT alone). It never repairs, deletes or
   writes any financial fact.

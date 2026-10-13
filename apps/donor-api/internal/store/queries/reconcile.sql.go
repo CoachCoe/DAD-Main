@@ -11,20 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const giftsPaidBetween = `-- name: GiftsPaidBetween :many
+const reconciliationGifts = `-- name: ReconciliationGifts :many
 
 SELECT stripe_object_id, stripe_payment_intent_id, amount_minor, currency, paid_at
 FROM donor_gifts
-WHERE paid_at >= $1::timestamptz AND paid_at < $2::timestamptz
-ORDER BY paid_at, stripe_object_id
+WHERE (paid_at >= $1::timestamptz AND paid_at < $2::timestamptz)
+OR stripe_payment_intent_id=ANY($3::text[])
+OR stripe_object_id=ANY($4::text[])
+ORDER BY paid_at, stripe_object_id LIMIT 10001
 `
 
-type GiftsPaidBetweenParams struct {
-	Start pgtype.Timestamptz `json:"start"`
-	EndAt pgtype.Timestamptz `json:"end_at"`
+type ReconciliationGiftsParams struct {
+	Start          pgtype.Timestamptz `json:"start"`
+	EndAt          pgtype.Timestamptz `json:"end_at"`
+	PaymentIntents []string           `json:"payment_intents"`
+	StripeObjects  []string           `json:"stripe_objects"`
 }
 
-type GiftsPaidBetweenRow struct {
+type ReconciliationGiftsRow struct {
 	StripeObjectID        string             `json:"stripe_object_id"`
 	StripePaymentIntentID pgtype.Text        `json:"stripe_payment_intent_id"`
 	AmountMinor           int64              `json:"amount_minor"`
@@ -32,19 +36,21 @@ type GiftsPaidBetweenRow struct {
 	PaidAt                pgtype.Timestamptz `json:"paid_at"`
 }
 
-// Read-only queries for the daily Stripe reconciliation job (cmd/reconcile).
-// Both are keyed on the window the job reconciles: gifts by paid_at (the
-// successful charge's time), refunds by observed_at. They return ids and the
-// fields the diff compares, never donor identifiers or payloads.
-func (q *Queries) GiftsPaidBetween(ctx context.Context, arg GiftsPaidBetweenParams) ([]GiftsPaidBetweenRow, error) {
-	rows, err := q.db.Query(ctx, giftsPaidBetween, arg.Start, arg.EndAt)
+// Processor creation and local observation can fall on different days.
+func (q *Queries) ReconciliationGifts(ctx context.Context, arg ReconciliationGiftsParams) ([]ReconciliationGiftsRow, error) {
+	rows, err := q.db.Query(ctx, reconciliationGifts,
+		arg.Start,
+		arg.EndAt,
+		arg.PaymentIntents,
+		arg.StripeObjects,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []GiftsPaidBetweenRow{}
+	items := []ReconciliationGiftsRow{}
 	for rows.Next() {
-		var i GiftsPaidBetweenRow
+		var i ReconciliationGiftsRow
 		if err := rows.Scan(
 			&i.StripeObjectID,
 			&i.StripePaymentIntentID,
@@ -62,37 +68,42 @@ func (q *Queries) GiftsPaidBetween(ctx context.Context, arg GiftsPaidBetweenPara
 	return items, nil
 }
 
-const refundsObservedBetween = `-- name: RefundsObservedBetween :many
-SELECT stripe_refund_id, amount_minor, status, observed_at
+const reconciliationRefunds = `-- name: ReconciliationRefunds :many
+SELECT stripe_refund_id, amount_minor, currency, status, observed_at
 FROM donor_refunds
-WHERE observed_at >= $1::timestamptz AND observed_at < $2::timestamptz
-ORDER BY observed_at, stripe_refund_id
+WHERE (observed_at >= $1::timestamptz AND observed_at < $2::timestamptz)
+OR stripe_refund_id=ANY($3::text[])
+OR status IN ('PENDING','REQUIRES_ACTION')
+ORDER BY observed_at, stripe_refund_id LIMIT 10001
 `
 
-type RefundsObservedBetweenParams struct {
-	Start pgtype.Timestamptz `json:"start"`
-	EndAt pgtype.Timestamptz `json:"end_at"`
+type ReconciliationRefundsParams struct {
+	Start         pgtype.Timestamptz `json:"start"`
+	EndAt         pgtype.Timestamptz `json:"end_at"`
+	StripeRefunds []string           `json:"stripe_refunds"`
 }
 
-type RefundsObservedBetweenRow struct {
+type ReconciliationRefundsRow struct {
 	StripeRefundID string             `json:"stripe_refund_id"`
 	AmountMinor    int64              `json:"amount_minor"`
+	Currency       string             `json:"currency"`
 	Status         string             `json:"status"`
 	ObservedAt     pgtype.Timestamptz `json:"observed_at"`
 }
 
-func (q *Queries) RefundsObservedBetween(ctx context.Context, arg RefundsObservedBetweenParams) ([]RefundsObservedBetweenRow, error) {
-	rows, err := q.db.Query(ctx, refundsObservedBetween, arg.Start, arg.EndAt)
+func (q *Queries) ReconciliationRefunds(ctx context.Context, arg ReconciliationRefundsParams) ([]ReconciliationRefundsRow, error) {
+	rows, err := q.db.Query(ctx, reconciliationRefunds, arg.Start, arg.EndAt, arg.StripeRefunds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []RefundsObservedBetweenRow{}
+	items := []ReconciliationRefundsRow{}
 	for rows.Next() {
-		var i RefundsObservedBetweenRow
+		var i ReconciliationRefundsRow
 		if err := rows.Scan(
 			&i.StripeRefundID,
 			&i.AmountMinor,
+			&i.Currency,
 			&i.Status,
 			&i.ObservedAt,
 		); err != nil {

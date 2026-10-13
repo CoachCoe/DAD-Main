@@ -45,6 +45,30 @@ type StaffFinanceGateway interface {
 type ReconcileGateway interface {
 	ListChargesByCreated(context.Context, time.Time, time.Time) ([]Object, error)
 	ListRefundsByCreated(context.Context, time.Time, time.Time) ([]Object, error)
+	RetrievePaymentIntent(context.Context, string) (Object, error)
+	RetrieveRefund(context.Context, string) (Object, error)
+}
+
+// WaitReconciliationRead leaves provider capacity for workers and staff commands.
+func WaitReconciliationRead(ctx context.Context) error {
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func ReconciliationFacts(o Object) Object {
+	out := Object{}
+	for _, key := range []string{"id", "payment_intent", "amount", "amount_captured", "currency", "status", "paid", "captured", "livemode", "created"} {
+		if value, ok := o[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
 }
 
 // StripeGateway calls Stripe in test mode. A failed call is reported as
@@ -249,6 +273,9 @@ func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time,
 	result := []Object{}
 	after := ""
 	for range 100 {
+		if err := WaitReconciliationRead(ctx); err != nil {
+			return nil, err
+		}
 		page := list(ctx, created, after)
 		if page.Err() != nil {
 			return nil, ErrProcessorUnavailable
@@ -266,7 +293,9 @@ func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time,
 				return nil, ErrFacts
 			}
 		}
-		result = append(result, rows...)
+		for _, row := range rows {
+			result = append(result, ReconciliationFacts(row))
+		}
 		if raw.BoolIs("has_more", false) {
 			return result, nil
 		}

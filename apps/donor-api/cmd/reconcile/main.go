@@ -10,8 +10,7 @@
 // By default it reconciles yesterday as a full calendar day in
 // America/New_York (intended to run ~00:30 NY once the day has closed). A
 // -date, or an explicit -since/-until pair, makes a re-run deterministic. A
-// -max-lag grace margin (default 30m) keeps a just-created Stripe object near
-// the window edge from being flagged as a lost event.
+// -max-lag (default 30m) requires the entire window to have settled before it runs.
 package main
 
 import (
@@ -22,8 +21,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"impactgraph/donor-api/internal/dbroles"
@@ -67,13 +68,16 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	date := flags.String("date", "", "reconcile this New York calendar day (YYYY-MM-DD); default yesterday in New York")
 	since := flags.String("since", "", "window start (RFC3339); use with -until for an explicit range")
 	until := flags.String("until", "", "window end, exclusive (RFC3339); use with -since")
-	maxLag := flags.Duration("max-lag", 30*time.Minute, "grace margin: a Stripe object created within this of the window edge is not flagged missing")
+	maxLag := flags.Duration("max-lag", 30*time.Minute, "required processing delay after the window closes")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("invalid reconcile arguments")
 	}
 	win, err := window(*date, *since, *until, *maxLag, time.Now())
 	if err != nil {
 		return err
+	}
+	if !win.Settled(time.Now()) {
+		return errors.New("reconciliation window has not settled; wait until its end plus max-lag")
 	}
 
 	dsn := dbroles.ReconcileJob.URL(getenv)
@@ -99,7 +103,12 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		return errors.New("stripe gateway unavailable")
 	}
 
-	report, err := reconcileWindow(ctx, win, gateway, queries.New(pool))
+	var report reconcile.Report
+	err = pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		var err error
+		report, err = reconcileWindow(ctx, win, gateway, queries.New(tx))
+		return err
+	})
 	if err != nil {
 		return err
 	}
@@ -118,23 +127,46 @@ func reconcileWindow(ctx context.Context, win reconcile.Window, gateway payments
 	gte, lte := win.StripeCreatedRange()
 	start := time.Unix(gte, 0).UTC()
 	end := time.Unix(lte, 0).UTC()
-	charges, err := gateway.ListChargesByCreated(ctx, start, end)
-	if err != nil {
-		return reconcile.Report{}, errors.New("stripe charge listing failed")
-	}
-	refunds, err := gateway.ListRefundsByCreated(ctx, start, end)
-	if err != nil {
-		return reconcile.Report{}, errors.New("stripe refund listing failed")
+	charges, refunds := []payments.Object{}, []payments.Object{}
+	if gte <= lte {
+		var err error
+		charges, err = gateway.ListChargesByCreated(ctx, start, end)
+		if err != nil {
+			return reconcile.Report{}, errors.New("stripe charge listing failed")
+		}
+		refunds, err = gateway.ListRefundsByCreated(ctx, start, end)
+		if err != nil {
+			return reconcile.Report{}, errors.New("stripe refund listing failed")
+		}
 	}
 
+	chargeIDs, paymentIDs, refundIDs := []string{}, []string{}, []string{}
+	seenCharges, seenRefunds := map[string]bool{}, map[string]bool{}
+	for _, charge := range charges {
+		_, collected, err := reconcile.CollectedCharge(charge)
+		if err != nil || !collected {
+			continue
+		}
+		id, payment := charge.Text("id"), charge.Text("payment_intent")
+		chargeIDs, paymentIDs = append(chargeIDs, id), append(paymentIDs, payment)
+		seenCharges[id], seenCharges[payment] = true, true
+	}
+	for _, refund := range refunds {
+		id := refund.Text("id")
+		refundIDs = append(refundIDs, id)
+		seenRefunds[id] = true
+	}
 	bound := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
-	giftRows, err := q.GiftsPaidBetween(ctx, queries.GiftsPaidBetweenParams{Start: bound(win.Start), EndAt: bound(win.End)})
+	giftRows, err := q.ReconciliationGifts(ctx, queries.ReconciliationGiftsParams{Start: bound(win.Start), EndAt: bound(win.End), StripeObjects: append(chargeIDs, paymentIDs...), PaymentIntents: paymentIDs})
 	if err != nil {
 		return reconcile.Report{}, errors.New("gift window query failed")
 	}
-	refundRows, err := q.RefundsObservedBetween(ctx, queries.RefundsObservedBetweenParams{Start: bound(win.Start), EndAt: bound(win.End)})
+	refundRows, err := q.ReconciliationRefunds(ctx, queries.ReconciliationRefundsParams{Start: bound(win.Start), EndAt: bound(win.End), StripeRefunds: refundIDs})
 	if err != nil {
 		return reconcile.Report{}, errors.New("refund window query failed")
+	}
+	if len(giftRows) > 10000 || len(refundRows) > 10000 {
+		return reconcile.Report{}, errors.New("reconciliation window exceeds 10000 records; use a smaller range")
 	}
 
 	gifts := make([]reconcile.Gift, 0, len(giftRows))
@@ -146,15 +178,58 @@ func reconcileWindow(ctx context.Context, win reconcile.Window, gateway payments
 			Currency:              g.Currency,
 			PaidAt:                g.PaidAt.Time,
 		})
+		if seenCharges[g.StripeObjectID] || (g.StripePaymentIntentID.Valid && seenCharges[g.StripePaymentIntentID.String]) {
+			continue
+		}
+		payment := g.StripePaymentIntentID.String
+		if payment == "" && strings.HasPrefix(g.StripeObjectID, "pi_") {
+			payment = g.StripeObjectID
+		}
+		if payment == "" {
+			continue
+		}
+		if err := payments.WaitReconciliationRead(ctx); err != nil {
+			return reconcile.Report{}, err
+		}
+		intent, err := gateway.RetrievePaymentIntent(ctx, payment)
+		if err != nil {
+			return reconcile.Report{}, errors.New("stripe payment verification failed")
+		}
+		if intent.Text("id") != payment || !intent.BoolIs("livemode", false) {
+			return reconcile.Report{}, errors.New("stripe payment verification returned invalid facts")
+		}
+		if intent.Text("status") != "succeeded" {
+			continue
+		}
+		charge, err := intent.Object("latest_charge")
+		if err != nil || charge.Text("payment_intent") != payment {
+			return reconcile.Report{}, errors.New("stripe payment charge verification returned invalid facts")
+		}
+		charges = append(charges, payments.ReconciliationFacts(charge))
+		seenCharges[payment] = true
 	}
 	dbRefunds := make([]reconcile.Refund, 0, len(refundRows))
 	for _, r := range refundRows {
 		dbRefunds = append(dbRefunds, reconcile.Refund{
 			StripeRefundID: r.StripeRefundID,
 			AmountMinor:    r.AmountMinor,
+			Currency:       r.Currency,
 			Status:         r.Status,
 			ObservedAt:     r.ObservedAt.Time,
 		})
+		if !seenRefunds[r.StripeRefundID] {
+			if err := payments.WaitReconciliationRead(ctx); err != nil {
+				return reconcile.Report{}, err
+			}
+			refund, err := gateway.RetrieveRefund(ctx, r.StripeRefundID)
+			if err != nil {
+				return reconcile.Report{}, errors.New("stripe refund verification failed")
+			}
+			if refund.Text("id") != r.StripeRefundID {
+				return reconcile.Report{}, errors.New("stripe refund verification returned invalid facts")
+			}
+			refunds = append(refunds, payments.ReconciliationFacts(refund))
+		}
 	}
 	return reconcile.Diff(win, charges, refunds, gifts, dbRefunds), nil
 }
