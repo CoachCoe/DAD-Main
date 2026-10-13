@@ -7,13 +7,22 @@
       "id": "0528857cd2a7017bebf104ee",
       "source": "github:CoachCoe/ImpactGraph",
       "check": "api-tests",
-      "severity": "unassessed",
-      "disposition": "untriaged",
+      "severity": "medium",
+      "disposition": "resolved",
       "firstSeen": "2026-10-13T16:25:08.780Z",
       "lastSeen": "2026-10-13T16:25:08.780Z",
       "lastRunId": "atm-20261013162508-d59b098c",
       "occurrences": 1,
-      "audit": []
+      "audit": [
+        {
+          "at": "2026-10-13T21:05:14.825Z",
+          "actor": "CoachCoe",
+          "disposition": "resolved",
+          "severity": "medium",
+          "noteDigest": "c6e4588bffde868069318fb9e6b16bfe83c16b35d3c5080f2abc2a6139efddc5"
+        }
+      ],
+      "updatedAt": "2026-10-13T21:05:14.825Z"
     }
   ],
   "receipts": [
