@@ -18,6 +18,11 @@ var (
 
 const Grace = 14 * 24 * time.Hour
 
+// PauseFreeze caps how long a donor-initiated pause freezes the giving streak,
+// measured from the pause start. It is the 3-month freeze window expressed as a
+// fixed 90-day approximation, in the fixed-duration style of Grace.
+const PauseFreeze = 3 * 30 * 24 * time.Hour
+
 // NewYork is the zone of the Founding Donor cutoff and receipt tax years.
 var NewYork = mustLoadLocation("America/New_York")
 
@@ -233,7 +238,7 @@ func GivingStreak(input []Gift, refunds []Refund, inputPeriods []Period, donorID
 	if err != nil {
 		return Streak{}, err
 	}
-	stopped, err := stoppedRenewals(stops, pauses, asOf)
+	stopped, frozen, err := stoppedRenewals(stops, pauses, asOf)
 	if err != nil {
 		return Streak{}, err
 	}
@@ -248,12 +253,15 @@ func GivingStreak(input []Gift, refunds []Refund, inputPeriods []Period, donorID
 	}
 	last := elapsed[len(elapsed)-1]
 	renewalDue := !last.EndsAt.After(asOf)
-	if renewalDue && !stopped[last.EndsAt] && !asOf.Before(last.EndsAt.Add(Grace)) {
+	// A renewal frozen by an in-window pause neither lapses to incomplete nor
+	// resets the streak; continuity is preserved until the freeze cap expires.
+	frozenRenewal := renewalDue && frozen[last.EndsAt]
+	if renewalDue && !stopped[last.EndsAt] && !frozenRenewal && !asOf.Before(last.EndsAt.Add(Grace)) {
 		return Streak{}, ErrIncomplete
 	}
 	result := countStreak(elapsed, paid, net, asOf)
 	result.Best = max(previousBest, result.Best)
-	if renewalDue && stopped[last.EndsAt] {
+	if renewalDue && stopped[last.EndsAt] && !frozenRenewal {
 		result.Current = 0
 		result.AtRisk = false
 		result.GraceEndsAt = nil
@@ -315,25 +323,29 @@ func periodPayments(gifts []Gift, net map[string]int64, periods []Period, donorI
 	return result, nil
 }
 
-// stoppedRenewals returns the renewal boundaries skipped by cancellation or
-// by a pause in effect at asOf.
-func stoppedRenewals(stops []time.Time, pauses []Pause, asOf time.Time) (map[time.Time]bool, error) {
-	stopped := map[time.Time]bool{}
+// stoppedRenewals returns the renewal boundaries ended by cancellation
+// (stopped) and, separately, those skipped by a donor-initiated pause that is
+// still inside its freeze window at asOf (frozen). A cancellation ends
+// continuity; a frozen boundary preserves it. A pause active past the
+// PauseFreeze cap is neither stopped nor frozen, so normal lapse resumes.
+func stoppedRenewals(stops []time.Time, pauses []Pause, asOf time.Time) (stopped, frozen map[time.Time]bool, err error) {
+	stopped = map[time.Time]bool{}
+	frozen = map[time.Time]bool{}
 	for _, t := range stops {
 		if t.IsZero() {
-			return nil, ErrInvalid
+			return nil, nil, ErrInvalid
 		}
 		stopped[utc(t)] = true
 	}
 	for _, p := range pauses {
 		if p.Start.IsZero() || p.End.IsZero() {
-			return nil, ErrInvalid
+			return nil, nil, ErrInvalid
 		}
-		if !asOf.Before(p.Start) && asOf.Before(p.End) {
-			stopped[utc(p.Start)] = true
+		if !asOf.Before(p.Start) && asOf.Before(p.End) && asOf.Before(p.Start.Add(PauseFreeze)) {
+			frozen[utc(p.Start)] = true
 		}
 	}
-	return stopped, nil
+	return stopped, frozen, nil
 }
 
 func countStreak(elapsed []Period, payments map[string][]Gift, net map[string]int64, asOf time.Time) Streak {

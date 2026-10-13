@@ -169,7 +169,9 @@ type projection struct {
 // projectionRules versions the rules a projection follows: recognition and
 // the messages and push intents queued with it. Raise it with any change to
 // them, so every saved projection is recomputed under the new rules.
-const projectionRules = 1
+// v2: pause now freezes the giving streak for up to PauseFreeze (A2) instead
+// of ending continuity at the first skipped renewal.
+const projectionRules = 2
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a
