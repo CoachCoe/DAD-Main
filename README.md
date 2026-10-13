@@ -113,7 +113,7 @@ make test
 make lint
 make check-ingress smoke-ingress check-images
 (cd apps/web && npx playwright install chromium)
-make test-browser-e2e
+DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" make test-browser-e2e
 ```
 
 Browser tests run against `next dev` by default; set `E2E_PRODUCTION=1` to run them
@@ -126,7 +126,11 @@ with `cmd/staff`, so point `DONOR_GO_DATABASE_URL` at a synthetic database.
 
 `make test` checks Go formatting, vet, race-enabled tests, compilation, frontend lint,
 unit tests, generated route types, TypeScript, and the production build. Browser tests
-start a local Go API and Next server. Use a synthetic application database and no live
+start a local Go API and Next server on 127.0.0.1:8002 and 127.0.0.1:3000, with matching
+origins regardless of the local application's origin settings. They require a database
+named `donor_go` and refuse the application database. Stop any running `make api` as
+well as `make web` before testing, so a test cannot reuse an application server.
+Use a synthetic application database and no live
 SMTP settings for those tests. `make lint` runs staticcheck, govulncheck, `npm audit`, and
 shellcheck when installed. `make check-ingress` runs `nginx -t` on the production ingress
 in both modes; `make smoke-ingress` checks its hosts, client addresses, body sizes, and
