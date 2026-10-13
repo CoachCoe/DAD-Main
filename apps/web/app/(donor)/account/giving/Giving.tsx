@@ -17,12 +17,13 @@ export default function Giving() {
   const [error, setError] = useState("");
   const { resource, data, failed, reload } = useApiResource<Schema<"GiftsPage">>(signedOut ? null : `/donor/me/gifts?offset=${offset}`);
   const heading = useRef<HTMLHeadingElement>(null);
-  const paged = useRef(false);
+  const paged = useRef<{ previous: typeof data } | null>(null);
   // Paging replaces the list the donor was reading; land them at the top of the new page.
   useEffect(() => {
-    if (data && paged.current) { paged.current = false; heading.current?.focus(); }
+    // A late effect from the previous response must not consume this request.
+    if (data && paged.current && data !== paged.current.previous) { paged.current = null; heading.current?.focus(); }
   }, [data]);
-  const page = (next: number) => { paged.current = true; setOffset(next); };
+  const page = (next: number) => { paged.current = { previous: data }; setOffset(next); };
   const messages = resourceMessages(resource, { loading: "Loading your giving…",
     failure: "Giving history could not be loaded right now. Please retry in a moment." });
   async function logout() {
