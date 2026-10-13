@@ -11,6 +11,56 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const pendingReconciliationRefunds = `-- name: PendingReconciliationRefunds :many
+SELECT id, stripe_refund_id, amount_minor, currency, status, observed_at
+FROM donor_refunds
+WHERE status IN ('PENDING','REQUIRES_ACTION')
+AND ($1::uuid IS NULL OR id > $1::uuid)
+AND NOT (stripe_refund_id=ANY($2::text[]))
+ORDER BY id LIMIT 100
+`
+
+type PendingReconciliationRefundsParams struct {
+	AfterID         pgtype.UUID `json:"after_id"`
+	ExcludedRefunds []string    `json:"excluded_refunds"`
+}
+
+type PendingReconciliationRefundsRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	StripeRefundID string             `json:"stripe_refund_id"`
+	AmountMinor    int64              `json:"amount_minor"`
+	Currency       string             `json:"currency"`
+	Status         string             `json:"status"`
+	ObservedAt     pgtype.Timestamptz `json:"observed_at"`
+}
+
+func (q *Queries) PendingReconciliationRefunds(ctx context.Context, arg PendingReconciliationRefundsParams) ([]PendingReconciliationRefundsRow, error) {
+	rows, err := q.db.Query(ctx, pendingReconciliationRefunds, arg.AfterID, arg.ExcludedRefunds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PendingReconciliationRefundsRow{}
+	for rows.Next() {
+		var i PendingReconciliationRefundsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StripeRefundID,
+			&i.AmountMinor,
+			&i.Currency,
+			&i.Status,
+			&i.ObservedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reconciliationGifts = `-- name: ReconciliationGifts :many
 
 SELECT stripe_object_id, stripe_payment_intent_id, amount_minor, currency, paid_at
@@ -73,7 +123,6 @@ SELECT stripe_refund_id, amount_minor, currency, status, observed_at
 FROM donor_refunds
 WHERE (observed_at >= $1::timestamptz AND observed_at < $2::timestamptz)
 OR stripe_refund_id=ANY($3::text[])
-OR status IN ('PENDING','REQUIRES_ACTION')
 ORDER BY observed_at, stripe_refund_id LIMIT 10001
 `
 

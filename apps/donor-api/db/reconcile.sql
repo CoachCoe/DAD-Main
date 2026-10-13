@@ -13,5 +13,12 @@ SELECT stripe_refund_id, amount_minor, currency, status, observed_at
 FROM donor_refunds
 WHERE (observed_at >= sqlc.arg(start)::timestamptz AND observed_at < sqlc.arg(end_at)::timestamptz)
 OR stripe_refund_id=ANY(sqlc.arg(stripe_refunds)::text[])
-OR status IN ('PENDING','REQUIRES_ACTION')
 ORDER BY observed_at, stripe_refund_id LIMIT 10001;
+
+-- name: PendingReconciliationRefunds :many
+SELECT id, stripe_refund_id, amount_minor, currency, status, observed_at
+FROM donor_refunds
+WHERE status IN ('PENDING','REQUIRES_ACTION')
+AND (sqlc.narg(after_id)::uuid IS NULL OR id > sqlc.narg(after_id)::uuid)
+AND NOT (stripe_refund_id=ANY(sqlc.arg(excluded_refunds)::text[]))
+ORDER BY id LIMIT 100;

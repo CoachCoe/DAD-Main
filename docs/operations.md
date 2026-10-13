@@ -132,6 +132,8 @@ Some migrations and releases need more:
 - `0009_subscription_sync` adds the billing anchor that dates paused renewals. A
   subscription synced before it shows no anchor until the Stripe worker next syncs it, so
   start the workers promptly after `up`.
+- `0015_pending_refund_reconciliation` indexes unsettled refunds for bounded batch reads.
+  Index creation blocks refund writes; migrate at a quiet time on a large database.
 - The release that introduces [database roles](#database-roles) runs each process as its
   own login, and the processes refuse to start as the schema owner. Before step 2, create
   `.env.database` from `.env.database.example`: move `POSTGRES_USER`, `POSTGRES_PASSWORD`,
@@ -325,10 +327,16 @@ recorded.
   report, so a re-run is safe and compares the latest available processor and database
   state. Failed and uncollected charges do not require gifts. Captured amounts, currency,
   and refund statuses must agree; malformed facts cannot produce a clean verdict.
-- **Bounds and account scope.** Each side is limited to 10,000 records and the run to
-  60 seconds; exceeding either fails, so use smaller explicit `--since`/`--until` ranges.
+- **Bounds and account scope.** Window records are limited to 10,000 per side; exceeding
+  that fails, so use smaller explicit `--since`/`--until` ranges. Older unsettled refunds
+  are read in pages of 100, up to 100,000 records, with full discrepancy counts and
+  bounded identifier lists. The report includes `pending_refunds_checked` and
+  `pending_refund_batches` for these additional reads. The default job deadline remains
+  60 seconds; use `--timeout 15m` for a large backlog (allowed range 1s to 1h).
+  Deadline or provider failure produces a nonzero exit and no partial verdict.
   Reads are sequential with a 100 ms pause before each provider request, leaving capacity
-  for workers and staff. Resolve a large backlog of unsettled refunds before retrying.
+  for workers and staff. A longer run holds a read-only snapshot, so schedule backlog
+  checks away from peak traffic and monitor database transaction age.
   The job audits the entire configured Stripe test account. Unrelated collected payments
   in a shared account are flagged too; use a dedicated account for DAD acceptance.
   Legacy invoice gifts without a stored PaymentIntent cannot receive a reverse charge

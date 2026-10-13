@@ -101,21 +101,49 @@ type Refund struct {
 // the offending objects for an operator. IDS ONLY — never donor PII or
 // payloads, per the Financial consistency rule in docs/architecture.md.
 type Report struct {
-	Window              Window   `json:"window"`
-	MissingGifts        int      `json:"missing_gifts"`
-	MissingRefunds      int      `json:"missing_refunds"`
-	AmountMismatches    int      `json:"amount_mismatches"`
-	StatusMismatches    int      `json:"status_mismatches"`
-	DBWithoutStripe     int      `json:"db_without_stripe"`
-	CurrencyMismatches  int      `json:"currency_mismatches"`
-	InvalidObjects      int      `json:"invalid_objects"`
-	MissingGiftIDs      []string `json:"missing_gift_ids"`
-	MissingRefundIDs    []string `json:"missing_refund_ids"`
-	AmountMismatchIDs   []string `json:"amount_mismatch_ids"`
-	StatusMismatchIDs   []string `json:"status_mismatch_ids"`
-	DBWithoutStripeIDs  []string `json:"db_without_stripe_ids"`
-	CurrencyMismatchIDs []string `json:"currency_mismatch_ids"`
-	InvalidObjectIDs    []string `json:"invalid_object_ids"`
+	PendingRefundsChecked int      `json:"pending_refunds_checked"`
+	PendingRefundBatches  int      `json:"pending_refund_batches"`
+	Window                Window   `json:"window"`
+	MissingGifts          int      `json:"missing_gifts"`
+	MissingRefunds        int      `json:"missing_refunds"`
+	AmountMismatches      int      `json:"amount_mismatches"`
+	StatusMismatches      int      `json:"status_mismatches"`
+	DBWithoutStripe       int      `json:"db_without_stripe"`
+	CurrencyMismatches    int      `json:"currency_mismatches"`
+	InvalidObjects        int      `json:"invalid_objects"`
+	MissingGiftIDs        []string `json:"missing_gift_ids"`
+	MissingRefundIDs      []string `json:"missing_refund_ids"`
+	AmountMismatchIDs     []string `json:"amount_mismatch_ids"`
+	StatusMismatchIDs     []string `json:"status_mismatch_ids"`
+	DBWithoutStripeIDs    []string `json:"db_without_stripe_ids"`
+	CurrencyMismatchIDs   []string `json:"currency_mismatch_ids"`
+	InvalidObjectIDs      []string `json:"invalid_object_ids"`
+}
+
+// Add retains full discrepancy counts while bounding accumulated identifiers.
+func (r *Report) Add(other Report) {
+	r.MissingGifts += other.MissingGifts
+	r.MissingRefunds += other.MissingRefunds
+	r.AmountMismatches += other.AmountMismatches
+	r.StatusMismatches += other.StatusMismatches
+	r.DBWithoutStripe += other.DBWithoutStripe
+	r.CurrencyMismatches += other.CurrencyMismatches
+	r.InvalidObjects += other.InvalidObjects
+	for _, pair := range []struct {
+		into *[]string
+		from []string
+	}{
+		{&r.MissingGiftIDs, other.MissingGiftIDs}, {&r.MissingRefundIDs, other.MissingRefundIDs},
+		{&r.AmountMismatchIDs, other.AmountMismatchIDs}, {&r.StatusMismatchIDs, other.StatusMismatchIDs},
+		{&r.DBWithoutStripeIDs, other.DBWithoutStripeIDs}, {&r.CurrencyMismatchIDs, other.CurrencyMismatchIDs},
+		{&r.InvalidObjectIDs, other.InvalidObjectIDs},
+	} {
+		*pair.into = append(*pair.into, pair.from...)
+		slices.Sort(*pair.into)
+		if len(*pair.into) > maxIDs {
+			*pair.into = (*pair.into)[:maxIDs]
+		}
+	}
 }
 
 // maxIDs bounds each id list so a bad day cannot print an unbounded report.

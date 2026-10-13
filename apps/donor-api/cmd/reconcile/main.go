@@ -69,8 +69,12 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	since := flags.String("since", "", "window start (RFC3339); use with -until for an explicit range")
 	until := flags.String("until", "", "window end, exclusive (RFC3339); use with -since")
 	maxLag := flags.Duration("max-lag", 30*time.Minute, "required processing delay after the window closes")
+	budget := flags.Duration("timeout", time.Minute, "total read-only job deadline (1s to 1h); raise for a pending-refund backlog")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("invalid reconcile arguments")
+	}
+	if *budget < time.Second || *budget > time.Hour {
+		return errors.New("-timeout must be between 1s and 1h")
 	}
 	win, err := window(*date, *since, *until, *maxLag, time.Now())
 	if err != nil {
@@ -84,7 +88,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if dsn == "" {
 		return errors.New(dbroles.ReconcileJob.Variable() + " is required")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, *budget)
 	defer cancel()
 	pool, err := store.Open(ctx, dsn, dbroles.ReconcileJob.Pool)
 	if err != nil {
@@ -124,6 +128,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 // reconcileWindow lists the window's Stripe charges and refunds and the
 // matching database rows, then diffs them. Both sides are read-only.
 func reconcileWindow(ctx context.Context, win reconcile.Window, gateway payments.ReconcileGateway, q *queries.Queries) (reconcile.Report, error) {
+	return reconcileWindowPaced(ctx, win, gateway, q, payments.WaitReconciliationRead)
+}
+
+func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway payments.ReconcileGateway, q *queries.Queries, wait func(context.Context) error) (reconcile.Report, error) {
 	gte, lte := win.StripeCreatedRange()
 	start := time.Unix(gte, 0).UTC()
 	end := time.Unix(lte, 0).UTC()
@@ -188,7 +196,7 @@ func reconcileWindow(ctx context.Context, win reconcile.Window, gateway payments
 		if payment == "" {
 			continue
 		}
-		if err := payments.WaitReconciliationRead(ctx); err != nil {
+		if err := wait(ctx); err != nil {
 			return reconcile.Report{}, err
 		}
 		intent, err := gateway.RetrievePaymentIntent(ctx, payment)
@@ -218,7 +226,7 @@ func reconcileWindow(ctx context.Context, win reconcile.Window, gateway payments
 			ObservedAt:     r.ObservedAt.Time,
 		})
 		if !seenRefunds[r.StripeRefundID] {
-			if err := payments.WaitReconciliationRead(ctx); err != nil {
+			if err := wait(ctx); err != nil {
 				return reconcile.Report{}, err
 			}
 			refund, err := gateway.RetrieveRefund(ctx, r.StripeRefundID)
@@ -231,7 +239,41 @@ func reconcileWindow(ctx context.Context, win reconcile.Window, gateway payments
 			refunds = append(refunds, payments.ReconciliationFacts(refund))
 		}
 	}
-	return reconcile.Diff(win, charges, refunds, gifts, dbRefunds), nil
+	report := reconcile.Diff(win, charges, refunds, gifts, dbRefunds)
+	excluded := make([]string, 0, len(dbRefunds))
+	for _, refund := range dbRefunds {
+		excluded = append(excluded, refund.StripeRefundID)
+	}
+	var after pgtype.UUID
+	for {
+		rows, err := q.PendingReconciliationRefunds(ctx, queries.PendingReconciliationRefundsParams{AfterID: after, ExcludedRefunds: excluded})
+		if err != nil {
+			return reconcile.Report{}, errors.New("pending refund batch query failed")
+		}
+		if len(rows) == 0 {
+			return report, nil
+		}
+		if report.PendingRefundsChecked+len(rows) > 100000 {
+			return reconcile.Report{}, errors.New("pending refund backlog exceeds 100000 records")
+		}
+		remote := make([]payments.Object, 0, len(rows))
+		local := make([]reconcile.Refund, 0, len(rows))
+		for _, row := range rows {
+			if err := wait(ctx); err != nil {
+				return reconcile.Report{}, err
+			}
+			refund, err := gateway.RetrieveRefund(ctx, row.StripeRefundID)
+			if err != nil || refund.Text("id") != row.StripeRefundID {
+				return reconcile.Report{}, errors.New("stripe pending refund verification failed")
+			}
+			remote = append(remote, payments.ReconciliationFacts(refund))
+			local = append(local, reconcile.Refund{StripeRefundID: row.StripeRefundID, AmountMinor: row.AmountMinor, Currency: row.Currency, Status: row.Status, ObservedAt: row.ObservedAt.Time})
+		}
+		report.Add(reconcile.Diff(win, nil, remote, nil, local))
+		report.PendingRefundsChecked += len(rows)
+		report.PendingRefundBatches++
+		after = rows[len(rows)-1].ID
+	}
 }
 
 func main() {

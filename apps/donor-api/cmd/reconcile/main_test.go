@@ -30,6 +30,7 @@ import (
 type fakeGateway struct {
 	charges, refunds          []payments.Object
 	paymentsByID, refundsByID map[string]payments.Object
+	refundReads               map[string]int
 }
 
 func (f fakeGateway) ListChargesByCreated(context.Context, time.Time, time.Time) ([]payments.Object, error) {
@@ -47,6 +48,9 @@ func (f fakeGateway) RetrievePaymentIntent(_ context.Context, id string) (paymen
 }
 
 func (f fakeGateway) RetrieveRefund(_ context.Context, id string) (payments.Object, error) {
+	if f.refundReads != nil {
+		f.refundReads[id]++
+	}
 	if o, ok := f.refundsByID[id]; ok {
 		return o, nil
 	}
@@ -264,5 +268,82 @@ func TestRunRejectsAnUnsettledWindowBeforeAccessingProviders(t *testing.T) {
 	err := run(context.Background(), []string{"-date", "9999-01-01"}, func(string) string { return "" }, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "has not settled") {
 		t.Fatal("unsettled window was accepted", err)
+	}
+}
+
+func TestPendingRefundBacklogIsFullyCheckedInBoundedBatches(t *testing.T) {
+	owner, reader := reconciliationDatabase(t)
+	ctx := context.Background()
+	win, err := reconcile.DayWindow(time.Date(2035, 3, 1, 0, 0, 0, 0, reconcile.NewYork), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const donor = "00000000-0000-4000-8000-000000000001"
+	for _, statement := range []string{
+		"INSERT INTO donors(id,email) VALUES('" + donor + "','batch@reconciliation.invalid')",
+		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES('" + donor + "','" + donor + "',3000,'ONE_TIME')",
+	} {
+		if _, err := owner.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := owner.Exec(ctx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$1,$1,'pi_batch',3000,'USD','ONE_TIME',$2)", donor, win.Start.Add(-48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	const count = 10105
+	rows := make([][]any, 0, count+1)
+	gw := fakeGateway{refundsByID: map[string]payments.Object{}, refundReads: map[string]int{}}
+	for i := 0; i <= count; i++ {
+		id, stripe := fmt.Sprintf("00000000-0000-4000-8000-%012x", i), fmt.Sprintf("re_batch_%05d", i)
+		observed := win.Start.Add(-24 * time.Hour)
+		if i == 0 {
+			observed = win.Start.Add(time.Hour)
+		}
+		rows = append(rows, []any{id, donor, stripe, int64(1), "USD", "PENDING", observed})
+		gw.refundsByID[stripe] = objects(t, fmt.Sprintf(`{"id":%q,"amount":1,"currency":"usd","status":"pending","livemode":false,"created":%d}`, stripe, observed.Unix()))[0]
+	}
+	if _, err := owner.CopyFrom(ctx, pgx.Identifier{"donor_refunds"}, []string{"id", "gift_id", "stripe_refund_id", "amount_minor", "currency", "status", "observed_at"}, pgx.CopyFromRows(rows)); err != nil {
+		t.Fatal(err)
+	}
+	gw.refunds = []payments.Object{gw.refundsByID["re_batch_00000"]}
+	gw.refundsByID[fmt.Sprintf("re_batch_%05d", count)]["status"] = []byte(`"requires_action"`)
+	wait := func(context.Context) error { return nil }
+	report, err := reconcileWindowPaced(ctx, win, gw, queries.New(reader), wait)
+	if err != nil || report.PendingRefundsChecked != count || report.PendingRefundBatches != 102 || report.StatusMismatches != 1 || report.StatusMismatchIDs[0] != fmt.Sprintf("re_batch_%05d", count) {
+		t.Fatal("last batch was not fully checked", report, err)
+	}
+	if gw.refundReads["re_batch_00000"] != 0 {
+		t.Fatal("window refund was checked twice")
+	}
+	for id, reads := range gw.refundReads {
+		if reads != 1 {
+			t.Fatalf("%s read %d times", id, reads)
+		}
+	}
+	for _, refund := range gw.refundsByID {
+		refund["status"] = []byte(`"requires_action"`)
+	}
+	report, err = reconcileWindowPaced(ctx, win, gw, queries.New(reader), wait)
+	if err != nil || report.StatusMismatches != count+1 || len(report.StatusMismatchIDs) != 100 {
+		t.Fatal("batch accumulation lost counts or exceeded the ID bound", report, err)
+	}
+	calls := 0
+	wait = func(context.Context) error {
+		calls++
+		if calls == 130 {
+			return context.Canceled
+		}
+		return nil
+	}
+	if report, err = reconcileWindowPaced(ctx, win, gw, queries.New(reader), wait); !errors.Is(err, context.Canceled) || report.PendingRefundsChecked != 0 {
+		t.Fatal("interrupted scan returned a partial verdict", report, err)
+	}
+}
+
+func TestRunRejectsUnboundedJobDeadlines(t *testing.T) {
+	for _, value := range []string{"0", "500ms", "1h1s"} {
+		if err := run(context.Background(), []string{"-timeout", value}, func(string) string { return "" }, io.Discard); err == nil || !strings.Contains(err.Error(), "-timeout") {
+			t.Fatalf("deadline %s accepted: %v", value, err)
+		}
 	}
 }
