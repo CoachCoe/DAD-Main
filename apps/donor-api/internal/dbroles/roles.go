@@ -36,10 +36,15 @@ var (
 	Monitor           = Role{"dad_monitor", 2}
 	StaffCLI          = Role{"dad_staff_cli", 2}
 	Rekey             = Role{"dad_rekey", 2}
+	// ReconcileJob is the daily Stripe reconciliation task's SELECT-only role.
+	// The Go identifier is ReconcileJob, not Reconcile, because privileges.go
+	// already declares a Reconcile function (the privilege reconciler); the
+	// database role name is still dad_reconcile.
+	ReconcileJob = Role{"dad_reconcile", 2}
 )
 
 // Roles lists every process role.
-var Roles = []Role{API, StripeWorker, ProjectionWorker, LoginEmailWorker, EmailChangeWorker, MessageWorker, PushWorker, Monitor, StaffCLI, Rekey}
+var Roles = []Role{API, StripeWorker, ProjectionWorker, LoginEmailWorker, EmailChangeWorker, MessageWorker, PushWorker, Monitor, StaffCLI, Rekey, ReconcileJob}
 
 // Workers maps each worker kind to its role.
 var Workers = map[string]Role{

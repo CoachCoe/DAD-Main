@@ -10,7 +10,7 @@ LOAD_MIX ?=
 LOAD_ORIGIN ?= http://localhost:3000
 LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -origin "$(LOAD_ORIGIN)" -client-ips
 
-.PHONY: install db-up migrate provision api donor-go web dev worker test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
+.PHONY: install db-up migrate provision api donor-go web dev worker reconcile test test-api test-donor-go test-web test-browser-e2e lint lint-go lint-web lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 
 install:
 	cd apps/donor-api && go mod download
@@ -36,6 +36,9 @@ dev:
 
 worker:
 	cd apps/donor-api && go run ./cmd/worker --kind "$(KIND)"
+
+reconcile:
+	cd apps/donor-api && go run ./cmd/reconcile $(RECONCILE_ARGS)
 
 generate:
 	docker run --rm -v "$(CURDIR)/apps/donor-api:/src" -w /src $(SQLC) generate

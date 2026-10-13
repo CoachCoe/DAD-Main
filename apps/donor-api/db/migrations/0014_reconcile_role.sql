@@ -1,0 +1,11 @@
+-- The daily Stripe reconciliation task (cmd/reconcile) runs as its own
+-- SELECT-only role, dad_reconcile, so a read-only audit never holds a write
+-- grant on a financial table. The role and its grants are declared in Go
+-- (internal/dbroles/roles.go and privileges.go) and applied by migrate's
+-- privilege reconciler (dbroles.Reconcile → ensureRole + Drift), exactly as
+-- every other process role is, so this migration carries no DDL of its own.
+-- It exists only to advance the schema version and to mark where the role was
+-- introduced; the privilege step creates the NOLOGIN group role and its
+-- SELECT grants on donor_gifts, donor_refunds, donor_billing_periods,
+-- donor_billing_observations, donor_refund_observations, donor_stripe_events,
+-- donor_checkouts and donor_schema_migrations.
