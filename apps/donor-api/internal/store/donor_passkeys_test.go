@@ -227,6 +227,61 @@ func TestDonorPasskeyRegistrationBelongsToItsDonor(t *testing.T) {
 	}
 }
 
+func TestDonorPasskeyRegistrationBelongsToItsSession(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := donorPasskeyService(t)
+	id, first := passkeyDonor(t, pool)
+	_, second := passkeyDonorFor(t, pool, id)
+	ceremony, err := s.BeginRegister(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID)
+	response := key.register(t, ceremony.Options)
+	if _, err = s.FinishRegister(ctx, second, ceremony.ID, response, ""); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatal("another session finished the registration", err)
+	}
+	if _, err = s.FinishRegister(ctx, first, ceremony.ID, response, ""); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatal("refused ceremony was not spent", err)
+	}
+	if list, err := s.ListPasskeys(ctx, first); err != nil || len(list.Passkeys) != 0 {
+		t.Fatal("refused registration stored a passkey", list, err)
+	}
+}
+
+func TestMalformedDonorPasskeyAnswerSpendsItsCeremony(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	s := donorPasskeyService(t)
+	_, session := passkeyDonor(t, pool)
+	key := newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID)
+	if err := registerPasskey(t, s, session, key, ""); err != nil {
+		t.Fatal(err)
+	}
+	signIn, err := s.BeginSignIn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.FinishSignIn(ctx, signIn.ID, []byte(`{}`), Client{}); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatal("malformed assertion accepted", err)
+	}
+	if _, err = s.FinishSignIn(ctx, signIn.ID, key.assert(t, signIn.Options), Client{}); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatal("malformed assertion did not spend the ceremony", err)
+	}
+	registration, err := s.BeginRegister(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.FinishRegister(ctx, session, registration.ID, []byte(`{}`), ""); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatal("malformed attestation accepted", err)
+	}
+	other := newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID)
+	if _, err = s.FinishRegister(ctx, session, registration.ID, other.register(t, registration.Options), ""); !errors.Is(err, ErrPasskeyDenied) {
+		t.Fatal("malformed attestation did not spend the ceremony", err)
+	}
+}
+
 func TestDonorPasskeyRefusesACredentialRegisteredToAnotherDonor(t *testing.T) {
 	pool := database(t)
 	s := donorPasskeyService(t)

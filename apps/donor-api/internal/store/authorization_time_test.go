@@ -18,7 +18,7 @@ import (
 func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
-	for _, kind := range []string{"donor", "staff"} {
+	for _, kind := range []string{"donor", "donor-passkey", "staff"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -26,7 +26,7 @@ func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 			var resolve func(pgx.Tx) error
 			var expire string
 			var subject pgtype.UUID
-			if kind == "donor" {
+			if kind != "staff" {
 				token := "owner-" + testID(t).String()
 				if _, err := pool.Exec(ctx, "UPDATE donors SET claimed_at=now() WHERE id=$1", donorID); err != nil {
 					t.Fatal(err)
@@ -35,6 +35,12 @@ func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 					t.Fatal(err)
 				}
 				resolve = func(tx pgx.Tx) error { _, err := donorOwner(token)(ctx, tx); return err }
+				if kind == "donor-passkey" {
+					resolve = func(tx pgx.Tx) error {
+						_, err := loadDonorUserByToken(ctx, queries.New(tx), token)
+						return err
+					}
+				}
 				expire, subject = "UPDATE donor_sessions SET expires_at=now() WHERE donor_id=$1", donorID
 			} else {
 				staffID, staffToken := staffFixture(t, pool, "FINANCE")

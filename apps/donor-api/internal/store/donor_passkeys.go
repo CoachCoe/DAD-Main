@@ -76,6 +76,7 @@ func NewDonorPasskeyService(db *pgxpool.Pool, publicOrigin string) (*DonorPasske
 type donorUser struct {
 	donor    queries.Donor
 	passkeys []webauthn.Credential
+	session  pgtype.UUID
 }
 
 func (u donorUser) WebAuthnID() []byte                         { return u.donor.ID.Bytes[:] }
@@ -123,8 +124,13 @@ func (s *DonorPasskeyService) sweepCeremonies(ctx context.Context) error {
 	return queries.New(s.DB).DeleteExpiredDonorCeremonies(ctx, timestamp(time.Now()))
 }
 
-func saveDonorCeremony(ctx context.Context, q *queries.Queries, kind string, donorID pgtype.UUID, session *webauthn.SessionData) (string, error) {
-	raw, err := json.Marshal(session)
+type donorCeremony struct {
+	webauthn.SessionData
+	SessionID pgtype.UUID `json:"session_id"`
+}
+
+func saveDonorCeremony(ctx context.Context, q *queries.Queries, kind string, donorID, sessionID pgtype.UUID, session *webauthn.SessionData) (string, error) {
+	raw, err := json.Marshal(donorCeremony{SessionData: *session, SessionID: sessionID})
 	if err != nil {
 		return "", err
 	}
@@ -138,8 +144,8 @@ func saveDonorCeremony(ctx context.Context, q *queries.Queries, kind string, don
 	})
 }
 
-func takeDonorCeremony(ctx context.Context, q *queries.Queries, id, kind string, now time.Time) (webauthn.SessionData, pgtype.UUID, error) {
-	var session webauthn.SessionData
+func takeDonorCeremony(ctx context.Context, q *queries.Queries, id, kind string, now time.Time) (donorCeremony, pgtype.UUID, error) {
+	var session donorCeremony
 	row, err := q.TakeDonorCeremony(ctx, queries.TakeDonorCeremonyParams{TokenHash: HashToken(id), Kind: kind})
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !row.ExpiresAt.Time.After(now)) {
 		return session, row.DonorID, ErrPasskeyDenied
@@ -179,23 +185,23 @@ func (s *DonorPasskeyService) BeginSignIn(ctx context.Context) (Ceremony, error)
 	if err != nil {
 		return Ceremony{}, err
 	}
-	id, err := saveDonorCeremony(ctx, queries.New(s.DB), "SIGN_IN", pgtype.UUID{}, session)
+	id, err := saveDonorCeremony(ctx, queries.New(s.DB), "SIGN_IN", pgtype.UUID{}, pgtype.UUID{}, session)
 	return Ceremony{ID: id, Options: assertion.Response}, err
 }
 
 // FinishSignIn validates a passkey assertion and issues a donor session.
 // A cloned-counter warning is treated as a compromised key and denied.
 func (s *DonorPasskeyService) FinishSignIn(ctx context.Context, ceremony string, response []byte, client Client) (Tokens, error) {
-	assertion, err := protocol.ParseCredentialRequestResponseBytes(response)
-	if err != nil {
-		return Tokens{}, ErrPasskeyDenied
-	}
 	var tokens Tokens
-	err = answerCeremony(ctx, s.DB, func(q *queries.Queries) error {
+	err := answerCeremony(ctx, s.DB, func(q *queries.Queries) error {
 		now := time.Now().UTC()
 		session, _, err := takeDonorCeremony(ctx, q, ceremony, "SIGN_IN", now)
 		if err != nil {
 			return err
+		}
+		assertion, err := protocol.ParseCredentialRequestResponseBytes(response)
+		if err != nil {
+			return ErrPasskeyDenied
 		}
 		ownerID, err := q.DonorPasskeyOwner(ctx, assertion.RawID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -211,9 +217,10 @@ func (s *DonorPasskeyService) FinishSignIn(ctx context.Context, ceremony string,
 		if user.donor.Disabled {
 			return ErrPasskeyDenied
 		}
+		now = time.Now().UTC()
 		_, passkey, err := s.WebAuthn.ValidatePasskeyLogin(
 			func([]byte, []byte) (webauthn.User, error) { return user, nil },
-			session, assertion,
+			session.SessionData, assertion,
 		)
 		if err != nil || passkey.Authenticator.CloneWarning {
 			return ErrPasskeyDenied
@@ -249,7 +256,7 @@ func (s *DonorPasskeyService) BeginRegister(ctx context.Context, token string) (
 		if err != nil {
 			return err
 		}
-		id, err := saveDonorCeremony(ctx, q, "REGISTER", user.donor.ID, session)
+		id, err := saveDonorCeremony(ctx, q, "REGISTER", user.donor.ID, user.session, session)
 		if err != nil {
 			return err
 		}
@@ -263,26 +270,29 @@ func (s *DonorPasskeyService) BeginRegister(ctx context.Context, token string) (
 // queues the essential notice telling them so, returning every passkey the
 // donor now holds.
 func (s *DonorPasskeyService) FinishRegister(ctx context.Context, token, ceremony string, response []byte, name string) (PasskeyList, error) {
-	attestation, err := protocol.ParseCredentialCreationResponseBytes(response)
-	if err != nil {
+	if !ValidPasskeyName(name) {
 		return PasskeyList{}, ErrPasskeyDenied
 	}
 	var list PasskeyList
-	err = answerCeremony(ctx, s.DB, func(q *queries.Queries) error {
+	err := answerCeremony(ctx, s.DB, func(q *queries.Queries) error {
 		now := time.Now().UTC()
 		session, donorID, err := takeDonorCeremony(ctx, q, ceremony, "REGISTER", now)
 		if err != nil {
 			return err
 		}
-		// The ceremony must belong to the caller's session.
+		attestation, err := protocol.ParseCredentialCreationResponseBytes(response)
+		if err != nil {
+			return ErrPasskeyDenied
+		}
 		user, err := loadDonorUserByToken(ctx, q, token)
 		if err != nil {
 			return err
 		}
-		if user.donor.ID != donorID {
+		if user.donor.ID != donorID || !session.SessionID.Valid || session.SessionID != user.session {
 			return ErrPasskeyDenied
 		}
-		passkey, err := s.WebAuthn.CreateCredential(user, session, attestation)
+		now = time.Now().UTC()
+		passkey, err := s.WebAuthn.CreateCredential(user, session.SessionData, attestation)
 		if err != nil {
 			return ErrPasskeyDenied
 		}
@@ -368,12 +378,13 @@ func listPasskeys(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 }
 
 func loadDonorUserByToken(ctx context.Context, q *queries.Queries, token string) (donorUser, error) {
-	now := time.Now().UTC()
-	si, err := authenticate(ctx, q, token, now)
+	si, err := lockSignedIn(ctx, q, token)
 	if err != nil {
 		return donorUser{}, err
 	}
-	return loadDonorUser(ctx, q, si.ID)
+	user, err := loadDonorUser(ctx, q, si.ID)
+	user.session = si.session
+	return user, err
 }
 
 func ValidPasskeyName(name string) bool {
