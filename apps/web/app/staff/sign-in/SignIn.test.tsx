@@ -28,6 +28,8 @@ afterEach(() => {
 });
 
 it("signs in with a passkey, without asking for an email or password", async () => {
+  const assign = vi.fn();
+  vi.stubGlobal("location", { ...window.location, assign });
   const get = browser(async () => {});
   const fetch = api(new Response(JSON.stringify({ signed_in: true }), { status: 200 }));
   render(<SignIn />);
@@ -38,6 +40,7 @@ it("signs in with a passkey, without asking for an email or password", async () 
   expect(fetch.mock.calls[1][0]).toBe("/api/donor/staff/sign-in");
   expect(JSON.parse(fetch.mock.calls[1][1]?.body as string)).toEqual({ ceremony: "ceremony-1", credential: { id: "passkey", type: "public-key" } });
   expect(screen.getByRole("alert")).toBeEmptyDOMElement();
+  await vi.waitFor(() => expect(assign).toHaveBeenCalledWith("/staff"));
 });
 
 it("treats a cancelled prompt as a choice, not a failure, and lets the person retry from the same button", async () => {

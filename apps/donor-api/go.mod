@@ -1,6 +1,6 @@
 module impactgraph/donor-api
 
-go 1.27.0
+go 1.27.2
 
 require (
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc
