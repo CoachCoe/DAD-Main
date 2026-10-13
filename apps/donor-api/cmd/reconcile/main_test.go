@@ -31,6 +31,14 @@ type fakeGateway struct {
 	charges, refunds          []payments.Object
 	paymentsByID, refundsByID map[string]payments.Object
 	refundReads               map[string]int
+	invoicePayments           map[string][]payments.Object
+}
+
+func (f fakeGateway) ListInvoicePayments(_ context.Context, invoice, payment string) ([]payments.Object, error) {
+	if rows, ok := f.invoicePayments[invoice+payment]; ok {
+		return rows, nil
+	}
+	return nil, nil
 }
 
 func (f fakeGateway) ListChargesByCreated(context.Context, time.Time, time.Time) ([]payments.Object, error) {
@@ -344,6 +352,96 @@ func TestRunRejectsUnboundedJobDeadlines(t *testing.T) {
 	for _, value := range []string{"0", "500ms", "1h1s"} {
 		if err := run(context.Background(), []string{"-timeout", value}, func(string) string { return "" }, io.Discard); err == nil || !strings.Contains(err.Error(), "-timeout") {
 			t.Fatalf("deadline %s accepted: %v", value, err)
+		}
+	}
+}
+
+func TestLegacyInvoiceGiftsUseVerifiedPaymentLinksAcrossDays(t *testing.T) {
+	owner, reader := reconciliationDatabase(t)
+	ctx := context.Background()
+	win, err := reconcile.DayWindow(time.Date(2035, 3, 1, 0, 0, 0, 0, reconcile.NewYork), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := func() string {
+		x, err := store.NewID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return x.String()
+	}
+	donor, checkout, a, b := id(), id(), id(), id()
+	for _, statement := range []string{
+		fmt.Sprintf("INSERT INTO donors(id,email) VALUES('%s','legacy@reconciliation.invalid')", donor),
+		fmt.Sprintf("INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES('%s','%s',3000,'MONTHLY')", checkout, donor),
+	} {
+		if _, err := owner.Exec(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, gift := range []struct {
+		id   string
+		paid time.Time
+	}{{a, win.Start.Add(time.Hour)}, {b, win.End.Add(time.Hour)}} {
+		if _, err := owner.Exec(ctx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','MONTHLY',$5)", gift.id, donor, checkout, "in_"+gift.id, gift.paid); err != nil {
+			t.Fatal(err)
+		}
+	}
+	charge := func(gift string, created time.Time) payments.Object {
+		return objects(t, fmt.Sprintf(`{"id":"ch_%s","payment_intent":"pi_%s","amount":3000,"amount_captured":3000,"currency":"usd","status":"succeeded","paid":true,"captured":true,"livemode":false,"created":%d}`, gift, gift, created.Unix()))[0]
+	}
+	link := func(gift string) payments.Object {
+		return objects(t, fmt.Sprintf(`{"id":"inpay_%s","invoice":"in_%s","amount_paid":3000,"currency":"usd","status":"paid","livemode":false,"created":%d,"payment":{"type":"payment_intent","payment_intent":"pi_%s"}}`, gift, gift, win.Start.Unix(), gift))[0]
+	}
+	oldCharge := charge(a, win.Start.Add(-time.Hour))
+	intent := objects(t, fmt.Sprintf(`{"id":"pi_%s","livemode":false,"status":"succeeded"}`, a))[0]
+	intent["latest_charge"], err = json.Marshal(oldCharge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := fakeGateway{charges: []payments.Object{charge(b, win.Start.Add(time.Hour))}, paymentsByID: map[string]payments.Object{"pi_" + a: intent}, invoicePayments: map[string][]payments.Object{"in_" + a: {link(a)}, "pi_" + b: {link(b)}}}
+	wait := func(context.Context) error { return nil }
+	q := queries.New(reader)
+	report, err := reconcileWindowPaced(ctx, win, gw, q, wait)
+	if err != nil || report.HasDiscrepancies() {
+		t.Fatal("legacy charge proof or cross-day lookup failed", report, err)
+	}
+	var stored int
+	if err := owner.QueryRow(ctx, "SELECT count(*) FROM donor_gifts WHERE donor_id=$1 AND stripe_payment_intent_id IS NULL", donor).Scan(&stored); err != nil || stored != 2 {
+		t.Fatal("read-only verification changed financial facts", stored, err)
+	}
+	proof := gw.invoicePayments["in_"+a][0]
+	proof["amount_paid"] = []byte(`1500`)
+	if _, err := reconcileWindowPaced(ctx, win, gw, q, wait); err == nil {
+		t.Fatal("partial allocation accepted as an entire charge")
+	}
+	proof["amount_paid"] = []byte(`3000`)
+	gw.invoicePayments["in_"+a] = append(gw.invoicePayments["in_"+a], link(a))
+	if _, err := reconcileWindowPaced(ctx, win, gw, q, wait); err == nil {
+		t.Fatal("ambiguous invoice payments produced a verdict")
+	}
+	gw.invoicePayments["in_"+a] = nil
+	report, err = reconcileWindowPaced(ctx, win, gw, q, wait)
+	if err != nil || report.DBWithoutStripe != 1 || report.DBWithoutStripeIDs[0] != "in_"+a {
+		t.Fatal("missing invoice proof was not flagged", report, err)
+	}
+}
+
+func TestInvoiceLinkRejectsUnrelatedAndInvalidProof(t *testing.T) {
+	for _, edit := range []func(payments.Object){
+		func(o payments.Object) { o["invoice"] = []byte(`"in_other"`) },
+		func(o payments.Object) { o["livemode"] = []byte(`true`) },
+		func(o payments.Object) { o["status"] = []byte(`"open"`) },
+		func(o payments.Object) { o["amount_paid"] = []byte(`null`) },
+		func(o payments.Object) {
+			o["payment"] = []byte(`{"type":"payment_record","payment_record":"payrec_test"}`)
+		},
+	} {
+		proof := objects(t, `{"id":"inpay_test","invoice":"in_test","amount_paid":3000,"currency":"usd","status":"paid","livemode":false,"created":1000,"payment":{"type":"payment_intent","payment_intent":"pi_test"}}`)[0]
+		edit(proof)
+		gateway := fakeGateway{invoicePayments: map[string][]payments.Object{"in_test": {proof}}}
+		if _, found, err := invoiceLink(context.Background(), gateway, "in_test", ""); err == nil || found {
+			t.Fatal("unrelated or invalid invoice proof accepted", err)
 		}
 	}
 }

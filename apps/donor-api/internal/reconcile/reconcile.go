@@ -88,6 +88,24 @@ type Gift struct {
 	PaidAt                time.Time
 }
 
+type InvoicePayment struct {
+	InvoiceID, PaymentIntentID, Currency string
+	AmountMinor                          int64
+}
+
+func InvoicePaymentFacts(o payments.Object) (InvoicePayment, error) {
+	payment, err := o.Object("payment")
+	amount, amountErr := o.Int("amount_paid")
+	_, createdErr := o.Unix("created")
+	if err != nil || amountErr != nil || createdErr != nil || amount <= 0 || !o.BoolIs("livemode", false) ||
+		o.Text("status") != "paid" || payment.Text("type") != "payment_intent" ||
+		!processorID(o.Text("id"), "inpay_") || !processorID(o.Text("invoice"), "in_") ||
+		!processorID(payment.Text("payment_intent"), "pi_") || o.Text("currency") != "usd" {
+		return InvoicePayment{}, payments.ErrFacts
+	}
+	return InvoicePayment{InvoiceID: o.Text("invoice"), PaymentIntentID: payment.Text("payment_intent"), Currency: o.Text("currency"), AmountMinor: amount}, nil
+}
+
 // Refund is the subset of a donor_refunds row the diff needs.
 type Refund struct {
 	StripeRefundID string

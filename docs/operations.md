@@ -339,8 +339,11 @@ recorded.
   checks away from peak traffic and monitor database transaction age.
   The job audits the entire configured Stripe test account. Unrelated collected payments
   in a shared account are flagged too; use a dedicated account for DAD acceptance.
-  Legacy invoice gifts without a stored PaymentIntent cannot receive a reverse charge
-  check and are reported for operator review.
+  For legacy invoice gifts missing a PaymentIntent ID, the job uses Stripe's read-only
+  Invoice Payments API to prove the link in either direction, including across day
+  boundaries. It does not backfill or alter the stored gift. A missing proof is flagged;
+  multiple payments, partial allocations, unsupported payment types, or truncated lists
+  fail for operator review. The configured test key needs Invoice Payments read access.
 - **Read-only.** The job is strictly read-only against both Stripe (List/Retrieve only) and
   the database (its `dad_reconcile` role has SELECT alone). It never repairs, deletes or
   writes any financial fact.

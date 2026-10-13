@@ -165,9 +165,46 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 		seenRefunds[id] = true
 	}
 	bound := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
-	giftRows, err := q.ReconciliationGifts(ctx, queries.ReconciliationGiftsParams{Start: bound(win.Start), EndAt: bound(win.End), StripeObjects: append(chargeIDs, paymentIDs...), PaymentIntents: paymentIDs})
+	giftParams := queries.ReconciliationGiftsParams{Start: bound(win.Start), EndAt: bound(win.End), StripeObjects: append(chargeIDs, paymentIDs...), PaymentIntents: paymentIDs}
+	giftRows, err := q.ReconciliationGifts(ctx, giftParams)
 	if err != nil {
 		return reconcile.Report{}, errors.New("gift window query failed")
+	}
+	knownPayments := map[string]bool{}
+	for _, gift := range giftRows {
+		knownPayments[gift.StripePaymentIntentID.String] = true
+		if strings.HasPrefix(gift.StripeObjectID, "pi_") {
+			knownPayments[gift.StripeObjectID] = true
+		}
+	}
+	invoiceLinks := map[string]reconcile.InvoicePayment{}
+	for _, charge := range charges {
+		amount, collected, err := reconcile.CollectedCharge(charge)
+		payment := charge.Text("payment_intent")
+		if err != nil || !collected || !strings.HasPrefix(payment, "pi_") || knownPayments[payment] {
+			continue
+		}
+		link, found, err := invoiceLink(ctx, gateway, "", payment)
+		if err != nil {
+			return reconcile.Report{}, err
+		}
+		if !found {
+			continue
+		}
+		if link.AmountMinor != amount || link.Currency != charge.Text("currency") {
+			return reconcile.Report{}, errors.New("invoice payment allocation is not a complete charge")
+		}
+		if previous, ok := invoiceLinks[link.InvoiceID]; ok && previous.PaymentIntentID != payment {
+			return reconcile.Report{}, errors.New("invoice has multiple collected payments; operator review required")
+		}
+		invoiceLinks[link.InvoiceID] = link
+		giftParams.StripeObjects = append(giftParams.StripeObjects, link.InvoiceID)
+	}
+	if len(invoiceLinks) > 0 {
+		giftRows, err = q.ReconciliationGifts(ctx, giftParams)
+		if err != nil {
+			return reconcile.Report{}, errors.New("legacy gift lookup failed")
+		}
 	}
 	refundRows, err := q.ReconciliationRefunds(ctx, queries.ReconciliationRefundsParams{Start: bound(win.Start), EndAt: bound(win.End), StripeRefunds: refundIDs})
 	if err != nil {
@@ -179,19 +216,34 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 
 	gifts := make([]reconcile.Gift, 0, len(giftRows))
 	for _, g := range giftRows {
+		var allocation *reconcile.InvoicePayment
+		payment := g.StripePaymentIntentID.String
+		if payment == "" && strings.HasPrefix(g.StripeObjectID, "pi_") {
+			payment = g.StripeObjectID
+		}
+		if payment == "" && strings.HasPrefix(g.StripeObjectID, "in_") {
+			link, found := invoiceLinks[g.StripeObjectID]
+			if !found {
+				var err error
+				link, found, err = invoiceLink(ctx, gateway, g.StripeObjectID, "")
+				if err != nil {
+					return reconcile.Report{}, err
+				}
+			}
+			if found {
+				payment = link.PaymentIntentID
+				allocation = &link
+			}
+		}
 		gifts = append(gifts, reconcile.Gift{
 			StripeObjectID:        g.StripeObjectID,
-			StripePaymentIntentID: g.StripePaymentIntentID.String,
+			StripePaymentIntentID: payment,
 			AmountMinor:           g.AmountMinor,
 			Currency:              g.Currency,
 			PaidAt:                g.PaidAt.Time,
 		})
-		if seenCharges[g.StripeObjectID] || (g.StripePaymentIntentID.Valid && seenCharges[g.StripePaymentIntentID.String]) {
+		if seenCharges[g.StripeObjectID] || (payment != "" && seenCharges[payment]) {
 			continue
-		}
-		payment := g.StripePaymentIntentID.String
-		if payment == "" && strings.HasPrefix(g.StripeObjectID, "pi_") {
-			payment = g.StripeObjectID
 		}
 		if payment == "" {
 			continue
@@ -212,6 +264,12 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 		charge, err := intent.Object("latest_charge")
 		if err != nil || charge.Text("payment_intent") != payment {
 			return reconcile.Report{}, errors.New("stripe payment charge verification returned invalid facts")
+		}
+		if allocation != nil {
+			amount, collected, err := reconcile.CollectedCharge(charge)
+			if err != nil || !collected || allocation.AmountMinor != amount || allocation.Currency != charge.Text("currency") {
+				return reconcile.Report{}, errors.New("invoice payment allocation is not a complete charge")
+			}
 		}
 		charges = append(charges, payments.ReconciliationFacts(charge))
 		seenCharges[payment] = true
@@ -274,6 +332,24 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 		report.PendingRefundBatches++
 		after = rows[len(rows)-1].ID
 	}
+}
+
+func invoiceLink(ctx context.Context, gateway payments.ReconcileGateway, invoice, payment string) (reconcile.InvoicePayment, bool, error) {
+	rows, err := gateway.ListInvoicePayments(ctx, invoice, payment)
+	if err != nil {
+		return reconcile.InvoicePayment{}, false, errors.New("stripe invoice payment lookup failed")
+	}
+	if len(rows) == 0 {
+		return reconcile.InvoicePayment{}, false, nil
+	}
+	if len(rows) != 1 {
+		return reconcile.InvoicePayment{}, false, errors.New("invoice payment mapping is ambiguous; operator review required")
+	}
+	link, err := reconcile.InvoicePaymentFacts(rows[0])
+	if err != nil || (invoice != "" && link.InvoiceID != invoice) || (payment != "" && link.PaymentIntentID != payment) {
+		return reconcile.InvoicePayment{}, false, errors.New("stripe invoice payment lookup returned invalid facts")
+	}
+	return link, true, nil
 }
 
 func main() {
