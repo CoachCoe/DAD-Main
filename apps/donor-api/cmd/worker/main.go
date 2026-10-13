@@ -115,8 +115,8 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 			if err != nil {
 				return false, err
 			}
-			refreshed, err := store.RefreshNextProjection(ctx, pool, now)
-			return purged || refreshed, err
+			processed, err := store.RefreshDueProjections(ctx, pool, now, store.ProjectionBatch)
+			return purged || processed > 0, err
 		}, nil
 	case "push":
 		config, err := push.FromEnvironment(getenv)
