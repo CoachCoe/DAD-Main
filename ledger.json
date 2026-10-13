@@ -1,8 +1,21 @@
 {
   "schemaVersion": 1,
   "source": "github:CoachCoe/ImpactGraph",
-  "sequence": 4,
-  "findings": [],
+  "sequence": 5,
+  "findings": [
+    {
+      "id": "0528857cd2a7017bebf104ee",
+      "source": "github:CoachCoe/ImpactGraph",
+      "check": "api-tests",
+      "severity": "unassessed",
+      "disposition": "untriaged",
+      "firstSeen": "2026-10-13T16:25:08.780Z",
+      "lastSeen": "2026-10-13T16:25:08.780Z",
+      "lastRunId": "atm-20261013162508-d59b098c",
+      "occurrences": 1,
+      "audit": []
+    }
+  ],
   "receipts": [
     {
       "execution": "38009661712:2",
@@ -39,6 +52,15 @@
       "artifactId": "11655978180",
       "artifactDigest": "43dd91988b1f8aa30542a67da58f03e1bea9eeafb2b69675eec1f2e6a0302aad",
       "eligible": true
+    },
+    {
+      "execution": "38430234572:1",
+      "runId": "atm-20261013162508-d59b098c",
+      "revision": "d412c30ca21a839109c76d91487f25379622708b",
+      "bundleSha256": "b639304b8adf160504bedd83219a68c6e7122dde003bffd71c339e71e35702d0",
+      "artifactId": "11831186462",
+      "artifactDigest": "4c7d1533e6175e27a060766092b773d99449777a99919eea579026806e2a5af2",
+      "eligible": false
     }
   ]
 }
