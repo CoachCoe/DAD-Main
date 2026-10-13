@@ -251,6 +251,10 @@ details[open] > summary::after { content: "–"; }
 .metric details { margin-top: auto; }
 .metric summary { font-size: var(--text-sm); }
 .metricValue { font-family: var(--font-display); font-size: var(--text-2xl); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--ink); }
+.metricSkeleton { display: block; width: 4ch; height: 1.1em; border-radius: var(--radius-pill); background: var(--line); }
+.metricSkeletonCopy { display: block; color: transparent; user-select: none; background: repeating-linear-gradient(transparent 0 .35em, var(--line) .35em 1em, transparent 1em 1.6em); }
+.metric .metricSkeletonDetail { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); min-height: 44px; margin-top: auto; border-top: 1px solid var(--line); font-weight: 600; }
+.metricSkeletonDetail > :last-child { font-size: var(--text-xl); font-weight: 400; line-height: 1; color: var(--ink-soft); }
 .illustrative { border-style: dashed; }
 .illustrative .metricValue { color: var(--ink-soft); }
 .badge {

@@ -97,7 +97,7 @@ server {
         proxy_pass http://web;
     }
 
-    location ~ ^/(|favicon\.ico|robots\.txt|staff|staff/.*|_next/.*|api/donor/staff/.*)$ {
+    location ~ ^/(|favicon\.ico|icon\.svg|robots\.txt|staff|staff/.*|_next/.*|api/donor/staff/.*)$ {
         proxy_pass http://web;
     }
 }

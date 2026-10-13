@@ -6,6 +6,29 @@ const dashboard = {
   referrals: { link: 12, irl: 7, total_minor: 57000, link_minor: 36000, irl_minor: 21000, currency: "USD" },
   streak: { current: 3, at_risk: false, grace_ends_at: null },
 };
+
+test("dashboard loading preserves the account navigation position", async ({ page }) => {
+  let release!: () => void;
+  const ready = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/donor/me/dashboard", async (route) => {
+    await ready;
+    await route.fulfill({ json: dashboard });
+  });
+  await page.goto("/account/dashboard");
+  await page.evaluate(() => document.fonts.ready);
+  await expect(page.getByRole("main").getByRole("status")).toContainText("Loading your dashboard");
+  const navigation = page.getByRole("navigation", { name: "Account", exact: true });
+  const before = await navigation.boundingBox();
+  const placeholders = await page.locator(".metric").evaluateAll((cards) => cards.map((card) => ({ title: card.querySelector("h2")?.textContent, height: card.getBoundingClientRect().height })));
+  release();
+  await expect(page.getByText("$570.00", { exact: true })).toBeVisible();
+  const after = await navigation.boundingBox();
+  expect(before).not.toBeNull();
+  expect(after).not.toBeNull();
+  const metrics = await page.locator(".metric").evaluateAll((cards) => cards.map((card) => ({ title: card.querySelector("h2")?.textContent, height: card.getBoundingClientRect().height })));
+  expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0)), JSON.stringify({ placeholders, metrics })).toBeLessThanOrEqual(10);
+});
+
 const profiles = {
   "/account/dashboard": { endpoint: "dashboard", data: dashboard },
   "/account/profile": { endpoint: "profile", data: { email: "browser-test@example.org", public_name: "Alex", version: 1, referral_emails: true, marketing_emails: false,

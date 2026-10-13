@@ -35,7 +35,7 @@ export function proxy(request: NextRequest) {
   if (onStaffHost && pathname === "/robots.txt") {
     return new NextResponse("User-agent: *\nDisallow: /\n", { headers: { "Content-Type": "text/plain", "X-Robots-Tag": "noindex, nofollow" } });
   }
-  const served = onStaffHost ? staffSurface.test(pathname) || framework.test(pathname) : !staffSurfaceSpelled.test(pathname);
+  const served = onStaffHost ? staffSurface.test(pathname) || framework.test(pathname) || pathname === "/icon.svg" : !staffSurfaceSpelled.test(pathname);
   // Staff pages render per request, so Next already marks them uncacheable.
   const staffHeaders = (response: NextResponse) => {
     if (onStaffHost) response.headers.set("X-Robots-Tag", "noindex, nofollow");
