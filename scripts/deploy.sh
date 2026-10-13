@@ -8,7 +8,7 @@ DATABASE_ENV_FILE="${DATABASE_ENV_FILE:-$root/.env.database}"
 export ENV_FILE
 cd "$root"
 compose() { docker compose --env-file "$ENV_FILE" --env-file "$DATABASE_ENV_FILE" -f docker-compose.prod.yml "$@"; }
-usage() { printf '%s\n' 'Usage: scripts/deploy.sh {build|migrate|adopt|provision-roles|up|workers|monitor [--max-age DURATION]|rekey --key KEY [--dry-run]|staff ARGS...|reload-ingress|down|logs [SERVICE...]|smoke}'; }
+usage() { printf '%s\n' 'Usage: scripts/deploy.sh {build|migrate|adopt|provision-roles|up|workers|monitor [--max-age DURATION]|reconcile [--date YYYY-MM-DD] [--max-lag DURATION]|rekey --key KEY [--dry-run]|staff ARGS...|reload-ingress|down|logs [SERVICE...]|smoke}'; }
 # Every donor container receives ENV_FILE, so a database credential there would reach
 # every process. Credentials belong in DATABASE_ENV_FILE, which Compose only interpolates.
 check_env_files() {
@@ -51,6 +51,7 @@ case "${1:-help}" in
     compose --profile workers up -d stripe-worker projection-worker login-email-worker email-change-worker message-worker push-worker
     ;;
   monitor) shift; compose run --rm --no-deps monitor monitor "$@" ;;
+  reconcile) shift; compose run --rm --no-deps reconcile reconcile "$@" ;;
   rekey) shift; compose run --rm --no-deps rekey rekey "$@" ;;
   staff) shift; compose run --rm --no-deps staff staff "$@" ;;
   # Recreates nginx if its configuration changed, then reloads it for renewed certificates.

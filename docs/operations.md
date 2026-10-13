@@ -156,6 +156,7 @@ schema.
 | `dad_worker_messages` | Message worker | `DONOR_WORKER_MESSAGES_DATABASE_URL` | Financial mail queue; reads the facts a message renders |
 | `dad_worker_push` | Push worker | `DONOR_WORKER_PUSH_DATABASE_URL` | Push queue and session push tokens; reads the facts it rechecks |
 | `dad_monitor` | Monitor | `DONOR_MONITOR_DATABASE_URL` | Reads queue status columns only: no addresses, bodies, tokens, or payloads |
+| `dad_reconcile` | `reconcile` | `DONOR_RECONCILE_DATABASE_URL` | Reads financial facts to reconcile Stripe charges and refunds against the database; SELECT only, no writes |
 | `dad_staff_cli` | Staff command | `DONOR_STAFF_CLI_DATABASE_URL` | Staff accounts, invitations, passkeys, sessions; writes audit records |
 | `dad_rekey` | `rekey` | `DONOR_REKEY_DATABASE_URL` | Reads and rewrites the encrypted columns and their ids only |
 
@@ -198,8 +199,8 @@ else. Connection limits assume one instance of each process, as Compose runs the
 one-off run of a process, such as the Stripe worker's `--retry-event`, shares its login's
 limit, and more replicas of a process need a higher limit than provisioning sets.
 
-Under Compose, `./scripts/deploy.sh monitor`, `rekey`, and `staff` run those commands as
-their own services with their own logins, and the Stripe worker's retry runs as
+Under Compose, `./scripts/deploy.sh monitor`, `reconcile`, `rekey`, and `staff` run those
+commands as their own services with their own logins, and the Stripe worker's retry runs as
 `docker compose … run --rm stripe-worker worker --kind stripe --retry-event evt_example --once`
 with both environment files.
 
@@ -286,6 +287,41 @@ go run ./cmd/worker --kind stripe --retry-event evt_example --once
 
 `--once` processes at most one eligible event, which may not be the reset event. Keep the
 worker running to drain the queue. Never delete financial facts to make a retry succeed.
+
+### Daily Stripe reconciliation
+
+The monitor only sees the `donor_stripe_events` inbox, so a webhook Stripe never delivered
+leaves no row to alarm on. The `reconcile` command closes that gap: once a day it lists the
+charges and refunds Stripe reports and diffs them against the gifts and refunds the database
+recorded.
+
+```sh
+./scripts/deploy.sh reconcile                 # yesterday, full New York calendar day
+./scripts/deploy.sh reconcile --date 2027-03-01   # re-run a specific day deterministically
+```
+
+- **Schedule.** Run it ~00:30 America/New_York, once yesterday's New York calendar day has
+  closed. New York is the system's authoritative civil-time zone, so the day finance reasons
+  about and the day the job reconciles are the same. The NY-day bounds are converted to a UTC
+  `created` range for Stripe and a `paid_at`/`observed_at` range for the database.
+- **Grace margin.** `--max-lag` (default 30m) keeps a charge or refund created in the last
+  30 minutes of the window from being flagged as missing, so a webhook still legitimately
+  in flight is not mistaken for a lost one. A dropped event is the signal, not a late one.
+- **Scope.** R1 reconciles charges and refunds only. Invoices, billing periods and
+  subscriptions are a phase-2 concern and are deliberately not reconciled yet; the role's
+  SELECT grant on `donor_billing_periods` and `donor_billing_observations` leaves the seam.
+- **Output and alarm.** The job prints one aggregate JSON object — counts per discrepancy
+  class (`missing_gifts`, `missing_refunds`, `amount_mismatches`, `status_mismatches`,
+  `db_without_stripe`), the window, and ids only, never donor identifiers or payloads — and
+  exits non-zero when any discrepancy count is greater than zero, so a CloudWatch alarm fires
+  on the exit code. A clean day prints the JSON and exits 0. It holds no state and writes no
+  report, so a re-run of the same day is safe and deterministic.
+- **Read-only.** The job is strictly read-only against both Stripe (List/Retrieve only) and
+  the database (its `dad_reconcile` role has SELECT alone). It never repairs, deletes or
+  writes any financial fact.
+- **Remediation is manual.** When the job flags a missing gift or refund, re-send the event
+  in Stripe, then run `worker --kind stripe --retry-event evt_example --once` to process it.
+  Never delete financial facts to make a reconciliation pass.
 
 Financial commands retain immutable inputs and processor idempotency keys. Unknown
 requests older than 23 hours require reconciliation. Hosted card-setup retries stop
