@@ -97,16 +97,13 @@ func (g *StripeGateway) ListInvoicePayments(ctx context.Context, invoice, paymen
 	return rows, nil
 }
 
-// WaitReconciliationRead leaves provider capacity for workers and staff commands.
+// WaitReconciliationRead spends one token from the shared reconcile budget, so
+// the daily job's reads — list pages and the per-intent/invoice verification
+// calls it makes through otherwise worker-bucketed gateway methods — all draw
+// from reconcile's slice of the Stripe ceiling and leave worker and staff
+// capacity intact. It blocks until a token is available or ctx is done.
 func WaitReconciliationRead(ctx context.Context) error {
-	timer := time.NewTimer(100 * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+	return DefaultRateBudget().Acquire(ctx, BucketReconcile)
 }
 
 func ReconciliationFacts(o Object) Object {
@@ -350,7 +347,10 @@ func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time,
 	created := &stripe.RangeQueryParams{GreaterThanOrEqual: start.Unix(), LesserThanOrEqual: end.Unix()}
 	result := []Object{}
 	after := ""
-	for range 100 {
+	// A sub-day slice should fit well within this bound; a slice that reaches it
+	// returns ErrListPageCap so the caller halves the range and retries, rather
+	// than silently truncating or failing a legitimately busy day.
+	for range listPageCap {
 		if err := WaitReconciliationRead(ctx); err != nil {
 			return nil, err
 		}
@@ -386,5 +386,10 @@ func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time,
 		}
 		after = last
 	}
-	return nil, ErrProcessorUnavailable
+	return nil, ErrListPageCap
 }
+
+// listPageCap bounds pages per listByCreated call. At 100 rows per page it caps
+// one call near 100k objects, well above any sub-day slice, so hitting it means
+// the time range should be split rather than that the data is unreadable.
+const listPageCap = 1000

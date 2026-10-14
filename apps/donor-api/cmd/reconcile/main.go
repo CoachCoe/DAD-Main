@@ -138,11 +138,11 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 	charges, refunds := []payments.Object{}, []payments.Object{}
 	if gte <= lte {
 		var err error
-		charges, err = gateway.ListChargesByCreated(ctx, start, end)
+		charges, err = listSplitting(ctx, start, end, gateway.ListChargesByCreated)
 		if err != nil {
 			return reconcile.Report{}, errors.New("stripe charge listing failed")
 		}
-		refunds, err = gateway.ListRefundsByCreated(ctx, start, end)
+		refunds, err = listSplitting(ctx, start, end, gateway.ListRefundsByCreated)
 		if err != nil {
 			return reconcile.Report{}, errors.New("stripe refund listing failed")
 		}
@@ -210,8 +210,15 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 	if err != nil {
 		return reconcile.Report{}, errors.New("refund window query failed")
 	}
-	if len(giftRows) > 10000 || len(refundRows) > 10000 {
-		return reconcile.Report{}, errors.New("reconciliation window exceeds 10000 records; use a smaller range")
+	// The diff needs the complete DB set for the window in memory to compare it
+	// against the complete Stripe set, so this bounds memory rather than the
+	// window length — Stripe listing itself is no longer day-capped (it splits
+	// sub-day; see listSplitting). A window whose DB side exceeds this bound is
+	// rejected with guidance to narrow it; streaming the DB-side diff to lift
+	// this bound entirely is a follow-up for horizon-scale daily volumes.
+	const reconcileRowBound = 100000
+	if len(giftRows) > reconcileRowBound || len(refundRows) > reconcileRowBound {
+		return reconcile.Report{}, errors.New("reconciliation window exceeds the in-memory row bound; use a smaller -since/-until range")
 	}
 
 	gifts := make([]reconcile.Gift, 0, len(giftRows))
@@ -332,6 +339,37 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 		report.PendingRefundBatches++
 		after = rows[len(rows)-1].ID
 	}
+}
+
+// listSplitting lists [start, end] through list, and when a range holds more
+// objects than one listing call may return (ErrListPageCap), halves the range
+// and lists each half, so an arbitrarily busy day is covered without raising
+// the per-call ceiling. Objects are returned in range order; the day's created
+// filter is inclusive on both ends, so the split point is kept out of the left
+// half (left ends one second before mid) to avoid returning a boundary object
+// twice. A range that cannot be split further (a single second over the cap)
+// surfaces ErrListPageCap rather than looping.
+func listSplitting(ctx context.Context, start, end time.Time, list func(context.Context, time.Time, time.Time) ([]payments.Object, error)) ([]payments.Object, error) {
+	objects, err := list(ctx, start, end)
+	if err == nil {
+		return objects, nil
+	}
+	if !errors.Is(err, payments.ErrListPageCap) {
+		return nil, err
+	}
+	if !end.After(start) {
+		return nil, err
+	}
+	mid := start.Add(end.Sub(start) / 2)
+	left, err := listSplitting(ctx, start, mid.Add(-time.Second), list)
+	if err != nil {
+		return nil, err
+	}
+	right, err := listSplitting(ctx, mid, end, list)
+	if err != nil {
+		return nil, err
+	}
+	return append(left, right...), nil
 }
 
 func invoiceLink(ctx context.Context, gateway payments.ReconcileGateway, invoice, payment string) (reconcile.InvoicePayment, bool, error) {
