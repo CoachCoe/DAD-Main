@@ -162,7 +162,7 @@ func (q *Queries) PushTargets(ctx context.Context, arg PushTargetsParams) ([]Pus
 
 const queuePushIntents = `-- name: QueuePushIntents :exec
 WITH projection AS (
-    SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version FROM donor_metric_projections m WHERE m.donor_id=$3::uuid
+    SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version, referred_link_count, referred_irl_count, referred_link_minor, referred_irl_minor FROM donor_metric_projections m WHERE m.donor_id=$3::uuid
 ), candidates AS (
     SELECT p.referrer_id AS donor_id,'REFERRAL_CONVERTED' AS category,'push:referral:'||p.donor_id::text AS dedup_key,
         json_build_object('referred_id',p.donor_id::text,'kind',p.referral_kind) AS context
