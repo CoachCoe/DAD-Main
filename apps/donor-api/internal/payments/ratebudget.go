@@ -19,13 +19,19 @@ const (
 	WorkerBudgetFraction = 0.6
 	// StaffBudgetFraction is the share of the ceiling staff mutations may spend.
 	StaffBudgetFraction = 0.3
+	// ReconcileBudgetFraction is the share the daily reconciliation job's reads
+	// may spend. It runs off-peak over a closed day, so a small slice keeps it
+	// from contending with live worker and staff traffic. The three fractions
+	// sum to the full ceiling without oversubscribing it.
+	ReconcileBudgetFraction = 0.1
 )
 
-// Bucket names. Adding a new bucket (e.g. BucketReconcile for X3) is one
-// constant here plus one registration line in NewRateBudget — no type change.
+// Bucket names. Adding a new bucket is one constant here plus one registration
+// line in NewRateBudget — no type change.
 const (
-	BucketWorker = "worker"
-	BucketStaff  = "staff"
+	BucketWorker    = "worker"
+	BucketStaff     = "staff"
+	BucketReconcile = "reconcile"
 )
 
 // bucket is a mutex-guarded token bucket. tokens refills at rate tokens/second,
@@ -79,9 +85,11 @@ type RateBudget struct {
 func NewRateBudget() *RateBudget {
 	workerRate := WorkerBudgetFraction * StripeBudgetPerSecond
 	staffRate := StaffBudgetFraction * StripeBudgetPerSecond
+	reconcileRate := ReconcileBudgetFraction * StripeBudgetPerSecond
 	return &RateBudget{buckets: map[string]*bucket{
-		BucketWorker: newBucket(workerRate, workerRate),
-		BucketStaff:  newBucket(staffRate, staffRate),
+		BucketWorker:    newBucket(workerRate, workerRate),
+		BucketStaff:     newBucket(staffRate, staffRate),
+		BucketReconcile: newBucket(reconcileRate, reconcileRate),
 	}}
 }
 

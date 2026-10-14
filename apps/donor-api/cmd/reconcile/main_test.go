@@ -445,3 +445,86 @@ func TestInvoiceLinkRejectsUnrelatedAndInvalidProof(t *testing.T) {
 		}
 	}
 }
+
+// TestListSplittingHalvesOnPageCap proves the adaptive sub-day windowing: a
+// lister that returns ErrListPageCap for any range wider than a threshold, but
+// succeeds on narrow enough ranges, is split until each slice lists cleanly,
+// and the slices' objects are concatenated in range order with no gap or
+// overlap across the inclusive split boundary.
+func TestListSplittingHalvesOnPageCap(t *testing.T) {
+	start := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(24*time.Hour - time.Second) // inclusive day, like StripeCreatedRange
+
+	// The lister "holds" one object per second in [start,end] and can only
+	// return a slice spanning at most 6 hours; a wider slice trips the cap. This
+	// forces at least two splits of a full day.
+	const maxSpan = 6 * time.Hour
+	var calls int
+	seen := map[int64]bool{}
+	lister := func(_ context.Context, s, e time.Time) ([]payments.Object, error) {
+		calls++
+		if e.Sub(s) > maxSpan {
+			return nil, payments.ErrListPageCap
+		}
+		out := []payments.Object{}
+		for sec := s.Unix(); sec <= e.Unix(); sec++ {
+			if seen[sec] {
+				t.Fatalf("second %d listed by more than one slice (overlap)", sec)
+			}
+			seen[sec] = true
+			out = append(out, payments.Object{"id": []byte(`"obj_` + strconv.FormatInt(sec, 10) + `"`)})
+		}
+		return out, nil
+	}
+
+	got, err := listSplitting(context.Background(), start, end, lister)
+	if err != nil {
+		t.Fatalf("listSplitting: %v", err)
+	}
+	want := int(end.Unix()-start.Unix()) + 1 // one object per inclusive second
+	if len(got) != want {
+		t.Fatalf("got %d objects, want %d (every second exactly once)", len(got), want)
+	}
+	if calls < 3 {
+		t.Fatalf("expected the day to split into multiple slices, saw %d calls", calls)
+	}
+	// Every second in the inclusive range must have been covered exactly once.
+	for sec := start.Unix(); sec <= end.Unix(); sec++ {
+		if !seen[sec] {
+			t.Fatalf("second %d was never listed (gap)", sec)
+		}
+	}
+}
+
+// TestListSplittingSurfacesCapForAnUnsplittableSecond proves the recursion
+// terminates: a single-second range that still trips the cap returns the error
+// rather than looping forever.
+func TestListSplittingSurfacesCapForAnUnsplittableSecond(t *testing.T) {
+	at := time.Date(2027, 3, 1, 12, 0, 0, 0, time.UTC)
+	lister := func(_ context.Context, _, _ time.Time) ([]payments.Object, error) {
+		return nil, payments.ErrListPageCap
+	}
+	_, err := listSplitting(context.Background(), at, at, lister)
+	if !errors.Is(err, payments.ErrListPageCap) {
+		t.Fatalf("got %v, want ErrListPageCap for an unsplittable range", err)
+	}
+}
+
+// TestListSplittingPropagatesNonCapErrors proves a real listing failure is
+// returned immediately, not retried by splitting.
+func TestListSplittingPropagatesNonCapErrors(t *testing.T) {
+	start := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	sentinel := errors.New("boom")
+	var calls int
+	lister := func(_ context.Context, _, _ time.Time) ([]payments.Object, error) {
+		calls++
+		return nil, sentinel
+	}
+	if _, err := listSplitting(context.Background(), start, end, lister); !errors.Is(err, sentinel) {
+		t.Fatalf("got %v, want the sentinel error", err)
+	}
+	if calls != 1 {
+		t.Fatalf("a non-cap error must not trigger a split: %d calls", calls)
+	}
+}

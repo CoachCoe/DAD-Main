@@ -73,3 +73,31 @@ func TestRateBudgetStaffReservationIndependentOfWorker(t *testing.T) {
 		t.Fatalf("staff grant waited %v despite an undrained bucket", waited)
 	}
 }
+
+// TestRateBudgetReconcileReservationIndependentOfWorkerAndStaff proves X3's
+// reconcile bucket owns its own slice of the ceiling: draining both the worker
+// and staff buckets does not delay a reconcile grant.
+func TestRateBudgetReconcileReservationIndependentOfWorkerAndStaff(t *testing.T) {
+	rb := NewRateBudget()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	drain := func(bucket string, rate float64) {
+		for i := 0; i < int(rate)+1; i++ {
+			if err := rb.Acquire(ctx, bucket); err != nil {
+				t.Fatalf("%s drain %d failed: %v", bucket, i, err)
+			}
+		}
+	}
+	drain(BucketWorker, WorkerBudgetFraction*StripeBudgetPerSecond)
+	drain(BucketStaff, StaffBudgetFraction*StripeBudgetPerSecond)
+	// Reconcile is untouched, so its grant arrives promptly.
+	recCtx, recCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer recCancel()
+	start := time.Now()
+	if err := rb.Acquire(recCtx, BucketReconcile); err != nil {
+		t.Fatalf("reconcile grant blocked by worker/staff drain: %v", err)
+	}
+	if waited := time.Since(start); waited > 100*time.Millisecond {
+		t.Fatalf("reconcile grant waited %v despite an undrained bucket", waited)
+	}
+}
