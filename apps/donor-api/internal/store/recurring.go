@@ -168,7 +168,7 @@ func (s RecurringService) prefetchSubscription(ctx context.Context, donor pgtype
 	if err != nil {
 		return nil, err
 	}
-	return fetchSubscription(ctx, q, s.Gateway, attempt.ID, attempt.StripeSubscriptionID.String)
+	return fetchSubscription(ctx, q, newSubFetcher(s.Gateway), attempt.ID, attempt.StripeSubscriptionID.String)
 }
 
 // refresh syncs the latest subscription of owner's donor before a command,
@@ -267,7 +267,7 @@ func leasedCommand[T any](ctx context.Context, s RecurringService, owner ownerRe
 	if err != nil {
 		return zero, err
 	}
-	snapshot, err := fetchSubscription(ctx, queries.New(s.DB), s.Gateway, lease.attempt, lease.subscription)
+	snapshot, err := fetchSubscription(ctx, queries.New(s.DB), newSubFetcher(s.Gateway), lease.attempt, lease.subscription)
 	if err != nil {
 		return zero, err
 	}
@@ -300,7 +300,7 @@ const (
 // current state and checks it suits use.
 func (s RecurringService) read(ctx context.Context, tx pgx.Tx, attempt queries.DonorStripeCheckout, now time.Time, use subscriptionUse, snapshot *subscriptionSnapshot) (queries.DonorSubscription, payments.Object, error) {
 	q := queries.New(tx)
-	remote, err := currentSubscription(ctx, q, s.Gateway, attempt, snapshot)
+	remote, err := currentSubscription(ctx, q, newSubFetcher(s.Gateway), attempt, snapshot)
 	if err != nil {
 		return queries.DonorSubscription{}, nil, err
 	}
