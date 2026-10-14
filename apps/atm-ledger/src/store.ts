@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { DurableObject } from "cloudflare:workers";
 import {
 	applyDelta,
@@ -66,6 +67,7 @@ export class LedgerStore extends DurableObject<Env> {
 		| { ok: false; status: number; detail: string }
 	> {
 		try {
+			this.consumeRequest();
 			switch (operation) {
 				case "snapshot":
 					return { ok: true, value: await this.snapshot() };
@@ -99,11 +101,56 @@ export class LedgerStore extends DurableObject<Env> {
 			ctx.storage.sql.exec(`
         CREATE TABLE IF NOT EXISTS head (id INTEGER PRIMARY KEY CHECK (id=1), version INTEGER NOT NULL, digest TEXT NOT NULL, history_hash TEXT NOT NULL, ledger TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS events (version INTEGER PRIMARY KEY, hash TEXT NOT NULL, payload TEXT NOT NULL, operation TEXT NOT NULL UNIQUE, request_digest TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS budget (id INTEGER PRIMARY KEY CHECK(id=1), day TEXT NOT NULL, requests INTEGER NOT NULL, events INTEGER NOT NULL, archive_bytes INTEGER NOT NULL);
+        INSERT OR IGNORE INTO budget VALUES(1,'',0,0,0);
         CREATE TABLE IF NOT EXISTS archive_pending (version INTEGER PRIMARY KEY REFERENCES events(version));
         CREATE TRIGGER IF NOT EXISTS events_no_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT, 'History is append-only'); END;
         CREATE TRIGGER IF NOT EXISTS events_no_delete BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'History is append-only'); END;
       `);
 		});
+	}
+
+	private budget() {
+		const today = new Date().toISOString().slice(0, 10);
+		this.ctx.storage.sql.exec(
+			"UPDATE budget SET day=?,requests=0,events=0 WHERE day<>?",
+			today,
+			today,
+		);
+		return this.ctx.storage.sql
+			.exec<{ requests: number; events: number; archive_bytes: number }>(
+				"SELECT requests,events,archive_bytes FROM budget WHERE id=1",
+			)
+			.one();
+	}
+
+	private consumeRequest() {
+		this.ctx.storage.transactionSync(() => {
+			check(
+				this.budget().requests < 1000,
+				"Daily ledger request quota reached",
+				429,
+			);
+			this.ctx.storage.sql.exec(
+				"UPDATE budget SET requests=requests+1 WHERE id=1",
+			);
+		});
+	}
+
+	private reserveEvent(payload: string, hash: string) {
+		const budget = this.budget();
+		const bytes =
+			2 * Buffer.byteLength(`{"event":${payload},"hash":"${hash}"}`);
+		check(budget.events < 200, "Daily ledger event quota reached", 429);
+		check(
+			budget.archive_bytes + bytes <= 100 * 1024 * 1024,
+			"Ledger archive quota reached",
+			507,
+		);
+		this.ctx.storage.sql.exec(
+			"UPDATE budget SET events=events+1,archive_bytes=archive_bytes+? WHERE id=1",
+			bytes,
+		);
 	}
 
 	private head(): Snapshot {
@@ -135,7 +182,7 @@ export class LedgerStore extends DurableObject<Env> {
 	private async archive(): Promise<void> {
 		const pending = this.ctx.storage.sql
 			.exec<EventRow>(
-				"SELECT e.* FROM events e JOIN archive_pending p USING(version) ORDER BY version LIMIT 100",
+				"SELECT e.* FROM events e JOIN archive_pending p USING(version) ORDER BY version LIMIT 10",
 			)
 			.toArray();
 		for (const event of pending) {
@@ -237,7 +284,7 @@ export class LedgerStore extends DurableObject<Env> {
 	) {
 		check(
 			prior.version < 999999999998 &&
-				canonical(next).length <= 16 * 1024 * 1024,
+				Buffer.byteLength(canonical(next)) <= 1024 * 1024,
 			"Ledger capacity exceeded",
 			503,
 		);
@@ -258,10 +305,11 @@ export class LedgerStore extends DurableObject<Env> {
 		};
 		const hash = digest(event);
 		check(
-			canonical(event).length <= 2 * 1024 * 1024,
+			Buffer.byteLength(canonical(event)) <= 512 * 1024,
 			"Event capacity exceeded",
 			413,
 		);
+		this.reserveEvent(canonical(event), hash);
 		this.ctx.storage.sql.exec(
 			"INSERT INTO events(version,hash,payload,operation,request_digest) VALUES(?,?,?,?,?)",
 			event.version,
@@ -538,7 +586,7 @@ export class LedgerStore extends DurableObject<Env> {
 		const startingVersion = head.version;
 		const listing = await this.env.ARCHIVE.list({
 			prefix,
-			limit: 100,
+			limit: 10,
 			startAfter: `${prefix}${String(head.version).padStart(12, "0")}~`,
 		});
 		for (const object of listing.objects) {
@@ -625,7 +673,8 @@ export class LedgerStore extends DurableObject<Env> {
 						"Existing history contradicts archive",
 						503,
 					);
-				else
+				else {
+					this.reserveEvent(payload, String(envelope.hash));
 					this.ctx.storage.sql.exec(
 						"INSERT INTO events(version,hash,payload,operation,request_digest) VALUES(?,?,?,?,?)",
 						event.version,
@@ -634,6 +683,7 @@ export class LedgerStore extends DurableObject<Env> {
 						event.operation,
 						event.requestDigest,
 					);
+				}
 				this.ctx.storage.sql.exec(
 					"INSERT INTO head(id,version,digest,history_hash,ledger) VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,digest=excluded.digest,history_hash=excluded.history_hash,ledger=excluded.ledger",
 					event.version,

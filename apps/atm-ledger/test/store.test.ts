@@ -427,4 +427,86 @@ describe("durable ledger", () => {
 		});
 		expect(await (await env.ARCHIVE.get(key))?.text()).toBe("retained history");
 	});
+	it("blocks excess requests before storage access and resets daily counters without dropping retained usage", async () => {
+		const { stub } = await setup();
+		await runInDurableObject(stub, async (_instance, state) => {
+			state.storage.sql.exec(
+				"UPDATE budget SET requests=1000,events=200,archive_bytes=42 WHERE id=1",
+			);
+		});
+		await expect(call(stub, "snapshot", null)).rejects.toThrow("request quota");
+		await runInDurableObject(stub, async (_instance, state) => {
+			state.storage.sql.exec("UPDATE budget SET day='2000-01-01' WHERE id=1");
+		});
+		await call(stub, "snapshot", null);
+		await runInDurableObject(stub, async (_instance, state) => {
+			expect(
+				state.storage.sql
+					.exec("SELECT requests,events,archive_bytes FROM budget")
+					.one(),
+			).toEqual({ requests: 1, events: 0, archive_bytes: 42 });
+		});
+	});
+
+	it.each(["events", "archive_bytes"])(
+		"rejects a publication at its %s quota without changing history",
+		async (column) => {
+			const { stub, snapshot } = await setup();
+			await runInDurableObject(stub, async (_instance, state) => {
+				if (column === "events")
+					state.storage.sql.exec("UPDATE budget SET events=200 WHERE id=1");
+				else
+					state.storage.sql.exec(
+						"UPDATE budget SET archive_bytes=? WHERE id=1",
+						100 * 1024 * 1024 - 1,
+					);
+			});
+			await expect(
+				call(
+					stub,
+					"publish",
+					{
+						expectedVersion: snapshot.version,
+						previousDigest: snapshot.digest,
+						ledger: collected(snapshot.ledger),
+					},
+					publisher,
+				),
+			).rejects.toThrow("quota");
+			expect(await call(stub, "snapshot", null)).toEqual(snapshot);
+			expect((await env.ARCHIVE.list()).objects).toHaveLength(2);
+			expect((await stub.history(0)).events).toHaveLength(1);
+		},
+	);
+
+	it("drains a bounded archive batch on an identical migration retry without reserving storage twice", async () => {
+		const m = migration();
+		for (let i = 1; i < 12; i++)
+			m.history.push({
+				...m.history[0],
+				commit: i.toString(16).padStart(40, "0"),
+				parent: m.history[i - 1].commit,
+			});
+		const stub = env.LEDGERS.getByName(source);
+		await expect(call(stub, "migrate", m)).rejects.toThrow("Archive backlog");
+		const snapshot = await call(stub, "migrate", m);
+		expect(snapshot.version).toBe(12);
+		expect((await env.ARCHIVE.list()).objects).toHaveLength(24);
+		let used = 0;
+		await runInDurableObject(stub, async (_instance, state) => {
+			used = state.storage.sql
+				.exec<{ n: number }>("SELECT archive_bytes n FROM budget")
+				.one().n;
+		});
+		const objects = await env.ARCHIVE.list();
+		expect(used).toBe(objects.objects.reduce((n, o) => n + o.size, 0));
+		await call(stub, "migrate", m);
+		await runInDurableObject(stub, async (_instance, state) => {
+			expect(
+				state.storage.sql
+					.exec<{ n: number }>("SELECT archive_bytes n FROM budget")
+					.one().n,
+			).toBe(used);
+		});
+	});
 });

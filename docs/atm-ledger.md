@@ -164,7 +164,7 @@ ATM jobs after a failed validation/publication attempt.
 
 If a point-in-time database restore leaves SQLite behind its archive, dispatch
 `ledger_operation=recover`. Only the authorized admin workflow can do this. It replays
-up to 100 missing archived events per request. Larger recoveries make durable progress
+up to 10 missing archived events per request. Larger recoveries make durable progress
 and return a retryable error until replay is complete; repeat the administrative job
 if its bounded retries are exhausted. The final replay verifies the archive head and
 records recovery without modifying original events or receipts.
@@ -174,7 +174,34 @@ the integrity checks. Preserve the Durable Object namespace and R2 bucket when r
 back code. A contradictory archive or corrupted history requires operator investigation;
 the recovery endpoint does not guess which conflicting record is correct.
 
-Requests and snapshots are bounded at 16 MiB, individual events at 2 MiB, migration at
+Requests are bounded at 16 MiB, ledger projections at 1 MiB and individual events at
+512 KiB (below SQLite row limits). Migration is bounded at
 1,000 legacy revisions, and history exports at 100 events per page. The administrative
 CLI bounds an interactive export at 100,000 events. Exceeding a bound blocks the operation
 and requires an explicitly reviewed capacity change; it never returns a partial green verdict.
+
+
+## Cost controls
+
+The service limits authenticated operations to 1,000 per UTC day, new events to 200
+per UTC day, and both retained R2 copies combined to 100 MiB. SQLite counters reserve
+archive bytes in the event transaction; failed transactions and identical publication
+retries do not reserve twice. Recovery accounts for restored events. Daily resets never
+reset retained bytes. Exceeding a quota blocks acceptance, preserves history, and requires
+operator review or a reviewed capacity change. Each archival/recovery pass handles ten
+events so initial import can drain through bounded, idempotent retries.
+
+An ingress limiter rejects excess traffic before JWT verification or storage work:
+60 requests per minute per Cloudflare location using a service-wide key. This is an
+approximate local abuse limit, not a global request or dollar cap. Invalid requests
+still invoke the Worker. Start with Workers Free's provider-enforced limits; do not
+upgrade the account to Paid as part of this migration. If Free cannot support the
+verified workload, review the failure and pricing before any upgrade. On Free, the
+platform's CPU limit applies; configuring a higher paid CPU limit is not required.
+
+Configure account budget alerts at $1, $5 and $10 in Billing > Billable Usage. Alerts
+are informational, may be delayed and exclude recurring plan fees; they are not a
+spending cap. Quotas apply only to this application's activity, and retained objects
+continue consuming storage after writes stop. Other applications share account free
+allowances. R2 remains private and uses Standard storage. No automatic expiry deletes
+the append-only history. Recheck account usage after import and the first billing cycle.

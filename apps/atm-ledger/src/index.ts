@@ -43,6 +43,8 @@ export default {
 			"Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
 		};
 		try {
+			if (!(await env.INGRESS.limit({ key: "atm-ledger" })).success)
+				throw new LedgerError("Ledger ingress rate limit reached", 429);
 			const authorization = request.headers.get("authorization");
 			if (!authorization?.startsWith("Bearer "))
 				throw new LedgerError("Authentication required", 401);

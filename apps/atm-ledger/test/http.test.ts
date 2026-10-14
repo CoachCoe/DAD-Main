@@ -34,3 +34,14 @@ it("refuses malformed bearer credentials without exposing token contents", async
 		"private-token-fixture",
 	);
 });
+
+it("rate limits ingress before authentication or durable storage access", async () => {
+	const response = await worker.fetch(
+		new Request("https://ledger.example.org/v1/ledger"),
+		{ ...env, INGRESS: { limit: async () => ({ success: false }) } },
+	);
+	expect(response.status).toBe(429);
+	expect(await response.json()).toEqual({
+		detail: "Ledger ingress rate limit reached",
+	});
+});

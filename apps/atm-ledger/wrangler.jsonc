@@ -6,6 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
+  "ratelimits": [{ "name": "INGRESS", "namespace_id": "1378692308", "simple": { "limit": 60, "period": 60 } }],
   "durable_objects": {
     "bindings": [{ "name": "LEDGERS", "class_name": "LedgerStore" }]
   },
