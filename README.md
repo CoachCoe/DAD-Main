@@ -147,10 +147,10 @@ app's API types from the OpenAPI contract; commit each source with its generated
 `make check-generated` fails if either has drifted.
 Applied migrations are immutable and checksum-checked.
 
-The ATM acceptance ledger has a dedicated [durable-store implementation and cutover
+The ATM acceptance ledger uses a dedicated [durable store and recovery
 procedure](docs/atm-ledger.md). `make test-ledger lint-ledger` validates its Worker,
-transactional storage, OIDC access, archive recovery and migration client. The existing
-Git ledger remains authoritative until the deployed migration passes its cutover checks.
+transactional storage, OIDC access, archive recovery and migration client. The original
+Git ledger history is retained as an archive tag; workflows require durable publication.
 
 Capacity is measured against a seeded, disposable deployment: `make seed` fills a
 dedicated database with 50,000 synthetic donors and writes a private fixture of session

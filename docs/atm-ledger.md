@@ -1,9 +1,13 @@
 # Durable ATM ledger
 
-The migration implementation lives in `apps/atm-ledger`. Deployment and cutover are
-separate steps: until the deployed service is initialized and both branch workflows
-are updated, `ATM_LEDGER_BACKEND` stays unset and ATM continues to use `atm-state`.
-Never delete that branch merely because the Worker builds or its tests pass.
+The active ledger runs at `https://impactgraph-atm-ledger.cocuyo.workers.dev`, backed
+by the dedicated `impactgraph-atm-ledger-history` R2 bucket. Source lives in
+`apps/atm-ledger`. Both branch workflows require the durable service and hold no Git
+write permission. There is no Git fallback on an outage.
+
+The original Git history is preserved by the annotated tag
+`archive/atm-state-20261013`. Do not restore the old state branch as an operational
+ledger; use verified archive recovery below.
 
 ## Storage and integrity
 
@@ -92,50 +96,32 @@ origin, without a path. Create the three named GitHub environments above. Restri
 admin environment to `dev`; protect environment administration and the actor allowlist.
 An environment's protection rules may add human approval if the organization requires it.
 
-## Cutover
+## Initial migration
 
-1. Commit, test and push the service, adapter and compatibility workflow on `dev`.
-   Verify CI and ATM still pass with the Git backend. Deploy the service and verify
-   private storage and retention locks. The service intentionally refuses to create
-   an empty operational ledger automatically.
-2. Update `.github/workflows/atm.yml` and `scripts/atm-ledger.mjs` on **both `dev` and
-   `main`** through authorized review. These are the consumer files needed on `main`;
-   the running Worker is deployed from the reviewed service revision on `dev`.
-   Do not silently promote unrelated application changes.
-3. Set repository variable `ATM_LEDGER_BACKEND=paused`. Drain all previously queued or
-   running Git-backed ATM executions. Pause branch pushes during the cutover window.
-   Maintenance-mode validations do not pass acceptance. Administrative operations use
-   the same GitHub concurrency group as publication.
-4. Dispatch the verified import:
+The initial import preserved all 22 committed ledger revisions through Git commit
+`397aee9237f2266aeb223219686340a3e416c6af`: 19 execution receipts and two resolved
+findings, each with its original audit record. The owner-authenticated import ran in
+[Actions run 38488982545](https://github.com/CoachCoe/ImpactGraph/actions/runs/38488982545).
+A separate [history export](https://github.com/CoachCoe/ImpactGraph/actions/runs/38489085019)
+verified every event hash, previous hash, before/after digest, source commit anchor,
+finding audit and receipt against every original Git revision. The source branch tip
+was checked again before activation.
 
-   ```sh
-   gh workflow run atm.yml --repo CoachCoe/ImpactGraph --ref dev -f ledger_operation=migrate
-   ```
+The service was deployed from the code committed in `6774ec3`, Cloudflare version
+`936fa1c6-339b-4c53-a362-295be87ddaf1`. Both consumer workflows were updated with explicit
+main-branch authorization. Publication was paused while legacy runs drained and the
+import was verified. `ATM_LEDGER_URL` selects the service origin;
+`ATM_LEDGER_BACKEND=paused` remains a maintenance switch that blocks acceptance.
+Other backend values cannot enable a Git fallback in the final workflow.
 
-   The admin job reads every committed `ledger.json` revision from the current
-   `atm-state` tip, imports them in order, and verifies that the service's final digest
-   equals the original ledger. Existing findings, triage audit arrays, receipts and
-   source commit anchors are preserved. A different second import is refused.
-5. Dispatch `ledger_operation=history`. Download its private export and verify its
-   hash chain, imported revision count, original receipts, findings and classifications.
-   Check that `atm-state` has not advanced beyond the imported tip. If it has, stop
-   cutover and investigate; do not discard the extra history or initialize another ledger.
-6. Set `ATM_LEDGER_BACKEND=durable`. Dispatch normal validation on `dev` and `main`:
+The Git state branch can be removed only after both branches have passed complete
+validation, encrypted evidence retention, durable publication and acceptance. Retain
+the archive tag. Identical retries must leave each execution receipt present exactly
+once. Any failed check requires investigation; never initialize an empty replacement.
 
-   ```sh
-   gh workflow run atm.yml --repo CoachCoe/ImpactGraph --ref dev -f ledger_operation=validate
-   gh workflow run atm.yml --repo CoachCoe/ImpactGraph --ref main -f ledger_operation=validate
-   ```
-
-   Both must pass validation, retained evidence, durable publication and acceptance.
-   Verify each execution appears once in the durable ledger with the intended code SHA.
-7. Preserve the final Git ledger tip as an annotated archive tag, then detach any clean
-   state worktree and remove the local/remote `atm-state` branch. Remove the compatibility
-   checkout/push path and its `contents: write` permission from both consumer workflows.
-   Normal validation must have no Git fallback after this point.
-
-Cloudflare authentication, resource provisioning, main-branch authorization and passing
-end-to-end cutover checks are prerequisites, not steps that local tests can establish.
+Migration remains an administrator-only, one-time bootstrap for an empty namespace
+with no retained archive. Repeating the original manifest is idempotent; a different
+import is refused. Never use migration instead of recovery for an existing ledger.
 
 ## Audited triage
 
