@@ -51,7 +51,8 @@ func (b *AnchorBackfill) SyncNext(ctx context.Context, now time.Time) (bool, err
 // sync reads the subscription with no lock held, then reconciles it under
 // the donor lock as a subscription event would.
 func (b *AnchorBackfill) sync(ctx context.Context, row queries.NextSubscriptionWithoutAnchorRow, now time.Time) error {
-	snapshot, err := fetchSubscription(ctx, queries.New(b.DB), b.Gateway, row.ID, row.StripeSubscriptionID.String)
+	fetcher := newSubFetcher(b.Gateway)
+	snapshot, err := fetchSubscription(ctx, queries.New(b.DB), fetcher, row.ID, row.StripeSubscriptionID.String)
 	if err != nil {
 		return err
 	}
@@ -71,7 +72,7 @@ func (b *AnchorBackfill) sync(ctx context.Context, row queries.NextSubscriptionW
 		if attempt.ID != row.ID || attempt.StripeSubscriptionID != row.StripeSubscriptionID {
 			return payments.ErrFacts
 		}
-		if _, err = reconcileSubscription(ctx, q, b.Gateway, draft, attempt, snapshot, now); err != nil {
+		if _, err = reconcileSubscription(ctx, q, fetcher, draft, attempt, snapshot, now); err != nil {
 			return err
 		}
 		_, err = refreshProjection(ctx, tx, row.DonorID, now)

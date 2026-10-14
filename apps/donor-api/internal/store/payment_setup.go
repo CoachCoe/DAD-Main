@@ -171,7 +171,7 @@ func (s RecurringService) insertPaymentUpdate(ctx context.Context, q *queries.Qu
 	if err != nil {
 		return err
 	}
-	remote, err := currentSubscription(ctx, q, s.Gateway, attempt, snapshot)
+	remote, err := currentSubscription(ctx, q, newSubFetcher(s.Gateway), attempt, snapshot)
 	if err != nil {
 		return err
 	}
