@@ -29,7 +29,6 @@ on:
 
 env:
   ATM_LEDGER_URL: ${{ vars.ATM_LEDGER_URL }}
-  ATM_LEDGER_BACKEND: ${{ vars.ATM_LEDGER_BACKEND || 'git' }}
 
 permissions:
   contents: read
@@ -76,12 +75,6 @@ jobs:
           path: atm
           persist-credentials: false
           token: ${{ secrets.ATM_READ_TOKEN || github.token }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: vars.ATM_LEDGER_BACKEND != 'durable'
-        with:
-          ref: atm-state
-          path: state
-          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -90,7 +83,6 @@ jobs:
       - run: npx playwright install --with-deps chromium
         working-directory: atm
       - name: Read durable ledger snapshot
-        if: vars.ATM_LEDGER_BACKEND == 'durable'
         run: |
           node candidate/scripts/atm-ledger.mjs snapshot state atm
           mkdir -p "$RUNNER_TEMP/atm"
@@ -128,7 +120,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      contents: write
+      contents: read
       id-token: write
     environment: atm-ledger-publisher
     outputs:
@@ -143,12 +135,6 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.ATM_READ_TOKEN || github.token }}
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: vars.ATM_LEDGER_BACKEND != 'durable'
-        with:
-          ref: atm-state
-          path: state
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: vars.ATM_LEDGER_BACKEND == 'durable'
         with:
           ref: ${{ github.workflow_sha }}
           path: control
@@ -165,29 +151,11 @@ jobs:
         id: publish
         env:
           CANDIDATE: ${{ needs.validate.outputs.revision }}
-          SOURCE: github:${{ github.repository }}
-          EXECUTION: ${{ github.run_id }}:${{ github.run_attempt }}
           ARTIFACT_ID: ${{ needs.validate.outputs.artifact_id }}
           ARTIFACT_DIGEST: ${{ needs.validate.outputs.artifact_digest }}
           ATM_PROPOSAL_DIR: proposal
         run: |
-          if [ "$ATM_LEDGER_BACKEND" = durable ]; then
-            node control/scripts/atm-ledger.mjs publish proposal atm
-            exit
-          fi
-          node atm/scripts/github-ci.js publish \
-            --source "$SOURCE" --execution "$EXECUTION" --revision "$CANDIDATE" \
-            --state state/ledger.json --proposal proposal/proposal.json \
-            --bundle proposal/evidence.atm --artifact-id "$ARTIFACT_ID" \
-            --artifact-digest "$ARTIFACT_DIGEST" --output "$RUNNER_TEMP/verdict"
-          cd state
-          git config user.name 'ATM quality gate'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ledger.json
-          git commit -m "Record ATM validation $EXECUTION"
-          # No force-push: a concurrent triage/state change fails closed.
-          git push origin HEAD:refs/heads/atm-state
-          echo "verdict=$(cat "$RUNNER_TEMP/verdict")" >> "$GITHUB_OUTPUT"
+          node control/scripts/atm-ledger.mjs publish proposal atm
 
   acceptance:
     name: ATM acceptance
