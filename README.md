@@ -16,7 +16,7 @@ publish blockchain transactions. The enrolment export is an inactive R2 stub.
 
 ## Local setup
 
-Requires Go 1.27.2, Node 22.13+ (or Node 24), npm, and Docker Compose, which runs
+Requires Go 1.27.2, Node 22.19+ (or Node 24), npm, and Docker Compose, which runs
 PostgreSQL 16 on 127.0.0.1.
 Commands below run from the repository root. The local database uses port 55432.
 
@@ -146,6 +146,11 @@ SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc and regenerat
 app's API types from the OpenAPI contract; commit each source with its generated code.
 `make check-generated` fails if either has drifted.
 Applied migrations are immutable and checksum-checked.
+
+The ATM acceptance ledger uses a dedicated [durable store and recovery
+procedure](docs/atm-ledger.md). `make test-ledger lint-ledger` validates its Worker,
+transactional storage, OIDC access, archive recovery and migration client. The original
+Git ledger history is retained as an archive tag; workflows require durable publication.
 
 Capacity is measured against a seeded, disposable deployment: `make seed` fills a
 dedicated database with 50,000 synthetic donors and writes a private fixture of session

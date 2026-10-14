@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "impactgraph-atm-ledger",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "ratelimits": [{ "name": "INGRESS", "namespace_id": "1378692308", "simple": { "limit": 60, "period": 60 } }],
+  "durable_objects": {
+    "bindings": [{ "name": "LEDGERS", "class_name": "LedgerStore" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LedgerStore"] }],
+  "r2_buckets": [{ "binding": "ARCHIVE", "bucket_name": "impactgraph-atm-ledger-history" }],
+  "vars": {
+    "SOURCE": "github:CoachCoe/ImpactGraph",
+    "REPOSITORY_ID": "1378692308",
+    "OWNER_ID": "17258192",
+    "ADMIN_ACTOR_IDS": "17258192"
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 1, "logs": { "invocation_logs": false } }
+}

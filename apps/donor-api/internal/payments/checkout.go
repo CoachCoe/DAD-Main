@@ -19,6 +19,12 @@ var (
 	// ErrUnconfigured reports that this deployment has no payment processor
 	// configured; retrying cannot help.
 	ErrUnconfigured = errors.New("payments are not configured")
+
+	// ErrListPageCap reports that a created-range listing reached its page cap
+	// before Stripe signalled has_more:false, so the range holds more objects
+	// than one listing call may return. The reconcile caller splits the time
+	// range and retries, so a single busy day never exceeds the cap.
+	ErrListPageCap = errors.New("listing exceeded its page cap; split the range")
 )
 
 type CheckoutRequest struct {

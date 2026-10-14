@@ -99,3 +99,127 @@ func TestConcurrentFinancialRefreshPreservesLongHistories(t *testing.T) {
 	}
 	t.Logf("64 contending financial refreshes, 32 donors, 768 gifts: %s", time.Since(start))
 }
+
+// TestConcurrentReferralDeltaConverges proves that N referred donors sharing one
+// referrer, each refreshed with two contending writers, still leave the
+// referrer's four denormalized columns equal to the OLD FILTER aggregate:
+// ApplyReferralDelta (col = col + delta) is race-safe under separate donor
+// locks, and the referrer's own recompute backstop reconciles any lost deltas.
+func TestConcurrentReferralDeltaConverges(t *testing.T) {
+	pool := database(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	const siblings = 8
+	now := time.Date(2028, 2, 1, 12, 0, 0, 0, time.UTC)
+	referrerID := testID(t)
+	siblingIDs := make([]pgtype.UUID, siblings)
+	for i := range siblingIDs {
+		siblingIDs[i] = testID(t)
+	}
+	allIDs := append([]pgtype.UUID{referrerID}, siblingIDs...)
+	t.Cleanup(func() {
+		for _, sql := range []string{
+			"DELETE FROM donor_messages WHERE donor_id=ANY($1)",
+			"DELETE FROM donor_refunds WHERE gift_id IN (SELECT id FROM donor_gifts WHERE donor_id=ANY($1))",
+			"DELETE FROM donor_gifts WHERE donor_id=ANY($1)",
+			"DELETE FROM donor_checkouts WHERE donor_id=ANY($1)",
+			"DELETE FROM donor_metric_projections WHERE donor_id=ANY($1)",
+			"DELETE FROM donors WHERE id=ANY($1)",
+		} {
+			if _, err := pool.Exec(context.Background(), sql, allIDs); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	// Seed referrer + referred donors. Each sibling has a ONE_TIME gift
+	// referred via LINK to referrerID.
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	expires := now.Add(24 * time.Hour)
+	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", referrerID, referrerID.String()+"@example.org")
+	for i, id := range siblingIDs {
+		mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id.String()+"@example.org")
+		checkout := testID(t)
+		mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'USD','ONE_TIME',$3,'LINK',$4)", checkout, id, referrerID, expires)
+		paidAt := now.Add(-time.Duration(siblings-i) * time.Hour)
+		mustExec(t, tx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,'LINK')", testID(t), id, checkout, "pi_"+id.String(), paidAt, referrerID)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	worker := as(t, dbroles.ProjectionWorker)
+	// Project the referrer first so its row exists for the deltas.
+	{
+		tx, err := worker.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = refreshProjection(ctx, tx, referrerID, now); err != nil {
+			tx.Rollback(ctx)
+			t.Fatal(err)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Concurrently project all siblings, two contending writers each.
+	var wg sync.WaitGroup
+	failures := make(chan error, siblings*2)
+	for round := range 2 {
+		for _, id := range siblingIDs {
+			wg.Add(1)
+			go func(id pgtype.UUID, round int) {
+				defer wg.Done()
+				tx, err := worker.Begin(ctx)
+				if err != nil {
+					failures <- err
+					return
+				}
+				defer tx.Rollback(ctx)
+				_, err = refreshProjection(ctx, tx, id, now)
+				if err == nil {
+					err = tx.Commit(ctx)
+				}
+				if err != nil {
+					failures <- err
+				}
+			}(id, round)
+		}
+	}
+	wg.Wait()
+	close(failures)
+	for err := range failures {
+		t.Error(err)
+	}
+	// Recompute the referrer so the backstop reconciles any lost deltas.
+	{
+		tx, err := worker.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = refreshProjection(ctx, tx, referrerID, now); err != nil {
+			tx.Rollback(ctx)
+			t.Fatal(err)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Assert the referrer's stored columns equal the OLD aggregate.
+	p, err := queries.New(pool).Projection(ctx, referrerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each sibling is LINK 3000, so aggregate: link_count = siblings, irl_count = 0,
+	// link_minor = 3000 * siblings, irl_minor = 0.
+	wantLink := int64(siblings)
+	wantMinor := int64(3000 * siblings)
+	got := [4]int64{p.ReferredLinkCount, p.ReferredIrlCount, p.ReferredLinkMinor, p.ReferredIrlMinor}
+	want := [4]int64{wantLink, 0, wantMinor, 0}
+	if got != want {
+		t.Fatalf("concurrent referral deltas diverged: got %v want %v", got, want)
+	}
+}

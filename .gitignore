@@ -13,6 +13,11 @@ playwright-report/
 apps/web/next-env.d.ts
 apps/web/lib/openapi.d.ts.tmp
 .DS_Store
+.wrangler/
+.dev.vars
+apps/atm-ledger/dist/
+apps/atm-ledger/worker-configuration.d.ts
+.worktrees/
 
 # Local dev-server config for the agent preview pane.
 .claude/

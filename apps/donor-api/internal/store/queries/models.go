@@ -161,6 +161,10 @@ type DonorMetricProjection struct {
 	RefreshFailures   int32              `json:"refresh_failures"`
 	RefreshError      pgtype.Text        `json:"refresh_error"`
 	RulesVersion      int32              `json:"rules_version"`
+	ReferredLinkCount int64              `json:"referred_link_count"`
+	ReferredIrlCount  int64              `json:"referred_irl_count"`
+	ReferredLinkMinor int64              `json:"referred_link_minor"`
+	ReferredIrlMinor  int64              `json:"referred_irl_minor"`
 }
 
 type DonorPartnerSignup struct {

@@ -171,8 +171,11 @@ type projection struct {
 
 // projectionRules versions the rules a projection follows: recognition and
 // the messages and push intents queued with it. Raise it with any change to
-// them, so every saved projection is recomputed under the new rules.
-const projectionRules = 3
+// them, so every saved projection is recomputed under the new rules. Raised
+// to 4 for the denormalized referral totals (0016): every referred donor
+// recomputes once so its incremental delta runs against the backfilled
+// baseline.
+const projectionRules = 4
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a
@@ -257,7 +260,98 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		}
 	}
 	out.NextRefreshAt = nextRefresh(out, h, refundBoundaries, stops, pauses, now)
+	if err = recomputeReferredTotals(ctx, q, id, &out); err != nil {
+		return projection{SaveProjectionParams: out}, err
+	}
+	if err = applyReferralDelta(ctx, q, old, out); err != nil {
+		return projection{SaveProjectionParams: out}, err
+	}
 	return projection{out, streak.Since}, q.SaveProjection(ctx, out)
+}
+
+// recomputeReferredTotals sets the donor's own four denormalized referral
+// totals from the live aggregate over the rows that reference it, so that
+// SaveProjection writes them. This is the reconciling backstop that makes the
+// incremental ApplyReferralDelta fast path converge for every ordering: a
+// referrer projected before any of its referred donors starts at zero and
+// accrues their later deltas; a referrer projected AFTER its referred donors
+// (whose deltas hit a 0-row UPDATE because the referrer row did not yet exist)
+// is reconciled here from scratch; a referrer's later refresh re-reconciles
+// just the same. The recompute SETs (never adds), so re-running it is
+// idempotent and cannot double-count against the 0016 backfill or the
+// rules-version bump. It is a bounded scan on the referrer's own, infrequent
+// projection refresh, not on the per-dashboard-view hot path.
+func recomputeReferredTotals(ctx context.Context, q *queries.Queries, id pgtype.UUID, out *queries.SaveProjectionParams) error {
+	totals, err := q.ReferralTotalsFromReferred(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		out.ReferredLinkCount, out.ReferredIrlCount, out.ReferredLinkMinor, out.ReferredIrlMinor = 0, 0, 0, 0
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	out.ReferredLinkCount = totals.LinkCount
+	out.ReferredIrlCount = totals.IrlCount
+	out.ReferredLinkMinor = totals.LinkMinor
+	out.ReferredIrlMinor = totals.IrlMinor
+	return nil
+}
+
+// referralContribution is a referred donor's contribution to its referrer's
+// four denormalized dashboard totals: it mirrors the FILTER aggregate exactly
+// (count only when net_minor>0; the minor sum carries net_minor, which the
+// schema constrains to >= 0). An unset or non-LINK/IRL kind, or an invalid
+// net, contributes nothing.
+func referralContribution(referrer pgtype.UUID, kind pgtype.Text, net pgtype.Int8) (linkCount, irlCount, linkMinor, irlMinor int64) {
+	if !referrer.Valid || !kind.Valid || !net.Valid {
+		return 0, 0, 0, 0
+	}
+	switch kind.String {
+	case "LINK":
+		linkMinor = net.Int64
+		if net.Int64 > 0 {
+			linkCount = 1
+		}
+	case "IRL":
+		irlMinor = net.Int64
+		if net.Int64 > 0 {
+			irlCount = 1
+		}
+	}
+	return linkCount, irlCount, linkMinor, irlMinor
+}
+
+// applyReferralDelta adjusts the referrer's denormalized referred totals by the
+// signed change this referred donor's projection makes to them, computed as the
+// new contribution minus the previously-stored one. Driving it from old -> new
+// (rather than adding from zero) is what lets the migration backfill and the
+// rules-version recompute converge instead of double-counting: an unchanged
+// referred donor applies a zero delta. The referral kind is frozen at first
+// touch by projectConversion, but computing the per-field new-old difference
+// handles a kind change correctly too. The update is atomic in SQL so sibling
+// referred donors sharing a referrer stay race-safe under their own donor locks.
+func applyReferralDelta(ctx context.Context, q *queries.Queries, old queries.DonorMetricProjection, out queries.SaveProjectionParams) error {
+	oldLink, oldIRL, oldLinkMinor, oldIRLMinor := referralContribution(old.ReferrerID, old.ReferralKind, old.NetMinor)
+	newLink, newIRL, newLinkMinor, newIRLMinor := referralContribution(out.ReferrerID, out.ReferralKind, out.NetMinor)
+	linkCount, irlCount := newLink-oldLink, newIRL-oldIRL
+	linkMinor, irlMinor := newLinkMinor-oldLinkMinor, newIRLMinor-oldIRLMinor
+	if linkCount == 0 && irlCount == 0 && linkMinor == 0 && irlMinor == 0 {
+		return nil
+	}
+	// The referrer owns the row being adjusted; new and old agree on it unless
+	// a kind change moved the contribution between fields, which the per-field
+	// difference above already accounts for. Prefer the current referrer.
+	referrer := out.ReferrerID
+	if !referrer.Valid {
+		referrer = old.ReferrerID
+	}
+	return q.ApplyReferralDelta(ctx, queries.ApplyReferralDeltaParams{
+		DonorID:           referrer,
+		ReferredLinkCount: linkCount,
+		ReferredIrlCount:  irlCount,
+		ReferredLinkMinor: linkMinor,
+		ReferredIrlMinor:  irlMinor,
+	})
 }
 
 // nextRefresh is the earliest moment after now at which the projection can

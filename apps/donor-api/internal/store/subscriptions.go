@@ -15,6 +15,50 @@ func terminalSubscription(status string) bool {
 	return status == "canceled" || status == "incomplete_expired"
 }
 
+// subFetcher memoizes RetrieveSubscription for the span of a single ProcessNext
+// step, so a subscription resolved once is reused rather than fetched again. It
+// is created per step and never shared across donors, so it introduces no
+// cross-donor coupling. A nil *subFetcher reads straight through the gateway.
+type subFetcher struct {
+	gateway payments.FinancialGateway
+	seen    map[string]payments.Object
+}
+
+func newSubFetcher(gateway payments.FinancialGateway) *subFetcher {
+	return &subFetcher{gateway: gateway, seen: map[string]payments.Object{}}
+}
+
+// retrieve returns the processor's view of id, fetching it at most once per
+// step for a given id. It is for a resolution that is content with any state
+// read during this step (a first resolution): the under-lock conflict re-read
+// uses refresh instead, so this memo never masks a needed fresh read.
+func (f *subFetcher) retrieve(ctx context.Context, id string) (payments.Object, error) {
+	if f == nil || f.seen == nil {
+		return f.refresh(ctx, id)
+	}
+	if cached, ok := f.seen[id]; ok {
+		return cached, nil
+	}
+	return f.refresh(ctx, id)
+}
+
+// refresh always reads the processor and records the result for the rest of
+// the step. The under-lock conflict path calls this so a state that moved
+// after the pre-lock read is observed, never a memoized pre-lock value.
+func (f *subFetcher) refresh(ctx context.Context, id string) (payments.Object, error) {
+	if f == nil || f.gateway == nil {
+		return nil, payments.ErrUnconfigured
+	}
+	remote, err := f.gateway.RetrieveSubscription(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if f.seen != nil {
+		f.seen[id] = remote
+	}
+	return remote, nil
+}
+
 // subscriptionSnapshot is processor state fetched without holding the donor
 // lock, with the reconciliation it was read after.
 type subscriptionSnapshot struct {
@@ -25,16 +69,15 @@ type subscriptionSnapshot struct {
 }
 
 // fetchSubscription reads an attempt's subscription from the processor. The
-// caller holds no donor lock, so a slow processor cannot block other work.
-func fetchSubscription(ctx context.Context, q *queries.Queries, gateway payments.FinancialGateway, attempt pgtype.UUID, id string) (*subscriptionSnapshot, error) {
+// caller holds no donor lock, so a slow processor cannot block other work. The
+// read goes through the step's memo so a later resolution in the same step
+// reuses it.
+func fetchSubscription(ctx context.Context, q *queries.Queries, fetcher *subFetcher, attempt pgtype.UUID, id string) (*subscriptionSnapshot, error) {
 	observed, err := q.SubscriptionObservedAt(ctx, attempt)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if gateway == nil {
-		return nil, payments.ErrUnconfigured
-	}
-	remote, err := gateway.RetrieveSubscription(ctx, id)
+	remote, err := fetcher.retrieve(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -43,8 +86,10 @@ func fetchSubscription(ctx context.Context, q *queries.Queries, gateway payments
 
 // currentSubscription returns processor state for the locked attempt. A
 // snapshot is used only if nothing was reconciled after it was read; otherwise
-// it may predate the stored state, so the processor is read again.
-func currentSubscription(ctx context.Context, q *queries.Queries, gateway payments.FinancialGateway, attempt queries.DonorStripeCheckout, snapshot *subscriptionSnapshot) (payments.Object, error) {
+// it may predate the stored state, so the processor is read again — but still
+// through the step memo, so a subscription already resolved this step is not
+// fetched twice.
+func currentSubscription(ctx context.Context, q *queries.Queries, fetcher *subFetcher, attempt queries.DonorStripeCheckout, snapshot *subscriptionSnapshot) (payments.Object, error) {
 	if snapshot != nil && snapshot.attempt == attempt.ID && snapshot.id == attempt.StripeSubscriptionID.String {
 		observed, err := q.SubscriptionObservedAt(ctx, attempt.ID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -54,16 +99,13 @@ func currentSubscription(ctx context.Context, q *queries.Queries, gateway paymen
 			return snapshot.remote, nil
 		}
 	}
-	if gateway == nil {
-		return nil, payments.ErrUnconfigured
-	}
-	return gateway.RetrieveSubscription(ctx, attempt.StripeSubscriptionID.String)
+	return fetcher.refresh(ctx, attempt.StripeSubscriptionID.String)
 }
 
 // The caller holds the donor lock. Use current processor state rather than an
 // event snapshot so delayed delivery cannot undo a newer cancellation or pause.
-func reconcileSubscription(ctx context.Context, q *queries.Queries, gateway payments.FinancialGateway, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, snapshot *subscriptionSnapshot, now time.Time) (queries.DonorSubscription, error) {
-	remote, err := currentSubscription(ctx, q, gateway, attempt, snapshot)
+func reconcileSubscription(ctx context.Context, q *queries.Queries, fetcher *subFetcher, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, snapshot *subscriptionSnapshot, now time.Time) (queries.DonorSubscription, error) {
+	remote, err := currentSubscription(ctx, q, fetcher, attempt, snapshot)
 	if err != nil {
 		return queries.DonorSubscription{}, err
 	}
