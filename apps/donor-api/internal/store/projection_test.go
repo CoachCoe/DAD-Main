@@ -169,6 +169,201 @@ func TestSharedReferralScenariosAgainstSQLAggregate(t *testing.T) {
 	}
 }
 
+// oldReferralAggregate computes a referrer's four referral totals the way the
+// pre-denormalization ReferralTotals query (and the 0016 backfill) did: a live
+// FILTER aggregate over the referred rows. The denormalized read must equal it
+// for every projection ordering; this is the oracle the correctness tests
+// compare against.
+func oldReferralAggregate(t *testing.T, tx pgx.Tx, referrer pgtype.UUID) referralTotals {
+	t.Helper()
+	var got referralTotals
+	err := tx.QueryRow(context.Background(), `SELECT
+count(*) FILTER (WHERE referral_kind='LINK' AND net_minor>0)::bigint,
+count(*) FILTER (WHERE referral_kind='IRL' AND net_minor>0)::bigint,
+coalesce(sum(net_minor) FILTER (WHERE referral_kind='LINK'),0)::bigint,
+coalesce(sum(net_minor) FILTER (WHERE referral_kind='IRL'),0)::bigint
+FROM donor_metric_projections WHERE referrer_id=$1`, referrer).Scan(&got.Link, &got.IRL, &got.LinkMinor, &got.IRLMinor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// dashboardTotals reads a referrer's denormalized dashboard totals as the API
+// role sees them, failing if the referrals are withheld.
+func dashboardTotals(t *testing.T, tx pgx.Tx, id pgtype.UUID, now time.Time) referralTotals {
+	t.Helper()
+	board, err := dashboard(context.Background(), queries.New(tx), id, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if board.Referrals == nil {
+		t.Fatalf("referral totals withheld for %s: %+v", id, board)
+	}
+	return referralTotals{Link: board.Referrals.Link, IRL: board.Referrals.IRL, LinkMinor: board.Referrals.LinkMinor, IRLMinor: board.Referrals.IRLMinor}
+}
+
+// TestDenormalizedReferralTotalsEqualTheOldAggregate pins the denormalized read
+// to the OLD FILTER aggregate across the orderings and the refund zero-crossing
+// that the shared-scenario test does not exercise. The shared test only ever
+// projects the referrer first (alice sorts first); here we also project the
+// referrer AFTER its referred donors — the ordering whose dropped incremental
+// deltas the recompute backstop must reconcile.
+func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	asOf := time.Date(2027, 3, 1, 12, 0, 0, 0, time.UTC)
+	window := asOf.AddDate(0, 1, 0)
+	project := func(t *testing.T, tx pgx.Tx, h *historyFixture, name string) {
+		t.Helper()
+		if _, err := refreshProjection(ctx, tx, h.donor(name), asOf); err != nil {
+			t.Fatal(name, err)
+		}
+	}
+	referred := func(ref, kind string) *recognition.Candidate {
+		return &recognition.Candidate{ReferrerID: ref, Kind: kind, ExpiresAt: window}
+	}
+
+	t.Run("varying counts, referrer projected first", func(t *testing.T) {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		h := newHistoryFixture(t, tx)
+		h.gift(recognition.Gift{ID: "l1", DonorID: "link1", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-72 * time.Hour), Candidate: referred("alice", "LINK")})
+		h.gift(recognition.Gift{ID: "l2", DonorID: "link2", Amount: 5000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-71 * time.Hour), Candidate: referred("alice", "LINK")})
+		h.gift(recognition.Gift{ID: "i1", DonorID: "irl1", Amount: 9000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-70 * time.Hour), Candidate: referred("alice", "IRL")})
+		actAs(t, tx, dbroles.ProjectionWorker)
+		for _, name := range []string{"alice", "link1", "link2", "irl1"} {
+			project(t, tx, h, name)
+		}
+		actAs(t, tx, dbroles.API)
+		if got, want := dashboardTotals(t, tx, h.donor("alice"), asOf), oldReferralAggregate(t, tx, h.donor("alice")); got != want {
+			t.Fatalf("denormalized totals disagree with aggregate: got %+v want %+v", got, want)
+		}
+	})
+
+	t.Run("referred projected before referrer", func(t *testing.T) {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		h := newHistoryFixture(t, tx)
+		h.gift(recognition.Gift{ID: "l1", DonorID: "link1", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-72 * time.Hour), Candidate: referred("alice", "LINK")})
+		h.gift(recognition.Gift{ID: "i1", DonorID: "irl1", Amount: 9000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-70 * time.Hour), Candidate: referred("alice", "IRL")})
+		actAs(t, tx, dbroles.ProjectionWorker)
+		// The referred donors are projected while alice has NO projection row,
+		// so each ApplyReferralDelta hits a 0-row UPDATE and is dropped. Only the
+		// recompute backstop in alice's own projection recovers the totals.
+		for _, name := range []string{"link1", "irl1", "alice"} {
+			project(t, tx, h, name)
+		}
+		actAs(t, tx, dbroles.API)
+		got, want := dashboardTotals(t, tx, h.donor("alice"), asOf), oldReferralAggregate(t, tx, h.donor("alice"))
+		if got != want {
+			t.Fatalf("referred-before-referrer did not converge: got %+v want %+v", got, want)
+		}
+		if want.Link != 1 || want.IRL != 1 || want.LinkMinor != 3000 || want.IRLMinor != 9000 {
+			t.Fatalf("unexpected aggregate baseline: %+v", want)
+		}
+	})
+
+	t.Run("full refund zero-crossing drops a referred donor from the count", func(t *testing.T) {
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		h := newHistoryFixture(t, tx)
+		h.gift(recognition.Gift{ID: "l1", DonorID: "link1", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-72 * time.Hour), Candidate: referred("alice", "LINK")})
+		h.gift(recognition.Gift{ID: "l2", DonorID: "link2", Amount: 5000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-71 * time.Hour), Candidate: referred("alice", "LINK")})
+		actAs(t, tx, dbroles.ProjectionWorker)
+		for _, name := range []string{"alice", "link1", "link2"} {
+			project(t, tx, h, name)
+		}
+		if got, want := oldReferralAggregate(t, tx, h.donor("alice")), (referralTotals{Link: 2, LinkMinor: 8000}); got != want {
+			t.Fatalf("baseline before refund: got %+v want %+v", got, want)
+		}
+		// Refund link1's whole gift, then reproject it: its net crosses to 0, so
+		// it must drop from the LINK count while its minor contribution goes to 0.
+		// The refund fixture spans donor_stripe_events (API-written) and the gift
+		// tables (StripeWorker-written), so write the fact as the owner — as the
+		// gift fixtures above do — then project as the projections worker, which
+		// holds only SELECT on the financial tables.
+		mustExec(t, tx, "RESET ROLE")
+		h.refund(recognition.Refund{GiftID: "l1", Amount: 3000, Status: "SUCCEEDED", UpdatedAt: asOf.Add(-48 * time.Hour)})
+		actAs(t, tx, dbroles.ProjectionWorker)
+		if _, err = refreshProjection(ctx, tx, h.donor("link1"), asOf); err != nil {
+			t.Fatal(err)
+		}
+		link1, err := queries.New(tx).Projection(ctx, h.donor("link1"))
+		if err != nil || link1.NetMinor.Int64 != 0 {
+			t.Fatalf("refunded donor net did not reach zero: %+v %v", link1, err)
+		}
+		actAs(t, tx, dbroles.API)
+		got, want := dashboardTotals(t, tx, h.donor("alice"), asOf), oldReferralAggregate(t, tx, h.donor("alice"))
+		if got != want {
+			t.Fatalf("totals after refund disagree with aggregate: got %+v want %+v", got, want)
+		}
+		if want.Link != 1 || want.LinkMinor != 5000 {
+			t.Fatalf("zero-crossing did not drop the refunded donor: %+v", want)
+		}
+	})
+}
+
+// TestReferralTotalsConvergeAfterRulesBumpRecompute proves the recompute is
+// idempotent: re-projecting an already-converged referrer and its referred
+// donors (as the projectionRules 3->4 bump makes every donor do once) leaves
+// the four denormalized columns equal to the aggregate, never double-counted.
+func TestReferralTotalsConvergeAfterRulesBumpRecompute(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	asOf := time.Date(2027, 4, 1, 12, 0, 0, 0, time.UTC)
+	window := asOf.AddDate(0, 1, 0)
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	h := newHistoryFixture(t, tx)
+	ref := func(kind string) *recognition.Candidate {
+		return &recognition.Candidate{ReferrerID: "alice", Kind: kind, ExpiresAt: window}
+	}
+	h.gift(recognition.Gift{ID: "l1", DonorID: "link1", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-72 * time.Hour), Candidate: ref("LINK")})
+	h.gift(recognition.Gift{ID: "l2", DonorID: "link2", Amount: 5000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-71 * time.Hour), Candidate: ref("LINK")})
+	h.gift(recognition.Gift{ID: "i1", DonorID: "irl1", Amount: 9000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-70 * time.Hour), Candidate: ref("IRL")})
+	names := []string{"alice", "link1", "link2", "irl1"}
+	actAs(t, tx, dbroles.ProjectionWorker)
+	for _, name := range names {
+		if _, err = refreshProjection(ctx, tx, h.donor(name), asOf); err != nil {
+			t.Fatal(name, err)
+		}
+	}
+	stored := func() referralTotals {
+		p, err := queries.New(tx).Projection(ctx, h.donor("alice"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return referralTotals{Link: p.ReferredLinkCount, IRL: p.ReferredIrlCount, LinkMinor: p.ReferredLinkMinor, IRLMinor: p.ReferredIrlMinor}
+	}
+	first := stored()
+	if want := oldReferralAggregate(t, tx, h.donor("alice")); first != want {
+		t.Fatalf("stored totals after first projection: got %+v want %+v", first, want)
+	}
+	// Re-run every donor's projection, as the rules bump does; the recompute SETs
+	// (not adds), so an unchanged referred set must leave the columns unchanged.
+	for _, name := range names {
+		if _, err = refreshProjection(ctx, tx, h.donor(name), asOf.Add(time.Hour)); err != nil {
+			t.Fatal(name, err)
+		}
+	}
+	if second := stored(); second != first {
+		t.Fatalf("recompute double-counted: first %+v second %+v", first, second)
+	}
+}
+
 func TestGiftStoresAttributionValidWhenCharged(t *testing.T) {
 	pool := database(t)
 	referrer, _ := donor(t, pool)

@@ -27,6 +27,12 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 	}
 	mustExec(t, tx, "UPDATE donor_metric_projections SET referrer_id=$1,referral_kind='LINK',net_minor=3000 WHERE donor_id=$2", owner, first)
 	mustExec(t, tx, "UPDATE donor_metric_projections SET referrer_id=$1,referral_kind='IRL',net_minor=9000 WHERE donor_id=$2", owner, second)
+	// The totals are read from the owner's own denormalized columns now, not
+	// recomputed from the referred rows on every view, so set them to exactly
+	// what the OLD FILTER aggregate produced for this setup: first LINK 3000 +
+	// second IRL 9000 -> Link 1, IRL 1, 12000 total. Production writes these the
+	// same way via projectFacts -> ReferralTotalsFromReferred -> SaveProjection.
+	mustExec(t, tx, "UPDATE donor_metric_projections SET referred_link_count=1,referred_irl_count=1,referred_link_minor=3000,referred_irl_minor=9000 WHERE donor_id=$1", owner)
 	q := queries.New(tx)
 	result, err := dashboard(ctx, q, owner, now)
 	if err != nil {
@@ -36,6 +42,12 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 	if referrals == nil || referrals.TotalMinor != 12000 || referrals.Link != 1 || referrals.IRL != 1 {
 		t.Fatal("wrong split", referrals)
 	}
+	// Incomplete referred facts must still never surface a total. These are
+	// caught by the readiness gate (a bounded bool_and over the referred rows),
+	// not by the totals read: a referred row that is unprojectable (NULL net),
+	// stale (next_refresh_at not ahead of now), or of an unknown kind flips
+	// ready false, so dashboard() withholds the referrals even though the
+	// owner's denormalized columns still hold the earlier good totals.
 	for _, modification := range []string{
 		"net_minor=NULL", "next_refresh_at=computed_at", "referral_kind=NULL",
 	} {
@@ -47,15 +59,32 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 		}
 		mustExec(t, tx, "ROLLBACK TO SAVEPOINT invalid_projection")
 	}
+	// Overflowing minors must still never surface a total. With denormalized
+	// columns the overflow guard reads the OWNER's minor columns, so mirror the
+	// overflowing net_minor onto the owner the way a recompute would, then
+	// confirm the dashboard still refuses to invent a sum. The single-channel
+	// case (sameChannel) is the stronger one: in production its bigint sum would
+	// fail the recompute outright; here we assert the dashboard guard itself
+	// still withholds the total when the stored minors overflow int64 together.
 	for _, sameChannel := range []bool{false, true} {
+		mustExec(t, tx, "SAVEPOINT overflow_projection")
 		mustExec(t, tx, "UPDATE donor_metric_projections SET net_minor=$1 WHERE donor_id=$2", int64(math.MaxInt64), first)
 		if sameChannel {
 			mustExec(t, tx, "UPDATE donor_metric_projections SET referral_kind='LINK' WHERE donor_id=$1", second)
 		}
+		// Mirror the overflowing minors onto the owner's denormalized columns so
+		// the dashboard reads them: both channels at MaxInt64 means their total
+		// overflows int64, which the guard (irlMinor <= MaxInt64-linkMinor) must
+		// catch so no sum is invented. (In production a single bigint column can
+		// never hold an overflowing per-channel sum: that case fails the recompute
+		// cast instead, keeping the owner's prior totals; here we pin the
+		// dashboard-level guard directly.)
+		mustExec(t, tx, "UPDATE donor_metric_projections SET referred_link_minor=$1,referred_irl_minor=$1 WHERE donor_id=$2", int64(math.MaxInt64), owner)
 		result, err = dashboard(ctx, q, owner, now)
 		if err != nil || result.Referrals != nil {
 			t.Fatal("overflowing aggregate exposed", result, err)
 		}
+		mustExec(t, tx, "ROLLBACK TO SAVEPOINT overflow_projection")
 	}
 }
 
@@ -86,6 +115,10 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 		t.Fatalf("totals shown while a referred gift awaits projection: %+v %v", result.Referrals, err)
 	}
 	mustExec(t, tx, "UPDATE donor_metric_projections SET referrer_id=$1,referral_kind='LINK',net_minor=3000,next_refresh_at=$3 WHERE donor_id=$2", owner, giver, now.Add(time.Hour))
+	// Projecting the giver credits the owner's denormalized columns in
+	// production; this test drives the referred rows by direct SQL, so set the
+	// owner's totals to what that projection would write (Link 1, 3000).
+	mustExec(t, tx, "UPDATE donor_metric_projections SET referred_link_count=1,referred_link_minor=3000 WHERE donor_id=$1", owner)
 	result, err := dashboard(ctx, q, owner, now)
 	if err != nil || result.Referrals == nil || result.Referrals.Link != 1 || result.Referrals.TotalMinor != 3000 {
 		t.Fatalf("an unpaid referred checkout held back the totals: %+v %v", result.Referrals, err)
