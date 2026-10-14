@@ -121,7 +121,12 @@ func ReconciliationFacts(o Object) Object {
 
 // StripeGateway calls Stripe in test mode. A failed call is reported as
 // ErrProcessorUnavailable, never as the SDK error, which can carry donor inputs.
-type StripeGateway struct{ client *stripe.Client }
+// budget bounds how fast this process spends the shared Stripe request ceiling,
+// reserving staff capacity by limiting worker self-consumption.
+type StripeGateway struct {
+	client *stripe.Client
+	budget *RateBudget
+}
 
 func NewStripeGateway(key string) (*StripeGateway, error) {
 	if key == "" {
@@ -136,7 +141,7 @@ func NewStripeGateway(key string) (*StripeGateway, error) {
 		// classes separately, never the SDK's raw request/error diagnostics.
 		LeveledLogger: &stripe.LeveledLogger{Level: stripe.LevelNull},
 	})
-	return &StripeGateway{client: stripe.NewClient(key, stripe.WithBackends(backends))}, nil
+	return &StripeGateway{client: stripe.NewClient(key, stripe.WithBackends(backends)), budget: DefaultRateBudget()}, nil
 }
 
 func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key string) (RemoteCheckout, error) {
@@ -165,6 +170,9 @@ func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key stri
 func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, params *stripe.SubscriptionUpdateParams, key string) error {
 	params.ProrationBehavior = stripe.String("none")
 	params.SetIdempotencyKey(key)
+	if err := g.acquire(ctx, BucketStaff); err != nil {
+		return err
+	}
 	if _, err := g.client.V1Subscriptions.Update(ctx, id, params); err != nil {
 		return ErrProcessorUnavailable
 	}
@@ -182,6 +190,16 @@ func (g *StripeGateway) ChangeMonthlyAmount(ctx context.Context, id, item, produ
 }
 func (g *StripeGateway) UpdateSubscriptionPaymentMethod(ctx context.Context, id, method, key string) error {
 	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{DefaultPaymentMethod: stripe.String(method)}, key)
+}
+
+// acquire spends a token from the named bucket before an SDK call, blocking
+// until one is free or ctx is done. A gateway built directly in a test may have
+// no budget; that path is unlimited.
+func (g *StripeGateway) acquire(ctx context.Context, bucket string) error {
+	if g.budget == nil {
+		return ctx.Err()
+	}
+	return g.budget.Acquire(ctx, bucket)
 }
 
 // rawObject returns the JSON the processor sent for a call, so callers verify
@@ -213,6 +231,9 @@ func (g *StripeGateway) RetrieveSetupIntent(ctx context.Context, id string) (Obj
 func (g *StripeGateway) RetrievePaymentIntent(ctx context.Context, id string) (Object, error) {
 	params := &stripe.PaymentIntentRetrieveParams{}
 	params.AddExpand("latest_charge")
+	if err := g.acquire(ctx, BucketWorker); err != nil {
+		return nil, err
+	}
 	result, err := g.client.V1PaymentIntents.Retrieve(ctx, id, params)
 	if err != nil {
 		return nil, ErrProcessorUnavailable
@@ -220,6 +241,9 @@ func (g *StripeGateway) RetrievePaymentIntent(ctx context.Context, id string) (O
 	return rawObject(result.LastResponse)
 }
 func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, error) {
+	if err := g.acquire(ctx, BucketWorker); err != nil {
+		return nil, err
+	}
 	result, err := g.client.V1Refunds.Retrieve(ctx, id, nil)
 	if err != nil {
 		return nil, ErrProcessorUnavailable
@@ -227,6 +251,9 @@ func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, 
 	return rawObject(result.LastResponse)
 }
 func (g *StripeGateway) RetrieveSubscription(ctx context.Context, id string) (Object, error) {
+	if err := g.acquire(ctx, BucketWorker); err != nil {
+		return nil, err
+	}
 	result, err := g.client.V1Subscriptions.Retrieve(ctx, id, nil)
 	if err != nil {
 		return nil, ErrProcessorUnavailable
@@ -237,6 +264,9 @@ func (g *StripeGateway) RetrieveSubscription(ctx context.Context, id string) (Ob
 func (g *StripeGateway) CreateRefund(ctx context.Context, payment string, amount int64, command string) (Object, error) {
 	params := &stripe.RefundCreateParams{PaymentIntent: stripe.String(payment), Amount: stripe.Int64(amount), Reason: stripe.String("requested_by_customer"), Metadata: map[string]string{"dad_staff_action": command}}
 	params.SetIdempotencyKey("dad-staff-refund-" + command)
+	if err := g.acquire(ctx, BucketStaff); err != nil {
+		return nil, err
+	}
 	result, err := g.client.V1Refunds.Create(ctx, params)
 	if err != nil {
 		return nil, ErrProcessorUnavailable
