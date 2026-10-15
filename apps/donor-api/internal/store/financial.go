@@ -169,13 +169,9 @@ type projection struct {
 	streakSince *time.Time
 }
 
-// projectionRules versions the rules a projection follows: recognition and
-// the messages and push intents queued with it. Raise it with any change to
-// them, so every saved projection is recomputed under the new rules. Raised
-// to 4 for the denormalized referral totals (0016): every referred donor
-// recomputes once so its incremental delta runs against the backfilled
-// baseline.
-const projectionRules = 4
+// projectionRules versions recognition and notification rules. Version 5 repairs
+// referral totals that a concurrent referrer refresh could previously overwrite.
+const projectionRules = 5
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a
@@ -201,20 +197,19 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 	if _, err := q.LockDonor(ctx, id); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
-	old, err := q.Projection(ctx, id)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		if out.ID, err = NewID(); err != nil {
-			return projection{SaveProjectionParams: out}, err
-		}
-	case err != nil:
+	if err := seedProjection(ctx, q, id, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
-	default:
-		out.ID = old.ID
-		out.FoundingAwardedAt = old.FoundingAwardedAt
-		out.BestStreak = old.BestStreak
-		out.FirstGiftID, out.ReferrerID, out.ReferralKind = old.FirstGiftID, old.ReferrerID, old.ReferralKind
 	}
+	// A referred donor adjusts this row without taking this donor's lock.
+	// Lock it before reading the aggregate so a later save cannot erase a delta.
+	old, err := q.LockProjection(ctx, id)
+	if err != nil {
+		return projection{SaveProjectionParams: out}, err
+	}
+	out.ID = old.ID
+	out.FoundingAwardedAt = old.FoundingAwardedAt
+	out.BestStreak = old.BestStreak
+	out.FirstGiftID, out.ReferrerID, out.ReferralKind = old.FirstGiftID, old.ReferrerID, old.ReferralKind
 	h, err := loadHistory(ctx, q, id)
 	if err != nil {
 		return projection{SaveProjectionParams: out}, err
@@ -263,24 +258,14 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 	if err = recomputeReferredTotals(ctx, q, id, &out); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
-	if err = applyReferralDelta(ctx, q, old, out); err != nil {
+	if err = applyReferralDelta(ctx, q, old, out, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
 	return projection{out, streak.Since}, q.SaveProjection(ctx, out)
 }
 
-// recomputeReferredTotals sets the donor's own four denormalized referral
-// totals from the live aggregate over the rows that reference it, so that
-// SaveProjection writes them. This is the reconciling backstop that makes the
-// incremental ApplyReferralDelta fast path converge for every ordering: a
-// referrer projected before any of its referred donors starts at zero and
-// accrues their later deltas; a referrer projected AFTER its referred donors
-// (whose deltas hit a 0-row UPDATE because the referrer row did not yet exist)
-// is reconciled here from scratch; a referrer's later refresh re-reconciles
-// just the same. The recompute SETs (never adds), so re-running it is
-// idempotent and cannot double-count against the 0016 backfill or the
-// rules-version bump. It is a bounded scan on the referrer's own, infrequent
-// projection refresh, not on the per-dashboard-view hot path.
+// recomputeReferredTotals reconciles the locked row with committed referred
+// projections. Writers of those projections lock this row before saving theirs.
 func recomputeReferredTotals(ctx context.Context, q *queries.Queries, id pgtype.UUID, out *queries.SaveProjectionParams) error {
 	totals, err := q.ReferralTotalsFromReferred(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -321,16 +306,9 @@ func referralContribution(referrer pgtype.UUID, kind pgtype.Text, net pgtype.Int
 	return linkCount, irlCount, linkMinor, irlMinor
 }
 
-// applyReferralDelta adjusts the referrer's denormalized referred totals by the
-// signed change this referred donor's projection makes to them, computed as the
-// new contribution minus the previously-stored one. Driving it from old -> new
-// (rather than adding from zero) is what lets the migration backfill and the
-// rules-version recompute converge instead of double-counting: an unchanged
-// referred donor applies a zero delta. The referral kind is frozen at first
-// touch by projectConversion, but computing the per-field new-old difference
-// handles a kind change correctly too. The update is atomic in SQL so sibling
-// referred donors sharing a referrer stay race-safe under their own donor locks.
-func applyReferralDelta(ctx context.Context, q *queries.Queries, old queries.DonorMetricProjection, out queries.SaveProjectionParams) error {
+// applyReferralDelta adjusts the referrer's totals in the same transaction as
+// the referred projection. First-gift attribution is permanent.
+func applyReferralDelta(ctx context.Context, q *queries.Queries, old queries.DonorMetricProjection, out queries.SaveProjectionParams, now time.Time) error {
 	oldLink, oldIRL, oldLinkMinor, oldIRLMinor := referralContribution(old.ReferrerID, old.ReferralKind, old.NetMinor)
 	newLink, newIRL, newLinkMinor, newIRLMinor := referralContribution(out.ReferrerID, out.ReferralKind, out.NetMinor)
 	linkCount, irlCount := newLink-oldLink, newIRL-oldIRL
@@ -344,6 +322,11 @@ func applyReferralDelta(ctx context.Context, q *queries.Queries, old queries.Don
 	referrer := out.ReferrerID
 	if !referrer.Valid {
 		referrer = old.ReferrerID
+	}
+	// Create the target before applying the delta. A concurrent first refresh
+	// must see either the committed contribution or the delta after its save.
+	if err := seedProjection(ctx, q, referrer, now); err != nil {
+		return err
 	}
 	return q.ApplyReferralDelta(ctx, queries.ApplyReferralDeltaParams{
 		DonorID:           referrer,

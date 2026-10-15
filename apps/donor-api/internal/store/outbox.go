@@ -44,6 +44,14 @@ func refreshProjection(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.
 	return result, queuePushIntents(ctx, q, result, now)
 }
 
+func seedProjection(ctx context.Context, q *queries.Queries, donor pgtype.UUID, now time.Time) error {
+	id, err := NewID()
+	if err != nil {
+		return err
+	}
+	return q.SeedProjection(ctx, queries.SeedProjectionParams{ID: id, DonorID: donor, ComputedAt: timestamp(now)})
+}
+
 // ProjectionBatch bounds how many due donors one RefreshDueProjections step
 // claims. It is large enough to amortize transaction round trips across a
 // backlog, small enough to keep one transaction's FOR UPDATE lock set and step

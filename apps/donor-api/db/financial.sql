@@ -28,16 +28,12 @@ SELECT stops_at FROM donor_subscriptions WHERE donor_id=$1 AND stops_at IS NOT N
 -- name: Projection :one
 SELECT * FROM donor_metric_projections WHERE donor_id=$1;
 
+-- name: LockProjection :one
+-- Referral deltas lock this row without taking its donor lock.
+SELECT * FROM donor_metric_projections WHERE donor_id=$1 FOR NO KEY UPDATE;
+
 -- name: SaveProjection :exec
--- The four referred_* columns carry this donor's own denormalized referral
--- totals (set from ReferralTotalsFromReferred before each save, so the write
--- is authoritative). Listing them in the DO UPDATE SET makes the referrer's
--- own recompute the reconciling backstop: it resets the totals to the live
--- aggregate on every refresh, so an incremental ApplyReferralDelta that was
--- dropped (because the referrer row did not exist yet) still converges once
--- the referrer is projected. ApplyReferralDelta remains the fast path and
--- never collides with this write: it targets the *referrer's* row while this
--- save writes *this donor's* row.
+-- The caller locks the projection before aggregating its referred rows.
 INSERT INTO donor_metric_projections
 (id,donor_id,referrer_id,referral_kind,first_gift_id,net_minor,founding_awarded_at,
  best_streak,current_streak,at_risk,grace_ends_at,computed_at,next_refresh_at,rules_version,
@@ -53,15 +49,7 @@ referred_link_count=EXCLUDED.referred_link_count,referred_irl_count=EXCLUDED.ref
 referred_link_minor=EXCLUDED.referred_link_minor,referred_irl_minor=EXCLUDED.referred_irl_minor;
 
 -- name: ReferralTotalsFromReferred :one
--- Recompute a referrer's four denormalized totals from its referred rows,
--- computed exactly as the OLD ReferralTotals aggregate (and the 0016 backfill)
--- did: counts filter on net_minor>0, the minor sums are unfiltered by sign
--- (net_minor is CHECK >= 0). Runs only on the referrer's own projection refresh
--- (projectFacts), never on a dashboard view, so the per-view read stays a
--- single-row lookup. This is the reconciling backstop that makes the
--- incremental ApplyReferralDelta converge for every referred-vs-referrer
--- projection ordering: whenever a referrer is projected it SETs its own totals
--- to the live aggregate, so a dropped delta cannot persist.
+-- Reconcile under LockProjection so concurrent deltas cannot be overwritten.
 SELECT
 count(*) FILTER (WHERE referral_kind='LINK' AND net_minor>0)::bigint AS link_count,
 count(*) FILTER (WHERE referral_kind='IRL' AND net_minor>0)::bigint AS irl_count,
@@ -70,12 +58,7 @@ coalesce(sum(net_minor) FILTER (WHERE referral_kind='IRL'),0)::bigint AS irl_min
 FROM donor_metric_projections WHERE referrer_id=$1;
 
 -- name: ApplyReferralDelta :exec
--- Adjust a referrer's denormalized referred totals by the signed delta a single
--- referred donor's projection change contributes. The update is atomic in SQL
--- (col = col + delta) so sibling referred donors, each under their own donor
--- lock, can update the same referrer row concurrently without a read-modify-write
--- race. It affects 0 rows when the referrer has no projection row yet; the
--- referred donor's next recompute reapplies the delta once that row exists.
+-- The caller ensures the target row exists before applying the delta.
 UPDATE donor_metric_projections SET
 referred_link_count=referred_link_count+$2,
 referred_irl_count=referred_irl_count+$3,

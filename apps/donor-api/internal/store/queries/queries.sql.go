@@ -83,9 +83,10 @@ func (q *Queries) InsertStripeEvent(ctx context.Context, arg InsertStripeEventPa
 }
 
 const lockDonor = `-- name: LockDonor :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at FROM donors WHERE id = $1 FOR UPDATE
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at FROM donors WHERE id = $1 FOR NO KEY UPDATE
 `
 
+// Serialize donor writes without blocking foreign keys that reference this donor.
 func (q *Queries) LockDonor(ctx context.Context, id pgtype.UUID) (Donor, error) {
 	row := q.db.QueryRow(ctx, lockDonor, id)
 	var i Donor
