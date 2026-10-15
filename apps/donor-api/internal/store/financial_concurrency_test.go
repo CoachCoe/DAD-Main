@@ -3,14 +3,132 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"impactgraph/donor-api/internal/dbroles"
 	"impactgraph/donor-api/internal/store/queries"
 )
+
+func TestReferrerRefreshCannotOverwriteConcurrentContribution(t *testing.T) {
+	for _, existing := range []bool{false, true} {
+		t.Run(fmt.Sprintf("existing_projection=%t", existing), func(t *testing.T) {
+			pool := database(t)
+			worker := as(t, dbroles.ProjectionWorker)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			parent, _ := donor(t, pool)
+			child, _ := donor(t, pool)
+			now := time.Now().UTC()
+			checkout := testID(t)
+			t.Cleanup(func() {
+				for _, sql := range []string{
+					"DELETE FROM donor_messages WHERE donor_id=ANY($1)",
+					"DELETE FROM donor_metric_projections WHERE donor_id=ANY($1)",
+					"DELETE FROM donor_gifts WHERE donor_id=ANY($1)",
+					"DELETE FROM donor_checkouts WHERE donor_id=ANY($1)",
+				} {
+					if _, err := pool.Exec(context.Background(), sql, []pgtype.UUID{parent, child}); err != nil {
+						t.Error(err)
+					}
+				}
+			})
+			mustExec(t, pool, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'USD','ONE_TIME',$3,'LINK',$4)", checkout, child, parent, now.Add(time.Hour))
+			mustExec(t, pool, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,'LINK')", testID(t), child, checkout, "pi_"+checkout.String(), now.Add(-time.Hour), parent)
+			if existing {
+				if err := seedProjection(ctx, queries.New(worker), parent, now); err != nil {
+					t.Fatal(err)
+				}
+			}
+			referrer, err := worker.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer referrer.Rollback(context.Background())
+			read := make(chan struct{})
+			resume := make(chan struct{})
+			var release sync.Once
+			defer release.Do(func() { close(resume) })
+			referrerDone := make(chan error, 1)
+			go func() {
+				q := queries.New(&pausedReferralAggregate{DBTX: referrer, read: read, resume: resume})
+				_, err := projectFacts(ctx, q, parent, now)
+				referrerDone <- err
+			}()
+			select {
+			case <-read:
+			case err := <-referrerDone:
+				t.Fatalf("referrer failed before reading totals: %v", err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			referred, err := worker.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer referred.Rollback(context.Background())
+			childDone := make(chan error, 1)
+			go func() {
+				_, err := projectFacts(ctx, queries.New(referred), child, now)
+				childDone <- err
+			}()
+			awaitBlocked(ctx, t, pool, referred, childDone)
+			release.Do(func() { close(resume) })
+			if err := <-referrerDone; err != nil {
+				t.Fatal(err)
+			}
+			if err := referrer.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-childDone; err != nil {
+				t.Fatal(err)
+			}
+			if err := referred.Commit(ctx); err != nil {
+				t.Fatal(err)
+			}
+			p, err := queries.New(pool).Projection(ctx, parent)
+			if err != nil || p.ReferredLinkCount != 1 || p.ReferredLinkMinor != 3000 {
+				t.Fatalf("concurrent contribution was lost: %+v %v", p, err)
+			}
+		})
+	}
+}
+
+type pausedReferralAggregate struct {
+	queries.DBTX
+	read   chan struct{}
+	resume chan struct{}
+}
+
+func (db *pausedReferralAggregate) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	row := db.DBTX.QueryRow(ctx, sql, args...)
+	if strings.HasPrefix(sql, "-- name: ReferralTotalsFromReferred") {
+		return pausedReferralRow{Row: row, read: db.read, resume: db.resume, ctx: ctx}
+	}
+	return row
+}
+
+type pausedReferralRow struct {
+	pgx.Row
+	read   chan struct{}
+	resume chan struct{}
+	ctx    context.Context
+}
+
+func (row pausedReferralRow) Scan(dest ...any) error {
+	err := row.Row.Scan(dest...)
+	close(row.read)
+	select {
+	case <-row.resume:
+		return err
+	case <-row.ctx.Done():
+		return row.ctx.Err()
+	}
+}
 
 func TestConcurrentFinancialRefreshPreservesLongHistories(t *testing.T) {
 	pool := database(t)

@@ -8,7 +8,8 @@ WHERE h.id = 'r1';
 SELECT * FROM donors WHERE email = $1;
 
 -- name: LockDonor :one
-SELECT * FROM donors WHERE id = $1 FOR UPDATE;
+-- Serialize donor writes without blocking foreign keys that reference this donor.
+SELECT * FROM donors WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: InsertGuest :exec
 INSERT INTO donors (id, email) VALUES ($1, $2) ON CONFLICT (email) DO NOTHING;

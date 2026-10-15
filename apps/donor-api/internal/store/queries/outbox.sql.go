@@ -36,23 +36,10 @@ func (q *Queries) DeferProjection(ctx context.Context, arg DeferProjectionParams
 	return err
 }
 
-const dueProjectionDonor = `-- name: DueProjectionDonor :one
-SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
-WHERE p.next_refresh_at<=$1 ORDER BY p.next_refresh_at
-LIMIT 1 FOR UPDATE OF d SKIP LOCKED
-`
-
-func (q *Queries) DueProjectionDonor(ctx context.Context, nextRefreshAt pgtype.Timestamptz) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, dueProjectionDonor, nextRefreshAt)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const dueProjectionDonors = `-- name: DueProjectionDonors :many
 SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
 WHERE p.next_refresh_at<=$1 ORDER BY p.next_refresh_at
-LIMIT $2::int FOR UPDATE OF d SKIP LOCKED
+LIMIT $2::int FOR NO KEY UPDATE OF d SKIP LOCKED
 `
 
 type DueProjectionDonorsParams struct {
@@ -108,28 +95,10 @@ func (q *Queries) InsertFinancialMessage(ctx context.Context, arg InsertFinancia
 	return err
 }
 
-const outdatedProjectionDonor = `-- name: OutdatedProjectionDonor :one
-SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
-WHERE p.rules_version<$1 AND p.computed_at<=$2
-LIMIT 1 FOR UPDATE OF d SKIP LOCKED
-`
-
-type OutdatedProjectionDonorParams struct {
-	RulesVersion int32              `json:"rules_version"`
-	ComputedAt   pgtype.Timestamptz `json:"computed_at"`
-}
-
-func (q *Queries) OutdatedProjectionDonor(ctx context.Context, arg OutdatedProjectionDonorParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, outdatedProjectionDonor, arg.RulesVersion, arg.ComputedAt)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const outdatedProjectionDonors = `-- name: OutdatedProjectionDonors :many
 SELECT d.id FROM donor_metric_projections p JOIN donors d ON d.id=p.donor_id
 WHERE p.rules_version<$1 AND p.computed_at<=$2
-LIMIT $3::int FOR UPDATE OF d SKIP LOCKED
+LIMIT $3::int FOR NO KEY UPDATE OF d SKIP LOCKED
 `
 
 type OutdatedProjectionDonorsParams struct {

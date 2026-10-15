@@ -28,12 +28,7 @@ type ApplyReferralDeltaParams struct {
 	ReferredIrlMinor  int64       `json:"referred_irl_minor"`
 }
 
-// Adjust a referrer's denormalized referred totals by the signed delta a single
-// referred donor's projection change contributes. The update is atomic in SQL
-// (col = col + delta) so sibling referred donors, each under their own donor
-// lock, can update the same referrer row concurrently without a read-modify-write
-// race. It affects 0 rows when the referrer has no projection row yet; the
-// referred donor's next recompute reapplies the delta once that row exists.
+// The caller ensures the target row exists before applying the delta.
 func (q *Queries) ApplyReferralDelta(ctx context.Context, arg ApplyReferralDeltaParams) error {
 	_, err := q.db.Exec(ctx, applyReferralDelta,
 		arg.DonorID,
@@ -93,6 +88,40 @@ func (q *Queries) GiftHistory(ctx context.Context, donorID pgtype.UUID) ([]GiftH
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockProjection = `-- name: LockProjection :one
+SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version, referred_link_count, referred_irl_count, referred_link_minor, referred_irl_minor FROM donor_metric_projections WHERE donor_id=$1 FOR NO KEY UPDATE
+`
+
+// Referral deltas lock this row without taking its donor lock.
+func (q *Queries) LockProjection(ctx context.Context, donorID pgtype.UUID) (DonorMetricProjection, error) {
+	row := q.db.QueryRow(ctx, lockProjection, donorID)
+	var i DonorMetricProjection
+	err := row.Scan(
+		&i.DonorID,
+		&i.ReferrerID,
+		&i.ReferralKind,
+		&i.FirstGiftID,
+		&i.NetMinor,
+		&i.FoundingAwardedAt,
+		&i.BestStreak,
+		&i.CurrentStreak,
+		&i.AtRisk,
+		&i.GraceEndsAt,
+		&i.ComputedAt,
+		&i.NextRefreshAt,
+		&i.ID,
+		&i.CreatedAt,
+		&i.RefreshFailures,
+		&i.RefreshError,
+		&i.RulesVersion,
+		&i.ReferredLinkCount,
+		&i.ReferredIrlCount,
+		&i.ReferredLinkMinor,
+		&i.ReferredIrlMinor,
+	)
+	return i, err
 }
 
 const missingReferredProjection = `-- name: MissingReferredProjection :one
@@ -279,15 +308,7 @@ type ReferralTotalsFromReferredRow struct {
 	IrlMinor  int64 `json:"irl_minor"`
 }
 
-// Recompute a referrer's four denormalized totals from its referred rows,
-// computed exactly as the OLD ReferralTotals aggregate (and the 0016 backfill)
-// did: counts filter on net_minor>0, the minor sums are unfiltered by sign
-// (net_minor is CHECK >= 0). Runs only on the referrer's own projection refresh
-// (projectFacts), never on a dashboard view, so the per-view read stays a
-// single-row lookup. This is the reconciling backstop that makes the
-// incremental ApplyReferralDelta converge for every referred-vs-referrer
-// projection ordering: whenever a referrer is projected it SETs its own totals
-// to the live aggregate, so a dropped delta cannot persist.
+// Reconcile under LockProjection so concurrent deltas cannot be overwritten.
 func (q *Queries) ReferralTotalsFromReferred(ctx context.Context, referrerID pgtype.UUID) (ReferralTotalsFromReferredRow, error) {
 	row := q.db.QueryRow(ctx, referralTotalsFromReferred, referrerID)
 	var i ReferralTotalsFromReferredRow
@@ -422,15 +443,7 @@ type SaveProjectionParams struct {
 	ReferredIrlMinor  int64              `json:"referred_irl_minor"`
 }
 
-// The four referred_* columns carry this donor's own denormalized referral
-// totals (set from ReferralTotalsFromReferred before each save, so the write
-// is authoritative). Listing them in the DO UPDATE SET makes the referrer's
-// own recompute the reconciling backstop: it resets the totals to the live
-// aggregate on every refresh, so an incremental ApplyReferralDelta that was
-// dropped (because the referrer row did not exist yet) still converges once
-// the referrer is projected. ApplyReferralDelta remains the fast path and
-// never collides with this write: it targets the *referrer's* row while this
-// save writes *this donor's* row.
+// The caller locks the projection before aggregating its referred rows.
 func (q *Queries) SaveProjection(ctx context.Context, arg SaveProjectionParams) error {
 	_, err := q.db.Exec(ctx, saveProjection,
 		arg.ID,
