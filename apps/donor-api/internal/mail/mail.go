@@ -13,6 +13,7 @@ import (
 	"net"
 	netmail "net/mail"
 	"net/smtp"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,33 @@ type Settings struct {
 	Port                       int
 	Username, Password, Sender string
 	EncryptionKeys             credentials.Keyring
+	// CAPath, when set, is a PEM file whose certificates are the only roots
+	// trusted for the STARTTLS handshake, replacing the system trust store.
+	// It exists for a mail server with a private CA — a local capture inbox
+	// (Mailpit) in development, or an internal relay in production. STARTTLS
+	// and full certificate verification remain mandatory either way; this
+	// never enables cleartext or skips verification.
+	CAPath string
 }
+
+// RootCAs builds the certificate pool for the STARTTLS handshake. It returns
+// nil (verify against the system trust store) when no CAPath is set, and an
+// error if the file is missing or holds no valid certificate.
+func (s Settings) RootCAs() (*x509.CertPool, error) {
+	if s.CAPath == "" {
+		return nil, nil
+	}
+	pem, err := os.ReadFile(s.CAPath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cannot read DONOR_SMTP_CA", ErrConfiguration)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("%w: DONOR_SMTP_CA holds no valid certificate", ErrConfiguration)
+	}
+	return pool, nil
+}
+
 type Message struct{ From, To, Subject, Body, ID string }
 type Transport interface {
 	Send(context.Context, Message) error

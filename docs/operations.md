@@ -406,6 +406,43 @@ replacement claim email. A queued response does not mean delivery succeeded. Mon
 queue age and parked jobs; automated paging and provider acceptance remain operational
 work. Test controlled mailboxes before inviting donors.
 
+### Capturing mail in development
+
+So development never sends real email and you can read what the app would have sent,
+`docker-compose.yml` includes a Mailpit capture inbox: SMTP on `127.0.0.1:1025` and a web
+UI at http://127.0.0.1:8025. The app's STARTTLS and certificate verification stay
+mandatory — Mailpit uses a locally generated certificate the app is told to trust via
+`DONOR_SMTP_CA`. There is no cleartext path.
+
+One-time setup, from the repository root:
+
+```sh
+mkdir -p certs
+# A self-signed cert whose name matches DONOR_SMTP_HOST (localhost):
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -keyout certs/mailpit-key.pem -out certs/mailpit.pem -days 365 \
+  -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost"
+```
+
+Then set in `.env` and reload it in each terminal that runs a worker:
+
+```sh
+DONOR_SMTP_HOST=localhost
+DONOR_SMTP_PORT=1025
+DONOR_SMTP_CA=certs/mailpit.pem
+# DONOR_SMTP_USERNAME / DONOR_SMTP_PASSWORD stay blank; Mailpit requires no auth.
+```
+
+Start Mailpit once the cert exists (it mounts the cert, so generate it first):
+
+```sh
+docker compose up -d --wait mailpit
+```
+
+The `certs/` directory holds a local, disposable key and is git-ignored; never reuse it
+anywhere real. This capture inbox is also the prerequisite the Two-Bot QA loop depends on
+(`docs/testing/two-bot-qa-loop-plan.md`).
+
 ## App notifications
 
 The push worker (`make worker KIND=push`, or `push-worker` in Compose) sends donor app

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"impactgraph/donor-api/internal/buildinfo"
 	"impactgraph/donor-api/internal/payments"
 	"impactgraph/donor-api/internal/store"
 	"impactgraph/donor-api/internal/wallet"
@@ -134,7 +135,7 @@ func (c *statusCapture) Write(b []byte) (int, error) { return len(b), nil }
 func (c *statusCapture) WriteHeader(status int)      { c.status = status }
 
 func (a *api) live(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "alive"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "alive", "commit": buildinfo.Revision()})
 }
 
 func (a *api) ready(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +150,7 @@ func (a *api) ready(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusServiceUnavailable, unavailable, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "payments": "test_mode_only"})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "payments": "test_mode_only", "commit": buildinfo.Revision()})
 }
 
 func (a *api) publicContent(w http.ResponseWriter, r *http.Request) {
