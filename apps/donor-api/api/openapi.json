@@ -85,10 +85,15 @@
                     "status": {
                       "type": "string",
                       "const": "alive"
+                    },
+                    "commit": {
+                      "type": "string",
+                      "description": "The running build's VCS revision, or \"unknown\"."
                     }
                   },
                   "required": [
-                    "status"
+                    "status",
+                    "commit"
                   ],
                   "additionalProperties": false
                 }
@@ -121,11 +126,16 @@
                     "payments": {
                       "type": "string",
                       "const": "test_mode_only"
+                    },
+                    "commit": {
+                      "type": "string",
+                      "description": "The running build's VCS revision, or \"unknown\"."
                     }
                   },
                   "required": [
                     "status",
-                    "payments"
+                    "payments",
+                    "commit"
                   ],
                   "additionalProperties": false
                 }

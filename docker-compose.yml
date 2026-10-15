@@ -15,5 +15,21 @@ services:
       timeout: 3s
       retries: 20
 
+  # Local capture inbox: the app delivers over STARTTLS and never sends real
+  # email in development. SMTP on 1025 (STARTTLS, using the mounted cert),
+  # web UI on 8025. Generate the cert once — see docs/operations.md,
+  # "Capturing mail in development" — and point DONOR_SMTP_CA at certs/mailpit.pem.
+  mailpit:
+    image: axllent/mailpit:v1.21.0
+    environment:
+      MP_SMTP_TLS_CERT: /certs/mailpit.pem
+      MP_SMTP_TLS_KEY: /certs/mailpit-key.pem
+      MP_SMTP_REQUIRE_STARTTLS: "true"
+    ports:
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    volumes:
+      - ./certs:/certs:ro
+
 volumes:
   impactgraph_postgres:
