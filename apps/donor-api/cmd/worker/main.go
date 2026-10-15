@@ -143,7 +143,11 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 	if err := payments.ValidateOrigin(origin); err != nil {
 		return nil, configError("DONOR_PUBLIC_ORIGIN, the origin of email links, " + err.Error())
 	}
-	transport := mail.SMTPTransport{Settings: *settings}
+	roots, err := settings.RootCAs()
+	if err != nil {
+		return nil, configError("DONOR_SMTP_CA could not be loaded")
+	}
+	transport := mail.SMTPTransport{Settings: *settings, RootCAs: roots}
 	var worker deliverer
 	switch kind {
 	case "email-changes":

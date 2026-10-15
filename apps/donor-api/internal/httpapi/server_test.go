@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http/httptest"
@@ -31,6 +32,28 @@ func TestUnconfiguredServerCannotAdvertiseReadiness(t *testing.T) {
 		}
 		if response.Header().Get("Cache-Control") != "no-store" {
 			t.Fatal("health and private errors must not be cached")
+		}
+	}
+}
+
+func TestHealthReportsBuildCommit(t *testing.T) {
+	server := NewServer("", Services{Ready: func(context.Context) error { return nil }})
+	for _, path := range []string{"/health/live", "/health/ready"} {
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
+		if response.Code != 200 {
+			t.Fatalf("%s: status %d", path, response.Code)
+		}
+		var body map[string]string
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		// commit is always present (the handler never omits it); its value is
+		// the embedded VCS revision or "unknown" when VCS stamping is off, as
+		// it is under `go test`. Either way it must be a non-empty string so a
+		// deployed copy always names a build.
+		if body["commit"] == "" {
+			t.Fatalf("%s: missing commit in %v", path, body)
 		}
 	}
 }

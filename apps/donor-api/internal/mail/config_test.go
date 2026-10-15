@@ -1,10 +1,20 @@
 package mail
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
+	"encoding/pem"
 	"errors"
+	"math/big"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestEnvironmentConfiguration(t *testing.T) {
@@ -61,5 +71,68 @@ func TestEnvironmentConfiguration(t *testing.T) {
 	s, err := FromEnvironment(func(string) string { return "" })
 	if s != nil || err != nil {
 		t.Fatal("unconfigured mail should be disabled")
+	}
+}
+
+func TestRootCAsFromCAPath(t *testing.T) {
+	// A self-signed CA PEM, as a local Mailpit cert would be.
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "mailpit.local"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "ca.pem")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	notPEM := filepath.Join(dir, "garbage.pem")
+	if err := os.WriteFile(notPEM, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("unset means system roots", func(t *testing.T) {
+		pool, err := Settings{}.RootCAs()
+		if err != nil || pool != nil {
+			t.Fatalf("got pool=%v err=%v, want nil pool and no error", pool, err)
+		}
+	})
+	t.Run("valid PEM builds a pool", func(t *testing.T) {
+		pool, err := Settings{CAPath: certPath}.RootCAs()
+		if err != nil || pool == nil {
+			t.Fatalf("got pool=%v err=%v, want a pool and no error", pool, err)
+		}
+	})
+	t.Run("missing file is a configuration error", func(t *testing.T) {
+		if _, err := (Settings{CAPath: filepath.Join(dir, "absent.pem")}).RootCAs(); !errors.Is(err, ErrConfiguration) {
+			t.Fatalf("got %v, want ErrConfiguration", err)
+		}
+	})
+	t.Run("non-certificate content is a configuration error", func(t *testing.T) {
+		if _, err := (Settings{CAPath: notPEM}).RootCAs(); !errors.Is(err, ErrConfiguration) {
+			t.Fatalf("got %v, want ErrConfiguration", err)
+		}
+	})
+
+	// FromEnvironment surfaces a bad CA path by name, without its value.
+	key32 := base64.URLEncoding.EncodeToString(make([]byte, 32))
+	env := map[string]string{
+		"DONOR_SMTP_HOST": "smtp.example.org", "DONOR_EMAIL_FROM": "DAD <sender@example.org>",
+		"DONOR_EMAIL_ENCRYPTION_KEY": key32, "DONOR_SMTP_CA": notPEM,
+	}
+	_, err = FromEnvironment(func(k string) string { return env[k] })
+	if !errors.Is(err, ErrConfiguration) || !strings.Contains(err.Error(), "DONOR_SMTP_CA") || strings.Contains(err.Error(), notPEM) {
+		t.Fatalf("got %v, want it to name DONOR_SMTP_CA without the path", err)
 	}
 }

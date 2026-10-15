@@ -12,7 +12,7 @@ import (
 // FromEnvironment returns nil when mail is deliberately unconfigured. An
 // invalid configuration's error names the variables to fix, never their values.
 func FromEnvironment(getenv func(string) string) (*Settings, error) {
-	s := Settings{Host: getenv("DONOR_SMTP_HOST"), Port: 587, Username: getenv("DONOR_SMTP_USERNAME"), Password: getenv("DONOR_SMTP_PASSWORD"), Sender: getenv("DONOR_EMAIL_FROM")}
+	s := Settings{Host: getenv("DONOR_SMTP_HOST"), Port: 587, Username: getenv("DONOR_SMTP_USERNAME"), Password: getenv("DONOR_SMTP_PASSWORD"), Sender: getenv("DONOR_EMAIL_FROM"), CAPath: getenv("DONOR_SMTP_CA")}
 	keys := getenv("DONOR_EMAIL_ENCRYPTION_KEY")
 	if s.Host == "" && s.Username == "" && s.Password == "" && s.Sender == "" && keys == "" {
 		return nil, nil
@@ -42,6 +42,10 @@ func FromEnvironment(getenv func(string) string) (*Settings, error) {
 	var err error
 	if s.EncryptionKeys, err = credentials.ParseKeyring(keys); err != nil {
 		invalid = append(invalid, "DONOR_EMAIL_ENCRYPTION_KEY ("+err.Error()+")")
+	}
+	// Fail fast on an unreadable or empty CA file rather than at the first send.
+	if _, err := s.RootCAs(); err != nil {
+		invalid = append(invalid, "DONOR_SMTP_CA")
 	}
 	if len(invalid) > 0 {
 		return nil, fmt.Errorf("%w: check %s", ErrConfiguration, strings.Join(invalid, ", "))
