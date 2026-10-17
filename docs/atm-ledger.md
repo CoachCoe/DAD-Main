@@ -1,13 +1,21 @@
 # Durable ATM ledger
 
-The active ledger runs at `https://impactgraph-atm-ledger.cocuyo.workers.dev`, backed
-by the dedicated `impactgraph-atm-ledger-history` R2 bucket. Source lives in
+The active ledger runs at `https://dad-atm-ledger.cocuyo.workers.dev`, backed
+by the dedicated `dad-atm-ledger-history` R2 bucket. Source lives in
 `apps/atm-ledger`. Both branch workflows require the durable service and hold no Git
 write permission. There is no Git fallback on an outage.
 
 The original Git history is preserved by the annotated tag
 `archive/atm-state-20261013`. Do not restore the old state branch as an operational
 ledger; use verified archive recovery below.
+
+> **Frozen archive (product rename).** As of the `impactgraph` -> `dad` product rename,
+> the old ledger is FROZEN as a read-only archive: the Worker `impactgraph-atm-ledger`
+> and its R2 bucket `impactgraph-atm-ledger-history` (22 revisions) are retired and no
+> longer accept writes. The git tag `archive/atm-state-20261013` preserves the original
+> history. References below to those old resource names describe this frozen archive and
+> remain accurate historical records; the active service now uses the `dad-atm-ledger`
+> identity described above.
 
 ## Storage and integrity
 
@@ -39,7 +47,7 @@ Restrict account access and deployment credentials accordingly.
 There are no shared publisher or triage passwords. The Worker verifies GitHub's signed
 OIDC tokens, issuer, audience, expiry, repository ID, owner ID, workflow path, event,
 hosted-runner claim, and job environment. The audience is
-`atm-ledger:github:CoachCoe/ImpactGraph`.
+`atm-ledger:github:CoachCoe/DAD-Main`.
 
 | Job environment | Allowed operations |
 |---|---|
@@ -84,9 +92,9 @@ bucket, expose this bucket publicly, or configure lifecycle deletion. If multipl
 accounts are available, set `CLOUDFLARE_ACCOUNT_ID` to the intended account.
 
 ```sh
-npx wrangler r2 bucket create impactgraph-atm-ledger-history
-npx wrangler r2 bucket lock add impactgraph-atm-ledger-history immutable-ledger "" --retention-indefinite
-npx wrangler r2 bucket lock list impactgraph-atm-ledger-history
+npx wrangler r2 bucket create dad-atm-ledger-history
+npx wrangler r2 bucket lock add dad-atm-ledger-history immutable-ledger "" --retention-indefinite
+npx wrangler r2 bucket lock list dad-atm-ledger-history
 npm run deploy
 ```
 
