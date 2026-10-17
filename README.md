@@ -1,4 +1,4 @@
-# ImpactGraph — DAD donor release
+# DAD — donor release
 
 The R1 donor application for Dynamic Aid Delivery: guest giving, direct Link and IRL
 referrals, a donor dashboard, recurring-gift controls, and an audited staff back office.
