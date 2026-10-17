@@ -23,3 +23,9 @@ apps/atm-ledger/worker-configuration.d.ts
 
 # Local dev-server config for the agent preview pane.
 .claude/
+
+# Working/process docs — kept local, not tracked. Product documentation
+# (architecture, operations, the product contract, etc.) stays tracked under docs/.
+docs/solutions/
+docs/testing/
+docs/infra-fix-now-runbook.md

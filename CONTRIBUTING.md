@@ -5,8 +5,11 @@ Read [the product contract](docs/donor-domain.md) before changing financial beha
 
 Go owns backend behavior, TypeScript owns the web application, and SQL owns persistence.
 Keep recipient workflows, AI, blockchain, and aid disbursement outside this release.
-Do not add dependencies without a concrete need. Do not commit working notes, progress
-trackers, generated build output, credentials, or editor files.
+Do not add dependencies without a concrete need. Do not commit generated build output,
+credentials, or editor files. Working and process notes (session logs, investigation
+reports, plans, scratch docs) are never tracked: keep them under the git-ignored
+`docs/requirements/` directory. Tracked `docs/` holds durable product documentation only —
+architecture, operations, the product contract, and the like.
 
 Follow the [README](README.md) setup, then run `make test`, `make lint`, and
 `make test-browser-e2e`; after changing `deploy/`, `scripts/`, or a Dockerfile, also run
