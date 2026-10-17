@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"impactgraph/donor-api/internal/dbroles"
+	"dad/donor-api/internal/dbroles"
 )
 
 func TestPartnerInquiryIsIdempotentAndShownToStaff(t *testing.T) {

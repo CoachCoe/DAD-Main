@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 // Monthly amounts are whole cents from $1 to $999,999.99.

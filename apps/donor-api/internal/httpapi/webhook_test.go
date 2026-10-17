@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"impactgraph/donor-api/internal/payments"
+	"dad/donor-api/internal/payments"
 )
 
 type webhookStub struct {

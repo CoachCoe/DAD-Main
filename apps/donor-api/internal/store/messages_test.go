@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/mail"
-	"impactgraph/donor-api/internal/recognition"
-	"impactgraph/donor-api/internal/store/queries"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/recognition"
+	"dad/donor-api/internal/store/queries"
 )
 
 func notificationWorker(t *testing.T, transport *recordingMail) MessageWorker {

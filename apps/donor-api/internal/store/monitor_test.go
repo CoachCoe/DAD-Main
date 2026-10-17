@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/store/queries"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/store/queries"
 )
 
 func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {

@@ -15,7 +15,7 @@ case "${1:-config}" in
   *) usage >&2; exit 2 ;;
 esac
 
-project="impactgraph-ingress-check-$$"
+project="dad-ingress-check-$$"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ingress-check.XXXXXX")"
 image="$(sed -n 's/^ *image: \(nginx:.*\)$/\1/p' docker-compose.prod.yml)"
 files=(-f docker-compose.prod.yml)

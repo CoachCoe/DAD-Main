@@ -7,11 +7,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dad/donor-api/internal/identity"
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/identity"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 type StaffFinanceService struct {

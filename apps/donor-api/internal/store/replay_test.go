@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"impactgraph/donor-api/internal/recognition"
+	"dad/donor-api/internal/recognition"
 )
 
 // This deliberately exhaustive oracle reconstructs each historical snapshot independently.

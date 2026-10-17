@@ -14,16 +14,16 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/credentials"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/dbroles/dbrolestest"
+	"dad/donor-api/internal/httpapi"
+	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stripe/stripe-go/v87"
-	"impactgraph/donor-api/internal/credentials"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/dbroles/dbrolestest"
-	"impactgraph/donor-api/internal/httpapi"
-	"impactgraph/donor-api/internal/mail"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store"
 )
 
 type journeyGateway struct{}

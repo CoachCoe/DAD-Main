@@ -8,7 +8,7 @@ import (
 	"time"
 	_ "time/tzdata" // America/New_York resolves inside the stripped container.
 
-	"impactgraph/donor-api/internal/payments"
+	"dad/donor-api/internal/payments"
 )
 
 // ErrWindow reports an unusable reconciliation window.

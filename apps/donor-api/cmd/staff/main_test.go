@@ -14,9 +14,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/dbroles/dbrolestest"
-	"impactgraph/donor-api/internal/migrations"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/dbroles/dbrolestest"
+	"dad/donor-api/internal/migrations"
 )
 
 func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {

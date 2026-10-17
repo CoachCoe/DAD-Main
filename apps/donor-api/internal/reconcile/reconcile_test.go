@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"impactgraph/donor-api/internal/payments"
+	"dad/donor-api/internal/payments"
 )
 
 // obj builds a payments.Object from a JSON literal for the fixtures.

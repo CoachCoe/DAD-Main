@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 func staffFixture(t *testing.T, pool *pgxpool.Pool, role string) (pgtype.UUID, string) {

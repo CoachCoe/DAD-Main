@@ -6,12 +6,12 @@ import (
 	"errors"
 	"time"
 
+	"dad/donor-api/internal/credentials"
+	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/credentials"
-	"impactgraph/donor-api/internal/mail"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 type LoginEmailWorker struct {

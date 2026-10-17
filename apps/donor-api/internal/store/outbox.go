@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/recognition"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/recognition"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 func queueMessage(ctx context.Context, q *queries.Queries, donor pgtype.UUID, kind, key string, details any, at time.Time) error {

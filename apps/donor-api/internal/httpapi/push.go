@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"impactgraph/donor-api/internal/push"
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/push"
+	"dad/donor-api/internal/store"
 )
 
 type PushSource interface {

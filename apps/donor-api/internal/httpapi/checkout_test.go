@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store"
 )
 
 type checkoutStub struct {

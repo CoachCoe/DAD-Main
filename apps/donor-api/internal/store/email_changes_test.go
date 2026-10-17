@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/mail"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 func changeFixture(t *testing.T) (EmailChangeService, EmailChangeWorker, pgtype.UUID, string, string, *recordingMail) {

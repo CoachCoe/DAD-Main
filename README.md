@@ -103,10 +103,10 @@ privilege the process lacks fails a test. Tests must never run against the appli
 database.
 
 ```sh
-docker run -d --name impactgraph-go-test-postgres -p 127.0.0.1:55440:5432 \
+docker run -d --name dad-go-test-postgres -p 127.0.0.1:55440:5432 \
   -e POSTGRES_USER=go_test -e POSTGRES_PASSWORD=go_test -e POSTGRES_DB=donor_go \
   postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
-# Wait for: docker exec impactgraph-go-test-postgres pg_isready -U go_test -d donor_go
+# Wait for: docker exec dad-go-test-postgres pg_isready -U go_test -d donor_go
 export TEST_DATABASE_URL=postgresql://go_test:go_test@localhost:55440/donor_go
 (cd apps/donor-api && DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" go run ./cmd/migrate)
 make test

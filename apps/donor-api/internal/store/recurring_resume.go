@@ -5,10 +5,10 @@ import (
 	"errors"
 	"time"
 
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 func ownedPause(ctx context.Context, q *queries.Queries, donor, id pgtype.UUID) (queries.DonorPause, error) {

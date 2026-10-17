@@ -1,4 +1,4 @@
-module impactgraph/donor-api/tools
+module dad/donor-api/tools
 
 go 1.27.2
 

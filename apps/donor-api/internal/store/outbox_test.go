@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 func TestFinancialOutboxDeduplicationYearBoundaryAndRollback(t *testing.T) {

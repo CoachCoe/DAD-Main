@@ -8,7 +8,7 @@ services:
     ports:
       - "127.0.0.1:55432:5432"
     volumes:
-      - impactgraph_postgres:/var/lib/postgresql/data
+      - dad_postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U impactgraph -d impactgraph"]
       interval: 3s
@@ -32,4 +32,4 @@ services:
       - ./certs:/certs:ro
 
 volumes:
-  impactgraph_postgres:
+  dad_postgres:

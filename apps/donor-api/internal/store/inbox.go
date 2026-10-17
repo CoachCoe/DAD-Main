@@ -3,9 +3,9 @@ package store
 import (
 	"context"
 
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 type StripeInbox struct{ DB *pgxpool.Pool }

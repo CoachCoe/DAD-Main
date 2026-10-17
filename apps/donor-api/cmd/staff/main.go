@@ -15,9 +15,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store"
 )
 
 func run(args []string, getenv func(string) string, out io.Writer) error {

@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"unicode/utf8"
 
-	"impactgraph/donor-api/internal/identity"
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/identity"
+	"dad/donor-api/internal/store"
 )
 
 type AccountSource interface {

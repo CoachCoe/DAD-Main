@@ -14,7 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"impactgraph/donor-api/internal/recognition"
+	"dad/donor-api/internal/recognition"
 )
 
 // emailDomain marks seeded donors. The reserved .invalid TLD can never

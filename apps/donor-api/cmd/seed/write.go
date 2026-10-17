@@ -20,7 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/store"
 )
 
 // table is one COPY target. Its rows are produced from the population as

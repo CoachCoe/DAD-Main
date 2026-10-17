@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/store"
 )
 
 type emailChangeStub struct {

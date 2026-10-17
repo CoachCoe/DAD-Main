@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/store/queries"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/store/queries"
 )
 
 func TestStaffResendIsIdempotentLimitedAndAudited(t *testing.T) {

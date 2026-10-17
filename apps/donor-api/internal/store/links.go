@@ -3,7 +3,7 @@ package store
 import (
 	"strconv"
 
-	"impactgraph/donor-api/internal/payments"
+	"dad/donor-api/internal/payments"
 )
 
 // publicSite builds every URL the store hands to donors, Stripe and email
