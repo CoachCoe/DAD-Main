@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"impactgraph/donor-api/internal/buildinfo"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store"
-	"impactgraph/donor-api/internal/wallet"
+	"dad/donor-api/internal/buildinfo"
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store"
+	"dad/donor-api/internal/wallet"
 )
 
 type ContentSource interface {

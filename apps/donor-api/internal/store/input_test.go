@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/payments"
 	"github.com/jackc/pgx/v5"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/payments"
 )
 
 // TestControlCharactersAreRejectedBeforeStorage covers inputs PostgreSQL

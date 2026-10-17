@@ -18,7 +18,7 @@ const admin: Principal = {
 	revision: "a".repeat(40),
 };
 const publisher: Principal = { ...admin, role: "publish", execution: "124:1" };
-const source = "github:CoachCoe/ImpactGraph";
+const source = "github:CoachCoe/DAD-Main";
 const migration = (
 	ledger = emptyLedger(source),
 ): { source: string; history: MigrationEntry[] } => ({

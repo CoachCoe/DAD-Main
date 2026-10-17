@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 // The caller holds the donor then gift lock, and current was read from the

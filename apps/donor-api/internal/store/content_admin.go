@@ -8,10 +8,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dad/donor-api/internal/credentials"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/credentials"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 var ErrSourceStorageUnconfigured = errors.New("source document storage is not configured")

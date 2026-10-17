@@ -11,7 +11,7 @@ import (
 )
 
 // commit may be set at link time for container builds where VCS stamping is
-// unavailable: -ldflags "-X impactgraph/donor-api/internal/buildinfo.commit=<sha>".
+// unavailable: -ldflags "-X dad/donor-api/internal/buildinfo.commit=<sha>".
 // When empty, Revision falls back to the VCS revision the Go toolchain embeds
 // for a build from a source checkout.
 var commit string

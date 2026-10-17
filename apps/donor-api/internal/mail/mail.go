@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"impactgraph/donor-api/internal/credentials"
+	"dad/donor-api/internal/credentials"
 )
 
 var ErrDelivery = errors.New("email delivery failed")

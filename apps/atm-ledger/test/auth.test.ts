@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { authenticate, authorize } from "../src/auth";
 
 const claims = {
-	repository: "CoachCoe/ImpactGraph",
+	repository: "CoachCoe/DAD-Main",
 	repository_id: "1378692308",
 	repository_owner_id: "17258192",
 	runner_environment: "github-hosted",
@@ -15,24 +15,24 @@ const claims = {
 	sha: "a".repeat(40),
 	event_name: "push",
 	environment: "atm-ledger-reader",
-	workflow_ref: "CoachCoe/ImpactGraph/.github/workflows/atm.yml@refs/heads/dev",
+	workflow_ref: "CoachCoe/DAD-Main/.github/workflows/atm.yml@refs/heads/dev",
 };
 
 describe("GitHub OIDC authorization", () => {
 	it.each([
 		{ repository_id: "1" },
 		{ repository_owner_id: "1" },
-		{ repository: "attacker/ImpactGraph" },
+		{ repository: "attacker/DAD-Main" },
 		{ runner_environment: "self-hosted" },
 		{ environment: "production" },
 		{ event_name: "pull_request_target" },
 		{
 			workflow_ref:
-				"CoachCoe/ImpactGraph/.github/workflows/other.yml@refs/heads/dev",
+				"CoachCoe/DAD-Main/.github/workflows/other.yml@refs/heads/dev",
 		},
 		{
 			workflow_ref:
-				"CoachCoe/ImpactGraph/.github/workflows/atm.yml@refs/heads/untrusted",
+				"CoachCoe/DAD-Main/.github/workflows/atm.yml@refs/heads/untrusted",
 		},
 	])(
 		"rejects identities outside the configured trust boundary: %j",
@@ -71,7 +71,7 @@ describe("GitHub OIDC authorization", () => {
 		const verify = createLocalJWKSet({ keys: [jwk] });
 		const sign = (
 			issuer = "https://token.actions.githubusercontent.com",
-			audience = "atm-ledger:github:CoachCoe/ImpactGraph",
+			audience = "atm-ledger:github:CoachCoe/DAD-Main",
 			expires = "2m",
 		) =>
 			new SignJWT(claims)

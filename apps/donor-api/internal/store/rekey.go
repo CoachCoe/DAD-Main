@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"dad/donor-api/internal/credentials"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/credentials"
 )
 
 // EncryptedColumn is a column of Fernet tokens in a table keyed by id.

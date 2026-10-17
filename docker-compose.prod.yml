@@ -4,7 +4,7 @@ name: impactgraph
 # instead gets its own login's URL from the database environment file, which Compose only
 # interpolates; see docs/operations.md#database-roles.
 x-donor: &donor
-  image: ${IMAGE_PREFIX:-impactgraph}/api:${IMAGE_TAG:?set IMAGE_TAG}
+  image: ${IMAGE_PREFIX:-dad}/api:${IMAGE_TAG:?set IMAGE_TAG}
   build:
     context: .
     dockerfile: apps/donor-api/Dockerfile
@@ -23,7 +23,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-impactgraph}
+      POSTGRES_DB: ${POSTGRES_DB:-dad}
     volumes: [postgres-data:/var/lib/postgresql/data]
     healthcheck:
       test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
@@ -44,8 +44,8 @@ services:
     # (files readable by uid 10001) and set DONOR_WALLET_*_FILE and DONOR_PUSH_*_FILE to
     # the container paths, for example DONOR_WALLET_GOOGLE_KEY_FILE=/run/secrets/wallet/google.json.
     # volumes:
-    #   - /etc/impactgraph/wallet:/run/secrets/wallet:ro
-    #   - /etc/impactgraph/push:/run/secrets/push:ro
+    #   - /etc/dad/wallet:/run/secrets/wallet:ro
+    #   - /etc/dad/push:/run/secrets/push:ro
     ports: ["127.0.0.1:${API_PORT:-8002}:8002"]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:8002/health/live]
@@ -159,11 +159,11 @@ services:
     environment:
       DONOR_WORKER_PUSH_DATABASE_URL: ${DONOR_WORKER_PUSH_DATABASE_URL:?set DONOR_WORKER_PUSH_DATABASE_URL}
     # volumes:
-    #   - /etc/impactgraph/push:/run/secrets/push:ro
+    #   - /etc/dad/push:/run/secrets/push:ro
     restart: unless-stopped
 
   web:
-    image: ${IMAGE_PREFIX:-impactgraph}/web:${IMAGE_TAG:?set IMAGE_TAG}
+    image: ${IMAGE_PREFIX:-dad}/web:${IMAGE_TAG:?set IMAGE_TAG}
     build:
       context: .
       dockerfile: apps/web/Dockerfile
@@ -208,7 +208,7 @@ services:
       - ./deploy/nginx/templates:/etc/nginx/templates:ro
       - ./deploy/nginx/conf:/etc/nginx/ingress:ro
       # fullchain.pem and privkey.pem, readable by uid 101.
-      - ${INGRESS_TLS_DIR:-/etc/impactgraph/tls}:/etc/nginx/tls:ro
+      - ${INGRESS_TLS_DIR:-/etc/dad/tls}:/etc/nginx/tls:ro
       - ${INGRESS_ORIGIN_PULL_CA:-./deploy/nginx/cloudflare-origin-pull-ca.pem}:/etc/nginx/origin-pull-ca.pem:ro
       - ${INGRESS_STAFF_ACCESS:-./deploy/nginx/staff-access.conf}:/etc/nginx/staff-access.conf:ro
     tmpfs:

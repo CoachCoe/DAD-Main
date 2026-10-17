@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"impactgraph/donor-api/internal/migrations"
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/migrations"
+	"dad/donor-api/internal/store"
 )
 
 func run(args []string, getenv func(string) string) error {

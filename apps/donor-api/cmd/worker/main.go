@@ -15,14 +15,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/mail"
-	"impactgraph/donor-api/internal/migrations"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/push"
-	"impactgraph/donor-api/internal/store"
-	"impactgraph/donor-api/internal/store/queries"
-	"impactgraph/donor-api/internal/workers"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/migrations"
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/push"
+	"dad/donor-api/internal/store"
+	"dad/donor-api/internal/store/queries"
+	"dad/donor-api/internal/workers"
 )
 
 // configError messages are written by this program and are safe to log.

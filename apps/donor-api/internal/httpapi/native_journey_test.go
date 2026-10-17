@@ -12,10 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/dbroles/dbrolestest"
-	"impactgraph/donor-api/internal/httpapi"
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/dbroles/dbrolestest"
+	"dad/donor-api/internal/httpapi"
+	"dad/donor-api/internal/store"
 )
 
 // TestAppSessionLifecycle runs the donor app's sign-in against real session

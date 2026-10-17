@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/dbroles/dbrolestest"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/dbroles/dbrolestest"
 )
 
 func secret(t *testing.T) string {

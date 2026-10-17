@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/store"
 )
 
 var appSession = strings.Repeat("s", 43)

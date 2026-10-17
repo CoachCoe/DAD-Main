@@ -7,10 +7,10 @@ import (
 	"time"
 	"unicode"
 
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 // Session lifetimes. Every request checks its session in the database, so

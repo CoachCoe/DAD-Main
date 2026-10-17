@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/credentials"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/credentials"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/mail"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 var emailTestKeys, _ = credentials.ParseKeyring("MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=")

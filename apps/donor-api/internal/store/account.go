@@ -5,10 +5,10 @@ import (
 	"errors"
 	"time"
 
+	"dad/donor-api/internal/identity"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/identity"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 type AccountService struct{ DB *pgxpool.Pool }

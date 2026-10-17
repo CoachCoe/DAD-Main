@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/payments"
 	"github.com/stripe/stripe-go/v87"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/payments"
 )
 
 func TestVerifiedInboxDurabilityAndConcurrentRedelivery(t *testing.T) {

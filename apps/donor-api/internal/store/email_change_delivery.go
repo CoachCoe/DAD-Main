@@ -5,10 +5,10 @@ import (
 	"errors"
 	"time"
 
+	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/mail"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 type EmailChangeWorker LoginEmailWorker

@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store"
 )
 
 type RecurringSource interface {

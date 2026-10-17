@@ -29,7 +29,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"impactgraph/donor-api/internal/migrations"
+	"dad/donor-api/internal/migrations"
 )
 
 // fixtureCodes is how many referral visits the fixture describes.

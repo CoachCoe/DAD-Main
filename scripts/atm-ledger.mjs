@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 
-const SOURCE = "github:CoachCoe/ImpactGraph";
+const SOURCE = "github:CoachCoe/DAD-Main";
 const json = file => readFile(file, "utf8").then(JSON.parse);
 async function responseJSON(response) {
   const length = Number(response.headers.get("content-length"));
@@ -73,7 +73,7 @@ async function main() {
     const note = (await readFile(noteFile, "utf8")).trim();
     if (note.length < 10 || !/^[a-f0-9]{24}$/.test(finding) || !["unassessed", "low", "medium", "high", "critical"].includes(severity) || !["untriaged", "confirmed", "resolved", "dismissed"].includes(disposition)) throw new Error("A finding, classification and meaningful private review note are required");
     const hash = createHash("sha256").update(note).digest("hex");
-    execFileSync("gh", ["workflow", "run", "atm.yml", "--repo", "CoachCoe/ImpactGraph", "--ref", "dev", "-f", "ledger_operation=triage", "-f", `finding=${finding}`, "-f", `severity=${severity}`, "-f", `disposition=${disposition}`, "-f", `note_digest=${hash}`], { stdio: "inherit" });
+    execFileSync("gh", ["workflow", "run", "atm.yml", "--repo", "CoachCoe/DAD-Main", "--ref", "dev", "-f", "ledger_operation=triage", "-f", `finding=${finding}`, "-f", `severity=${severity}`, "-f", `disposition=${disposition}`, "-f", `note_digest=${hash}`], { stdio: "inherit" });
     return;
   }
   if (!stateDir) throw new Error("Usage: node scripts/atm-ledger.mjs {snapshot|publish|migrate|triage|history|recover} STATE_DIR [ATM_DIR]");

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 // restoreContent removes actor's sources and publications and restores the

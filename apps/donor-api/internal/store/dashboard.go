@@ -7,10 +7,10 @@ import (
 	"math"
 	"time"
 
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 // DonorDashboard is the web dashboard contract.

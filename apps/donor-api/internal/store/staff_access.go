@@ -8,11 +8,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dad/donor-api/internal/identity"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/identity"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 func createStaffInvite(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (string, error) {

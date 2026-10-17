@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"time"
 
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 type ContentReader struct{ DB queries.DBTX }

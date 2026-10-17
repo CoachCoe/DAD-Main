@@ -7,11 +7,11 @@ import (
 	"log/slog"
 	"time"
 
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 var ErrSubscriptionConflict = errors.New("billing details changed or require reconciliation; refresh before confirming")

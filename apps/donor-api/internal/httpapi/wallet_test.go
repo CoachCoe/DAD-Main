@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"impactgraph/donor-api/internal/store"
-	"impactgraph/donor-api/internal/wallet"
+	"dad/donor-api/internal/store"
+	"dad/donor-api/internal/wallet"
 )
 
 type walletDonor struct {

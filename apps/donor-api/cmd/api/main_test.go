@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/dbroles/dbrolestest"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/dbroles/dbrolestest"
 )
 
 func TestTrustedProxiesAcceptsProxyNetworksAndRefusesOpenRanges(t *testing.T) {

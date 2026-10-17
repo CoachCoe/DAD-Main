@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/recognition"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/recognition"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 func testID(t *testing.T) pgtype.UUID {

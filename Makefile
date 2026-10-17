@@ -88,12 +88,12 @@ smoke-ingress:
 
 # The web image is built for the ingress check's hosts so it can be served through nginx.
 check-images:
-	docker build -f apps/donor-api/Dockerfile -t impactgraph/api:check .
-	docker run --rm --entrypoint sh impactgraph/api:check -c \
+	docker build -f apps/donor-api/Dockerfile -t dad/api:check .
+	docker run --rm --entrypoint sh dad/api:check -c \
 		'for binary in api worker migrate provision monitor reconcile staff rekey; do command -v "$$binary" >/dev/null || exit 1; done'
-	docker build -f apps/web/Dockerfile -t impactgraph/web:check \
+	docker build -f apps/web/Dockerfile -t dad/web:check \
 		--build-arg DONOR_PUBLIC_ORIGIN=https://public.test --build-arg DONOR_STAFF_ORIGIN=https://staff.test .
-	./scripts/check-ingress.sh web impactgraph/web:check
+	./scripts/check-ingress.sh web dad/web:check
 
 seed:
 	cd apps/donor-api && go run ./cmd/seed -database-url "$(SEED_DATABASE_URL)" -confirm "$(SEED_CONFIRM)" -donors "$(SEED_DONORS)" -fixture "$(LOAD_FIXTURE)"

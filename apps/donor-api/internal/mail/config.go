@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"impactgraph/donor-api/internal/credentials"
+	"dad/donor-api/internal/credentials"
 )
 
 // FromEnvironment returns nil when mail is deliberately unconfigured. An

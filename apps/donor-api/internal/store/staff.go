@@ -9,13 +9,13 @@ import (
 	"slices"
 	"time"
 
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store/queries"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 var (

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/recognition"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/recognition"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 type referralScenario struct {

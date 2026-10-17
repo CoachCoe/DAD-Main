@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/credentials"
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/dbroles/dbrolestest"
+	"dad/donor-api/internal/migrations"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/internal/credentials"
-	"impactgraph/donor-api/internal/dbroles"
-	"impactgraph/donor-api/internal/dbroles/dbrolestest"
-	"impactgraph/donor-api/internal/migrations"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 // testDatabaseName reports whether name is a dedicated test database, which

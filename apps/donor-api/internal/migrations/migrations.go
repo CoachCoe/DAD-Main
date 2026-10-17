@@ -12,10 +12,10 @@ import (
 	"strings"
 	"sync"
 
+	"dad/donor-api/db"
+	"dad/donor-api/internal/dbroles"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"impactgraph/donor-api/db"
-	"impactgraph/donor-api/internal/dbroles"
 )
 
 var ErrAdoptionRequired = errors.New("existing donor database requires explicit baseline adoption")

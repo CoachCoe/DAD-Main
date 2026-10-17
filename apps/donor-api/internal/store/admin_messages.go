@@ -6,9 +6,9 @@ import (
 	"errors"
 	"time"
 
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"impactgraph/donor-api/internal/store/queries"
 )
 
 // RequestClaim queues a fresh sign-in link for the donor.

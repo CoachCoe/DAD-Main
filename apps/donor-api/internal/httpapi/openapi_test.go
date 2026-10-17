@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"impactgraph/donor-api/internal/payments"
-	"impactgraph/donor-api/internal/store"
+	"dad/donor-api/internal/payments"
+	"dad/donor-api/internal/store"
 )
 
 // The contract is JSON rather than YAML so it can be checked with the
