@@ -118,6 +118,15 @@ Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURE
 
 Some migrations and releases need more:
 
+- The DAD rebrand changes image names, example database names/logins, and the default
+  TLS directory. Existing PostgreSQL volumes keep their original database, owner, and
+  password: changing `POSTGRES_*` does not rename or update an initialized cluster.
+  Keep the deployed values and matching process URLs in `.env.database`; use explicit
+  `INGRESS_TLS_DIR` if certificates remain at their previous path. The production
+  Compose project remains `impactgraph` to retain its existing `postgres-data` volume.
+  Do not rename the project or delete volumes to complete the rebrand. Local Compose
+  now uses `dad_postgres`; the former `impactgraph_postgres` volume is separate and
+  must be backed up and deliberately migrated if its data is needed.
 - The release that binds donor passkey registration to its originating session rejects
   registrations started on an older image. These challenges last five minutes; donors
   can restart registration after the upgrade. Existing passkeys and sessions still work.

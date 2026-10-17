@@ -1,3 +1,4 @@
+# Preserve the deployed project identity and its PostgreSQL volume across the rebrand.
 name: impactgraph
 
 # Every donor service receives ENV_FILE, so it holds no database credentials. Each service

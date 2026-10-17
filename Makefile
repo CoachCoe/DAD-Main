@@ -75,7 +75,7 @@ lint-go:
 	cd apps/donor-api && go tool -modfile=tools/go.mod staticcheck ./... && go run $(GOVULNCHECK) ./...
 
 lint-web:
-	cd apps/web && npm audit --omit=dev --audit-level=high
+	cd apps/web && npm audit --audit-level=high
 
 lint-scripts:
 	@if command -v shellcheck >/dev/null || [ -n "$$CI" ]; then shellcheck scripts/*.sh deploy/nginx/*.envsh; else echo "shellcheck not installed; skipping script lint" >&2; fi
