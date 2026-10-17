@@ -28,7 +28,7 @@ one host for both.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `INGRESS_MODE` | `cloudflare` | `cloudflare` or `direct`, as above. |
-| `INGRESS_TLS_DIR` | `/etc/impactgraph/tls` | Host directory with `fullchain.pem` and `privkey.pem`, readable by uid 101. |
+| `INGRESS_TLS_DIR` | `/etc/dad/tls` | Host directory with `fullchain.pem` and `privkey.pem`, readable by uid 101. |
 | `INGRESS_ORIGIN_PULL_CA` | `deploy/nginx/cloudflare-origin-pull-ca.pem` | CA that signs the edge's client certificate (cloudflare mode). |
 | `INGRESS_STAFF_ACCESS` | `deploy/nginx/staff-access.conf` (allows all) | nginx `allow`/`deny` rules for the staff host. |
 | `DONOR_STAFF_ORIGIN` | required | Staff origin, also passed to the web build and the API. |
