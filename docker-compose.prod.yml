@@ -1,5 +1,4 @@
-# Preserve the deployed project identity and its PostgreSQL volume across the rebrand.
-name: impactgraph
+name: dad
 
 # Every donor service receives ENV_FILE, so it holds no database credentials. Each service
 # instead gets its own login's URL from the database environment file, which Compose only

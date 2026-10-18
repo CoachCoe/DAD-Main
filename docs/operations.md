@@ -123,8 +123,13 @@ Some migrations and releases need more:
   password: changing `POSTGRES_*` does not rename or update an initialized cluster.
   Keep the deployed values and matching process URLs in `.env.database`; use explicit
   `INGRESS_TLS_DIR` if certificates remain at their previous path. The production
-  Compose project remains `impactgraph` to retain its existing `postgres-data` volume.
-  Do not rename the project or delete volumes to complete the rebrand. Local Compose
+  Compose project is now `dad`, and Compose names volumes after the project, so a host
+  deployed before the rebrand would start an empty `dad_postgres-data` volume beside its
+  existing `impactgraph_postgres-data`. On such a host, add
+  `COMPOSE_PROJECT_NAME=impactgraph` to `.env.production`, which overrides the project
+  name, until the database has been backed up, restored into the new project, and
+  verified ([backup and restore drill](#backup-and-restore-drill)). Never delete the old
+  volume to complete the rebrand. Local Compose
   now uses `dad_postgres`; the former `impactgraph_postgres` volume is separate and
   must be backed up and deliberately migrated if its data is needed. A checkout made
   before the rename may still run that project's PostgreSQL container, which holds port
