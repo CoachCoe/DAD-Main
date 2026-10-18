@@ -21,7 +21,8 @@ export default function Dashboard() {
   const messages = resourceMessages(resource, { loading: "Loading your dashboard…",
     failure: "Your dashboard could not be loaded right now. Please retry in a moment." });
   const updating = data?.state === "preparing" ? "We’re preparing your dashboard. Please refresh shortly."
-    : data?.state === "ready" && !data.referrals ? "Referral totals are updating. Please refresh shortly." : "";
+    : data?.state === "ready" && !data.referrals ? "Referral totals are updating. Please refresh shortly."
+    : data?.state === "ready" && !data.streak ? "Your streak is updating. Please refresh shortly." : "";
 
   return <Page wide eyebrow="My account" title="Your circle’s impact">
     <p className="note">DAD launches in April 2027. This preview shows test payments and simulated recognition only.</p>

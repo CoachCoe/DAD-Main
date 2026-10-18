@@ -59,6 +59,20 @@ it("does not substitute zeros for unavailable metrics", async () => {
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
 });
 
+it("can refresh an unavailable streak while keeping verified referral totals", async () => {
+  vi.stubGlobal("fetch", vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ...data, streak: null }) })
+    .mockResolvedValueOnce({ ok: true, json: async () => data }));
+  render(<DashboardPage />);
+  expect(await screen.findByText("$123.45")).toBeVisible();
+  expect(screen.getByRole("status")).toHaveTextContent("Your streak is updating");
+  expect(screen.queryByText("0 months")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Refresh dashboard" }));
+  expect(await screen.findByText("2 months")).toBeVisible();
+  expect(screen.getByText("$123.45")).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Refresh dashboard" })).not.toBeInTheDocument();
+});
+
 it("explains the payment grace state", async () => {
   respond({ ...data, streak: { current: 2, at_risk: true, grace_ends_at: "2027-02-15T00:00:00Z" } });
   render(<DashboardPage />);
