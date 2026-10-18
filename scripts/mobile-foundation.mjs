@@ -51,23 +51,53 @@ export function nativeContract(source) {
   };
 }
 
+const header = "// Generated from DAD-Main design/tokens.json; do not edit.\n";
+
+const validToken = (group, value) =>
+  group === "color"
+    ? typeof value === "string" && /^(#[0-9a-f]{3,8}|rgba\([\d.,]+\))$/i.test(value)
+    : typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+// Each platform declares one map per token group, string-valued for colors and numeric otherwise.
+function tokenMaps(tokens, declare, entry, close) {
+  const groups = Object.entries(tokens).map(([group, values]) =>
+    [declare(group, group === "color"), ...Object.entries(values).map(([key, value]) => entry(key, value)), close].join("\n"),
+  );
+  return groups.join("\n");
+}
+
+const swiftTokens = (tokens) =>
+  `${header}public enum DADTokens {\n${tokenMaps(
+    tokens,
+    (group, color) => `    public static let ${group}: [String: ${color ? "String" : "Double"}] = [`,
+    (key, value) => `        ${JSON.stringify(key)}: ${JSON.stringify(value)},`,
+    "    ]",
+  )}\n}\n`;
+
+const kotlinNumber = (value) => (Number.isInteger(value) ? `${value}.0` : String(value));
+
+const kotlinTokens = (tokens) =>
+  `${header}package org.dad.foundation.generated\n\nobject DADTokens {\n${tokenMaps(
+    tokens,
+    (group, color) => `    val ${group}: Map<String, ${color ? "String" : "Double"}> = mapOf(`,
+    (key, value) => `        ${JSON.stringify(key)} to ${typeof value === "string" ? JSON.stringify(value) : kotlinNumber(value)},`,
+    "    )",
+  )}\n}\n`;
+
 export function tokenSources(document) {
   if (document.schema_version !== 1) throw new Error("Unsupported design token schema");
   const { schema_version: _, ...tokens } = document;
   for (const group of ["color", "radius", "space", "text"]) {
     if (!tokens[group] || typeof tokens[group] !== "object") throw new Error(`Missing token group: ${group}`);
-    for (const value of Object.values(tokens[group])) {
-      if (group === "color" ? typeof value !== "string" || !/^(#[0-9a-f]{3,8}|rgba\([\d.,]+\))$/i.test(value) : typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-        throw new Error(`Invalid design token in ${group}`);
-      }
+    if (!Object.values(tokens[group]).every((value) => validToken(group, value))) {
+      throw new Error(`Invalid design token in ${group}`);
     }
   }
-  const header = "// Generated from DAD-Main design/tokens.json; do not edit.\n";
-  const swift = `${header}public enum DADTokens {\n${Object.entries(tokens).map(([group, values]) =>
-    `    public static let ${group}: [String: ${group === "color" ? "String" : "Double"}] = [\n${Object.entries(values).map(([key, value]) => `        ${JSON.stringify(key)}: ${JSON.stringify(value)},`).join("\n")}\n    ]`).join("\n")}\n}\n`;
-  const kotlin = `${header}package org.dad.foundation.generated\n\nobject DADTokens {\n${Object.entries(tokens).map(([group, values]) =>
-    `    val ${group}: Map<String, ${group === "color" ? "String" : "Double"}> = mapOf(\n${Object.entries(values).map(([key, value]) => `        ${JSON.stringify(key)} to ${group === "color" ? JSON.stringify(value) : Number.isInteger(value) ? `${value}.0` : String(value)},`).join("\n")}\n    )`).join("\n")}\n}\n`;
-  return { "tokens.ts": `${header}export const tokens = ${JSON.stringify(tokens, null, 2)} as const;\n`, "DADTokens.swift": swift, "DADTokens.kt": kotlin };
+  return {
+    "tokens.ts": `${header}export const tokens = ${JSON.stringify(tokens, null, 2)} as const;\n`,
+    "DADTokens.swift": swiftTokens(tokens),
+    "DADTokens.kt": kotlinTokens(tokens),
+  };
 }
 
 export async function generateWeb(check = false) {
