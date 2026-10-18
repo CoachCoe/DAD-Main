@@ -629,8 +629,8 @@ make seed SEED_DATABASE_URL=postgresql://user:pass@db:5432/dad_load SEED_CONFIRM
   LOAD_FIXTURE=/secure/dad-load.json
 ```
 
-`SEED_DONORS` (default 50,000, at most 200,000) donors are generated deterministically
-from `-seed` and held in memory, about 8 KB of RSS per donor (400 MB at 50,000): mostly
+`SEED_DONORS` (default 50,000, at most 1,000,000) donors are generated deterministically
+from `-seed` and held in memory, about 8 KB of RSS per donor (400 MB at 50,000, 8 GB at 1,000,000): mostly
 monthly gifts at the preselected $30, some at the $90 and $150 presets or at custom
 amounts such as $10, $50 and $100, one-time gifts, abandoned checkouts, up to two years of
 anniversary renewals with failures recovered within and after the 14-day grace,

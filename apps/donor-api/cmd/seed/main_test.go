@@ -39,6 +39,7 @@ func TestParseRequiresAnExplicitConfirmedDatabase(t *testing.T) {
 		"wrong confirmation": {"-database-url", url, "-confirm", "loadtest", "-sessions", "0"},
 		"sessions, no file":  {"-database-url", url, "-confirm", "loadtest_a"},
 		"no donors":          {"-database-url", url, "-confirm", "loadtest_a", "-sessions", "0", "-donors", "0"},
+		"too many donors":    {"-database-url", url, "-confirm", "loadtest_a", "-sessions", "0", "-donors", "1000001"},
 		"stray argument":     {"-database-url", url, "-confirm", "loadtest_a", "-sessions", "0", "now"},
 	} {
 		if _, err := parse(args); err == nil {
