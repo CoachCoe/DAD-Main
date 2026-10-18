@@ -1,13 +1,13 @@
-import { env } from "cloudflare:workers";
 import { reset, runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	digest,
 	emptyLedger,
 	type Finding,
 	type Ledger,
-	type Principal,
 	type MigrationEntry,
+	type Principal,
 } from "../src/ledger";
 
 const admin: Principal = {
