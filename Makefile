@@ -72,7 +72,7 @@ lint-ledger:
 # staticcheck is pinned in apps/donor-api/tools/go.mod with a newer x/tools than its
 # release requires, which is what reads the export data of the Go release CI uses.
 lint-go:
-	cd apps/donor-api && go tool -modfile=tools/go.mod staticcheck ./... && go run $(GOVULNCHECK) ./...
+	cd apps/donor-api && bash ../../scripts/check-go-dependencies.sh && go tool -modfile=tools/go.mod staticcheck ./... && go run $(GOVULNCHECK) ./...
 
 lint-web:
 	cd apps/web && npm audit --audit-level=high

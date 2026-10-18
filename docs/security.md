@@ -181,6 +181,17 @@ a native anchor rather than client routing. Both origins are compiled into the w
 so its host routing and headers always agree. User content must never be inserted as
 raw HTML. Account tokens use fragments removed before network requests.
 
+## Dependency advisory boundary
+
+`GO-2026-5932` concerns the unmaintained `golang.org/x/crypto/openpgp` packages;
+the application and its tests do not import them. Other packages from `x/crypto`,
+including OCSP used by WebAuthn's certificate checks, remain required. The
+[advisory](https://pkg.go.dev/vuln/GO-2026-5932) lists all OpenPGP versions as
+affected, with no known fix, so changing the module version cannot resolve it.
+`make lint-go` rejects legacy OpenPGP anywhere in the application/test dependency
+graph and continues to run the unmodified vulnerability scanner. A module-only
+notice is distinct from an affected imported package or reachable function.
+
 Release still needs verified legal/entity details, approved retention and incident
 procedures, managed secret storage, backup/restore evidence, the Cloudflare edge
 configuration and origin firewall,
