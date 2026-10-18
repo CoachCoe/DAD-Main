@@ -11,7 +11,7 @@ connects with its own login, which holds only what that process needs
 the API opens up to 40 connections, and each worker, the monitor, migrations, the staff
 command, and `rekey` up to 2. A full deployment therefore needs up to 58 of PostgreSQL's
 default 100 `max_connections`, or 60 while a migration runs. When adding API replicas, raise `max_connections` (or put a
-pooler such as PgBouncer in front) so the total stays below it; `pool_max_conns=N` in a
+[transaction-mode pooler](#connection-pooling) in front) so the total stays below it; `pool_max_conns=N` in a
 process's database URL overrides its size.
 
 Back up the database together with its separately stored encryption keys, then verify a
@@ -88,10 +88,10 @@ Staff passkeys belong to the staff hostname; changing it means every staff membe
 again.
 
 Rate limits are per visitor. nginx sets `X-Real-IP` to the client address, which the API
-trusts only from the web container's fixed address `172.30.42.10`
-([edge](edge.md#client-address)). Setting `DONOR_CLIENT_IP_HEADER` empty makes all
-visitors share the proxy's quota. Edit the Compose network if `172.30.42.0/24` clashes on
-the host.
+trusts only from the `app` network, `172.30.43.0/24`, that the web containers alone share
+with it ([edge](edge.md#client-address)). Setting `DONOR_CLIENT_IP_HEADER` empty makes all
+visitors share the proxy's quota. Edit the Compose networks if `172.30.42.0/24` or
+`172.30.43.0/24` clashes on the host.
 
 The API's in-process limiter keeps a token bucket per client and per class, so a burst
 on one surface cannot starve another for visitors sharing an address; the classes and
@@ -267,6 +267,20 @@ TLS (`sslmode=verify-full`) in every URL for a remote database.
 Backups are taken without privileges. After restoring one into an application database,
 run `migrate`, which recreates missing roles and grants the declared privileges, then
 `provision-roles`.
+
+### Connection pooling
+
+Every process works through a transaction-mode pooler, such as PgBouncer, RDS Proxy, or a
+managed provider's pooler: none keeps session state between transactions, and migrations
+take only transaction-scoped advisory locks. Point each process's URL at the pooler with
+its own login. pgx prepares and caches statements on each connection, so either the
+pooler must track protocol-level prepared statements (PgBouncer 1.21 or later with
+`max_prepared_statements` above zero), or every URL must add
+`default_query_exec_mode=exec`, which uses unnamed statements only. A pooler that does
+neither fails most requests with SQLSTATE 42P05 or 26000. The `role` URL parameter that
+local development uses is a startup parameter poolers do not forward; deployed processes
+use their own logins instead. Size the pooler's server connections to the database's
+`max_connections`, and leave each process's own pool size unchanged.
 
 ## Stripe
 
@@ -674,11 +688,10 @@ Referral captures are rate limited per client, and one generator is one client. 
 that header only from `DONOR_TRUSTED_PROXY_CIDRS`, so have the generator reach the API
 directly, not through the ingress, which overwrites the header. Otherwise captures fail
 with 429. The Compose API publishes its port on host loopback only, and connections
-through it arrive from the `default` network's gateway, not from the load host. Docker 28
-takes the gateway from the start of the network's `ip_range`, 172.30.42.128; older
-releases use 172.30.42.1. Either add that address to the staging API's list for the
-run, which lets any local process choose its client address, or run the generator in a
-container on that network with `LOAD_API=http://api:8002`.
+through it arrive from the `default` network's gateway, 172.30.42.1, not from the load
+host. Either add that address to the staging API's list for the run, which lets any local
+process choose its client address, or run the generator in a container on the `app`
+network with `LOAD_API=http://api:8002`.
 
 ```sh
 make loadtest-seeded LOAD_API=http://api.staging.internal:8002 LOAD_ORIGIN=https://staging.example.org \
