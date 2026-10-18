@@ -3,6 +3,7 @@ package payments
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"testing"
 	"time"
@@ -13,7 +14,7 @@ func TestGatewayWaitsForBudgetBeforeCallingStripe(t *testing.T) {
 		name, budget string
 		call         func(context.Context, *StripeGateway) error
 	}{
-		{"checkout", BucketStaff, func(ctx context.Context, g *StripeGateway) error {
+		{"checkout", BucketCheckout, func(ctx context.Context, g *StripeGateway) error {
 			_, err := g.CreateCheckout(ctx, []byte(`{"mode":"payment"}`), "fixture")
 			return err
 		}},
@@ -35,8 +36,9 @@ func TestGatewayWaitsForBudgetBeforeCallingStripe(t *testing.T) {
 				t.Error("exhausted budget reached Stripe")
 			})
 			defer closeServer()
-			g.budget = NewRateBudget()
-			g.budget.buckets[tc.budget] = newBucket(1, 0)
+			budget := NewRateBudget(DefaultRequestsPerSecond)
+			budget.buckets[tc.budget] = newBucket(1, 0)
+			g.budget = budget
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 			defer cancel()
 			if err := tc.call(ctx, g); !errors.Is(err, context.DeadlineExceeded) {
@@ -108,55 +110,66 @@ func TestRateBudgetHonorsContextCancellation(t *testing.T) {
 	}
 }
 
-// Draining the worker bucket must not stop the staff bucket from granting a
-// token within a bounded wait: the buckets are independent reservations.
-func TestRateBudgetStaffReservationIndependentOfWorker(t *testing.T) {
-	rb := NewRateBudget()
-	// Fully drain the worker bucket (its burst is one second of its rate).
-	drain := int(WorkerBudgetFraction*StripeBudgetPerSecond) + 1
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	for i := 0; i < drain; i++ {
-		if err := rb.Acquire(ctx, BucketWorker); err != nil {
-			t.Fatalf("worker drain %d failed: %v", i, err)
-		}
-	}
-	// The staff bucket is untouched, so a staff grant arrives within a bounded wait.
-	staffCtx, staffCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer staffCancel()
-	start := time.Now()
-	if err := rb.Acquire(staffCtx, BucketStaff); err != nil {
-		t.Fatalf("staff grant blocked by worker drain: %v", err)
-	}
-	if waited := time.Since(start); waited > 100*time.Millisecond {
-		t.Fatalf("staff grant waited %v despite an undrained bucket", waited)
+// Draining every other bucket must not delay a bucket's first request: each
+// owns its share of the ceiling.
+func TestRateBudgetBucketsAreIndependent(t *testing.T) {
+	for name := range shares {
+		t.Run(name, func(t *testing.T) {
+			rb := NewRateBudget(DefaultRequestsPerSecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			for other := range shares {
+				if other == name {
+					continue
+				}
+				_, burst, _ := BucketRate(other, DefaultRequestsPerSecond)
+				for i := 0; i < int(burst)+1; i++ {
+					if err := rb.Acquire(ctx, other); err != nil {
+						t.Fatalf("%s drain %d failed: %v", other, i, err)
+					}
+				}
+			}
+			start := time.Now()
+			if err := rb.Acquire(ctx, name); err != nil {
+				t.Fatal(err)
+			}
+			if waited := time.Since(start); waited > 100*time.Millisecond {
+				t.Fatalf("%s waited %v despite an undrained bucket", name, waited)
+			}
+		})
 	}
 }
 
-// TestRateBudgetReconcileReservationIndependentOfWorkerAndStaff proves X3's
-// reconcile bucket owns its own slice of the ceiling: draining both the worker
-// and staff buckets does not delay a reconcile grant.
-func TestRateBudgetReconcileReservationIndependentOfWorkerAndStaff(t *testing.T) {
-	rb := NewRateBudget()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	drain := func(bucket string, rate float64) {
-		for i := 0; i < int(rate)+1; i++ {
-			if err := rb.Acquire(ctx, bucket); err != nil {
-				t.Fatalf("%s drain %d failed: %v", bucket, i, err)
-			}
+func TestSharesDivideTheWholeCeiling(t *testing.T) {
+	total := 0.0
+	for name := range shares {
+		rate, burst, ok := BucketRate(name, 100)
+		if !ok || rate <= 0 || burst < 1 {
+			t.Fatalf("%s: rate %v, burst %v", name, rate, burst)
+		}
+		total += rate
+	}
+	if math.Abs(total-100) > 1e-9 {
+		t.Fatalf("bucket rates sum to %v of a 100 request ceiling", total)
+	}
+	if _, _, ok := BucketRate("unknown", 100); ok {
+		t.Fatal("unknown bucket has a rate")
+	}
+	if err := NewRateBudget(100).Acquire(context.Background(), "unknown"); !errors.Is(err, ErrUnknownBucket) {
+		t.Fatalf("unknown bucket: %v", err)
+	}
+}
+
+func TestRequestsPerSecondConfiguration(t *testing.T) {
+	for value, want := range map[string]float64{"": DefaultRequestsPerSecond, "100": 100, "12.5": 12.5} {
+		got, err := RequestsPerSecond(func(string) string { return value })
+		if err != nil || got != want {
+			t.Errorf("%q: %v, %v", value, got, err)
 		}
 	}
-	drain(BucketWorker, WorkerBudgetFraction*StripeBudgetPerSecond)
-	drain(BucketStaff, StaffBudgetFraction*StripeBudgetPerSecond)
-	// Reconcile is untouched, so its grant arrives promptly.
-	recCtx, recCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer recCancel()
-	start := time.Now()
-	if err := rb.Acquire(recCtx, BucketReconcile); err != nil {
-		t.Fatalf("reconcile grant blocked by worker/staff drain: %v", err)
-	}
-	if waited := time.Since(start); waited > 100*time.Millisecond {
-		t.Fatalf("reconcile grant waited %v despite an undrained bucket", waited)
+	for _, value := range []string{"0", "-1", "ten", "10001", "NaN"} {
+		if _, err := RequestsPerSecond(func(string) string { return value }); err == nil {
+			t.Errorf("%q accepted", value)
+		}
 	}
 }

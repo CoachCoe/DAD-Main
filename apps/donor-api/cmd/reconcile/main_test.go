@@ -65,6 +65,11 @@ func (f fakeGateway) RetrieveRefund(_ context.Context, id string) (payments.Obje
 	return nil, errors.New("unexpected refund lookup")
 }
 
+// reconcileWindow reconciles without pacing, which only the provider needs.
+func reconcileWindow(ctx context.Context, win reconcile.Window, gateway payments.ReconcileGateway, q *queries.Queries) (reconcile.Report, error) {
+	return reconcileWindowPaced(ctx, win, gateway, q, func(context.Context) error { return nil })
+}
+
 func objects(t *testing.T, raws ...string) []payments.Object {
 	t.Helper()
 	out := make([]payments.Object, 0, len(raws))

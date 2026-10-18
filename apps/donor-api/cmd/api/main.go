@@ -101,11 +101,17 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if (stripeKey == "") != (webhookSecret == "") {
 		return services, release, errors.New("set both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or neither")
 	}
+	stripeCeiling, err := payments.RequestsPerSecond(getenv)
+	if err != nil {
+		return services, release, err
+	}
+	var stripeGateway *payments.StripeGateway
 	var gateway payments.StaffFinanceGateway
 	if stripeKey != "" {
-		if gateway, err = payments.NewStripeGateway(stripeKey); err != nil {
+		if stripeGateway, err = payments.NewStripeGateway(stripeKey); err != nil {
 			return services, release, err
 		}
+		gateway = stripeGateway
 	}
 	services.StaffOrigin = getenv("DONOR_STAFF_ORIGIN")
 	if err = validateStaffOrigin(services.StaffOrigin, services.Origin, getenv); err != nil {
@@ -161,6 +167,9 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if err = dbroles.API.Check(startup, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
 		pool.Close()
 		return services, release, err
+	}
+	if stripeGateway != nil {
+		stripeGateway.UseBudget(store.StripeBudget{DB: pool, PerSecond: stripeCeiling})
 	}
 	services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
 	services.Content = store.ContentReader{DB: pool}

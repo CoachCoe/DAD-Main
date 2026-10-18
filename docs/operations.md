@@ -270,15 +270,19 @@ run `migrate`, which recreates missing roles and grants the declared privileges,
 
 ## Stripe
 
-Stripe's [default sandbox limit](https://docs.stripe.com/rate-limits) is 25 requests
-per second per account. The gateway budgets worker reads, interactive checkout/finance
-commands, and reconciliation separately within each process. Checkout and card-setup
-reads, and each refund-list page, also spend tokens. These limits do not coordinate
-across processes or account for the SDK's automatic retries. Before increasing API or
-Stripe-worker replicas, add an account-wide limiter or allocate conservative budgets
-across every caller, reserve room for retries, and measure provider throttling and
-queue age. The local API load test excludes provider calls and cannot validate that
-capacity.
+Stripe limits requests per account: by default 25 per second in a sandbox and 100 in
+live mode ([rate limits](https://docs.stripe.com/rate-limits)). Set the account's limit
+as `DONOR_STRIPE_REQUESTS_PER_SECOND` (default 25) for every process. It is divided
+among four buckets so that one kind of traffic cannot starve another: event-processing
+reads 40%, donor checkout and card setup 30%, staff and donor subscription commands
+20%, and the daily reconciliation 10%. Each bucket admits a burst of one second of its
+rate. The API and Stripe worker reserve every request in the `donor_stripe_budgets`
+table, so any number of their replicas together stay within the limit; a request whose
+turn would come after its deadline fails at once and is retried like any processor
+outage. The reconciliation job, which runs once a day as a single process, paces itself
+within its own share. The SDK's automatic retries are not budgeted, so leave headroom
+below the account's real limit. The local API load test excludes provider calls and
+cannot validate that capacity.
 
 Use the organization's verified Stripe **test** account and snapshot webhook events at
 API version `2026-09-30.endive`. Subscribe to:

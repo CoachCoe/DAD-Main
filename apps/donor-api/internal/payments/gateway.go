@@ -54,7 +54,7 @@ func (g *StripeGateway) ListInvoicePayments(ctx context.Context, invoice, paymen
 	if (invoice == "") == (payment == "") {
 		return nil, ErrFacts
 	}
-	if err := WaitReconciliationRead(ctx); err != nil {
+	if err := g.acquire(ctx, BucketReconcile); err != nil {
 		return nil, err
 	}
 	params := &stripe.InvoicePaymentListParams{Status: stripe.String("paid"), ListParams: stripe.ListParams{Limit: stripe.Int64(100)}}
@@ -97,15 +97,6 @@ func (g *StripeGateway) ListInvoicePayments(ctx context.Context, invoice, paymen
 	return rows, nil
 }
 
-// WaitReconciliationRead spends one token from the shared reconcile budget, so
-// the daily job's reads — list pages and the per-intent/invoice verification
-// calls it makes through otherwise worker-bucketed gateway methods — all draw
-// from reconcile's slice of the Stripe ceiling and leave worker and staff
-// capacity intact. It blocks until a token is available or ctx is done.
-func WaitReconciliationRead(ctx context.Context) error {
-	return DefaultRateBudget().Acquire(ctx, BucketReconcile)
-}
-
 func ReconciliationFacts(o Object) Object {
 	out := Object{}
 	for _, key := range []string{"id", "payment_intent", "amount", "amount_captured", "currency", "status", "paid", "captured", "livemode", "created"} {
@@ -118,11 +109,10 @@ func ReconciliationFacts(o Object) Object {
 
 // StripeGateway calls Stripe in test mode. A failed call is reported as
 // ErrProcessorUnavailable, never as the SDK error, which can carry donor inputs.
-// budget bounds how fast this process spends the shared Stripe request ceiling,
-// reserving staff capacity by limiting worker self-consumption.
+// Every call first spends from budget.
 type StripeGateway struct {
 	client *stripe.Client
-	budget *RateBudget
+	budget Budget
 }
 
 func NewStripeGateway(key string) (*StripeGateway, error) {
@@ -141,6 +131,10 @@ func NewStripeGateway(key string) (*StripeGateway, error) {
 	return &StripeGateway{client: stripe.NewClient(key, stripe.WithBackends(backends)), budget: DefaultRateBudget()}, nil
 }
 
+// UseBudget replaces the process-local budget the gateway starts with, such as
+// with one shared by every replica.
+func (g *StripeGateway) UseBudget(budget Budget) { g.budget = budget }
+
 func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key string) (RemoteCheckout, error) {
 	var params stripe.CheckoutSessionCreateParams
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -151,7 +145,7 @@ func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key stri
 		return RemoteCheckout{}, ErrProcessorUnavailable
 	}
 	params.SetIdempotencyKey(key)
-	if err := g.acquire(ctx, BucketStaff); err != nil {
+	if err := g.acquire(ctx, BucketCheckout); err != nil {
 		return RemoteCheckout{}, err
 	}
 	session, err := g.client.V1CheckoutSessions.Create(ctx, &params)
@@ -363,7 +357,7 @@ func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time,
 	// returns ErrListPageCap so the caller halves the range and retries, rather
 	// than silently truncating or failing a legitimately busy day.
 	for range listPageCap {
-		if err := WaitReconciliationRead(ctx); err != nil {
+		if err := g.acquire(ctx, BucketReconcile); err != nil {
 			return nil, err
 		}
 		page := list(ctx, created, after)

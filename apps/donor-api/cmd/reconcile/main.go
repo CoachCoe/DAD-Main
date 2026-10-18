@@ -84,6 +84,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		return errors.New("reconciliation window has not settled; wait until its end plus max-lag")
 	}
 
+	ceiling, err := payments.RequestsPerSecond(getenv)
+	if err != nil {
+		return err
+	}
 	dsn := dbroles.ReconcileJob.URL(getenv)
 	if dsn == "" {
 		return errors.New(dbroles.ReconcileJob.Variable() + " is required")
@@ -106,11 +110,15 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err != nil {
 		return errors.New("stripe gateway unavailable")
 	}
+	// The daily job is a single process, so it paces itself within its share.
+	requests := payments.NewRateBudget(ceiling)
+	gateway.UseBudget(requests)
+	wait := func(ctx context.Context) error { return requests.Acquire(ctx, payments.BucketReconcile) }
 
 	var report reconcile.Report
 	err = pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		var err error
-		report, err = reconcileWindow(ctx, win, gateway, queries.New(tx))
+		report, err = reconcileWindowPaced(ctx, win, gateway, queries.New(tx), wait)
 		return err
 	})
 	if err != nil {
@@ -125,12 +133,9 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	return nil
 }
 
-// reconcileWindow lists the window's Stripe charges and refunds and the
-// matching database rows, then diffs them. Both sides are read-only.
-func reconcileWindow(ctx context.Context, win reconcile.Window, gateway payments.ReconcileGateway, q *queries.Queries) (reconcile.Report, error) {
-	return reconcileWindowPaced(ctx, win, gateway, q, payments.WaitReconciliationRead)
-}
-
+// reconcileWindowPaced lists the window's Stripe charges and refunds and the
+// matching database rows, then diffs them; wait paces each provider read.
+// Both sides are read-only.
 func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway payments.ReconcileGateway, q *queries.Queries, wait func(context.Context) error) (reconcile.Report, error) {
 	gte, lte := win.StripeCreatedRange()
 	start := time.Unix(gte, 0).UTC()

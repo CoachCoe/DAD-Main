@@ -53,6 +53,7 @@ var grants = map[string]map[Role]string{
 	"donor_resumptions":            {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT"},
 	"donor_cancellations":          {API: "SELECT, INSERT, UPDATE"},
 	"donor_payment_updates":        {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE"},
+	"donor_stripe_budgets":         {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE"},
 
 	"donor_metric_projections": {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT, INSERT, UPDATE",
 		MessageWorker: "SELECT", PushWorker: "SELECT", Monitor: "SELECT (next_refresh_at, refresh_error)"},

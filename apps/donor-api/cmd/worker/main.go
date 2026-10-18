@@ -98,6 +98,11 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		if err != nil {
 			return nil, configError("STRIPE_SECRET_KEY must be a Stripe test-mode secret key")
 		}
+		ceiling, err := payments.RequestsPerSecond(getenv)
+		if err != nil {
+			return nil, configError(err.Error())
+		}
+		gateway.UseBudget(store.StripeBudget{DB: pool, PerSecond: ceiling})
 		events := store.EventWorker{DB: pool, Gateway: gateway}
 		backfill := &store.AnchorBackfill{DB: pool, Gateway: gateway}
 		return func(ctx context.Context) (bool, error) {

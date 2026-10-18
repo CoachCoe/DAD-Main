@@ -62,11 +62,12 @@ true; add a rule when a mistake would otherwise be repeated.
   provider state *before* taking the donor lock; re-fetch on conflict happens
   under the lock. Do not move a provider round trip inside the lock — a test
   (`TestEventWorkerReadsProcessorOutsideDonorLock`) enforces this.
-- **Every Stripe call spends from its process's rate budget**
-  (`internal/payments/ratebudget.go`, named buckets worker/staff/reconcile).
-  Route new calls and every list page through the appropriate bucket. The
-  sandbox default is 25 req/s per account; replicas and SDK retries require
-  deployment-wide coordination beyond these process-local limits.
+- **Every Stripe call spends from the account's request budget**
+  (`internal/payments/ratebudget.go`, buckets worker/checkout/staff/reconcile).
+  Route new calls and every list page through the appropriate bucket. The API
+  and Stripe worker share it through PostgreSQL (`store.StripeBudget`), so
+  replicas cannot exceed it together; the daily reconcile job keeps its own
+  process-local slice. SDK retries are not budgeted.
 
 ## Workflow / process
 

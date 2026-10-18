@@ -54,6 +54,13 @@ func TestPushWorkerRunsWithoutProvidersButRefusesPartialOnes(t *testing.T) {
 	}
 }
 
+func TestStripeWorkerRefusesAnInvalidRequestCeiling(t *testing.T) {
+	env := map[string]string{"STRIPE_SECRET_KEY": "sk_test_123", "DONOR_STRIPE_REQUESTS_PER_SECOND": "0"}
+	if _, err := stepFor("stripe", nil, func(name string) string { return env[name] }); !isConfigError(err) {
+		t.Fatalf("got %v, want a configuration error", err)
+	}
+}
+
 func isConfigError(err error) bool {
 	_, ok := errors.AsType[configError](err)
 	return ok
