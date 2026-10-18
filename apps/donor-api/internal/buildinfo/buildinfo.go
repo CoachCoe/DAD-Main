@@ -33,18 +33,3 @@ func Revision() string {
 	}
 	return "unknown"
 }
-
-// Modified reports whether the build was made from a dirty working tree, when
-// the toolchain recorded it. A deployed copy should never report true.
-func Modified() bool {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return false
-	}
-	for _, setting := range info.Settings {
-		if setting.Key == "vcs.modified" {
-			return setting.Value == "true"
-		}
-	}
-	return false
-}
