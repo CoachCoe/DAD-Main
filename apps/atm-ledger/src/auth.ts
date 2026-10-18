@@ -1,15 +1,19 @@
 import {
 	createRemoteJWKSet,
-	jwtVerify,
-	type JWTVerifyGetKey,
 	type JWTPayload,
+	type JWTVerifyGetKey,
+	jwtVerify,
 } from "jose";
-import { check, type Principal } from "./ledger";
+import { actorName, check, LedgerError, type Principal, sha } from "./ledger";
 
 const githubKeys = createRemoteJWKSet(
 	new URL("https://token.actions.githubusercontent.com/.well-known/jwks"),
 	{ timeoutDuration: 5000 },
 );
+const workflowRoles = new Map<unknown, Principal["role"]>([
+	["atm-ledger-reader", "read"],
+	["atm-ledger-publisher", "publish"],
+]);
 type Trust = Pick<
 	Env,
 	"SOURCE" | "REPOSITORY_ID" | "OWNER_ID" | "ADMIN_ACTOR_IDS"
@@ -28,7 +32,7 @@ export function authorize(claims: JWTPayload, env: Trust): Principal {
 	check(
 		typeof claims.workflow_ref === "string" &&
 			typeof claims.actor === "string" &&
-			/^[A-Za-z0-9_.@-]{1,100}$/.test(claims.actor) &&
+			actorName.test(claims.actor) &&
 			typeof claims.actor_id === "string" &&
 			/^\d+$/.test(claims.actor_id),
 		"Invalid workflow identity",
@@ -40,19 +44,19 @@ export function authorize(claims: JWTPayload, env: Trust): Principal {
 			typeof claims.run_attempt === "string" &&
 			/^\d+$/.test(claims.run_attempt) &&
 			typeof claims.sha === "string" &&
-			/^[a-f0-9]{40}$/.test(claims.sha),
+			sha.test(claims.sha),
 		"Invalid execution identity",
 		403,
 	);
 	const workflow = `${repo}/.github/workflows/atm.yml@`;
-	const admin = `${repo}/.github/workflows/atm.yml@refs/heads/dev`;
+	const admin = `${workflow}refs/heads/dev`;
 	const supportedRef =
-		claims.workflow_ref === `${workflow}refs/heads/dev` ||
+		claims.workflow_ref === admin ||
 		claims.workflow_ref === `${workflow}refs/heads/main` ||
 		new RegExp(
 			`^${workflow.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}refs/pull/[0-9]+/merge$`,
 		).test(claims.workflow_ref);
-	let role: Principal["role"];
+	let role: Principal["role"] | undefined;
 	if (
 		claims.workflow_ref === admin &&
 		claims.event_name === "workflow_dispatch" &&
@@ -64,19 +68,10 @@ export function authorize(claims: JWTPayload, env: Trust): Principal {
 		supportedRef &&
 		["push", "pull_request", "workflow_dispatch"].includes(
 			String(claims.event_name),
-		) &&
-		claims.environment === "atm-ledger-reader"
+		)
 	)
-		role = "read";
-	else if (
-		supportedRef &&
-		["push", "pull_request", "workflow_dispatch"].includes(
-			String(claims.event_name),
-		) &&
-		claims.environment === "atm-ledger-publisher"
-	)
-		role = "publish";
-	else throw new Error("Identity is not authorized");
+		role = workflowRoles.get(claims.environment);
+	check(role, "Identity is not authorized", 403);
 	return {
 		role,
 		actor: claims.actor,
@@ -91,8 +86,8 @@ export async function authenticate(
 	env: Trust,
 	keys: JWTVerifyGetKey = githubKeys,
 ): Promise<Principal> {
-	check(token.length <= 16384, "Invalid credential", 401);
 	try {
+		check(token.length <= 16384, "Invalid credential");
 		const { payload } = await jwtVerify(token, keys, {
 			issuer: "https://token.actions.githubusercontent.com",
 			audience: `atm-ledger:${env.SOURCE}`,
@@ -103,6 +98,6 @@ export async function authenticate(
 		});
 		return authorize(payload, env);
 	} catch {
-		throw new Error("Identity is not authorized");
+		throw new LedgerError("Identity is not authorized", 403);
 	}
 }

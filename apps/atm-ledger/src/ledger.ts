@@ -8,18 +8,18 @@ export class LedgerError extends Error {
 	}
 }
 
-export type Severity = "unassessed" | "low" | "medium" | "high" | "critical";
-export type Disposition =
-	| "untriaged"
-	| "confirmed"
-	| "resolved"
-	| "dismissed"
-	| "reopened";
-export interface Audit {
+const severities = ["unassessed", "low", "medium", "high", "critical"] as const;
+// Triage chooses any disposition but "reopened", which only a publication sets.
+const triaged = ["untriaged", "confirmed", "resolved", "dismissed"] as const;
+const dispositions = [...triaged, "reopened"] as const;
+const closed: readonly string[] = ["resolved", "dismissed"];
+type Severity = (typeof severities)[number];
+type Disposition = (typeof dispositions)[number];
+interface Audit {
 	at: string;
 	actor: string;
 	severity: Severity;
-	disposition: Exclude<Disposition, "reopened">;
+	disposition: (typeof triaged)[number];
 	noteDigest: string;
 }
 export interface Finding {
@@ -35,7 +35,7 @@ export interface Finding {
 	updatedAt?: string;
 	audit: Audit[];
 }
-export interface Receipt {
+interface Receipt {
 	execution: string;
 	runId: string;
 	revision: string;
@@ -95,17 +95,13 @@ export function object(
 		"Unexpected fields",
 	);
 }
-const severity = ["unassessed", "low", "medium", "high", "critical"];
-const disposition = [
-	"untriaged",
-	"confirmed",
-	"resolved",
-	"dismissed",
-	"reopened",
-];
 export const hex = /^[a-f0-9]{64}$/;
 export const sha = /^[a-f0-9]{40}$/;
+export const actorName = /^[A-Za-z0-9_.@-]{1,100}$/;
+const findingId = /^[a-f0-9]{24}$/;
 const run = /^atm-[0-9]{14}-[a-f0-9]{8}$/;
+const oneOf = <T extends string>(v: unknown, values: readonly T[]): v is T =>
+	typeof v === "string" && (values as readonly string[]).includes(v);
 const date = (v: unknown) =>
 	typeof v === "string" && Number.isFinite(Date.parse(v));
 const matches = (v: unknown, pattern: RegExp) =>
@@ -175,17 +171,14 @@ export function validateLedger(
 			"audit",
 		]);
 		check(
-			matches(f.id, /^[a-f0-9]{24}$/) &&
+			matches(f.id, findingId) &&
 				!ids.has(f.id) &&
 				f.source === source &&
 				matches(f.check, /^[a-z-]+$/),
 			"Invalid finding identity",
 		);
 		check(
-			typeof f.severity === "string" &&
-				severity.includes(f.severity) &&
-				typeof f.disposition === "string" &&
-				disposition.includes(f.disposition),
+			oneOf(f.severity, severities) && oneOf(f.disposition, dispositions),
 			"Invalid finding classification",
 		);
 		check(
@@ -203,19 +196,16 @@ export function validateLedger(
 			"Invalid triage time",
 		);
 		check(
-			!["resolved", "dismissed"].includes(f.disposition) ||
-				(f.updatedAt && f.audit.length),
+			!closed.includes(f.disposition) || (f.updatedAt && f.audit.length),
 			"Closure requires an audit record",
 		);
 		for (const a of f.audit) {
 			object(a, ["at", "actor", "disposition", "severity", "noteDigest"]);
 			check(
 				date(a.at) &&
-					matches(a.actor, /^[A-Za-z0-9_.@-]{1,100}$/) &&
-					typeof a.disposition === "string" &&
-					disposition.slice(0, 4).includes(a.disposition) &&
-					typeof a.severity === "string" &&
-					severity.includes(a.severity) &&
+					matches(a.actor, actorName) &&
+					oneOf(a.disposition, triaged) &&
+					oneOf(a.severity, severities) &&
 					matches(a.noteDigest, hex),
 				"Invalid triage audit",
 			);
@@ -281,8 +271,7 @@ export function publication(
 			n.lastSeen >= f.lastSeen &&
 				n.occurrences >= f.occurrences &&
 				(n.disposition === f.disposition ||
-					(["resolved", "dismissed"].includes(f.disposition) &&
-						n.disposition === "reopened")),
+					(closed.includes(f.disposition) && n.disposition === "reopened")),
 			"Invalid finding transition",
 		);
 		if (digest(n) !== digest(f)) changes.push(n);
@@ -303,7 +292,7 @@ export function publication(
 		!receipt.eligible ||
 			next.findings.every(
 				(f) =>
-					["resolved", "dismissed"].includes(f.disposition) ||
+					closed.includes(f.disposition) ||
 					!["unassessed", "high", "critical"].includes(f.severity),
 			),
 		"Open findings block acceptance",
@@ -324,11 +313,9 @@ export function triage(
 ): { ledger: Ledger; delta: Delta } {
 	object(body, ["finding", "severity", "disposition", "noteDigest"]);
 	check(
-		matches(body.finding, /^[a-f0-9]{24}$/) &&
-			typeof body.severity === "string" &&
-			severity.includes(body.severity) &&
-			typeof body.disposition === "string" &&
-			disposition.slice(0, 4).includes(body.disposition) &&
+		matches(body.finding, findingId) &&
+			oneOf(body.severity, severities) &&
+			oneOf(body.disposition, triaged) &&
 			matches(body.noteDigest, hex),
 		"Invalid triage request",
 	);

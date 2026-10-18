@@ -1,5 +1,6 @@
 import { authenticate } from "./auth";
 import { LedgerError } from "./ledger";
+
 export { LedgerStore } from "./store";
 
 const LIMIT = 16 * 1024 * 1024;
@@ -48,11 +49,7 @@ export default {
 			const authorization = request.headers.get("authorization");
 			if (!authorization?.startsWith("Bearer "))
 				throw new LedgerError("Authentication required", 401);
-			const principal = await authenticate(authorization.slice(7), env).catch(
-				() => {
-					throw new LedgerError("Identity is not authorized", 403);
-				},
-			);
+			const principal = await authenticate(authorization.slice(7), env);
 			const url = new URL(request.url);
 			const store = env.LEDGERS.getByName(env.SOURCE);
 			const call = async (
