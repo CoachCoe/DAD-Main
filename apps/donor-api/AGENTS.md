@@ -3,8 +3,7 @@
 Hard-won rules for working in the Go backend. Read this before changing code
 here. These are constraints the codebase enforces (often via tests that fail
 loudly) or that cost real rediscovery time when ignored. Keep it short and
-true; add a rule when a mistake would otherwise be repeated, and link the
-fuller write-up in `docs/solutions/` when one exists.
+true; add a rule when a mistake would otherwise be repeated.
 
 ## Database and migrations
 
@@ -58,8 +57,7 @@ fuller write-up in `docs/solutions/` when one exists.
   (`internal/payments/webhook.go`) keeps only the fields the worker verifies.
   Webhooks cannot be expanded, so a `payment_intent.succeeded` payload carries
   `latest_charge` as a bare id, never the expanded object — you cannot "trust
-  the payload" for charge facts that live on the expanded charge. See
-  `docs/solutions/`.
+  the payload" for charge facts that live on the expanded charge.
 - **Preserve the fetch-outside-lock discipline.** The Stripe worker fetches
   provider state *before* taking the donor lock; re-fetch on conflict happens
   under the lock. Do not move a provider round trip inside the lock — a test

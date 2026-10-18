@@ -467,8 +467,7 @@ docker compose up -d --wait mailpit
 ```
 
 The `certs/` directory holds a local, disposable key and is git-ignored; never reuse it
-anywhere real. This capture inbox is also the prerequisite the Two-Bot QA loop depends on
-(`docs/testing/two-bot-qa-loop-plan.md`).
+anywhere real.
 
 ## App notifications
 
