@@ -309,48 +309,18 @@ func (g *StripeGateway) CreateRefund(ctx context.Context, payment string, amount
 }
 
 func (g *StripeGateway) ListPaymentRefunds(ctx context.Context, payment string) ([]Object, error) {
-	result := []Object{}
-	after := ""
-	for range 10 {
+	return g.paginate(ctx, BucketStaff, 10, ErrProcessorUnavailable, func(after string) listPage {
 		params := &stripe.RefundListParams{PaymentIntent: stripe.String(payment), ListParams: stripe.ListParams{Limit: stripe.Int64(100)}}
 		if after != "" {
 			params.StartingAfter = stripe.String(after)
 		}
-		if err := g.acquire(ctx, BucketStaff); err != nil {
-			return nil, err
-		}
-		page := g.client.V1Refunds.List(ctx, params)
-		if page.Err() != nil {
-			return nil, ErrProcessorUnavailable
-		}
-		raw, err := rawObject(page.LastResponse())
-		if err != nil {
-			return nil, err
-		}
-		rows, err := raw.Array("data")
-		if err != nil || len(rows) > 100 {
-			return nil, ErrFacts
-		}
-		result = append(result, rows...)
-		if raw.BoolIs("has_more", false) {
-			return result, nil
-		}
-		if !raw.BoolIs("has_more", true) || len(rows) == 0 {
-			return nil, ErrFacts
-		}
-		last := rows[len(rows)-1].Text("id")
-		if last == "" || last == after {
-			return nil, ErrFacts
-		}
-		after = last
-	}
-	return nil, ErrProcessorUnavailable
+		return g.client.V1Refunds.List(ctx, params)
+	}, func(row Object) (Object, error) { return row, nil })
 }
 
 // ListChargesByCreated lists every charge Stripe created in [start, end],
-// read-only, for the daily reconciliation job. It pages exactly as
-// ListPaymentRefunds does and rejects any live-mode object, so this test-only
-// build never reconciles a live fact.
+// read-only, for the daily reconciliation job. It rejects any live-mode
+// object, so this test-only build never reconciles a live fact.
 func (g *StripeGateway) ListChargesByCreated(ctx context.Context, start, end time.Time) ([]Object, error) {
 	return g.listByCreated(ctx, start, end, func(ctx context.Context, created *stripe.RangeQueryParams, after string) listPage {
 		params := &stripe.ChargeListParams{CreatedRange: created, ListParams: stripe.ListParams{Limit: stripe.Int64(100)}}
@@ -380,25 +350,45 @@ type listPage interface {
 	LastResponse() *stripe.APIResponse
 }
 
-// listByCreated runs the shared bounded paging loop ListPaymentRefunds proved:
-// Limit 100, a created range, starting_after, has_more termination, and the
-// non-advancing-cursor guard. Each returned object must be livemode:false.
+// listByCreated lists the objects created in [start, end] for reconciliation,
+// each of which must be livemode:false.
 func (g *StripeGateway) listByCreated(
 	ctx context.Context,
 	start, end time.Time,
 	list func(context.Context, *stripe.RangeQueryParams, string) listPage,
 ) ([]Object, error) {
 	created := &stripe.RangeQueryParams{GreaterThanOrEqual: start.Unix(), LesserThanOrEqual: end.Unix()}
-	result := []Object{}
-	after := ""
-	// A sub-day slice should fit well within this bound; a slice that reaches it
+	// A sub-day slice should fit well within the cap; a slice that reaches it
 	// returns ErrListPageCap so the caller halves the range and retries, rather
 	// than silently truncating or failing a legitimately busy day.
-	for range listPageCap {
-		if err := g.acquire(ctx, BucketReconcile); err != nil {
+	return g.paginate(ctx, BucketReconcile, listPageCap, ErrListPageCap, func(after string) listPage {
+		return list(ctx, created, after)
+	}, func(row Object) (Object, error) {
+		if !row.BoolIs("livemode", false) {
+			return nil, ErrFacts
+		}
+		return ReconciliationFacts(row), nil
+	})
+}
+
+// paginate reads at most pages pages of 100 rows, following starting_after
+// until has_more is false, and keeps each row as keep returns it. A page that
+// does not advance the cursor is refused; a longer list returns exhausted.
+func (g *StripeGateway) paginate(
+	ctx context.Context,
+	bucket string,
+	pages int,
+	exhausted error,
+	list func(after string) listPage,
+	keep func(Object) (Object, error),
+) ([]Object, error) {
+	result := []Object{}
+	after := ""
+	for range pages {
+		if err := g.acquire(ctx, bucket); err != nil {
 			return nil, err
 		}
-		page := list(ctx, created, after)
+		page := list(after)
 		if page.Err() != nil {
 			return nil, ErrProcessorUnavailable
 		}
@@ -411,12 +401,11 @@ func (g *StripeGateway) listByCreated(
 			return nil, ErrFacts
 		}
 		for _, row := range rows {
-			if !row.BoolIs("livemode", false) {
-				return nil, ErrFacts
+			kept, err := keep(row)
+			if err != nil {
+				return nil, err
 			}
-		}
-		for _, row := range rows {
-			result = append(result, ReconciliationFacts(row))
+			result = append(result, kept)
 		}
 		if raw.BoolIs("has_more", false) {
 			return result, nil
@@ -430,7 +419,7 @@ func (g *StripeGateway) listByCreated(
 		}
 		after = last
 	}
-	return nil, ErrListPageCap
+	return nil, exhausted
 }
 
 // listPageCap bounds pages per listByCreated call. At 100 rows per page it caps
