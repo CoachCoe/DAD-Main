@@ -124,7 +124,7 @@ on `DONOR_STAFF_ORIGIN` (default http://staff.localhost:3000) with Chromium's vi
 authenticator; the staff journey provisions or recovers `e2e.administrator@example.org`
 with `cmd/staff`, so point `DONOR_GO_DATABASE_URL` at a synthetic database.
 
-`make test` checks Go formatting, vet, race-enabled tests, compilation, frontend lint,
+`make test` checks Go formatting, vet, race-enabled tests, compilation, frontend lint and formatting,
 unit tests, generated route types, TypeScript, and the production build. Browser tests
 start a local Go API and Next server on 127.0.0.1:8002 and 127.0.0.1:3000, with matching
 origins regardless of the local application's origin settings. They require a database
