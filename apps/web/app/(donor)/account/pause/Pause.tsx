@@ -108,60 +108,57 @@ export default function PauseGiving() {
               <Link href="/account/recurring">See its current status</Link>.
             </p>
           ) : (
-            data && (
+            data &&
+            (!choice ? (
               <>
-                {!choice ? (
-                  <>
-                    <p className="lead">
-                      Skip up to three monthly renewals. You’ll see the exact resume date before you confirm.
-                    </p>
-                    <div className="actions">
-                      {data.options.map((option) => (
-                        <button
-                          type="button"
-                          className="secondary"
-                          key={option.months}
-                          ref={option.months === opener ? step.trigger : undefined}
-                          onClick={() => {
-                            setOpener(option.months);
-                            setChoice(option);
-                          }}
-                        >
-                          Skip {renewals(option.months)}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div className="callout">
-                    <h2 ref={step.heading} tabIndex={-1}>
-                      Confirm your pause
-                    </h2>
-                    <p>
-                      Skip {renewals(choice.months)}, starting{" "}
-                      <time dateTime={choice.starts_at}>{formatDate(choice.starts_at)}</time>.
-                    </p>
-                    <p>
-                      Giving automatically resumes{" "}
-                      <time dateTime={choice.resumes_at}>{formatDate(choice.resumes_at)}</time>.
-                    </p>
-                    <div className="actions">
-                      <button type="button" className="button" disabled={busy} onClick={() => confirm(choice)}>
-                        {busy ? "Checking pause…" : "Confirm pause"}
-                      </button>
-                      <button
-                        type="button"
-                        className="secondary"
-                        disabled={busy || requestKey !== null}
-                        onClick={() => setChoice(null)}
-                      >
-                        Back
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <p className="lead">
+                  Skip up to three monthly renewals. You’ll see the exact resume date before you confirm.
+                </p>
+                <div className="actions">
+                  {data.options.map((option) => (
+                    <button
+                      type="button"
+                      className="secondary"
+                      key={option.months}
+                      ref={option.months === opener ? step.trigger : undefined}
+                      onClick={() => {
+                        setOpener(option.months);
+                        setChoice(option);
+                      }}
+                    >
+                      Skip {renewals(option.months)}
+                    </button>
+                  ))}
+                </div>
               </>
-            )
+            ) : (
+              <div className="callout">
+                <h2 ref={step.heading} tabIndex={-1}>
+                  Confirm your pause
+                </h2>
+                <p>
+                  Skip {renewals(choice.months)}, starting{" "}
+                  <time dateTime={choice.starts_at}>{formatDate(choice.starts_at)}</time>.
+                </p>
+                <p>
+                  Giving automatically resumes <time dateTime={choice.resumes_at}>{formatDate(choice.resumes_at)}</time>
+                  .
+                </p>
+                <div className="actions">
+                  <button type="button" className="button" disabled={busy} onClick={() => confirm(choice)}>
+                    {busy ? "Checking pause…" : "Confirm pause"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={busy || requestKey !== null}
+                    onClick={() => setChoice(null)}
+                  >
+                    Back
+                  </button>
+                </div>
+              </div>
+            ))
           )}
           <p className="note">
             Your streak is frozen during a pause of up to three months and continues when giving resumes. Your Founding
