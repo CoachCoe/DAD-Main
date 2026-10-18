@@ -90,6 +90,39 @@ func (q *Queries) GiftHistory(ctx context.Context, donorID pgtype.UUID) ([]GiftH
 	return items, nil
 }
 
+const insertReferralCorrection = `-- name: InsertReferralCorrection :exec
+INSERT INTO donor_referral_corrections
+    (donor_id,old_first_gift_id,new_first_gift_id,old_referrer_id,new_referrer_id,old_kind,new_kind,recorded_at,rules_version)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+`
+
+type InsertReferralCorrectionParams struct {
+	DonorID        pgtype.UUID        `json:"donor_id"`
+	OldFirstGiftID string             `json:"old_first_gift_id"`
+	NewFirstGiftID pgtype.Text        `json:"new_first_gift_id"`
+	OldReferrerID  pgtype.UUID        `json:"old_referrer_id"`
+	NewReferrerID  pgtype.UUID        `json:"new_referrer_id"`
+	OldKind        pgtype.Text        `json:"old_kind"`
+	NewKind        pgtype.Text        `json:"new_kind"`
+	RecordedAt     pgtype.Timestamptz `json:"recorded_at"`
+	RulesVersion   int32              `json:"rules_version"`
+}
+
+func (q *Queries) InsertReferralCorrection(ctx context.Context, arg InsertReferralCorrectionParams) error {
+	_, err := q.db.Exec(ctx, insertReferralCorrection,
+		arg.DonorID,
+		arg.OldFirstGiftID,
+		arg.NewFirstGiftID,
+		arg.OldReferrerID,
+		arg.NewReferrerID,
+		arg.OldKind,
+		arg.NewKind,
+		arg.RecordedAt,
+		arg.RulesVersion,
+	)
+	return err
+}
+
 const lockProjection = `-- name: LockProjection :one
 SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version, referred_link_count, referred_irl_count, referred_link_minor, referred_irl_minor FROM donor_metric_projections WHERE donor_id=$1 FOR NO KEY UPDATE
 `

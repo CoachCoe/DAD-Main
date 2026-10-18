@@ -7,6 +7,7 @@ import (
 	"maps"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"dad/donor-api/internal/recognition"
@@ -169,9 +170,8 @@ type projection struct {
 	streakSince *time.Time
 }
 
-// projectionRules versions recognition and notification rules. Version 5 repairs
-// referral totals that a concurrent referrer refresh could previously overwrite.
-const projectionRules = 5
+// Version 6 attributes conversions to the earliest verified successful payment.
+const projectionRules = 6
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a
@@ -209,7 +209,6 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 	out.ID = old.ID
 	out.FoundingAwardedAt = old.FoundingAwardedAt
 	out.BestStreak = old.BestStreak
-	out.FirstGiftID, out.ReferrerID, out.ReferralKind = old.FirstGiftID, old.ReferrerID, old.ReferralKind
 	h, err := loadHistory(ctx, q, id)
 	if err != nil {
 		return projection{SaveProjectionParams: out}, err
@@ -261,6 +260,16 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 	if err = applyReferralDelta(ctx, q, old, out, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
+	if old.FirstGiftID.Valid && (old.FirstGiftID != out.FirstGiftID || old.ReferrerID != out.ReferrerID || old.ReferralKind != out.ReferralKind) {
+		if err = q.InsertReferralCorrection(ctx, queries.InsertReferralCorrectionParams{
+			DonorID: id, OldFirstGiftID: old.FirstGiftID.String, NewFirstGiftID: out.FirstGiftID,
+			OldReferrerID: old.ReferrerID, NewReferrerID: out.ReferrerID,
+			OldKind: old.ReferralKind, NewKind: out.ReferralKind,
+			RecordedAt: timestamp(now), RulesVersion: projectionRules,
+		}); err != nil {
+			return projection{SaveProjectionParams: out}, err
+		}
+	}
 	return projection{out, streak.Since}, q.SaveProjection(ctx, out)
 }
 
@@ -306,35 +315,38 @@ func referralContribution(referrer pgtype.UUID, kind pgtype.Text, net pgtype.Int
 	return linkCount, irlCount, linkMinor, irlMinor
 }
 
-// applyReferralDelta adjusts the referrer's totals in the same transaction as
-// the referred projection. First-gift attribution is permanent.
+// applyReferralDelta transfers contributions atomically with the projection.
 func applyReferralDelta(ctx context.Context, q *queries.Queries, old queries.DonorMetricProjection, out queries.SaveProjectionParams, now time.Time) error {
-	oldLink, oldIRL, oldLinkMinor, oldIRLMinor := referralContribution(old.ReferrerID, old.ReferralKind, old.NetMinor)
-	newLink, newIRL, newLinkMinor, newIRLMinor := referralContribution(out.ReferrerID, out.ReferralKind, out.NetMinor)
-	linkCount, irlCount := newLink-oldLink, newIRL-oldIRL
-	linkMinor, irlMinor := newLinkMinor-oldLinkMinor, newIRLMinor-oldIRLMinor
-	if linkCount == 0 && irlCount == 0 && linkMinor == 0 && irlMinor == 0 {
-		return nil
+	deltas := map[pgtype.UUID]queries.ApplyReferralDeltaParams{}
+	add := func(referrer pgtype.UUID, kind pgtype.Text, net pgtype.Int8, sign int64) {
+		if !referrer.Valid {
+			return
+		}
+		link, irl, linkMinor, irlMinor := referralContribution(referrer, kind, net)
+		d := deltas[referrer]
+		d.DonorID = referrer
+		d.ReferredLinkCount += sign * link
+		d.ReferredIrlCount += sign * irl
+		d.ReferredLinkMinor += sign * linkMinor
+		d.ReferredIrlMinor += sign * irlMinor
+		deltas[referrer] = d
 	}
-	// The referrer owns the row being adjusted; new and old agree on it unless
-	// a kind change moved the contribution between fields, which the per-field
-	// difference above already accounts for. Prefer the current referrer.
-	referrer := out.ReferrerID
-	if !referrer.Valid {
-		referrer = old.ReferrerID
+	add(old.ReferrerID, old.ReferralKind, old.NetMinor, -1)
+	add(out.ReferrerID, out.ReferralKind, out.NetMinor, 1)
+	// Lock both recipients in a stable order when attribution changes owners.
+	for _, id := range slices.SortedFunc(maps.Keys(deltas), func(a, b pgtype.UUID) int { return strings.Compare(a.String(), b.String()) }) {
+		d := deltas[id]
+		if d.ReferredLinkCount == 0 && d.ReferredIrlCount == 0 && d.ReferredLinkMinor == 0 && d.ReferredIrlMinor == 0 {
+			continue
+		}
+		if err := seedProjection(ctx, q, id, now); err != nil {
+			return err
+		}
+		if err := q.ApplyReferralDelta(ctx, d); err != nil {
+			return err
+		}
 	}
-	// Create the target before applying the delta. A concurrent first refresh
-	// must see either the committed contribution or the delta after its save.
-	if err := seedProjection(ctx, q, referrer, now); err != nil {
-		return err
-	}
-	return q.ApplyReferralDelta(ctx, queries.ApplyReferralDeltaParams{
-		DonorID:           referrer,
-		ReferredLinkCount: linkCount,
-		ReferredIrlCount:  irlCount,
-		ReferredLinkMinor: linkMinor,
-		ReferredIrlMinor:  irlMinor,
-	})
+	return nil
 }
 
 // nextRefresh is the earliest moment after now at which the projection can
@@ -366,23 +378,20 @@ func nextRefresh(out queries.SaveProjectionParams, h history, refundBoundaries, 
 	return next
 }
 
-// projectConversion records the donor's first gift, its referral and the
-// Founding Donor award. Both are permanent once set, so a gift processed late
-// cannot move a relationship whose referral notice may already have been sent.
+// Arrival order must not determine attribution. The founding award stays earned.
 func projectConversion(out *queries.SaveProjectionParams, h history, id pgtype.UUID, now time.Time) error {
-	if !out.FirstGiftID.Valid {
-		relations, err := recognition.Relationships(h.Gifts, now)
-		if err != nil {
-			return err
-		}
-		if relation, ok := relations[id.String()]; ok {
-			out.FirstGiftID = text(relation.FirstGiftID)
-			if relation.ReferrerID != nil {
-				if err = out.ReferrerID.Scan(*relation.ReferrerID); err != nil {
-					return err
-				}
-				out.ReferralKind = text(*relation.Kind)
+	relations, err := recognition.Relationships(h.Gifts, now)
+	if err != nil {
+		return err
+	}
+	out.FirstGiftID, out.ReferrerID, out.ReferralKind = pgtype.Text{}, pgtype.UUID{}, pgtype.Text{}
+	if relation, ok := relations[id.String()]; ok {
+		out.FirstGiftID = text(relation.FirstGiftID)
+		if relation.ReferrerID != nil {
+			if err = out.ReferrerID.Scan(*relation.ReferrerID); err != nil {
+				return err
 			}
+			out.ReferralKind = text(*relation.Kind)
 		}
 	}
 	if out.FoundingAwardedAt.Valid {

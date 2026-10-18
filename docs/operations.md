@@ -402,6 +402,14 @@ recognition, or the messages and push intents queued with it, raises `projection
 projection whenever no projection is due. A donor whose facts cannot be projected is deferred with
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
+
+Deploy migration `0017_referral_corrections.sql` before binaries using projection rules
+version 6. Older projections then converge on the earliest verified successful payment
+through the normal refresh worker. Corrections, transferred referral totals, and new
+notification intents commit together. Monitor projection errors during convergence and
+use the staff `referral-corrections` export to inspect changed attribution. The migration
+does not rewrite gift facts or reconstruct corrections from before this release.
+
 The projection worker also applies referral-touch retention ([donor domain](donor-domain.md#referrals)):
 on start and then hourly it deletes touches that led to no attributed gift and were
 captured more than 13 months ago, at most 2,000 per transaction and one batch between projection
@@ -688,6 +696,12 @@ seeded database. A generator sharing a host with the API or database competes wi
 for CPU. Keep results with the run's ticket, not in the repository.
 
 ## External acceptance
+
+Browser analytics/privacy decisions and manual assistive-technology acceptance are
+deferred by product agreement, as are native design deliverables and physical Wallet/QR
+acceptance. See [analytics](analytics.md) for the collection boundary and
+[design foundations](design-system.md) for the manual accessibility scope. These items
+remain unverified; deferral does not establish production acceptance.
 
 Before live solicitation, verify the receiving entity, EIN, processor account, approved
 receipt and policy text, registrations, Wallet accounts/certificates, delivery reputation,

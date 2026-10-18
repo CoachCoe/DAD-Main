@@ -20,7 +20,7 @@ UPDATE donor_sessions SET push_token=NULL,push_environment=NULL WHERE id=$1 AND 
 WITH projection AS (
     SELECT * FROM donor_metric_projections m WHERE m.donor_id=sqlc.arg(donor_id)::uuid
 ), candidates AS (
-    SELECT p.referrer_id AS donor_id,'REFERRAL_CONVERTED' AS category,'push:referral:'||p.donor_id::text AS dedup_key,
+    SELECT p.referrer_id AS donor_id,'REFERRAL_CONVERTED' AS category,'push:referral:'||p.donor_id::text||':'||p.referrer_id::text||':'||p.referral_kind AS dedup_key,
         json_build_object('referred_id',p.donor_id::text,'kind',p.referral_kind) AS context
     FROM projection p WHERE p.referrer_id IS NOT NULL AND p.net_minor>0
     AND EXISTS(SELECT 1 FROM donor_gifts g WHERE g.stripe_object_id=p.first_gift_id
@@ -42,6 +42,9 @@ SELECT gen_random_uuid(),c.donor_id,c.category,c.dedup_key,c.context,sqlc.arg(as
 FROM candidates c
 WHERE EXISTS(SELECT 1 FROM donor_sessions s WHERE s.donor_id=c.donor_id AND s.push_token IS NOT NULL
     AND coalesce(s.refresh_expires_at,s.expires_at)>sqlc.arg(as_of)::timestamptz)
+AND (c.category<>'REFERRAL_CONVERTED' OR NOT EXISTS(
+    SELECT 1 FROM donor_push_notifications n WHERE n.category='REFERRAL_CONVERTED' AND n.donor_id=c.donor_id
+    AND n.context->>'referred_id'=c.context->>'referred_id' AND n.context->>'kind'=c.context->>'kind'))
 ON CONFLICT(dedup_key) DO NOTHING;
 
 -- name: NextPushNotification :one

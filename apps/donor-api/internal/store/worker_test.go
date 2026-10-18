@@ -98,7 +98,8 @@ func newWorkerFixture(t *testing.T, frequency string) *workerFixture {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, sql := range []string{
-			"DELETE FROM donor_messages WHERE donor_id=$1 OR dedup_key=$2",
+			"DELETE FROM donor_messages WHERE donor_id=$1 OR (kind='REFERRAL' AND context->>'referred_id'=$2)",
+			"DELETE FROM donor_referral_corrections WHERE donor_id=$1",
 			"DELETE FROM donor_billing_observations WHERE period_id IN (SELECT id FROM donor_billing_periods WHERE donor_id=$1)",
 			"DELETE FROM donor_refund_observations WHERE refund_id IN (SELECT r.id FROM donor_refunds r JOIN donor_gifts g ON g.id=r.gift_id WHERE g.donor_id=$1)",
 			"DELETE FROM donor_refunds WHERE gift_id IN (SELECT id FROM donor_gifts WHERE donor_id=$1)",
@@ -114,8 +115,8 @@ func newWorkerFixture(t *testing.T, frequency string) *workerFixture {
 			"DELETE FROM donor_payment_updates WHERE donor_id=$1",
 		} {
 			args := []any{id}
-			if sql == "DELETE FROM donor_messages WHERE donor_id=$1 OR dedup_key=$2" {
-				args = append(args, "referral:"+id.String())
+			if sql == "DELETE FROM donor_messages WHERE donor_id=$1 OR (kind='REFERRAL' AND context->>'referred_id'=$2)" {
+				args = append(args, id.String())
 			}
 			if _, err := f.db.Exec(ctx, sql, args...); err != nil {
 				t.Error(err)
