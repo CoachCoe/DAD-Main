@@ -126,7 +126,10 @@ Some migrations and releases need more:
   Compose project remains `impactgraph` to retain its existing `postgres-data` volume.
   Do not rename the project or delete volumes to complete the rebrand. Local Compose
   now uses `dad_postgres`; the former `impactgraph_postgres` volume is separate and
-  must be backed up and deliberately migrated if its data is needed.
+  must be backed up and deliberately migrated if its data is needed. A checkout made
+  before the rename may still run that project's PostgreSQL container, which holds port
+  55432 so that `make db-up` fails; stop it with `docker stop impactgraph-postgres-1`,
+  which keeps its volume.
 - The release that binds donor passkey registration to its originating session rejects
   registrations started on an older image. These challenges last five minutes; donors
   can restart registration after the upgrade. Existing passkeys and sessions still work.
