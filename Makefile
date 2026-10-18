@@ -75,6 +75,7 @@ format-go:
 
 format-web:
 	cd apps/web && npm run format
+	cd scripts && ../apps/web/node_modules/.bin/biome format --write .
 
 test-web:
 	cd apps/web && npm run lint && npm test -- --run && npm exec next typegen && npm run typecheck && npm run build
@@ -96,8 +97,10 @@ lint-ledger:
 lint-go:
 	cd apps/donor-api && bash ../../scripts/check-go-dependencies.sh && go tool -modfile=tools/go.mod staticcheck ./... && go run $(GOVULNCHECK) ./...
 
+# The Node scripts share the web app's Biome install, so they are checked here.
 lint-web:
 	cd apps/web && npm audit --audit-level=high
+	cd scripts && ../apps/web/node_modules/.bin/biome check --error-on-warnings .
 
 lint-scripts:
 	@if command -v shellcheck >/dev/null || [ -n "$$CI" ]; then shellcheck scripts/*.sh deploy/nginx/*.envsh; else echo "shellcheck not installed; skipping script lint" >&2; fi
