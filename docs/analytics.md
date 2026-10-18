@@ -98,6 +98,10 @@ No anonymous identifier, browser event, or new third-party destination is introd
 Anonymous behavioral collection is not enabled. Approved privacy/consent text, retention,
 and an analytics destination have not been provided. The referral cookie serves the
 explicit referral function; it is not permission to create a general tracking identifier.
+Browser analytics and its privacy decisions are deferred by product agreement. Before
+enabling collection, approve the events, journey-to-checkout linkage, destination and
+access, retention/deletion, and consent/opt-out disclosures. Metrics that depend on browser
+observations remain unavailable until collection and reconciliation are accepted.
 The following schema is the implementation contract once that product/privacy decision is
 approved, rather than an implied live collection policy:
 
