@@ -73,9 +73,12 @@ establish approved native layouts or visual/accessibility acceptance.
 
 ## App foundation boundary
 
-The mobile implementation stack remains a product/engineering choice. The historical
-PRD specifies one cross-platform codebase; choosing separate SwiftUI and Kotlin/Compose
-apps must update that decision explicitly. The two empty app repositories do not settle it.
+The mobile implementation decision is separate SwiftUI/iOS and Kotlin/Compose/Android
+applications in `DAD-iOS` and `DAD-Android`, approved on 18 October 2026. This supersedes
+the historical PRD's single cross-platform codebase requirement. DAD-Main continues to
+own business rules, API contracts, design values, and server integrations; client code
+owns native presentation, lifecycle, secure credential storage, and platform interaction.
+The final mobile feature subset and navigation remain subject to the mobile PRD.
 
 Once chosen, the first implementation should prove an authenticated read, single-flight
 refresh and atomic token replacement, cancellation/timeouts, revoked-session handling,
