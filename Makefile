@@ -1,6 +1,6 @@
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
 SQLC := sqlc/sqlc:1.31.1@sha256:70f53171d27b2424e9358869975455a6e955a5aa8e58a998a270a6e34e525537
-GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts
+GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts apps/web/design/tokens.ts
 
 # Load testing against a disposable, seeded deployment; see docs/operations.md.
 SEED_DONORS ?= 50000
@@ -11,6 +11,7 @@ LOAD_ORIGIN ?= http://localhost:3000
 LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -origin "$(LOAD_ORIGIN)" -client-ips
 
 .PHONY: install db-up migrate provision api donor-go web dev worker reconcile test test-api test-donor-go test-web test-ledger test-browser-e2e lint lint-go lint-web lint-ledger lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
+.PHONY: generate-mobile check-mobile bundle-mobile
 
 install:
 	cd apps/donor-api && go mod download
@@ -44,6 +45,17 @@ reconcile:
 generate:
 	docker run --rm -v "$(CURDIR)/apps/donor-api:/src" -w /src $(SQLC) generate
 	cd apps/web && npm run --silent generate:api
+	node scripts/mobile-foundation.mjs generate
+
+generate-mobile:
+	node scripts/mobile-foundation.mjs generate
+
+check-mobile:
+	node scripts/mobile-foundation.mjs check
+	node --test scripts/mobile-foundation.test.mjs
+
+bundle-mobile: check-mobile
+	node scripts/mobile-foundation.mjs bundle "$${MOBILE_BUNDLE_DIR:?set MOBILE_BUNDLE_DIR outside the repository}"
 
 check-generated: generate
 	@test -z "$$(git status --porcelain -- $(GENERATED))" || \

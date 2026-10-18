@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "account_paths": ["/account/dashboard", "/account/profile", "/account/payment-method"],
+  "proof_paths": ["/account/claim", "/account/email-change"],
+  "claim_return_paths": ["/account/dashboard", "/account/payment-method"],
+  "referral_prefix": "/r/",
+  "notification_paths": ["/account/dashboard", "/account/payment-method"],
+  "referrals_open_web": true
+}

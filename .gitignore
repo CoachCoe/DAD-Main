@@ -12,6 +12,8 @@ playwright-report/
 *.tsbuildinfo
 apps/web/next-env.d.ts
 apps/web/lib/openapi.d.ts.tmp
+contracts/mobile/swift/.build/
+contracts/mobile/swift/.swiftpm/
 .DS_Store
 .wrangler/
 .dev.vars
