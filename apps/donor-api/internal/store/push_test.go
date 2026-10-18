@@ -272,7 +272,7 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 		}
 	}
 	intents := pushIntents(t, tx, h.donor("alice"))
-	if len(intents) != 1 || intents[0].Category != "REFERRAL_CONVERTED" || intents[0].DedupKey != "push:referral:"+h.donor("ben").String() || !intents[0].ExpiresAt.Time.Equal(paid.Add(pushLifetime)) {
+	if len(intents) != 1 || intents[0].Category != "REFERRAL_CONVERTED" || intents[0].DedupKey != "push:referral:"+h.donor("ben").String()+":"+h.donor("alice").String()+":IRL" || !intents[0].ExpiresAt.Time.Equal(paid.Add(pushLifetime)) {
 		t.Fatalf("intents %+v, want one conversion notice", intents)
 	}
 	if !strings.Contains(string(intents[0].Context), `"kind" : "IRL"`) {

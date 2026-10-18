@@ -118,6 +118,15 @@ Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURE
 
 Some migrations and releases need more:
 
+- The DAD rebrand changes image names, example database names/logins, and the default
+  TLS directory. Existing PostgreSQL volumes keep their original database, owner, and
+  password: changing `POSTGRES_*` does not rename or update an initialized cluster.
+  Keep the deployed values and matching process URLs in `.env.database`; use explicit
+  `INGRESS_TLS_DIR` if certificates remain at their previous path. The production
+  Compose project remains `impactgraph` to retain its existing `postgres-data` volume.
+  Do not rename the project or delete volumes to complete the rebrand. Local Compose
+  now uses `dad_postgres`; the former `impactgraph_postgres` volume is separate and
+  must be backed up and deliberately migrated if its data is needed.
 - The release that binds donor passkey registration to its originating session rejects
   registrations started on an older image. These challenges last five minutes; donors
   can restart registration after the upgrade. Existing passkeys and sessions still work.
@@ -253,6 +262,16 @@ run `migrate`, which recreates missing roles and grants the declared privileges,
 
 ## Stripe
 
+Stripe's [default sandbox limit](https://docs.stripe.com/rate-limits) is 25 requests
+per second per account. The gateway budgets worker reads, interactive checkout/finance
+commands, and reconciliation separately within each process. Checkout and card-setup
+reads, and each refund-list page, also spend tokens. These limits do not coordinate
+across processes or account for the SDK's automatic retries. Before increasing API or
+Stripe-worker replicas, add an account-wide limiter or allocate conservative budgets
+across every caller, reserve room for retries, and measure provider throttling and
+queue age. The local API load test excludes provider calls and cannot validate that
+capacity.
+
 Use the organization's verified Stripe **test** account and snapshot webhook events at
 API version `2026-09-30.endive`. Subscribe to:
 
@@ -383,6 +402,14 @@ recognition, or the messages and push intents queued with it, raises `projection
 projection whenever no projection is due. A donor whose facts cannot be projected is deferred with
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
+
+Deploy migration `0017_referral_corrections.sql` before binaries using projection rules
+version 6. Older projections then converge on the earliest verified successful payment
+through the normal refresh worker. Corrections, transferred referral totals, and new
+notification intents commit together. Monitor projection errors during convergence and
+use the staff `referral-corrections` export to inspect changed attribution. The migration
+does not rewrite gift facts or reconstruct corrections from before this release.
+
 The projection worker also applies referral-touch retention ([donor domain](donor-domain.md#referrals)):
 on start and then hourly it deletes touches that led to no attributed gift and were
 captured more than 13 months ago, at most 2,000 per transaction and one batch between projection
@@ -669,6 +696,12 @@ seeded database. A generator sharing a host with the API or database competes wi
 for CPU. Keep results with the run's ticket, not in the repository.
 
 ## External acceptance
+
+Browser analytics/privacy decisions and manual assistive-technology acceptance are
+deferred by product agreement, as are native design deliverables and physical Wallet/QR
+acceptance. See [analytics](analytics.md) for the collection boundary and
+[design foundations](design-system.md) for the manual accessibility scope. These items
+remain unverified; deferral does not establish production acceptance.
 
 Before live solicitation, verify the receiving entity, EIN, processor account, approved
 receipt and policy text, registrations, Wallet accounts/certificates, delivery reputation,

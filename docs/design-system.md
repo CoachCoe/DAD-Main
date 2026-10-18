@@ -20,6 +20,15 @@ mobile, and tablet layouts, automated WCAG 2.2 checks, keyboard confirmation, an
 or failed data recovery. Automated checks do not establish full assistive-technology
 conformance.
 
+Manual assistive-technology acceptance is deferred by product agreement, alongside
+browser analytics. The future pass covers VoiceOver with iPhone/Safari, TalkBack with
+Android/Chrome, and desktop keyboard-only navigation through giving, account claim and
+sign-in, dashboard, preferences, recurring-gift changes, and critical staff tasks. Check
+control names and reading order, focus movement and restoration, dialogs, validation,
+loading/error announcements, and completion of each journey. Record device/browser
+versions and results, fix failures, and retest; automated accessibility results alone
+do not complete this acceptance.
+
 These shared values are an engineering foundation, not completion of the agency design
 deliverables. The eleven donor app screens, native component implementations, interactive
 prototype, responsive/redline specifications, approved Wallet artwork, store assets, and

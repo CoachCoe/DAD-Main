@@ -28,4 +28,6 @@ apps/atm-ledger/worker-configuration.d.ts
 # (architecture, operations, the product contract, etc.) stays tracked under docs/.
 docs/solutions/
 docs/testing/
+docs/requirements/
+.agents/tasks/
 docs/infra-fix-now-runbook.md

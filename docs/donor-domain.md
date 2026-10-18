@@ -41,9 +41,25 @@ The first valid referral touch wins for 30 days, for both referrer and channel (
 IRL). Later scans, links, and direct visits do not overwrite it or extend its deadline.
 An expired window can be replaced by a new referral touch. Checkout stores attribution
 before account creation, and each collected gift records the referrer and channel that
-were valid at the moment of charge. Conversion requires a successful first gift within the window;
-starting checkout is not conversion. Once converted, the donor's direct referral
-relationship is permanent. Later gifts add dollars, never additional conversions.
+were valid at the moment of charge. Conversion uses the earliest verified successful
+payment's collection timestamp, with the Stripe payment object ID in ascending lexical
+order breaking timestamp ties. Starting checkout is not conversion. That first payment
+must carry a valid referral within its window; a direct first payment earns no referral
+conversion. Later gifts add dollars, never additional conversions.
+
+Webhook arrival order does not decide credit. If an earlier payment is verified later,
+the Go projection corrects the first gift, referrer, and channel and transfers the donor's
+realized net dollars and single qualifying conversion atomically between the affected
+totals. Original gift facts remain unchanged. Each change to an established first gift
+is appended to the staff `referral-corrections` export, including old/new payment IDs,
+referrers, channels, recording time, and rules version. Recomputing unchanged facts adds
+no correction. A previously earned Founding Donor badge remains permanent.
+
+Pending referral notices are checked against current attribution before delivery.
+Corrected recipients can receive their own notice, once per referred donor, recipient,
+and channel; existing legacy notices prevent duplicate sends. Already delivered notices
+cannot be recalled. The correction history records the attribution change without
+inventing a second financial gift or silently changing historical notification records.
 
 A referral touch that led to a gift carrying its referrer is kept for good. Any other
 touch, including one whose checkout was abandoned or paid after the window, is deleted 13

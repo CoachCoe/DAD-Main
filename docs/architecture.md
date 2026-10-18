@@ -89,6 +89,12 @@ are committed before external mutations and carry frozen parameters and stable p
 idempotency keys. An ambiguous provider response is reconciled before another mutation;
 old unknown commands require operator review rather than a new blind request.
 
+Recognition uses the earliest verified successful payment, ordered by collection time
+and stable processor object ID, independently of webhook delivery order. A late earlier
+payment can correct the projected relationship; referrer totals and append-only correction
+history change in the same transaction. Gift facts remain intact. See the
+[referral rules](donor-domain.md#referrals) for notification and refund behavior.
+
 The webhook verifies the raw request signature and persists allowlisted fields before
 acknowledging. Workers fetch current provider state before taking the donor lock, then
 lock and apply it, fetching again only if another writer recorded newer state meanwhile;

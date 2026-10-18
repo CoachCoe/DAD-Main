@@ -117,6 +117,22 @@ func TestEquivalentTimezoneFactsDeduplicateWithoutChangingInput(t *testing.T) {
 		t.Fatal("calculation modified caller facts")
 	}
 }
+
+func TestFirstPaymentTimestampTiesUseStableObjectID(t *testing.T) {
+	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := Gift{ID: "pi_a", DonorID: "ben", Amount: 3000, PaidAt: now, Frequency: "ONE_TIME", Currency: "USD", Candidate: &Candidate{ReferrerID: "alice", Kind: "IRL", ExpiresAt: now.Add(time.Hour)}}
+	z := Gift{ID: "pi_z", DonorID: "ben", Amount: 3000, PaidAt: now, Frequency: "ONE_TIME", Currency: "USD", Candidate: &Candidate{ReferrerID: "cara", Kind: "LINK", ExpiresAt: now.Add(time.Hour)}}
+	for _, input := range [][]Gift{{a, z}, {z, a}} {
+		got, err := Relationships(input, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := got["ben"]
+		if r.FirstGiftID != "pi_a" || r.ReferrerID == nil || *r.ReferrerID != "alice" || r.Kind == nil || *r.Kind != "IRL" {
+			t.Fatalf("timestamp tie depends on input order: %+v", r)
+		}
+	}
+}
 func TestFoundingQualifiedAtUsesEarliestQualifyingGift(t *testing.T) {
 	early := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
 	gifts := []Gift{

@@ -16,7 +16,7 @@ WITH gifts AS MATERIALIZED (
         json_build_object('year',year),sqlc.arg(as_of)::timestamptz FROM years
     WHERE year>=2026 AND year<extract(year FROM sqlc.arg(as_of)::timestamptz AT TIME ZONE 'America/New_York')
     UNION ALL
-    SELECT p.referrer_id,'REFERRAL','referral:'||p.donor_id::text,
+    SELECT p.referrer_id,'REFERRAL','referral:'||p.donor_id::text||':'||p.referrer_id::text||':'||p.referral_kind,
         json_build_object('referred_id',p.donor_id::text,'kind',coalesce(p.referral_kind,'')),sqlc.arg(as_of)::timestamptz
     FROM donor_metric_projections p WHERE p.donor_id=sqlc.arg(donor_id) AND p.referrer_id IS NOT NULL AND p.net_minor>0
     UNION ALL
@@ -28,6 +28,9 @@ WITH gifts AS MATERIALIZED (
 INSERT INTO donor_messages(id,donor_id,kind,dedup_key,context,available_at)
 SELECT gen_random_uuid(),c.donor_id,c.kind,c.dedup_key,c.payload,c.available_at FROM candidates c
 WHERE NOT EXISTS(SELECT 1 FROM donor_messages m WHERE m.dedup_key=c.dedup_key)
+AND (c.kind<>'REFERRAL' OR NOT EXISTS(
+    SELECT 1 FROM donor_messages m WHERE m.kind='REFERRAL' AND m.donor_id=c.donor_id
+    AND m.context->>'referred_id'=c.payload->>'referred_id' AND m.context->>'kind'=c.payload->>'kind'))
 ON CONFLICT(dedup_key) DO NOTHING;
 
 -- name: QueueLoginEmail :exec

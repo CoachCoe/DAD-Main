@@ -21,6 +21,7 @@ Use stable record IDs for deduplication, not email addresses, names, or webhook 
 | `billing_attempt_observed.v1` | billing-history / source event ID | Verified FAILED or PAID invoice observation, with amount, billing reason, processor event creation, effective occurrence, and local recording timestamps. A replay of the same event does not add a row. |
 | `account_claimed.v1` | donors / donor ID, claimed_at | First account claim, separate from first gift. Giving before claim is normal. |
 | `referral_recognized.v1` | referrals / referred donor ID | Direct-only referrer/channel and realized net giving from projections. Check freshness before using totals. |
+| `referral_corrected.v1` | referral-corrections / correction ID | Append-only old/new first payment, referrer and channel when late verified facts correct established attribution; includes recording time and rules version. Collection starts with migration 0017 and does not invent past corrections. |
 | `recognition_computed.v1` | streaks / donor ID, computed_at | Current and best streak, risk/grace, and permanent founding award. Unknown is not zero. |
 | `notification_completed.v1` | messages / message ID | Worker completed the intent; inspect suppression and error fields. Does not prove inbox delivery, opening, or reading. |
 | `identity_changed.v1` | identity-events / event ID | Requested, current-address verified, or completed email change. Donor identity remains stable. |
@@ -44,7 +45,7 @@ taken while that period was within retention, and state the capture cutoff.
 | Metric | Definition and caveats |
 |---|---|
 | Founding donors | Distinct donor IDs whose first successful gift completed before the launch cutoff. A later refund or cancellation does not remove the permanent badge. Account claim is not required. |
-| First-gift conversion by source | Distinct eligible landing journeys with a verified first gift divided by eligible landing journeys, separately DIRECT/LINK/IRL. Attribution uses the frozen checkout source; browser campaign parameters cannot override it. Do not substitute checkout requests for landing journeys. |
+| First-gift conversion by source | Distinct eligible landing journeys with a verified first gift divided by eligible landing journeys, separately DIRECT/LINK/IRL. Attribution uses the frozen source of the earliest verified successful payment, with payment ID breaking timestamp ties; delayed verification can correct the projection. Browser campaign parameters cannot override it. Do not substitute checkout requests for landing journeys. |
 | Seven-day share rate | Donors with a confirmed native-share handoff or clipboard copy within seven days of first gift divided by donors whose seven-day observation window has elapsed. Label this a share-action proxy, not verified invitation delivery. Cancellation of a share sheet is not a share. |
 | IRL conversion share | IRL first-gift conversions divided by LINK plus IRL first-gift conversions in the same cohort and observation window. Direct gifts are excluded from this denominator. |
 | Viral coefficient | Converting direct referrals credited to a donor cohort divided by donors in that cohort, with acquisition dates and observation window stated. No second-level credit. Publish gross first conversions separately from currently qualified referrals after full refunds. |
@@ -98,6 +99,10 @@ No anonymous identifier, browser event, or new third-party destination is introd
 Anonymous behavioral collection is not enabled. Approved privacy/consent text, retention,
 and an analytics destination have not been provided. The referral cookie serves the
 explicit referral function; it is not permission to create a general tracking identifier.
+Browser analytics and its privacy decisions are deferred by product agreement. Before
+enabling collection, approve the events, journey-to-checkout linkage, destination and
+access, retention/deletion, and consent/opt-out disclosures. Metrics that depend on browser
+observations remain unavailable until collection and reconciliation are accepted.
 The following schema is the implementation contract once that product/privacy decision is
 approved, rather than an implied live collection policy:
 

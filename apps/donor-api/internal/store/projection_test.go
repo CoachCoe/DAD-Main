@@ -414,7 +414,7 @@ WHERE g.stripe_object_id=$1`, "pi_first_"+f.donorID.String(), HashToken(visitor)
 	}
 }
 
-func TestConversionAndFoundingArePermanentOnceProjected(t *testing.T) {
+func TestEarlierPaymentCorrectsConversionAndPreservesFoundingAward(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
@@ -431,11 +431,11 @@ func TestConversionAndFoundingArePermanentOnceProjected(t *testing.T) {
 	if err != nil || first.ReferrerID != h.donor("alice") || !first.FoundingAwardedAt.Time.Equal(later) {
 		t.Fatalf("first projection: %+v %v", first, err)
 	}
-	// An earlier gift processed late must not move the converted relationship.
+	// Provider collection time, rather than processing order, determines credit.
 	h.gift(recognition.Gift{ID: "earlier", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: earlier, Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: window}})
 	second, err := projectFacts(ctx, queries.New(tx), h.donor("ben"), later.Add(time.Hour))
-	if err != nil || second.ReferrerID != first.ReferrerID || second.ReferralKind != first.ReferralKind || second.FirstGiftID != first.FirstGiftID || !second.FoundingAwardedAt.Time.Equal(first.FoundingAwardedAt.Time) || second.NetMinor.Int64 != 6000 {
-		t.Fatalf("relationship moved: %+v %v", second, err)
+	if err != nil || second.ReferrerID != h.donor("cara") || second.ReferralKind.String != "IRL" || second.FirstGiftID.String != h.objects["earlier"] || !second.FoundingAwardedAt.Time.Equal(first.FoundingAwardedAt.Time) || second.NetMinor.Int64 != 6000 {
+		t.Fatalf("incorrect corrected relationship: %+v %v", second, err)
 	}
 }
 

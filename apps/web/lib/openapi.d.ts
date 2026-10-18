@@ -2390,6 +2390,8 @@ export interface operations {
                     "application/json": {
                         /** @constant */
                         status: "alive";
+                        /** @description The running build's VCS revision, or "unknown". */
+                        commit: string;
                     };
                 };
             };
@@ -2415,6 +2417,8 @@ export interface operations {
                         status: "ready";
                         /** @constant */
                         payments: "test_mode_only";
+                        /** @description The running build's VCS revision, or "unknown". */
+                        commit: string;
                     };
                 };
             };
