@@ -19,7 +19,11 @@ import (
 
 func TestEnvironmentConfiguration(t *testing.T) {
 	key := base64.URLEncoding.EncodeToString(make([]byte, 32))
-	valid := map[string]string{"DONOR_SMTP_HOST": "smtp.example.org", "DONOR_EMAIL_FROM": "DAD <sender@example.org>", "DONOR_EMAIL_ENCRYPTION_KEY": key}
+	valid := map[string]string{
+		"DONOR_SMTP_HOST":            "smtp.example.org",
+		"DONOR_EMAIL_FROM":           "DAD <sender@example.org>",
+		"DONOR_EMAIL_ENCRYPTION_KEY": key,
+	}
 	for _, tc := range []struct {
 		name, field, value string
 		invalid            bool
@@ -51,7 +55,8 @@ func TestEnvironmentConfiguration(t *testing.T) {
 				if want := tc.field; !strings.Contains(err.Error(), want) || (tc.value != "" && strings.Contains(err.Error(), tc.value)) {
 					t.Fatalf("got %q, want it to name %s without its value", err, want)
 				}
-				if tc.name == "invalid retired key" && (!strings.Contains(err.Error(), "key 2 of 2") || strings.Contains(err.Error(), key)) {
+				if tc.name == "invalid retired key" &&
+					(!strings.Contains(err.Error(), "key 2 of 2") || strings.Contains(err.Error(), key)) {
 					t.Fatalf("got %q, want it to name the second key's position without key material", err)
 				}
 				return

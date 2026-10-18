@@ -89,7 +89,12 @@ WHERE a.roleid=(SELECT oid FROM pg_roles WHERE rolname=$1) AND (a.inherit_option
 			return err
 		}
 		if len(others) > 0 {
-			return fmt.Errorf("%s's privileges also reach %s; revoke the role from each (REVOKE %s FROM …) or drop it", login.Role.Name, strings.Join(others, ", "), login.Role.Name)
+			return fmt.Errorf(
+				"%s's privileges also reach %s; revoke the role from each (REVOKE %s FROM …) or drop it",
+				login.Role.Name,
+				strings.Join(others, ", "),
+				login.Role.Name,
+			)
 		}
 	}
 	return nil
@@ -102,7 +107,8 @@ func provision(ctx context.Context, tx pgx.Tx, login Login) error {
 	}
 	user := pgx.Identifier{login.User}.Sanitize()
 	var elevated bool
-	err = tx.QueryRow(ctx, `SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls OR NOT rolinherit FROM pg_roles WHERE rolname=$1`, login.User).Scan(&elevated)
+	err = tx.QueryRow(ctx, `SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls OR NOT rolinherit FROM pg_roles WHERE rolname=$1`, login.User).
+		Scan(&elevated)
 	var statement string
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):

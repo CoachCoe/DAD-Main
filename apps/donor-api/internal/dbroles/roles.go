@@ -44,7 +44,19 @@ var (
 )
 
 // Roles lists every process role.
-var Roles = []Role{API, StripeWorker, ProjectionWorker, LoginEmailWorker, EmailChangeWorker, MessageWorker, PushWorker, Monitor, StaffCLI, Rekey, ReconcileJob}
+var Roles = []Role{
+	API,
+	StripeWorker,
+	ProjectionWorker,
+	LoginEmailWorker,
+	EmailChangeWorker,
+	MessageWorker,
+	PushWorker,
+	Monitor,
+	StaffCLI,
+	Rekey,
+	ReconcileJob,
+}
 
 // Workers maps each worker kind to its role.
 var Workers = map[string]Role{
@@ -108,7 +120,12 @@ SELECT has_database_privilege(session_user,current_database(),'CREATE') OR EXIST
 	case err != nil:
 		return ErrCheckFailed
 	case schemaChanger && !allowOwner:
-		return fmt.Errorf("%s connects as a user that can change the schema; use a login of %s (see docs/operations.md#database-roles), or set %s=true on a local machine", r.Variable(), r.Name, AllowOwnerVariable)
+		return fmt.Errorf(
+			"%s connects as a user that can change the schema; use a login of %s (see docs/operations.md#database-roles), or set %s=true on a local machine",
+			r.Variable(),
+			r.Name,
+			AllowOwnerVariable,
+		)
 	case schemaChanger && !assumed:
 		return nil
 	case !member:

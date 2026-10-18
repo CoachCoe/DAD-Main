@@ -25,6 +25,7 @@ func (s *dashboardStub) DonorDashboard(ctx context.Context, token string) (store
 	s.token = token
 	return store.DonorDashboard{Mode: "test", State: "preparing"}, s.err
 }
+
 func TestDashboardAuthenticationAndPrivateErrors(t *testing.T) {
 	for _, tc := range []struct {
 		token  string

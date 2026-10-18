@@ -12,7 +12,14 @@ import (
 // FromEnvironment returns nil when mail is deliberately unconfigured. An
 // invalid configuration's error names the variables to fix, never their values.
 func FromEnvironment(getenv func(string) string) (*Settings, error) {
-	s := Settings{Host: getenv("DONOR_SMTP_HOST"), Port: 587, Username: getenv("DONOR_SMTP_USERNAME"), Password: getenv("DONOR_SMTP_PASSWORD"), Sender: getenv("DONOR_EMAIL_FROM"), CAPath: getenv("DONOR_SMTP_CA")}
+	s := Settings{
+		Host:     getenv("DONOR_SMTP_HOST"),
+		Port:     587,
+		Username: getenv("DONOR_SMTP_USERNAME"),
+		Password: getenv("DONOR_SMTP_PASSWORD"),
+		Sender:   getenv("DONOR_EMAIL_FROM"),
+		CAPath:   getenv("DONOR_SMTP_CA"),
+	}
 	keys := getenv("DONOR_EMAIL_ENCRYPTION_KEY")
 	if s.Host == "" && s.Username == "" && s.Password == "" && s.Sender == "" && keys == "" {
 		return nil, nil

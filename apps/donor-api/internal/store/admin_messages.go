@@ -59,10 +59,14 @@ func (s *StaffService) ResendMessage(ctx context.Context, token string, messageI
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return QueuedMessage{}, err
 		}
-		if (source.Kind != "RECEIPT" && source.Kind != "ANNUAL") || source.SuppressedReason.Valid || (!source.CompletedAt.Valid && source.Attempts < 5) {
+		if (source.Kind != "RECEIPT" && source.Kind != "ANNUAL") || source.SuppressedReason.Valid ||
+			(!source.CompletedAt.Valid && source.Attempts < 5) {
 			return QueuedMessage{}, ErrStaffConflict
 		}
-		recent, err := q.RecentDonorMessage(ctx, queries.RecentDonorMessageParams{DonorID: source.DonorID, Kind: source.Kind, CreatedAt: timestamp(now.Add(-time.Minute))})
+		recent, err := q.RecentDonorMessage(
+			ctx,
+			queries.RecentDonorMessageParams{DonorID: source.DonorID, Kind: source.Kind, CreatedAt: timestamp(now.Add(-time.Minute))},
+		)
 		if err != nil {
 			return QueuedMessage{}, err
 		}
@@ -89,7 +93,15 @@ func (s *StaffService) ResendMessage(ctx context.Context, token string, messageI
 		if err != nil {
 			return QueuedMessage{}, err
 		}
-		return queued, auditStaff(ctx, q, actor.ID, "message.resend_requested", job.ID.String(), map[string]string{"source_id": messageID.String()}, now)
+		return queued, auditStaff(
+			ctx,
+			q,
+			actor.ID,
+			"message.resend_requested",
+			job.ID.String(),
+			map[string]string{"source_id": messageID.String()},
+			now,
+		)
 	})
 }
 

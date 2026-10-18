@@ -20,7 +20,14 @@ func SVG(url string) ([]byte, error) {
 	modules := code.Bounds().Dx()
 	size := modules + 2*quietZone
 	var out strings.Builder
-	fmt.Fprintf(&out, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" shape-rendering="crispEdges"><rect width="100%%" height="100%%" fill="white"/><path fill="black" d="`, size, size, size*10, size*10)
+	fmt.Fprintf(
+		&out,
+		`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" shape-rendering="crispEdges"><rect width="100%%" height="100%%" fill="white"/><path fill="black" d="`,
+		size,
+		size,
+		size*10,
+		size*10,
+	)
 	for y := range modules {
 		for x := range modules {
 			if code.At(x, y) == color.Black {

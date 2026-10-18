@@ -56,7 +56,8 @@ func NewFCM(keyJSON []byte) (*FCM, error) {
 		Key     string `json:"private_key"`
 	}
 	invalid := fmt.Errorf("%w: DONOR_PUSH_FCM_KEY_FILE must be a Firebase service-account JSON key", ErrConfiguration)
-	if json.Unmarshal(keyJSON, &account) != nil || account.Type != "service_account" || !projectPattern.MatchString(account.Project) || !serviceAccountPattern.MatchString(account.Email) {
+	if json.Unmarshal(keyJSON, &account) != nil || account.Type != "service_account" || !projectPattern.MatchString(account.Project) ||
+		!serviceAccountPattern.MatchString(account.Email) {
 		return nil, invalid
 	}
 	block, rest := pem.Decode([]byte(account.Key))
@@ -111,7 +112,8 @@ func (f *FCM) accessToken(ctx context.Context) (string, error) {
 	if err := throttled(response); err != nil {
 		return "", err
 	}
-	if response.StatusCode != http.StatusOK || json.Unmarshal(body, &grant) != nil || grant.Token == "" || time.Duration(grant.Expires)*time.Second <= accessMargin {
+	if response.StatusCode != http.StatusOK || json.Unmarshal(body, &grant) != nil || grant.Token == "" ||
+		time.Duration(grant.Expires)*time.Second <= accessMargin {
 		return "", ErrRejected
 	}
 	f.access, f.expires = grant.Token, now.Add(time.Duration(grant.Expires)*time.Second-accessMargin)
@@ -147,7 +149,12 @@ func (f *FCM) Send(ctx context.Context, device Device, n Notification) error {
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, f.SendURL+"/v1/projects/"+f.project+"/messages:send", bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		f.SendURL+"/v1/projects/"+f.project+"/messages:send",
+		bytes.NewReader(body),
+	)
 	if err != nil {
 		return err
 	}

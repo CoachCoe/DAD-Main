@@ -87,7 +87,8 @@ func TestUnmatchedRoutesAnswerInJSONAndKeepAllow(t *testing.T) {
 	server := NewServer("", Services{})
 	response := httptest.NewRecorder()
 	server.Handler.ServeHTTP(response, httptest.NewRequest("DELETE", "/donor/checkouts", nil))
-	if response.Code != 405 || response.Header().Get("Allow") != "POST" || response.Header().Get("Content-Type") != "application/json" || !strings.Contains(response.Body.String(), `"detail":"Method Not Allowed"`) {
+	if response.Code != 405 || response.Header().Get("Allow") != "POST" || response.Header().Get("Content-Type") != "application/json" ||
+		!strings.Contains(response.Body.String(), `"detail":"Method Not Allowed"`) {
 		t.Fatalf("%d %v %s", response.Code, response.Header(), response.Body.String())
 	}
 }
@@ -95,7 +96,8 @@ func TestUnmatchedRoutesAnswerInJSONAndKeepAllow(t *testing.T) {
 func TestPathCleaningRedirectKeepsLocation(t *testing.T) {
 	response := httptest.NewRecorder()
 	NewServer("", Services{}).Handler.ServeHTTP(response, httptest.NewRequest("GET", "/donor/staff/exports/../secrets.csv", nil))
-	if response.Code != 307 || response.Header().Get("Location") != "/donor/staff/secrets.csv" || response.Header().Get("Content-Type") != "application/json" {
+	if response.Code != 307 || response.Header().Get("Location") != "/donor/staff/secrets.csv" ||
+		response.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("got %d Location %q Content-Type %q, want a JSON 307 to the clean path",
 			response.Code, response.Header().Get("Location"), response.Header().Get("Content-Type"))
 	}
@@ -107,7 +109,8 @@ func TestSecurityHeadersApplyToEveryResponse(t *testing.T) {
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
 		h := response.Header()
-		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" || !strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+		if h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" ||
+			!strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 			t.Fatalf("%s missing security headers: %v", path, h)
 		}
 	}

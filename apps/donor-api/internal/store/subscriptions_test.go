@@ -23,12 +23,41 @@ func paymentObject(t *testing.T, value map[string]any) payments.Object {
 	}
 	return out
 }
+
 func subscription(checkout string, start time.Time) map[string]any {
-	return map[string]any{"id": "sub_" + checkout, "livemode": false, "status": "active", "customer": "cus_fixture", "cancel_at_period_end": false, "cancel_at": nil, "billing_cycle_anchor": start.Unix(), "metadata": map[string]any{"dad_checkout_id": checkout}, "items": map[string]any{"has_more": false, "data": []any{map[string]any{"id": "si_fixture", "quantity": 1, "current_period_start": start.Unix(), "current_period_end": start.Add(30 * 24 * time.Hour).Unix(), "price": map[string]any{"currency": "usd", "unit_amount": 3000, "product": "prod_fixture", "recurring": map[string]any{"interval": "month", "interval_count": 1}}}}}}
+	return map[string]any{
+		"id":                   "sub_" + checkout,
+		"livemode":             false,
+		"status":               "active",
+		"customer":             "cus_fixture",
+		"cancel_at_period_end": false,
+		"cancel_at":            nil,
+		"billing_cycle_anchor": start.Unix(),
+		"metadata":             map[string]any{"dad_checkout_id": checkout},
+		"items": map[string]any{
+			"has_more": false,
+			"data": []any{
+				map[string]any{
+					"id":                   "si_fixture",
+					"quantity":             1,
+					"current_period_start": start.Unix(),
+					"current_period_end":   start.Add(30 * 24 * time.Hour).Unix(),
+					"price": map[string]any{
+						"currency":    "usd",
+						"unit_amount": 3000,
+						"product":     "prod_fixture",
+						"recurring":   map[string]any{"interval": "month", "interval_count": 1},
+					},
+				},
+			},
+		},
+	}
 }
+
 func subscriptionItem(remote map[string]any) map[string]any {
 	return remote["items"].(map[string]any)["data"].([]any)[0].(map[string]any)
 }
+
 func assertEventProcessed(t *testing.T, f *workerFixture, id string, want bool) {
 	t.Helper()
 	var done bool
@@ -39,6 +68,7 @@ func assertEventProcessed(t *testing.T, f *workerFixture, id string, want bool) 
 		t.Fatalf("processed=%v want=%v", done, want)
 	}
 }
+
 func TestSubscriptionUsesCurrentStateAndReleasesCancelledReservation(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	result := f.checkout(t)
@@ -60,10 +90,12 @@ func TestSubscriptionUsesCurrentStateAndReleasesCancelledReservation(t *testing.
 	if status != "canceled" || attempt != "CANCELLED" || !stops.Equal(start.Add(30*24*time.Hour)) {
 		t.Fatal("stale webhook overrode current cancellation")
 	}
-	if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_recurring_reservations WHERE donor_id=$1", f.donorID).Scan(&reservations); err != nil || reservations != 0 {
+	if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_recurring_reservations WHERE donor_id=$1", f.donorID).Scan(&reservations); err != nil ||
+		reservations != 0 {
 		t.Fatal("reservation not released", err)
 	}
 }
+
 func TestCheckoutCompletionSyncsTheSubscriptionItBinds(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	result := f.checkout(t)
@@ -76,12 +108,18 @@ func TestCheckoutCompletionSyncsTheSubscriptionItBinds(t *testing.T) {
 		session.String = "cs_test_" + result.CheckoutID
 	}
 	subID := "sub_" + result.CheckoutID
-	completed := map[string]any{"id": session.String, "status": "complete", "subscription": subID, "metadata": map[string]any{"dad_checkout_id": result.CheckoutID}}
+	completed := map[string]any{
+		"id":           session.String,
+		"status":       "complete",
+		"subscription": subID,
+		"metadata":     map[string]any{"dad_checkout_id": result.CheckoutID},
+	}
 	event := f.receive(t, "checkout.session.completed", completed)
 	f.process(t)
 	assertEventProcessed(t, f, event, false)
 	var bound bool
-	if err := f.db.QueryRow(ctx, "SELECT stripe_subscription_id IS NOT NULL FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&bound); err != nil || bound {
+	if err := f.db.QueryRow(ctx, "SELECT stripe_subscription_id IS NOT NULL FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&bound); err != nil ||
+		bound {
 		t.Fatal("completion applied without its subscription", err)
 	}
 
@@ -113,12 +151,14 @@ func TestEverySubscriptionEventSyncsCurrentState(t *testing.T) {
 			f.process(t)
 			assertEventProcessed(t, f, event, true)
 			var stops time.Time
-			if err := f.db.QueryRow(context.Background(), "SELECT stops_at FROM donor_subscriptions WHERE donor_id=$1", f.donorID).Scan(&stops); err != nil || !stops.Equal(start.Add(30*24*time.Hour)) {
+			if err := f.db.QueryRow(context.Background(), "SELECT stops_at FROM donor_subscriptions WHERE donor_id=$1", f.donorID).Scan(&stops); err != nil ||
+				!stops.Equal(start.Add(30*24*time.Hour)) {
 				t.Fatal("event did not sync the subscription's current state", stops, err)
 			}
 		})
 	}
 }
+
 func TestInvalidSubscriptionRollsBackBindingAndProjection(t *testing.T) {
 	cases := map[string]func(map[string]any){
 		"live":        func(r map[string]any) { r["livemode"] = true },
@@ -145,15 +185,18 @@ func TestInvalidSubscriptionRollsBackBindingAndProjection(t *testing.T) {
 			assertEventProcessed(t, f, event, false)
 			var bound bool
 			var schedules int
-			if err := f.db.QueryRow(context.Background(), "SELECT stripe_subscription_id IS NOT NULL FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&bound); err != nil || bound {
+			if err := f.db.QueryRow(context.Background(), "SELECT stripe_subscription_id IS NOT NULL FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&bound); err != nil ||
+				bound {
 				t.Fatal("failed binding survived", err)
 			}
-			if err := f.db.QueryRow(context.Background(), "SELECT count(*) FROM donor_subscriptions WHERE donor_id=$1", f.donorID).Scan(&schedules); err != nil || schedules != 0 {
+			if err := f.db.QueryRow(context.Background(), "SELECT count(*) FROM donor_subscriptions WHERE donor_id=$1", f.donorID).Scan(&schedules); err != nil ||
+				schedules != 0 {
 				t.Fatal("invalid schedule saved", err)
 			}
 		})
 	}
 }
+
 func TestReconcileAuthorizedAmountPauseAndResumption(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	result := f.checkout(t)
@@ -181,7 +224,8 @@ func TestReconcileAuthorizedAmountPauseAndResumption(t *testing.T) {
 	assertEventProcessed(t, f, event, true)
 	var confirmed bool
 	for _, table := range []string{"donor_amount_changes", "donor_pauses"} {
-		if err := f.db.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM "+table+" WHERE donor_id=$1", f.donorID).Scan(&confirmed); err != nil || !confirmed {
+		if err := f.db.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM "+table+" WHERE donor_id=$1", f.donorID).Scan(&confirmed); err != nil ||
+			!confirmed {
 			t.Fatal("authorization not confirmed", table, err)
 		}
 	}
@@ -193,7 +237,8 @@ func TestReconcileAuthorizedAmountPauseAndResumption(t *testing.T) {
 	event = f.receive(t, "customer.subscription.updated", remote)
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
-	if err := f.db.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM donor_resumptions WHERE id=$1", resume).Scan(&confirmed); err != nil || !confirmed {
+	if err := f.db.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM donor_resumptions WHERE id=$1", resume).Scan(&confirmed); err != nil ||
+		!confirmed {
 		t.Fatal("resumption not confirmed", err)
 	}
 	remote["pause_collection"] = nil
@@ -229,7 +274,8 @@ func TestInvoiceConfirmsPendingAmountWithoutRepricingPriorPeriod(t *testing.T) {
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
 	var total int64
-	if err := f.db.QueryRow(ctx, "SELECT sum(amount_minor) FROM donor_gifts WHERE donor_id=$1", f.donorID).Scan(&total); err != nil || total != 12000 {
+	if err := f.db.QueryRow(ctx, "SELECT sum(amount_minor) FROM donor_gifts WHERE donor_id=$1", f.donorID).Scan(&total); err != nil ||
+		total != 12000 {
 		t.Fatal("invoice effective boundary changed", total, err)
 	}
 }
@@ -252,7 +298,8 @@ func TestExpiredCheckoutReleasesItsReservationButNeverUndoesACompletion(t *testi
 	}
 	sessionOf := func(f *workerFixture, checkout string) string {
 		var session pgtype.Text
-		if err := f.db.QueryRow(ctx, "SELECT stripe_session_id FROM donor_stripe_checkouts WHERE checkout_id=$1", checkout).Scan(&session); err != nil || !session.Valid {
+		if err := f.db.QueryRow(ctx, "SELECT stripe_session_id FROM donor_stripe_checkouts WHERE checkout_id=$1", checkout).Scan(&session); err != nil ||
+			!session.Valid {
 			t.Fatal("checkout has no session", err)
 		}
 		return session.String
@@ -265,13 +312,25 @@ func TestExpiredCheckoutReleasesItsReservationButNeverUndoesACompletion(t *testi
 	if _, err := f.service.BeginCheckout(ctx, again); !errors.Is(err, payments.ErrCheckoutConflict) {
 		t.Fatal("second monthly checkout allowed while the first is open", err)
 	}
-	foreign := f.receive(t, "checkout.session.expired", map[string]any{"id": "cs_someone_else", "status": "expired", "metadata": map[string]any{"dad_checkout_id": result.CheckoutID}})
+	foreign := f.receive(
+		t,
+		"checkout.session.expired",
+		map[string]any{"id": "cs_someone_else", "status": "expired", "metadata": map[string]any{"dad_checkout_id": result.CheckoutID}},
+	)
 	f.process(t)
 	assertEventProcessed(t, f, foreign, false)
 	if reservations(f) != 1 {
 		t.Fatal("an expiry for another session released the reservation")
 	}
-	expired := f.receive(t, "checkout.session.expired", map[string]any{"id": sessionOf(f, result.CheckoutID), "status": "expired", "metadata": map[string]any{"dad_checkout_id": result.CheckoutID}})
+	expired := f.receive(
+		t,
+		"checkout.session.expired",
+		map[string]any{
+			"id":       sessionOf(f, result.CheckoutID),
+			"status":   "expired",
+			"metadata": map[string]any{"dad_checkout_id": result.CheckoutID},
+		},
+	)
 	f.process(t)
 	assertEventProcessed(t, f, expired, true)
 	if attemptStatus(f, result.CheckoutID) != "EXPIRED" || reservations(f) != 0 {
@@ -284,7 +343,15 @@ func TestExpiredCheckoutReleasesItsReservationButNeverUndoesACompletion(t *testi
 	done := newWorkerFixture(t, "MONTHLY")
 	finished := done.checkout(t)
 	mustExec(t, done.db, "UPDATE donor_stripe_checkouts SET status='COMPLETE' WHERE checkout_id=$1", finished.CheckoutID)
-	late := done.receive(t, "checkout.session.expired", map[string]any{"id": sessionOf(done, finished.CheckoutID), "status": "expired", "metadata": map[string]any{"dad_checkout_id": finished.CheckoutID}})
+	late := done.receive(
+		t,
+		"checkout.session.expired",
+		map[string]any{
+			"id":       sessionOf(done, finished.CheckoutID),
+			"status":   "expired",
+			"metadata": map[string]any{"dad_checkout_id": finished.CheckoutID},
+		},
+	)
 	done.process(t)
 	assertEventProcessed(t, done, late, true)
 	if attemptStatus(done, finished.CheckoutID) != "COMPLETE" || reservations(done) != 1 {

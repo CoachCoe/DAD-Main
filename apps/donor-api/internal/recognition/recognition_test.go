@@ -120,8 +120,24 @@ func TestEquivalentTimezoneFactsDeduplicateWithoutChangingInput(t *testing.T) {
 
 func TestFirstPaymentTimestampTiesUseStableObjectID(t *testing.T) {
 	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-	a := Gift{ID: "pi_a", DonorID: "ben", Amount: 3000, PaidAt: now, Frequency: "ONE_TIME", Currency: "USD", Candidate: &Candidate{ReferrerID: "alice", Kind: "IRL", ExpiresAt: now.Add(time.Hour)}}
-	z := Gift{ID: "pi_z", DonorID: "ben", Amount: 3000, PaidAt: now, Frequency: "ONE_TIME", Currency: "USD", Candidate: &Candidate{ReferrerID: "cara", Kind: "LINK", ExpiresAt: now.Add(time.Hour)}}
+	a := Gift{
+		ID:        "pi_a",
+		DonorID:   "ben",
+		Amount:    3000,
+		PaidAt:    now,
+		Frequency: "ONE_TIME",
+		Currency:  "USD",
+		Candidate: &Candidate{ReferrerID: "alice", Kind: "IRL", ExpiresAt: now.Add(time.Hour)},
+	}
+	z := Gift{
+		ID:        "pi_z",
+		DonorID:   "ben",
+		Amount:    3000,
+		PaidAt:    now,
+		Frequency: "ONE_TIME",
+		Currency:  "USD",
+		Candidate: &Candidate{ReferrerID: "cara", Kind: "LINK", ExpiresAt: now.Add(time.Hour)},
+	}
 	for _, input := range [][]Gift{{a, z}, {z, a}} {
 		got, err := Relationships(input, now)
 		if err != nil {
@@ -133,6 +149,7 @@ func TestFirstPaymentTimestampTiesUseStableObjectID(t *testing.T) {
 		}
 	}
 }
+
 func TestFoundingQualifiedAtUsesEarliestQualifyingGift(t *testing.T) {
 	early := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
 	gifts := []Gift{
@@ -195,7 +212,15 @@ func TestPauseKeepsStreakThroughResumption(t *testing.T) {
 		}
 		gifts := []Gift{
 			{ID: "first", DonorID: "ben", Amount: 3000, PaidAt: start, Frequency: "MONTHLY", PeriodID: "first", Currency: "USD"},
-			{ID: "resumed", DonorID: "ben", Amount: 3000, PaidAt: resume.Add(time.Hour), Frequency: "MONTHLY", PeriodID: "resumed", Currency: "USD"},
+			{
+				ID:        "resumed",
+				DonorID:   "ben",
+				Amount:    3000,
+				PaidAt:    resume.Add(time.Hour),
+				Frequency: "MONTHLY",
+				PeriodID:  "resumed",
+				Currency:  "USD",
+			},
 		}
 		pauses := []Pause{{Start: paused, End: resume}}
 		got, err := GivingStreak(gifts, nil, periods, "ben", resume.Add(2*time.Hour), 0, nil, pauses)

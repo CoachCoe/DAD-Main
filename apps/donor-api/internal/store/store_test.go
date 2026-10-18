@@ -97,6 +97,7 @@ func keyring(t *testing.T, value string) credentials.Keyring {
 	}
 	return keys
 }
+
 func donor(t *testing.T, pool *pgxpool.Pool) (pgtype.UUID, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -117,6 +118,7 @@ func donor(t *testing.T, pool *pgxpool.Pool) (pgtype.UUID, string) {
 	})
 	return id, email
 }
+
 func link(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID, now time.Time) string {
 	t.Helper()
 	key, err := NewID()
@@ -124,12 +126,20 @@ func link(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID, now time.Time) strin
 		t.Fatal(err)
 	}
 	token := HashToken(string(key.Bytes[:]))
-	_, err = pool.Exec(context.Background(), "INSERT INTO donor_login_links (id,donor_id,token_hash,expires_at) VALUES ($1,$2,$3,$4)", key, id, HashToken(token), now.Add(15*time.Minute))
+	_, err = pool.Exec(
+		context.Background(),
+		"INSERT INTO donor_login_links (id,donor_id,token_hash,expires_at) VALUES ($1,$2,$3,$4)",
+		key,
+		id,
+		HashToken(token),
+		now.Add(15*time.Minute),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return token
 }
+
 func TestOpenSizesThePoolFromTheDatabaseURL(t *testing.T) {
 	database(t)
 	url := os.Getenv("TEST_DATABASE_URL")
@@ -209,7 +219,10 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 		if len(session) != 43 {
 			t.Fatalf("token encoding changed")
 		}
-		if _, err = authenticate(context.Background(), queries.New(api), session, time.Now().Add(30*24*time.Hour)); !errors.Is(err, ErrDenied) {
+		if _, err = authenticate(context.Background(), queries.New(api), session, time.Now().Add(30*24*time.Hour)); !errors.Is(
+			err,
+			ErrDenied,
+		) {
 			t.Fatal("session expiry boundary")
 		}
 	}
@@ -222,6 +235,7 @@ func TestClaimIsSingleUseUnderConcurrency(t *testing.T) {
 		t.Fatalf("sibling remains usable: %v", err)
 	}
 }
+
 func TestClaimRollbackLeavesProofUsable(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
@@ -252,11 +266,13 @@ func TestClaimRollbackLeavesProofUsable(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestExistingTokenHashEncoding(t *testing.T) {
 	if HashToken("test") != "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08" {
 		t.Fatal("invalid token hash")
 	}
 }
+
 func TestDisabledDonorCannotClaim(t *testing.T) {
 	pool := database(t)
 	id, _ := donor(t, pool)
@@ -275,6 +291,7 @@ func TestDisabledDonorCannotClaim(t *testing.T) {
 		t.Fatalf("disabled donor claimed: %v", err)
 	}
 }
+
 func TestExpiredProofCannotCreateSession(t *testing.T) {
 	pool := database(t)
 	id, _ := donor(t, pool)

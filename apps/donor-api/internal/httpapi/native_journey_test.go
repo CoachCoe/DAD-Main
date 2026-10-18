@@ -27,7 +27,8 @@ func TestAppSessionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil || dsn == "" || (config.ConnConfig.Database != "donor_go" && !strings.HasPrefix(config.ConnConfig.Database, "donor_go_")) {
+	if err != nil || dsn == "" ||
+		(config.ConnConfig.Database != "donor_go" && !strings.HasPrefix(config.ConnConfig.Database, "donor_go_")) {
 		t.Fatal("TEST_DATABASE_URL must name a migrated donor_go test database")
 	}
 	pool, err := store.Open(ctx, dsn, 10)
@@ -56,7 +57,15 @@ func TestAppSessionLifecycle(t *testing.T) {
 
 	const origin = "https://donor.example.org"
 	api := dbrolestest.Open(t, dbroles.API)
-	server := httpapi.NewServer("", httpapi.Services{Origin: origin, Account: store.AccountService{DB: api}, Donor: store.DonorService{DB: api, Origin: origin}, Push: store.PushService{DB: api, Platforms: []string{"IOS"}}})
+	server := httpapi.NewServer(
+		"",
+		httpapi.Services{
+			Origin:  origin,
+			Account: store.AccountService{DB: api},
+			Donor:   store.DonorService{DB: api, Origin: origin},
+			Push:    store.PushService{DB: api, Platforms: []string{"IOS"}},
+		},
+	)
 	call := func(method, path, body, session string) *httptest.ResponseRecorder {
 		t.Helper()
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
@@ -75,7 +84,9 @@ func TestAppSessionLifecycle(t *testing.T) {
 	issued := func(step string, response *httptest.ResponseRecorder) tokens {
 		t.Helper()
 		var body tokens
-		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK || body.Access == "" || body.Refresh == "" || len(response.Result().Cookies()) != 0 {
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK || body.Access == "" ||
+			body.Refresh == "" ||
+			len(response.Result().Cookies()) != 0 {
 			t.Fatalf("%s: got %d %s, want 200 with tokens and no cookie", step, response.Code, response.Body)
 		}
 		return body
@@ -117,7 +128,16 @@ func TestAppSessionLifecycle(t *testing.T) {
 	if !strings.Contains(profile.Body.String(), email) {
 		t.Fatalf("profile is not the claimed donor's: %s", profile.Body)
 	}
-	expect("write with bearer", call("POST", "/donor/me/preferences", `{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":true}`, session.Access), http.StatusOK)
+	expect(
+		"write with bearer",
+		call(
+			"POST",
+			"/donor/me/preferences",
+			`{"version":0,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":true}`,
+			session.Access,
+		),
+		http.StatusOK,
+	)
 	expect("refresh token as bearer", call("GET", "/donor/me/profile", "", session.Refresh), http.StatusUnauthorized)
 	expect("access token as refresh token", refresh(session.Access), http.StatusUnauthorized)
 	browserRefresh := httptest.NewRequest("POST", "/donor/refresh", strings.NewReader(`{"refresh_token":"`+session.Refresh+`"}`))
@@ -137,14 +157,29 @@ func TestAppSessionLifecycle(t *testing.T) {
 
 	session, other := signIn("Alex phone"), signIn("Alex tablet")
 	listed := sessions(session.Access)
-	if len(listed) != 2 || !listed[0].Current || listed[0].Label != "Alex phone" || listed[1].Current || listed[1].Label != "Alex tablet" || listed[1].Client != "APP" {
+	if len(listed) != 2 || !listed[0].Current || listed[0].Label != "Alex phone" || listed[1].Current || listed[1].Label != "Alex tablet" ||
+		listed[1].Client != "APP" {
 		t.Fatalf("listed %+v, want this phone first and the tablet", listed)
 	}
-	expect("sign out this session by ID", call("POST", "/donor/me/sessions/"+listed[0].ID.String()+"/revoke", "", session.Access), http.StatusConflict)
-	expect("register the tablet for notifications", call("POST", "/donor/me/push-device", `{"platform":"IOS","token":"`+strings.Repeat("0f", 32)+`","environment":"SANDBOX"}`, other.Access), http.StatusOK)
+	expect(
+		"sign out this session by ID",
+		call("POST", "/donor/me/sessions/"+listed[0].ID.String()+"/revoke", "", session.Access),
+		http.StatusConflict,
+	)
+	expect(
+		"register the tablet for notifications",
+		call(
+			"POST",
+			"/donor/me/push-device",
+			`{"platform":"IOS","token":"`+strings.Repeat("0f", 32)+`","environment":"SANDBOX"}`,
+			other.Access,
+		),
+		http.StatusOK,
+	)
 	expect("sign out the tablet", call("POST", "/donor/me/sessions/"+listed[1].ID.String()+"/revoke", "", session.Access), http.StatusOK)
 	var registered int
-	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1 AND push_token IS NOT NULL", id).Scan(&registered); err != nil || registered != 0 {
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1 AND push_token IS NOT NULL", id).Scan(&registered); err != nil ||
+		registered != 0 {
 		t.Fatalf("the signed-out tablet kept its push token: %d %v", registered, err)
 	}
 	expect("tablet read after sign-out", call("GET", "/donor/me/profile", "", other.Access), http.StatusUnauthorized)
@@ -182,10 +217,16 @@ func TestAppSessionLifecycle(t *testing.T) {
 	cookie := claimed.Result().Cookies()[0].Value
 	var fromBrowser store.Sessions
 	listing := browser("GET", "/donor/me/sessions", "", cookie)
-	if err = json.Unmarshal(listing.Body.Bytes(), &fromBrowser); err != nil || len(fromBrowser.Sessions) != 2 || fromBrowser.Sessions[0].Label != "Web browser" || !fromBrowser.Sessions[0].Current {
+	if err = json.Unmarshal(listing.Body.Bytes(), &fromBrowser); err != nil || len(fromBrowser.Sessions) != 2 ||
+		fromBrowser.Sessions[0].Label != "Web browser" ||
+		!fromBrowser.Sessions[0].Current {
 		t.Fatalf("browser listing: got %d %s, want this browser first and the phone", listing.Code, listing.Body)
 	}
-	expect("browser signs out the phone", browser("POST", "/donor/me/sessions/"+fromBrowser.Sessions[1].ID.String()+"/revoke", "", cookie), http.StatusOK)
+	expect(
+		"browser signs out the phone",
+		browser("POST", "/donor/me/sessions/"+fromBrowser.Sessions[1].ID.String()+"/revoke", "", cookie),
+		http.StatusOK,
+	)
 	expect("phone after the browser signed it out", call("GET", "/donor/me/profile", "", session.Access), http.StatusUnauthorized)
 	expect("browser after signing out the phone", browser("GET", "/donor/me/profile", "", cookie), http.StatusOK)
 

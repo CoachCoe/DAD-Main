@@ -32,7 +32,8 @@ func createStaffInvite(ctx context.Context, q *queries.Queries, id pgtype.UUID, 
 
 func inviteStaff(ctx context.Context, q *queries.Queries, actor pgtype.UUID, email, name, role string, now time.Time) (string, error) {
 	canonical, err := identity.NormalizeEmail(email)
-	if err != nil || !plainText(name, false) || identity.TrimSpace(name) == "" || utf8.RuneCountInString(name) > 100 || len(staffPermissions(role)) == 0 {
+	if err != nil || !plainText(name, false) || identity.TrimSpace(name) == "" || utf8.RuneCountInString(name) > 100 ||
+		len(staffPermissions(role)) == 0 {
 		return "", ErrStaffInput
 	}
 	id, err := NewID()
@@ -170,7 +171,14 @@ func (s *StaffService) Recover(ctx context.Context, email string) (string, error
 	})
 }
 
-func changeAccess(ctx context.Context, q *queries.Queries, actor pgtype.UUID, row queries.LockStaffAccountsRow, action, role string, now time.Time) (AccessChange, error) {
+func changeAccess(
+	ctx context.Context,
+	q *queries.Queries,
+	actor pgtype.UUID,
+	row queries.LockStaffAccountsRow,
+	action, role string,
+	now time.Time,
+) (AccessChange, error) {
 	var result AccessChange
 	var details any
 	var event string

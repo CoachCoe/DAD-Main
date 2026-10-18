@@ -33,7 +33,15 @@ func testIssuer(t *testing.T) (*Issuer, time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Synthetic test CA"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	ca := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Synthetic test CA"},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
 	caDER, err := x509.CreateCertificate(rand.Reader, ca, ca, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
@@ -42,17 +50,38 @@ func testIssuer(t *testing.T) (*Issuer, time.Time) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf := &x509.Certificate{SerialNumber: big.NewInt(2), Subject: pkix.Name{OrganizationalUnit: []string{"TESTTEAM"}, ExtraNames: []pkix.AttributeTypeAndValue{{Type: asn1.ObjectIdentifier{0, 9, 2342, 19200300, 100, 1, 1}, Value: "pass.org.example.dad"}}}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour), KeyUsage: x509.KeyUsageDigitalSignature}
+	leaf := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject: pkix.Name{
+			OrganizationalUnit: []string{"TESTTEAM"},
+			ExtraNames: []pkix.AttributeTypeAndValue{
+				{Type: asn1.ObjectIdentifier{0, 9, 2342, 19200300, 100, 1, 1}, Value: "pass.org.example.dad"},
+			},
+		},
+		NotBefore: now.Add(-time.Hour),
+		NotAfter:  now.Add(time.Hour),
+		KeyUsage:  x509.KeyUsageDigitalSignature,
+	}
 	der, err := x509.CreateCertificate(rand.Reader, leaf, ca, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	apple, err := newApple(der, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), caDER, now)
+	apple, err := newApple(
+		der,
+		pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}),
+		caDER,
+		now,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &Issuer{Origin: "https://dad.example", Apple: apple, Google: &Google{Email: "wallet@test.iam.gserviceaccount.com", ClassID: "123.dad", Key: key}}, now
+	return &Issuer{
+		Origin: "https://dad.example",
+		Apple:  apple,
+		Google: &Google{Email: "wallet@test.iam.gserviceaccount.com", ClassID: "123.dad", Key: key},
+	}, now
 }
+
 func TestSignedAppleBundleAndGoogleClaims(t *testing.T) {
 	issuer, now := testIssuer(t)
 	link := "https://dad.example/r/public-code?via=irl"
@@ -106,7 +135,10 @@ func TestSignedAppleBundleAndGoogleClaims(t *testing.T) {
 		PassTypeIdentifier string
 		Barcodes           []struct{ Message string }
 	}
-	if err = json.Unmarshal(files["pass.json"], &pass); err != nil || pass.TeamIdentifier != "TESTTEAM" || pass.PassTypeIdentifier != "pass.org.example.dad" || len(pass.Barcodes) != 1 || pass.Barcodes[0].Message != link {
+	if err = json.Unmarshal(files["pass.json"], &pass); err != nil || pass.TeamIdentifier != "TESTTEAM" ||
+		pass.PassTypeIdentifier != "pass.org.example.dad" ||
+		len(pass.Barcodes) != 1 ||
+		pass.Barcodes[0].Message != link {
 		t.Fatal(pass, err)
 	}
 	url, err := issuer.GoogleURL(link, now)
@@ -139,7 +171,10 @@ func TestSignedAppleBundleAndGoogleClaims(t *testing.T) {
 			}
 		}
 	}
-	if err = json.Unmarshal(payload, &claims); err != nil || claims.Aud != "google" || claims.Typ != "savetowallet" || claims.Iss != issuer.Google.Email || len(claims.Origins) != 1 || claims.Origins[0] != issuer.Origin {
+	if err = json.Unmarshal(payload, &claims); err != nil || claims.Aud != "google" || claims.Typ != "savetowallet" ||
+		claims.Iss != issuer.Google.Email ||
+		len(claims.Origins) != 1 ||
+		claims.Origins[0] != issuer.Origin {
 		t.Fatal(claims, err)
 	}
 	object := claims.Payload.GenericObjects[0]
@@ -147,11 +182,13 @@ func TestSignedAppleBundleAndGoogleClaims(t *testing.T) {
 		t.Fatal(object)
 	}
 	for _, raw := range [][]byte{payload, files["pass.json"]} {
-		if !bytes.Contains(raw, []byte("$30/month")) || !bytes.Contains(raw, []byte("April 2027")) || bytes.Contains(raw, []byte("donor_id")) {
+		if !bytes.Contains(raw, []byte("$30/month")) || !bytes.Contains(raw, []byte("April 2027")) ||
+			bytes.Contains(raw, []byte("donor_id")) {
 			t.Fatal("disclosure missing or internal identity exposed")
 		}
 	}
 }
+
 func TestWalletRejectsWrongURLsAndExpiredCertificate(t *testing.T) {
 	issuer, now := testIssuer(t)
 	for _, link := range []string{"https://evil.example/r/code?via=irl", "https://dad.example/r/code", "https://dad.example/r/code?via=link", "https://user@dad.example/r/code?via=irl", "https://dad.example/r/code?via=irl#fragment"} {
@@ -188,9 +225,17 @@ func TestWalletConfigurationLoadsPrivateFilesAndRejectsInsecureOrigin(t *testing
 	files := map[string][]byte{
 		"DONOR_WALLET_APPLE_CERT_FILE": issuer.Apple.Certificate.Raw,
 		"DONOR_WALLET_APPLE_WWDR_FILE": issuer.Apple.Intermediate.Raw,
-		"DONOR_WALLET_APPLE_KEY_FILE":  pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(issuer.Apple.Key)}),
+		"DONOR_WALLET_APPLE_KEY_FILE": pem.EncodeToMemory(
+			&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(issuer.Apple.Key)},
+		),
 	}
-	serviceAccount, err := json.Marshal(map[string]string{"type": "service_account", "client_email": issuer.Google.Email, "private_key": string(files["DONOR_WALLET_APPLE_KEY_FILE"])})
+	serviceAccount, err := json.Marshal(
+		map[string]string{
+			"type":         "service_account",
+			"client_email": issuer.Google.Email,
+			"private_key":  string(files["DONOR_WALLET_APPLE_KEY_FILE"]),
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -47,7 +47,12 @@ func parse(args []string) (options, error) {
 	flags := flag.NewFlagSet("seed", flag.ContinueOnError)
 	flags.StringVar(&o.databaseURL, "database-url", "", "disposable database to fill, as a URL naming its host and database (required)")
 	flags.StringVar(&o.confirm, "confirm", "", "the database's name, repeated to confirm it is disposable (required)")
-	flags.IntVar(&o.donors, "donors", 50000, "donors to create (1–1,000,000; the population is held in memory, about 8 KB of RSS per donor)")
+	flags.IntVar(
+		&o.donors,
+		"donors",
+		50000,
+		"donors to create (1–1,000,000; the population is held in memory, about 8 KB of RSS per donor)",
+	)
 	flags.Uint64Var(&o.seed, "seed", 1, "random seed; the same seed and size give the same population")
 	flags.BoolVar(&o.appendPopulation, "append", false, "add to a database that already holds a seeded population")
 	flags.IntVar(&o.sessions, "sessions", 2000, "donor sessions to create for authenticated load (0 for none)")

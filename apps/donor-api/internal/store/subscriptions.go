@@ -72,7 +72,13 @@ type subscriptionSnapshot struct {
 // caller holds no donor lock, so a slow processor cannot block other work. The
 // read goes through the step's memo so a later resolution in the same step
 // reuses it.
-func fetchSubscription(ctx context.Context, q *queries.Queries, fetcher *subFetcher, attempt pgtype.UUID, id string) (*subscriptionSnapshot, error) {
+func fetchSubscription(
+	ctx context.Context,
+	q *queries.Queries,
+	fetcher *subFetcher,
+	attempt pgtype.UUID,
+	id string,
+) (*subscriptionSnapshot, error) {
 	observed, err := q.SubscriptionObservedAt(ctx, attempt)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -89,7 +95,13 @@ func fetchSubscription(ctx context.Context, q *queries.Queries, fetcher *subFetc
 // it may predate the stored state, so the processor is read again — but still
 // through the step memo, so a subscription already resolved this step is not
 // fetched twice.
-func currentSubscription(ctx context.Context, q *queries.Queries, fetcher *subFetcher, attempt queries.DonorStripeCheckout, snapshot *subscriptionSnapshot) (payments.Object, error) {
+func currentSubscription(
+	ctx context.Context,
+	q *queries.Queries,
+	fetcher *subFetcher,
+	attempt queries.DonorStripeCheckout,
+	snapshot *subscriptionSnapshot,
+) (payments.Object, error) {
 	if snapshot != nil && snapshot.attempt == attempt.ID && snapshot.id == attempt.StripeSubscriptionID.String {
 		observed, err := q.SubscriptionObservedAt(ctx, attempt.ID)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -104,7 +116,15 @@ func currentSubscription(ctx context.Context, q *queries.Queries, fetcher *subFe
 
 // The caller holds the donor lock. Use current processor state rather than an
 // event snapshot so delayed delivery cannot undo a newer cancellation or pause.
-func reconcileSubscription(ctx context.Context, q *queries.Queries, fetcher *subFetcher, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, snapshot *subscriptionSnapshot, now time.Time) (queries.DonorSubscription, error) {
+func reconcileSubscription(
+	ctx context.Context,
+	q *queries.Queries,
+	fetcher *subFetcher,
+	draft queries.DonorCheckout,
+	attempt queries.DonorStripeCheckout,
+	snapshot *subscriptionSnapshot,
+	now time.Time,
+) (queries.DonorSubscription, error) {
 	remote, err := currentSubscription(ctx, q, fetcher, attempt, snapshot)
 	if err != nil {
 		return queries.DonorSubscription{}, err
@@ -116,7 +136,14 @@ func reconcileSubscription(ctx context.Context, q *queries.Queries, fetcher *sub
 // subscription, confirming any amount change, pause or resumption it shows,
 // with everything donor views read from it. Only a single-item monthly USD
 // subscription is supported.
-func reconcileRemoteSubscription(ctx context.Context, q *queries.Queries, draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, remote payments.Object, now time.Time) (queries.DonorSubscription, error) {
+func reconcileRemoteSubscription(
+	ctx context.Context,
+	q *queries.Queries,
+	draft queries.DonorCheckout,
+	attempt queries.DonorStripeCheckout,
+	remote payments.Object,
+	now time.Time,
+) (queries.DonorSubscription, error) {
 	item, price, err := monthlyItem(draft, attempt, remote)
 	if err != nil {
 		return queries.DonorSubscription{}, err
@@ -160,7 +187,20 @@ func reconcileRemoteSubscription(ctx context.Context, q *queries.Queries, draft 
 		return queries.DonorSubscription{}, err
 	}
 	external := !remote.Absent("schedule") || !remote.Absent("pending_update")
-	row, err := q.SaveSubscription(ctx, queries.SaveSubscriptionParams{ID: id, AttemptID: attempt.ID, DonorID: draft.DonorID, Status: status, PeriodEnd: timestamp(end), StopsAt: stops, BillingAnchor: timestamp(anchor), ExternalChange: external, ObservedAt: timestamp(now)})
+	row, err := q.SaveSubscription(
+		ctx,
+		queries.SaveSubscriptionParams{
+			ID:             id,
+			AttemptID:      attempt.ID,
+			DonorID:        draft.DonorID,
+			Status:         status,
+			PeriodEnd:      timestamp(end),
+			StopsAt:        stops,
+			BillingAnchor:  timestamp(anchor),
+			ExternalChange: external,
+			ObservedAt:     timestamp(now),
+		},
+	)
 	if err != nil || !terminalSubscription(status) {
 		return row, err
 	}
@@ -172,11 +212,22 @@ func reconcileRemoteSubscription(ctx context.Context, q *queries.Queries, draft 
 
 // monthlyItem returns the subscription's only item and its price, which must
 // bill draft's checkout once a month.
-func monthlyItem(draft queries.DonorCheckout, attempt queries.DonorStripeCheckout, remote payments.Object) (payments.Object, payments.Object, error) {
+func monthlyItem(
+	draft queries.DonorCheckout,
+	attempt queries.DonorStripeCheckout,
+	remote payments.Object,
+) (payments.Object, payments.Object, error) {
 	metadata, e1 := remote.Object("metadata")
 	items, e2 := remote.Object("items")
 	lines, e3 := items.Array("data")
-	if draft.Frequency != "MONTHLY" || !attempt.StripeSubscriptionID.Valid || remote.Text("id") != attempt.StripeSubscriptionID.String || !remote.BoolIs("livemode", false) || e1 != nil || metadata.Text("dad_checkout_id") != draft.ID.String() || e2 != nil || !items.BoolIs("has_more", false) || e3 != nil || len(lines) != 1 {
+	if draft.Frequency != "MONTHLY" || !attempt.StripeSubscriptionID.Valid || remote.Text("id") != attempt.StripeSubscriptionID.String ||
+		!remote.BoolIs("livemode", false) ||
+		e1 != nil ||
+		metadata.Text("dad_checkout_id") != draft.ID.String() ||
+		e2 != nil ||
+		!items.BoolIs("has_more", false) ||
+		e3 != nil ||
+		len(lines) != 1 {
 		return nil, nil, payments.ErrFacts
 	}
 	item := lines[0]
@@ -184,7 +235,9 @@ func monthlyItem(draft queries.DonorCheckout, attempt queries.DonorStripeCheckou
 	recurring, e2 := price.Object("recurring")
 	count, e3 := recurring.Int("interval_count")
 	quantity, e4 := item.Int("quantity")
-	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || price.Text("currency") != "usd" || recurring.Text("interval") != "month" || count != 1 || quantity != 1 {
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || price.Text("currency") != "usd" || recurring.Text("interval") != "month" ||
+		count != 1 ||
+		quantity != 1 {
 		return nil, nil, payments.ErrFacts
 	}
 	return item, price, nil
@@ -203,7 +256,13 @@ func monthlyPeriod(o payments.Object, startKey, endKey string) (time.Time, time.
 
 // reconcileAmount confirms the latest amount change once the processor bills
 // it from the renewal it was scheduled for.
-func reconcileAmount(ctx context.Context, q *queries.Queries, draft queries.DonorCheckout, item, price payments.Object, end, now time.Time) error {
+func reconcileAmount(
+	ctx context.Context,
+	q *queries.Queries,
+	draft queries.DonorCheckout,
+	item, price payments.Object,
+	end, now time.Time,
+) error {
 	actual, err := price.Int("unit_amount")
 	if err != nil {
 		return err
@@ -235,7 +294,13 @@ func reconcileAmount(ctx context.Context, q *queries.Queries, draft queries.Dono
 
 // reconcilePause confirms a pause or early resumption the processor shows,
 // and refuses a subscription collecting again during a confirmed pause.
-func reconcilePause(ctx context.Context, q *queries.Queries, attempt queries.DonorStripeCheckout, remote payments.Object, now time.Time) error {
+func reconcilePause(
+	ctx context.Context,
+	q *queries.Queries,
+	attempt queries.DonorStripeCheckout,
+	remote payments.Object,
+	now time.Time,
+) error {
 	pause, err := q.LatestPause(ctx, attempt.ID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err

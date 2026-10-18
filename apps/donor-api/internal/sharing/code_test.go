@@ -14,7 +14,10 @@ import (
 	decoder "github.com/makiuchi-d/gozxing/qrcode"
 )
 
-var testURLs = []string{"https://dad.example/r/aBc123_-?via=irl", "https://donors.dynamic-aid.example/r/abcdefghijklmnopqrstuvwxyz123456?via=irl"}
+var testURLs = []string{
+	"https://dad.example/r/aBc123_-?via=irl",
+	"https://donors.dynamic-aid.example/r/abcdefghijklmnopqrstuvwxyz123456?via=irl",
+}
 
 var modulePattern = regexp.MustCompile(`M([0-9]+) ([0-9]+)h1v1h-1z`)
 

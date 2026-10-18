@@ -25,6 +25,7 @@ func (s *webhookStub) Receive(ctx context.Context, body []byte, signature string
 	s.signature = signature
 	return s.err
 }
+
 func TestWebhookAcknowledgementAndLimits(t *testing.T) {
 	for _, tc := range []struct {
 		err    error

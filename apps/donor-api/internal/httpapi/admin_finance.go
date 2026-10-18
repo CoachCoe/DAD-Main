@@ -113,6 +113,12 @@ func (a *api) cancelSubscription(w http.ResponseWriter, r *http.Request, session
 	if !ok {
 		return
 	}
-	request := store.StaffFinancialRequest{RequestID: key, DonorID: donorID, TargetID: body.ID, PeriodEnd: body.End.Truncate(time.Microsecond), Reason: body.Reason}
+	request := store.StaffFinancialRequest{
+		RequestID: key,
+		DonorID:   donorID,
+		TargetID:  body.ID,
+		PeriodEnd: body.End.Truncate(time.Microsecond),
+		Reason:    body.Reason,
+	}
 	a.finance(providerTimeout).serve(w, r, func(ctx context.Context) (any, error) { return a.StaffFinance.Cancel(ctx, session, request) })
 }

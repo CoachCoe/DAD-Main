@@ -335,9 +335,18 @@ func summarize(seconds float64, hs ...*histogram) stats {
 // Each picks scenarios by weight. A request fails on a transport error, a
 // status other than the scenario's, a timeout, or a body over maxBodyBytes.
 func load(ctx context.Context, cfg config) result {
-	transport := &http.Transport{MaxIdleConns: cfg.concurrency, MaxIdleConnsPerHost: cfg.concurrency, MaxConnsPerHost: cfg.concurrency, IdleConnTimeout: 30 * time.Second}
+	transport := &http.Transport{
+		MaxIdleConns:        cfg.concurrency,
+		MaxIdleConnsPerHost: cfg.concurrency,
+		MaxConnsPerHost:     cfg.concurrency,
+		IdleConnTimeout:     30 * time.Second,
+	}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: requestTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client := &http.Client{
+		Transport:     transport,
+		Timeout:       requestTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
 
 	total := 0
 	for _, s := range cfg.scenarios {
@@ -354,7 +363,11 @@ func load(ctx context.Context, cfg config) result {
 	for i := range cfg.concurrency {
 		// App users are spread evenly through the numbering, so any concurrency
 		// gets close to the requested share.
-		u := &user{r: rand.New(rand.NewPCG(uint64(i), 0)), native: int(float64(i+1)*cfg.nativeShare) > int(float64(i)*cfg.nativeShare), address: clientAddress(uint32(i))}
+		u := &user{
+			r:       rand.New(rand.NewPCG(uint64(i), 0)),
+			native:  int(float64(i+1)*cfg.nativeShare) > int(float64(i)*cfg.nativeShare),
+			address: clientAddress(uint32(i)),
+		}
 		wg.Go(func() {
 			for time.Now().Before(deadline) && ctx.Err() == nil {
 				pick := u.r.IntN(total)
@@ -463,9 +476,17 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	api := flags.String("api", "http://127.0.0.1:8002", "API base URL for the seeded mix")
 	fixturePath := flags.String("fixture", "", "cmd/seed fixture; runs the seeded donor mix")
 	mix := flags.String("mix", "", "scenario weights overriding the default mix, such as dashboard=30,gifts=0")
-	origin := flags.String("origin", "http://localhost:3000", "browser Origin on referral captures; must equal the API's DONOR_PUBLIC_ORIGIN")
+	origin := flags.String(
+		"origin",
+		"http://localhost:3000",
+		"browser Origin on referral captures; must equal the API's DONOR_PUBLIC_ORIGIN",
+	)
 	nativeShare := flags.Float64("native", 0.25, "share of signed-in users that are the donor app (bearer) rather than a browser (cookie)")
-	clientIPs := flags.Bool("client-ips", false, "send a distinct X-Real-IP per user and per captured visitor; the API must trust this host as a proxy")
+	clientIPs := flags.Bool(
+		"client-ips",
+		false,
+		"send a distinct X-Real-IP per user and per captured visitor; the API must trust this host as a proxy",
+	)
 	targets := flags.String("url", "", "comma-separated endpoints read in equal measure instead of the seeded mix")
 	duration := flags.Duration("duration", time.Minute, "test duration (up to 1h)")
 	concurrency := flags.Int("concurrency", 16, "concurrent users (1–2048)")
@@ -480,7 +501,8 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err != nil {
 		return err
 	}
-	if *duration <= 0 || *duration > time.Hour || *concurrency < 1 || *concurrency > 2048 || *nativeShare < 0 || *nativeShare > 1 || (*targets == "") == (*fixturePath == "") {
+	if *duration <= 0 || *duration > time.Hour || *concurrency < 1 || *concurrency > 2048 || *nativeShare < 0 || *nativeShare > 1 ||
+		(*targets == "") == (*fixturePath == "") {
 		return errors.New("invalid load-test arguments; pass either -fixture or -url")
 	}
 	cfg := config{duration: *duration, concurrency: *concurrency, nativeShare: *nativeShare, clientIPs: *clientIPs}

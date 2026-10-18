@@ -37,8 +37,26 @@ func TestReferrerRefreshCannotOverwriteConcurrentContribution(t *testing.T) {
 					}
 				}
 			})
-			mustExec(t, pool, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'USD','ONE_TIME',$3,'LINK',$4)", checkout, child, parent, now.Add(time.Hour))
-			mustExec(t, pool, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,'LINK')", testID(t), child, checkout, "pi_"+checkout.String(), now.Add(-time.Hour), parent)
+			mustExec(
+				t,
+				pool,
+				"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'USD','ONE_TIME',$3,'LINK',$4)",
+				checkout,
+				child,
+				parent,
+				now.Add(time.Hour),
+			)
+			mustExec(
+				t,
+				pool,
+				"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,'LINK')",
+				testID(t),
+				child,
+				checkout,
+				"pi_"+checkout.String(),
+				now.Add(-time.Hour),
+				parent,
+			)
 			if existing {
 				if err := seedProjection(ctx, queries.New(worker), parent, now); err != nil {
 					t.Fatal(err)
@@ -160,10 +178,22 @@ func TestConcurrentFinancialRefreshPreservesLongHistories(t *testing.T) {
 	for _, id := range ids {
 		mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id.String()+"@example.org")
 		checkout := testID(t)
-		mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','MONTHLY')", checkout, id)
-		mustExec(t, tx, `INSERT INTO donor_billing_periods(id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status)
+		mustExec(
+			t,
+			tx,
+			"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','MONTHLY')",
+			checkout,
+			id,
+		)
+		mustExec(
+			t,
+			tx,
+			`INSERT INTO donor_billing_periods(id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status)
   SELECT gen_random_uuid(),$1,$2,'in_'||($1::uuid)::text||'_'||n,'sub_'||($1::uuid)::text,
-  '2026-02-01 12:00Z'::timestamptz+n*interval '1 month','2026-03-01 12:00Z'::timestamptz+n*interval '1 month','PAID' FROM generate_series(0,23) n`, id, checkout)
+  '2026-02-01 12:00Z'::timestamptz+n*interval '1 month','2026-03-01 12:00Z'::timestamptz+n*interval '1 month','PAID' FROM generate_series(0,23) n`,
+			id,
+			checkout,
+		)
 		mustExec(t, tx, `INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,period_id)
   SELECT gen_random_uuid(),donor_id,checkout_id,stripe_invoice_id,3000,'USD','MONTHLY',due_at,id FROM donor_billing_periods WHERE donor_id=$1`, id)
 	}
@@ -187,7 +217,8 @@ func TestConcurrentFinancialRefreshPreservesLongHistories(t *testing.T) {
 				}
 				defer tx.Rollback(ctx)
 				facts, err := refreshProjection(ctx, tx, id, now)
-				if err == nil && (!facts.CurrentStreak.Valid || facts.CurrentStreak.Int32 != 24 || facts.BestStreak != 24 || facts.NetMinor.Int64 != 72000) {
+				if err == nil &&
+					(!facts.CurrentStreak.Valid || facts.CurrentStreak.Int32 != 24 || facts.BestStreak != 24 || facts.NetMinor.Int64 != 72000) {
 					err = fmt.Errorf("incorrect financial projection in writer %d", round)
 				}
 				if err == nil {
@@ -206,7 +237,8 @@ func TestConcurrentFinancialRefreshPreservesLongHistories(t *testing.T) {
 	}
 	for _, id := range ids {
 		var receipts, annual int
-		err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE kind='RECEIPT'),count(*) FILTER(WHERE kind='ANNUAL') FROM donor_messages WHERE donor_id=$1`, id).Scan(&receipts, &annual)
+		err = pool.QueryRow(ctx, `SELECT count(*) FILTER(WHERE kind='RECEIPT'),count(*) FILTER(WHERE kind='ANNUAL') FROM donor_messages WHERE donor_id=$1`, id).
+			Scan(&receipts, &annual)
 		if err != nil || receipts != 24 || annual != 2 {
 			t.Fatal("duplicate or lost notification intents", receipts, annual, err)
 		}
@@ -261,9 +293,27 @@ func TestConcurrentReferralDeltaConverges(t *testing.T) {
 	for i, id := range siblingIDs {
 		mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id.String()+"@example.org")
 		checkout := testID(t)
-		mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'USD','ONE_TIME',$3,'LINK',$4)", checkout, id, referrerID, expires)
+		mustExec(
+			t,
+			tx,
+			"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'USD','ONE_TIME',$3,'LINK',$4)",
+			checkout,
+			id,
+			referrerID,
+			expires,
+		)
 		paidAt := now.Add(-time.Duration(siblings-i) * time.Hour)
-		mustExec(t, tx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,'LINK')", testID(t), id, checkout, "pi_"+id.String(), paidAt, referrerID)
+		mustExec(
+			t,
+			tx,
+			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,'LINK')",
+			testID(t),
+			id,
+			checkout,
+			"pi_"+id.String(),
+			paidAt,
+			referrerID,
+		)
 	}
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)

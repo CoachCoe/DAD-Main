@@ -90,7 +90,8 @@ func TestProvisionCreatesALoginPerRole(t *testing.T) {
 			t.Fatalf("%s: %v", role.Name, err)
 		}
 		var limit int32
-		if err = conn.QueryRow(ctx, "SELECT rolconnlimit FROM pg_roles WHERE rolname=current_user").Scan(&limit); err != nil || limit != role.Pool {
+		if err = conn.QueryRow(ctx, "SELECT rolconnlimit FROM pg_roles WHERE rolname=current_user").Scan(&limit); err != nil ||
+			limit != role.Pool {
 			t.Errorf("%s: connection limit %d, want %d (%v)", role.Name, limit, role.Pool, err)
 		}
 		if err = role.Check(ctx, conn, false); err != nil {

@@ -20,7 +20,12 @@ type accountStub struct {
 
 var (
 	browserTokens = store.Tokens{Access: "new-secret-session", AccessTTL: 30 * 24 * time.Hour}
-	appTokens     = store.Tokens{Access: "new-access-token", AccessTTL: 15 * time.Minute, Refresh: "new-refresh-token", RefreshTTL: 60 * 24 * time.Hour}
+	appTokens     = store.Tokens{
+		Access:     "new-access-token",
+		AccessTTL:  15 * time.Minute,
+		Refresh:    "new-refresh-token",
+		RefreshTTL: 60 * 24 * time.Hour,
+	}
 )
 
 func (s *accountStub) ClaimAccount(_ context.Context, proof, old string, client store.Client) (store.Tokens, error) {
@@ -30,15 +35,18 @@ func (s *accountStub) ClaimAccount(_ context.Context, proof, old string, client 
 	}
 	return browserTokens, s.err
 }
+
 func (s *accountStub) Refresh(_ context.Context, token string) (store.Tokens, error) {
 	s.refresh = token
 	return appTokens, s.err
 }
+
 func (s *accountStub) SignOut(_ context.Context, token string) error { s.old = token; return s.err }
 func (s *accountStub) QueueLogin(_ context.Context, email, next string) error {
 	s.email, s.next = email, next
 	return s.err
 }
+
 func TestClaimSetsCookieOnlyAfterSuccess(t *testing.T) {
 	for _, tc := range []struct {
 		err    error
@@ -53,9 +61,17 @@ func TestClaimSetsCookieOnlyAfterSuccess(t *testing.T) {
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, req)
 		if response.Code != tc.status || stub.proof != proof || stub.old != "old-session" {
-			t.Fatalf("%v: got %d with proof %q revoking %q, want %d with the proof revoking old-session", tc.err, response.Code, stub.proof, stub.old, tc.status)
+			t.Fatalf(
+				"%v: got %d with proof %q revoking %q, want %d with the proof revoking old-session",
+				tc.err,
+				response.Code,
+				stub.proof,
+				stub.old,
+				tc.status,
+			)
 		}
-		if body := response.Body.String(); strings.Contains(body, proof) || strings.Contains(body, "private") || strings.Contains(body, "new-secret-session") {
+		if body := response.Body.String(); strings.Contains(body, proof) || strings.Contains(body, "private") ||
+			strings.Contains(body, "new-secret-session") {
 			t.Fatalf("%v: claim body leaked a credential or cause: %s", tc.err, body)
 		}
 		cookies := response.Result().Cookies()
@@ -65,7 +81,12 @@ func TestClaimSetsCookieOnlyAfterSuccess(t *testing.T) {
 			}
 			continue
 		}
-		if len(cookies) != 1 || cookies[0].Name != "dad_donor_session" || cookies[0].Value != "new-secret-session" || !cookies[0].HttpOnly || !cookies[0].Secure || cookies[0].SameSite != http.SameSiteLaxMode || cookies[0].MaxAge != 30*86400 || cookies[0].Path != "/" {
+		if len(cookies) != 1 || cookies[0].Name != "dad_donor_session" || cookies[0].Value != "new-secret-session" ||
+			!cookies[0].HttpOnly ||
+			!cookies[0].Secure ||
+			cookies[0].SameSite != http.SameSiteLaxMode ||
+			cookies[0].MaxAge != 30*86400 ||
+			cookies[0].Path != "/" {
 			t.Fatalf("got cookies %+v, want one HttpOnly, Secure, Lax, 30-day session cookie", cookies)
 		}
 	}

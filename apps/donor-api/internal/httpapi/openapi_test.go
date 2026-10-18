@@ -91,7 +91,12 @@ func TestContractListsExactlyTheServedRoutes(t *testing.T) {
 }
 
 func TestContractSecurityMatchesRouteAuth(t *testing.T) {
-	schemes := map[auth][]string{noAuth: {}, donorAuth: {"bearerAuth", "cookieAuth"}, staffAuth: {"staffCookieAuth"}, stripeAuth: {"stripeSignature"}}
+	schemes := map[auth][]string{
+		noAuth:     {},
+		donorAuth:  {"bearerAuth", "cookieAuth"},
+		staffAuth:  {"staffCookieAuth"},
+		stripeAuth: {"stripeSignature"},
+	}
 	ops := loadContract(t).operations()
 	for _, route := range allRoutes() {
 		op, ok := ops[route.pattern]

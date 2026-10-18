@@ -33,18 +33,37 @@ func newPaymentUpdateFixture(t *testing.T) paymentUpdateFixture {
 	if _, err := f.db.Exec(ctx, `INSERT INTO donor_payment_updates(id,donor_id,attempt_id,customer_id,request_params,stripe_session_id,hosted_url,status) VALUES($1,$2,$3,'cus_fixture','{}',$4,'https://checkout.stripe.com/c/test','OPEN')`, id, f.donorID, attempt, session); err != nil {
 		t.Fatal(err)
 	}
-	remote := map[string]any{"id": session, "livemode": false, "mode": "setup", "customer": "cus_fixture", "status": "complete", "setup_intent": setupID, "metadata": map[string]any{"dad_payment_update_id": id.String()}}
-	setup := map[string]any{"id": setupID, "livemode": false, "customer": "cus_fixture", "status": "succeeded", "usage": "off_session", "payment_method_types": []string{"card"}, "payment_method": "pm_fixture", "metadata": map[string]any{"dad_payment_update_id": id.String()}}
+	remote := map[string]any{
+		"id":           session,
+		"livemode":     false,
+		"mode":         "setup",
+		"customer":     "cus_fixture",
+		"status":       "complete",
+		"setup_intent": setupID,
+		"metadata":     map[string]any{"dad_payment_update_id": id.String()},
+	}
+	setup := map[string]any{
+		"id":                   setupID,
+		"livemode":             false,
+		"customer":             "cus_fixture",
+		"status":               "succeeded",
+		"usage":                "off_session",
+		"payment_method_types": []string{"card"},
+		"payment_method":       "pm_fixture",
+		"metadata":             map[string]any{"dad_payment_update_id": id.String()},
+	}
 	sub := subscription(result.CheckoutID, time.Now().Add(-24*time.Hour))
 	p := paymentUpdateFixture{f: f, id: id, checkout: result.CheckoutID, session: session, remote: remote, setup: setup, sub: sub}
 	p.publish(t)
 	return p
 }
+
 func (p paymentUpdateFixture) publish(t *testing.T) {
 	p.f.gateway.sessions[p.session] = paymentObject(t, p.remote)
 	p.f.gateway.setups[p.setup["id"].(string)] = paymentObject(t, p.setup)
 	p.f.gateway.subscriptions["sub_"+p.checkout] = paymentObject(t, p.sub)
 }
+
 func (p paymentUpdateFixture) assertState(t *testing.T, status string) {
 	t.Helper()
 	var got string
@@ -56,10 +75,12 @@ func (p paymentUpdateFixture) assertState(t *testing.T, status string) {
 	if got != status || completed != (status == "APPLIED") || url == terminalPaymentUpdate(status) {
 		t.Fatalf("unexpected update state %s completed=%v url=%v", got, completed, url)
 	}
-	if err := p.f.db.QueryRow(context.Background(), "SELECT count(*) FROM donor_gifts WHERE donor_id=$1", p.f.donorID).Scan(&gifts); err != nil || gifts != 0 {
+	if err := p.f.db.QueryRow(context.Background(), "SELECT count(*) FROM donor_gifts WHERE donor_id=$1", p.f.donorID).Scan(&gifts); err != nil ||
+		gifts != 0 {
 		t.Fatal("card setup generated a gift", err)
 	}
 }
+
 func TestPaymentUpdateRecoversLostProviderAcknowledgement(t *testing.T) {
 	p := newPaymentUpdateFixture(t)
 	p.f.gateway.loseAcknowledgement = true
@@ -81,6 +102,7 @@ func TestPaymentUpdateRecoversLostProviderAcknowledgement(t *testing.T) {
 		t.Fatal("duplicate event changed the card")
 	}
 }
+
 func TestPaymentUpdateRequiresVerifiedOwnershipAndCardSetup(t *testing.T) {
 	cases := map[string]func(*paymentUpdateFixture){
 		"session owner": func(p *paymentUpdateFixture) { p.remote["customer"] = "cus_other" },
@@ -109,6 +131,7 @@ func TestPaymentUpdateRequiresVerifiedOwnershipAndCardSetup(t *testing.T) {
 		})
 	}
 }
+
 func TestPaymentUpdateExpiryCancellationAndIdempotencyAge(t *testing.T) {
 	for _, mode := range []string{"expired", "canceled", "old", "old already applied"} {
 		t.Run(mode, func(t *testing.T) {

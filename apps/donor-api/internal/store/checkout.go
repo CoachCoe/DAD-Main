@@ -69,7 +69,10 @@ func (s CheckoutService) BeginCheckout(ctx context.Context, request payments.Che
 		if current.StripeSessionID.Valid && current.StripeSessionID.String != remote.ID {
 			return payments.ErrCheckoutConflict
 		}
-		return q.AcknowledgeCheckout(ctx, queries.AcknowledgeCheckoutParams{ID: request.RequestID, StripeSessionID: text(remote.ID), HostedUrl: text(remote.URL)})
+		return q.AcknowledgeCheckout(
+			ctx,
+			queries.AcknowledgeCheckoutParams{ID: request.RequestID, StripeSessionID: text(remote.ID), HostedUrl: text(remote.URL)},
+		)
 	})
 	if err != nil {
 		return empty, err
@@ -81,13 +84,26 @@ func (s CheckoutService) BeginCheckout(ctx context.Context, request payments.Che
 // attribution, and the attempt's frozen processor parameters, or returns the
 // attempt already recorded for request. A monthly gift reserves the donor's
 // one recurring slot.
-func (s CheckoutService) prepare(ctx context.Context, site publicSite, request payments.CheckoutRequest, digest string, now time.Time) (queries.DonorStripeCheckout, error) {
+func (s CheckoutService) prepare(
+	ctx context.Context,
+	site publicSite,
+	request payments.CheckoutRequest,
+	digest string,
+	now time.Time,
+) (queries.DonorStripeCheckout, error) {
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (queries.DonorStripeCheckout, error) {
 		return prepareAttempt(ctx, queries.New(tx), site, request, digest, now)
 	})
 }
 
-func prepareAttempt(ctx context.Context, q *queries.Queries, site publicSite, request payments.CheckoutRequest, digest string, now time.Time) (queries.DonorStripeCheckout, error) {
+func prepareAttempt(
+	ctx context.Context,
+	q *queries.Queries,
+	site publicSite,
+	request payments.CheckoutRequest,
+	digest string,
+	now time.Time,
+) (queries.DonorStripeCheckout, error) {
 	empty := queries.DonorStripeCheckout{}
 	donor, err := lockGuest(ctx, q, request.Email, now)
 	if err != nil {
@@ -167,16 +183,31 @@ func lockGuest(ctx context.Context, q *queries.Queries, email string, now time.T
 
 // checkoutDraft is a new checkout carrying the visitor's referral, if its
 // window is still open and the referrer is not the donor.
-func checkoutDraft(ctx context.Context, q *queries.Queries, donor queries.Donor, request payments.CheckoutRequest, now time.Time) (queries.InsertCheckoutParams, error) {
+func checkoutDraft(
+	ctx context.Context,
+	q *queries.Queries,
+	donor queries.Donor,
+	request payments.CheckoutRequest,
+	now time.Time,
+) (queries.InsertCheckoutParams, error) {
 	id, err := NewID()
 	if err != nil {
 		return queries.InsertCheckoutParams{}, err
 	}
-	draft := queries.InsertCheckoutParams{ID: id, DonorID: donor.ID, AmountMinor: request.Amount, Frequency: request.Frequency, CreatedAt: timestamp(now)}
+	draft := queries.InsertCheckoutParams{
+		ID:          id,
+		DonorID:     donor.ID,
+		AmountMinor: request.Amount,
+		Frequency:   request.Frequency,
+		CreatedAt:   timestamp(now),
+	}
 	if request.Visitor == nil || *request.Visitor == "" {
 		return draft, nil
 	}
-	touch, err := q.ValidReferralTouch(ctx, queries.ValidReferralTouchParams{TokenHash: HashToken(*request.Visitor), ExpiresAt: timestamp(now), ID: donor.ID})
+	touch, err := q.ValidReferralTouch(
+		ctx,
+		queries.ValidReferralTouchParams{TokenHash: HashToken(*request.Visitor), ExpiresAt: timestamp(now), ID: donor.ID},
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return draft, nil
 	}

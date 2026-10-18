@@ -209,7 +209,12 @@ func TestClaimReturnsTokensOnlyToTheApp(t *testing.T) {
 			t.Errorf("%s: got %d, tokens in body %v/%v, in cookie %v; want %d, %v, %v",
 				tc.name, response.Code, access, refresh, cookieToken, tc.status, tc.bodyTokens, tc.cookieToken)
 		}
-		want := map[string]any{"access_token": appTokens.Access, "expires_in": float64(15 * 60), "refresh_token": appTokens.Refresh, "refresh_expires_in": float64(60 * 24 * 60 * 60)}
+		want := map[string]any{
+			"access_token":       appTokens.Access,
+			"expires_in":         float64(15 * 60),
+			"refresh_token":      appTokens.Refresh,
+			"refresh_expires_in": float64(60 * 24 * 60 * 60),
+		}
 		if tc.bodyTokens && !reflect.DeepEqual(body, want) {
 			t.Errorf("%s: native session body %v, want %v", tc.name, body, want)
 		}
@@ -299,7 +304,8 @@ func TestRefreshAnswersWithoutLeakingCauses(t *testing.T) {
 		r.Header.Set("X-DAD-Client", "native")
 		response := httptest.NewRecorder()
 		NewServer("", Services{Account: &accountStub{err: tc.err}}).Handler.ServeHTTP(response, r)
-		if response.Code != tc.status || strings.Contains(response.Body.String(), "private") || strings.Contains(response.Body.String(), appTokens.Refresh) {
+		if response.Code != tc.status || strings.Contains(response.Body.String(), "private") ||
+			strings.Contains(response.Body.String(), appTokens.Refresh) {
 			t.Errorf("%s with %v: got %d %s, want %d without causes or tokens", tc.body, tc.err, response.Code, response.Body, tc.status)
 		}
 	}
@@ -346,7 +352,16 @@ func TestAppLogoutRevokesBearerWithoutCookies(t *testing.T) {
 // The app may call donor account routes only; giving, referral capture,
 // partner signup, and the back office stay on the web.
 func TestOnlyDonorAccountRoutesAdmitTheApp(t *testing.T) {
-	entries := map[string]bool{"POST /donor/login": true, "POST /donor/claim": true, "POST /donor/refresh": true, "POST /donor/email-change/confirm": true, "POST /donor/passkeys/sign-in/options": true, "POST /donor/passkeys/sign-in": true, "POST /donor/logout": true, "POST /donor/logout-all": true}
+	entries := map[string]bool{
+		"POST /donor/login":                    true,
+		"POST /donor/claim":                    true,
+		"POST /donor/refresh":                  true,
+		"POST /donor/email-change/confirm":     true,
+		"POST /donor/passkeys/sign-in/options": true,
+		"POST /donor/passkeys/sign-in":         true,
+		"POST /donor/logout":                   true,
+		"POST /donor/logout-all":               true,
+	}
 	server := NewServer("", Services{})
 	for _, route := range allRoutes() {
 		if !strings.HasPrefix(route.pattern, "POST ") || route.auth == stripeAuth {
@@ -388,8 +403,18 @@ func TestSessionRoutesServeCookieAndBearerCallers(t *testing.T) {
 			var body struct {
 				Sessions []store.DeviceSession `json:"sessions"`
 			}
-			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK || body.Sessions == nil || len(donor.sessions) != 1 || donor.sessions[0] != appSession {
-				t.Errorf("%s %s %s: got %d %s with sessions %q, want 200 with a session list for the caller", caller.name, method, path, response.Code, response.Body, donor.sessions)
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK || body.Sessions == nil ||
+				len(donor.sessions) != 1 ||
+				donor.sessions[0] != appSession {
+				t.Errorf(
+					"%s %s %s: got %d %s with sessions %q, want 200 with a session list for the caller",
+					caller.name,
+					method,
+					path,
+					response.Code,
+					response.Body,
+					donor.sessions,
+				)
 			}
 			if strings.HasSuffix(path, "/revoke") && donor.revoked.String() != testID {
 				t.Errorf("%s: revoked %s, want %s", caller.name, donor.revoked.String(), testID)
@@ -414,7 +439,16 @@ func TestSessionRevocationErrors(t *testing.T) {
 		response := httptest.NewRecorder()
 		NewServer("", Services{Donor: donor}).Handler.ServeHTTP(response, appRequest("POST", tc.path, ""))
 		if response.Code != tc.status || len(donor.sessions) != tc.calls || strings.Contains(response.Body.String(), "private") {
-			t.Errorf("%s with %v: got %d %s after %d store calls, want %d after %d", tc.path, tc.err, response.Code, response.Body, len(donor.sessions), tc.status, tc.calls)
+			t.Errorf(
+				"%s with %v: got %d %s after %d store calls, want %d after %d",
+				tc.path,
+				tc.err,
+				response.Code,
+				response.Body,
+				len(donor.sessions),
+				tc.status,
+				tc.calls,
+			)
 		}
 	}
 }

@@ -32,7 +32,8 @@ func (s RecurringService) Pause(ctx context.Context, token string, r PauseReques
 		if err != nil && !fresh {
 			return nil, nil, err
 		}
-		if !fresh && (command.DonorID != d.ID || command.AttemptID != attempt.ID || command.Months != r.Months || !command.StartsAt.Time.Equal(r.StartsAt) || !command.ResumesAt.Time.Equal(r.ResumesAt)) {
+		if !fresh &&
+			(command.DonorID != d.ID || command.AttemptID != attempt.ID || command.Months != r.Months || !command.StartsAt.Time.Equal(r.StartsAt) || !command.ResumesAt.Time.Equal(r.ResumesAt)) {
 			return nil, nil, ErrSubscriptionConflict
 		}
 		if fresh {
@@ -56,7 +57,9 @@ func (s RecurringService) Pause(ctx context.Context, token string, r PauseReques
 			result, err := completePause(ctx, tx, d.ID, attempt.ID, command, now)
 			return &result, nil, err
 		}
-		if !now.Before(command.StartsAt.Time) || schedule.Status != "active" || schedule.StopsAt.Valid || !schedule.PeriodEnd.Time.Equal(command.StartsAt.Time) || now.Sub(command.CreatedAt.Time) >= commandRetryWindow {
+		if !now.Before(command.StartsAt.Time) || schedule.Status != "active" || schedule.StopsAt.Valid ||
+			!schedule.PeriodEnd.Time.Equal(command.StartsAt.Time) ||
+			now.Sub(command.CreatedAt.Time) >= commandRetryWindow {
 			return nil, nil, ErrSubscriptionConflict
 		}
 		lease, err := leaseSubscription(ctx, q, d.ID, attempt, command.ID, now)
@@ -108,18 +111,46 @@ func requireNoActivePause(ctx context.Context, q *queries.Queries, attempt pgtyp
 
 // insertPause records r once the subscription shows it is still the pause
 // that was offered: from the next renewal, resuming the chosen months later.
-func insertPause(ctx context.Context, q *queries.Queries, donor, attempt pgtype.UUID, schedule queries.DonorSubscription, remote payments.Object, r PauseRequest, now time.Time) error {
+func insertPause(
+	ctx context.Context,
+	q *queries.Queries,
+	donor, attempt pgtype.UUID,
+	schedule queries.DonorSubscription,
+	remote payments.Object,
+	r PauseRequest,
+	now time.Time,
+) error {
 	until, err := renewalAfter(r.StartsAt, r.Months, schedule.BillingAnchor.Time)
 	if err != nil {
 		return err
 	}
-	if schedule.Status != "active" || schedule.StopsAt.Valid || !remote.Absent("pause_collection") || !schedule.PeriodEnd.Time.Equal(r.StartsAt) || !until.Equal(r.ResumesAt) || !now.Before(r.StartsAt) {
+	if schedule.Status != "active" || schedule.StopsAt.Valid || !remote.Absent("pause_collection") ||
+		!schedule.PeriodEnd.Time.Equal(r.StartsAt) ||
+		!until.Equal(r.ResumesAt) ||
+		!now.Before(r.StartsAt) {
 		return ErrSubscriptionConflict
 	}
-	return q.InsertPause(ctx, queries.InsertPauseParams{ID: r.RequestID, DonorID: donor, AttemptID: attempt, Months: r.Months, StartsAt: timestamp(r.StartsAt), ResumesAt: timestamp(r.ResumesAt), CreatedAt: timestamp(now)})
+	return q.InsertPause(
+		ctx,
+		queries.InsertPauseParams{
+			ID:        r.RequestID,
+			DonorID:   donor,
+			AttemptID: attempt,
+			Months:    r.Months,
+			StartsAt:  timestamp(r.StartsAt),
+			ResumesAt: timestamp(r.ResumesAt),
+			CreatedAt: timestamp(now),
+		},
+	)
 }
 
-func completePause(ctx context.Context, tx pgx.Tx, donor, attempt pgtype.UUID, command queries.DonorPause, now time.Time) (PauseResult, error) {
+func completePause(
+	ctx context.Context,
+	tx pgx.Tx,
+	donor, attempt pgtype.UUID,
+	command queries.DonorPause,
+	now time.Time,
+) (PauseResult, error) {
 	q := queries.New(tx)
 	if err := releaseLease(ctx, q, attempt, command.ID); err != nil {
 		return PauseResult{}, err

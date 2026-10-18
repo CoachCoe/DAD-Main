@@ -147,10 +147,12 @@ func TestAPNsSendsSignedAlertsOverHTTP2(t *testing.T) {
 		t.Fatalf("authorization %q", first.authorization)
 	}
 	header, claims, digest, signature := decodeJWT(t, bearer)
-	if !reflect.DeepEqual(header, map[string]any{"alg": "ES256", "kid": "ABC123DEFG"}) || !reflect.DeepEqual(claims, map[string]any{"iss": "TEAM123456", "iat": float64(clock.Unix())}) {
+	if !reflect.DeepEqual(header, map[string]any{"alg": "ES256", "kid": "ABC123DEFG"}) ||
+		!reflect.DeepEqual(claims, map[string]any{"iss": "TEAM123456", "iat": float64(clock.Unix())}) {
 		t.Fatalf("header %v claims %v", header, claims)
 	}
-	if len(signature) != 64 || !ecdsa.Verify(&key.PublicKey, digest, new(big.Int).SetBytes(signature[:32]), new(big.Int).SetBytes(signature[32:])) {
+	if len(signature) != 64 ||
+		!ecdsa.Verify(&key.PublicKey, digest, new(big.Int).SetBytes(signature[:32]), new(big.Int).SetBytes(signature[32:])) {
 		t.Fatal("provider token signature does not verify with the key's public half")
 	}
 
@@ -213,7 +215,10 @@ func newFCMServer(t *testing.T) *fcmServer {
 			_ = r.ParseForm()
 			s.exchanges = append(s.exchanges, r.PostForm)
 			w.WriteHeader(s.tokenStatus)
-			_, _ = io.WriteString(w, `{"access_token":"access-`+string(rune('0'+len(s.exchanges)))+`","expires_in":3599,"token_type":"Bearer"}`)
+			_, _ = io.WriteString(
+				w,
+				`{"access_token":"access-`+string(rune('0'+len(s.exchanges)))+`","expires_in":3599,"token_type":"Bearer"}`,
+			)
 		case "/v1/projects/dad-donor-app/messages:send":
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
@@ -274,7 +279,11 @@ func TestFCMExchangesASignedAssertionAndCachesTheAccessToken(t *testing.T) {
 		}
 	}
 	if len(server.exchanges) != 1 || server.authorized[0] != "Bearer access-1" || server.authorized[1] != "Bearer access-1" {
-		t.Fatalf("exchanges %d, authorizations %v: the access token should be exchanged once and reused", len(server.exchanges), server.authorized)
+		t.Fatalf(
+			"exchanges %d, authorizations %v: the access token should be exchanged once and reused",
+			len(server.exchanges),
+			server.authorized,
+		)
 	}
 	form := server.exchanges[0]
 	if form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:jwt-bearer" {
@@ -295,7 +304,11 @@ func TestFCMExchangesASignedAssertionAndCachesTheAccessToken(t *testing.T) {
 		"token":        device.Token,
 		"notification": map[string]any{"title": notification.Title, "body": notification.Body},
 		"data":         map[string]any{"category": "REFERRAL_CONVERTED", "path": "/account/dashboard"},
-		"android":      map[string]any{"collapse_key": notification.ID, "ttl": "3600s", "notification": map[string]any{"tag": notification.ID}},
+		"android": map[string]any{
+			"collapse_key": notification.ID,
+			"ttl":          "3600s",
+			"notification": map[string]any{"tag": notification.ID},
+		},
 	}}
 	if !reflect.DeepEqual(server.sends[0], want) {
 		t.Fatalf("message %v, want %v", server.sends[0], want)
@@ -359,7 +372,12 @@ func TestFromEnvironmentLoadsOnlyCompleteProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 	p8, account := write("AuthKey.p8", pkcs8(t, ecKey)), write("firebase.json", serviceAccount(t, rsaKey))
-	apns := map[string]string{"DONOR_PUSH_APNS_KEY_FILE": p8, "DONOR_PUSH_APNS_KEY_ID": "ABC123DEFG", "DONOR_PUSH_APNS_TEAM_ID": "TEAM123456", "DONOR_PUSH_APNS_TOPIC": "org.dad.donor"}
+	apns := map[string]string{
+		"DONOR_PUSH_APNS_KEY_FILE": p8,
+		"DONOR_PUSH_APNS_KEY_ID":   "ABC123DEFG",
+		"DONOR_PUSH_APNS_TEAM_ID":  "TEAM123456",
+		"DONOR_PUSH_APNS_TOPIC":    "org.dad.donor",
+	}
 	with := func(base map[string]string, changes ...string) func(string) string {
 		env := map[string]string{}
 		for k, v := range base {

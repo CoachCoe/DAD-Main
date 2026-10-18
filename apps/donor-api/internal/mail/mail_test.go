@@ -24,7 +24,13 @@ import (
 )
 
 func TestMessageMIMEAndInjectionBoundaries(t *testing.T) {
-	message := Message{From: "DAD <sender@example.org>", To: "donor@example.org", Subject: "Your gift — thank you", Body: "Line one\nA UTF-8 amount: €30\n.", ID: "<dad-login-fixture@example.org>"}
+	message := Message{
+		From:    "DAD <sender@example.org>",
+		To:      "donor@example.org",
+		Subject: "Your gift — thank you",
+		Body:    "Line one\nA UTF-8 amount: €30\n.",
+		ID:      "<dad-login-fixture@example.org>",
+	}
 	wire, from, to, err := message.wire()
 	if err != nil || from != "sender@example.org" || to != "donor@example.org" {
 		t.Fatal("bad envelopes", err)
@@ -98,7 +104,15 @@ func TestSMTPRefusesCleartextAndHonorsCancellation(t *testing.T) {
 				}
 				commands <- command
 			}()
-			transport := SMTPTransport{Settings: Settings{Host: host, Port: port, Username: "private-user", Password: "private-password", Sender: "sender@example.org"}}
+			transport := SMTPTransport{
+				Settings: Settings{
+					Host:     host,
+					Port:     port,
+					Username: "private-user",
+					Password: "private-password",
+					Sender:   "sender@example.org",
+				},
+			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			result := make(chan error, 1)
@@ -232,8 +246,23 @@ func TestSMTPDeliversOverVerifiedSTARTTLS(t *testing.T) {
 	port, _ := strconv.Atoi(portText)
 	sessions := make(chan fixtureSession, 1)
 	go func() { sessions <- serveSTARTTLS(listener, config) }()
-	transport := SMTPTransport{Settings: Settings{Host: host, Port: port, Username: "private-user", Password: "private-password", Sender: "DAD <sender@example.org>"}, RootCAs: roots}
-	message := Message{From: "DAD <sender@example.org>", To: "donor@example.org", Subject: "Receipt", Body: "Thank you\n.hidden line\n.", ID: "<dad-message-fixture@example.org>"}
+	transport := SMTPTransport{
+		Settings: Settings{
+			Host:     host,
+			Port:     port,
+			Username: "private-user",
+			Password: "private-password",
+			Sender:   "DAD <sender@example.org>",
+		},
+		RootCAs: roots,
+	}
+	message := Message{
+		From:    "DAD <sender@example.org>",
+		To:      "donor@example.org",
+		Subject: "Receipt",
+		Body:    "Thank you\n.hidden line\n.",
+		ID:      "<dad-message-fixture@example.org>",
+	}
 	if err = transport.Send(context.Background(), message); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +271,16 @@ func TestSMTPDeliversOverVerifiedSTARTTLS(t *testing.T) {
 		t.Fatal(session.err)
 	}
 	plain := base64.StdEncoding.EncodeToString([]byte("\x00private-user\x00private-password"))
-	want := []string{"EHLO localhost", "STARTTLS", "EHLO localhost", "AUTH PLAIN " + plain, "MAIL FROM:<sender@example.org>", "RCPT TO:<donor@example.org>", "DATA", "QUIT"}
+	want := []string{
+		"EHLO localhost",
+		"STARTTLS",
+		"EHLO localhost",
+		"AUTH PLAIN " + plain,
+		"MAIL FROM:<sender@example.org>",
+		"RCPT TO:<donor@example.org>",
+		"DATA",
+		"QUIT",
+	}
 	if !slices.Equal(session.commands, want) {
 		t.Fatalf("commands = %q", session.commands)
 	}

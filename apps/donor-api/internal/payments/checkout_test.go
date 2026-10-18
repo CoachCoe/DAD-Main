@@ -14,30 +14,44 @@ func TestCheckoutUsesPinnedSDKAndSavedParameters(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if r.Method != "POST" || r.URL.Path != "/v1/checkout/sessions" || r.Header.Get("Stripe-Version") != APIVersion || r.Header.Get("Idempotency-Key") != "dad-checkout-test" {
+		if r.Method != "POST" || r.URL.Path != "/v1/checkout/sessions" || r.Header.Get("Stripe-Version") != APIVersion ||
+			r.Header.Get("Idempotency-Key") != "dad-checkout-test" {
 			t.Error("Stripe boundary changed")
 		}
 		if err := r.ParseForm(); err != nil {
 			t.Error(err)
 		}
-		if r.Form.Get("allowed_payment_method_types[0]") != "card" || r.Form.Get("payment_method_types[0]") != "" || r.Form.Get("line_items[0][price_data][unit_amount]") != "3000" || r.Form.Get("customer") != "" {
+		if r.Form.Get("allowed_payment_method_types[0]") != "card" || r.Form.Get("payment_method_types[0]") != "" ||
+			r.Form.Get("line_items[0][price_data][unit_amount]") != "3000" ||
+			r.Form.Get("customer") != "" {
 			t.Errorf("wrong Stripe request form: %v", r.Form)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"cs_test_fixture","url":"https://checkout.stripe.com/c/test","livemode":false}`))
 	}))
 	defer server.Close()
-	backends := stripe.NewBackendsWithConfig(&stripe.BackendConfig{URL: stripe.String(server.URL), HTTPClient: server.Client(), MaxNetworkRetries: stripe.Int64(0), LeveledLogger: &stripe.LeveledLogger{Level: stripe.LevelNull}})
+	backends := stripe.NewBackendsWithConfig(
+		&stripe.BackendConfig{
+			URL:               stripe.String(server.URL),
+			HTTPClient:        server.Client(),
+			MaxNetworkRetries: stripe.Int64(0),
+			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
+		},
+	)
 	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
-	raw := []byte(`{"mode":"payment","customer_email":"donor@example.org","allowed_payment_method_types":["card"],"line_items":[{"price_data":{"currency":"usd","unit_amount":3000,"product_data":{"name":"DAD one-time gift"}},"quantity":1}]}`)
+	raw := []byte(
+		`{"mode":"payment","customer_email":"donor@example.org","allowed_payment_method_types":["card"],"line_items":[{"price_data":{"currency":"usd","unit_amount":3000,"product_data":{"name":"DAD one-time gift"}},"quantity":1}]}`,
+	)
 	result, err := gateway.CreateCheckout(context.Background(), raw, "dad-checkout-test")
 	if err != nil || ValidateRemoteCheckout(result) != nil || calls != 1 {
 		t.Fatalf("SDK request failed: %v", err)
 	}
-	if _, err = gateway.CreateCheckout(context.Background(), []byte(`{"payment_method_types":["card"]}`), "old-key"); err == nil || calls != 1 {
+	if _, err = gateway.CreateCheckout(context.Background(), []byte(`{"payment_method_types":["card"]}`), "old-key"); err == nil ||
+		calls != 1 {
 		t.Fatal("unknown persisted params silently changed")
 	}
 }
+
 func TestPaymentBoundariesRejectLiveAndUnsafeOrigins(t *testing.T) {
 	for _, key := range []string{"sk_live_test", "rk_live_test", ""} {
 		if _, err := NewStripeGateway(key); err == nil {
@@ -89,7 +103,14 @@ func TestFinancialGatewayUsesPinnedSDKAndIdempotentCardUpdate(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"fixture","livemode":false}`))
 	}))
 	defer server.Close()
-	backends := stripe.NewBackendsWithConfig(&stripe.BackendConfig{URL: stripe.String(server.URL), HTTPClient: server.Client(), MaxNetworkRetries: stripe.Int64(0), LeveledLogger: &stripe.LeveledLogger{Level: stripe.LevelNull}})
+	backends := stripe.NewBackendsWithConfig(
+		&stripe.BackendConfig{
+			URL:               stripe.String(server.URL),
+			HTTPClient:        server.Client(),
+			MaxNetworkRetries: stripe.Int64(0),
+			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
+		},
+	)
 	g := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
 	for _, read := range []func(context.Context, string) (Object, error){g.RetrievePaymentIntent, g.RetrieveRefund, g.RetrieveSubscription, g.RetrieveCheckout, g.RetrieveSetupIntent} {
 		value, err := read(context.Background(), "fixture")
@@ -104,6 +125,7 @@ func TestFinancialGatewayUsesPinnedSDKAndIdempotentCardUpdate(t *testing.T) {
 		t.Fatalf("requests=%d", calls)
 	}
 }
+
 func TestSubscriptionMutationsNeverProrate(t *testing.T) {
 	var forms []map[string]string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +144,14 @@ func TestSubscriptionMutationsNeverProrate(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"sub_fixture","object":"subscription"}`))
 	}))
 	defer server.Close()
-	backends := stripe.NewBackendsWithConfig(&stripe.BackendConfig{URL: stripe.String(server.URL), HTTPClient: server.Client(), MaxNetworkRetries: stripe.Int64(0), LeveledLogger: &stripe.LeveledLogger{Level: stripe.LevelNull}})
+	backends := stripe.NewBackendsWithConfig(
+		&stripe.BackendConfig{
+			URL:               stripe.String(server.URL),
+			HTTPClient:        server.Client(),
+			MaxNetworkRetries: stripe.Int64(0),
+			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
+		},
+	)
 	gateway := &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}
 	ctx := context.Background()
 	for _, err := range []error{
@@ -137,7 +166,15 @@ func TestSubscriptionMutationsNeverProrate(t *testing.T) {
 	want := []map[string]string{
 		{"cancel_at": "1800000000", "proration_behavior": "none"},
 		{"pause_collection[behavior]": "void", "pause_collection[resumes_at]": "1900000000", "proration_behavior": "none"},
-		{"items[0][id]": "si_fixture", "items[0][quantity]": "1", "items[0][price_data][currency]": "usd", "items[0][price_data][product]": "prod_fixture", "items[0][price_data][recurring][interval]": "month", "items[0][price_data][unit_amount]": "9000", "proration_behavior": "none"},
+		{
+			"items[0][id]":                              "si_fixture",
+			"items[0][quantity]":                        "1",
+			"items[0][price_data][currency]":            "usd",
+			"items[0][price_data][product]":             "prod_fixture",
+			"items[0][price_data][recurring][interval]": "month",
+			"items[0][price_data][unit_amount]":         "9000",
+			"proration_behavior":                        "none",
+		},
 	}
 	if !reflect.DeepEqual(forms, want) {
 		t.Fatalf("got %v\nwant %v", forms, want)

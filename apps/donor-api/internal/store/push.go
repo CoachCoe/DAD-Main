@@ -94,7 +94,15 @@ func (s PushService) RegisterDevice(ctx context.Context, token string, device Pu
 			return PushRegistration{}, err
 		}
 		environment := pgtype.Text{String: device.Environment, Valid: device.Environment != ""}
-		set, err := q.SetPushToken(ctx, queries.SetPushTokenParams{ID: user.session, Platform: text(device.Platform), PushToken: text(device.Token), PushEnvironment: environment})
+		set, err := q.SetPushToken(
+			ctx,
+			queries.SetPushTokenParams{
+				ID:              user.session,
+				Platform:        text(device.Platform),
+				PushToken:       text(device.Token),
+				PushEnvironment: environment,
+			},
+		)
 		if err != nil {
 			return PushRegistration{}, err
 		}
@@ -115,7 +123,12 @@ func (s PushService) UnregisterDevice(ctx context.Context, token string) (PushRe
 
 // queuePushIntents queues the notifications the projection p calls for.
 func queuePushIntents(ctx context.Context, q *queries.Queries, p projection, now time.Time) error {
-	params := queries.QueuePushIntentsParams{DonorID: p.DonorID, AsOf: timestamp(now), ExpiresAt: timestamp(now.Add(pushLifetime)), RecentSince: timestamp(now.Add(-pushLifetime))}
+	params := queries.QueuePushIntentsParams{
+		DonorID:     p.DonorID,
+		AsOf:        timestamp(now),
+		ExpiresAt:   timestamp(now.Add(pushLifetime)),
+		RecentSince: timestamp(now.Add(-pushLifetime)),
+	}
 	if p.CurrentStreak.Valid && p.streakSince != nil && recognition.Milestone(int64(p.CurrentStreak.Int32)) {
 		params.Milestone = pgtype.Int4{Int32: p.CurrentStreak.Int32, Valid: true}
 		params.RunStartedAt = timestamp(*p.streakSince)
@@ -126,7 +139,13 @@ func queuePushIntents(ctx context.Context, q *queries.Queries, p projection, now
 // pushSuppression returns why a notification should no longer be sent, if
 // it should not: it expired, the donor turned its category off, or the fact
 // it announces no longer holds.
-func pushSuppression(ctx context.Context, q *queries.Queries, job queries.DonorPushNotification, donor queries.Donor, now time.Time) (string, error) {
+func pushSuppression(
+	ctx context.Context,
+	q *queries.Queries,
+	job queries.DonorPushNotification,
+	donor queries.Donor,
+	now time.Time,
+) (string, error) {
 	if !now.Before(job.ExpiresAt.Time) {
 		return "expired", nil
 	}
@@ -298,7 +317,15 @@ func (w PushWorker) claim(ctx context.Context, now time.Time) (*pushJob, bool, e
 			if !messageDataError(err) {
 				return err
 			}
-			return q.FailPushNotification(ctx, queries.FailPushNotificationParams{ID: row.ID, LastError: text("InvalidNotification"), AvailableAt: messageRetryAt(now, row.Attempts+1), Attempts: row.Attempts + 1})
+			return q.FailPushNotification(
+				ctx,
+				queries.FailPushNotificationParams{
+					ID:          row.ID,
+					LastError:   text("InvalidNotification"),
+					AvailableAt: messageRetryAt(now, row.Attempts+1),
+					Attempts:    row.Attempts + 1,
+				},
+			)
 		}
 		if reason != "" {
 			return completePush(ctx, q, row.ID, now, reason)
@@ -310,7 +337,10 @@ func (w PushWorker) claim(ctx context.Context, now time.Time) (*pushJob, bool, e
 		claimed := &pushJob{DonorPushNotification: row, note: note}
 		for _, d := range devices {
 			if provider := w.Providers[d.Platform.String]; provider != nil {
-				claimed.targets = append(claimed.targets, pushTarget{d.ID, provider, push.Device{Token: d.PushToken.String, Environment: d.PushEnvironment.String}})
+				claimed.targets = append(
+					claimed.targets,
+					pushTarget{d.ID, provider, push.Device{Token: d.PushToken.String, Environment: d.PushEnvironment.String}},
+				)
 			}
 		}
 		switch {
@@ -350,13 +380,24 @@ func (w PushWorker) record(ctx context.Context, job *pushJob, outcome pushOutcom
 		attempt := job.Attempts + 1
 		switch {
 		case outcome.rejected:
-			return q.FailPushNotification(ctx, queries.FailPushNotificationParams{ID: job.ID, LastError: text("ProviderRejected"), AvailableAt: timestamp(now), Attempts: maxDeliveryAttempts})
+			return q.FailPushNotification(
+				ctx,
+				queries.FailPushNotificationParams{
+					ID:          job.ID,
+					LastError:   text("ProviderRejected"),
+					AvailableAt: timestamp(now),
+					Attempts:    maxDeliveryAttempts,
+				},
+			)
 		case outcome.retry:
 			retryAt := messageRetryAt(now, attempt)
 			if later := now.Add(outcome.after); later.After(retryAt.Time) {
 				retryAt = timestamp(later)
 			}
-			return q.FailPushNotification(ctx, queries.FailPushNotificationParams{ID: job.ID, LastError: text("DeliveryError"), AvailableAt: retryAt, Attempts: attempt})
+			return q.FailPushNotification(
+				ctx,
+				queries.FailPushNotificationParams{ID: job.ID, LastError: text("DeliveryError"), AvailableAt: retryAt, Attempts: attempt},
+			)
 		case len(outcome.sent) == 0 && len(job.SentTo) == 0:
 			return completePush(ctx, q, job.ID, now, "unregistered")
 		}
@@ -365,5 +406,12 @@ func (w PushWorker) record(ctx context.Context, job *pushJob, outcome pushOutcom
 }
 
 func completePush(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time, reason string) error {
-	return q.CompletePushNotification(ctx, queries.CompletePushNotificationParams{ID: id, CompletedAt: timestamp(now), SuppressedReason: pgtype.Text{String: reason, Valid: reason != ""}})
+	return q.CompletePushNotification(
+		ctx,
+		queries.CompletePushNotificationParams{
+			ID:               id,
+			CompletedAt:      timestamp(now),
+			SuppressedReason: pgtype.Text{String: reason, Valid: reason != ""},
+		},
+	)
 }

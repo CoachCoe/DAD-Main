@@ -118,33 +118,54 @@ func (p *population) tables() []table {
 				}
 			}
 		}},
-		{"donor_preference_events", "id donor_id version referral_emails marketing_emails consent_version source created_at", func(emit func(...any)) {
-			for _, d := range p.donors {
-				if d.preference {
-					referral, marketing := d.emails()
-					emit(derived(d.id, 2), d.id, int32(1), referral, marketing, "r1-notifications-v1", "account", d.claimedAt)
+		{
+			"donor_preference_events",
+			"id donor_id version referral_emails marketing_emails consent_version source created_at",
+			func(emit func(...any)) {
+				for _, d := range p.donors {
+					if d.preference {
+						referral, marketing := d.emails()
+						emit(derived(d.id, 2), d.id, int32(1), referral, marketing, "r1-notifications-v1", "account", d.claimedAt)
+					}
 				}
-			}
-		}},
+			},
+		},
 		{"donor_referral_touches", "id token_hash referrer_id kind touched_at expires_at created_at", func(emit func(...any)) {
 			for _, t := range p.touches {
 				emit(t.id, t.tokenHash, t.referrer.id, t.kind, t.at, t.at.Add(referralWindow), t.at)
 			}
 		}},
-		{"donor_checkouts", "id donor_id amount_minor currency frequency referrer_id referral_kind referral_expires_at created_at", func(emit func(...any)) {
-			for c := range p.checkouts {
-				var expires pgtype.Timestamptz
-				if c.referrer != nil {
-					expires = timeOrNull(c.expiresAt)
+		{
+			"donor_checkouts",
+			"id donor_id amount_minor currency frequency referrer_id referral_kind referral_expires_at created_at",
+			func(emit func(...any)) {
+				for c := range p.checkouts {
+					var expires pgtype.Timestamptz
+					if c.referrer != nil {
+						expires = timeOrNull(c.expiresAt)
+					}
+					emit(c.id, c.donor.id, c.amount, "USD", c.frequency, donorID(c.referrer), textOrNull(c.kind), expires, c.createdAt)
 				}
-				emit(c.id, c.donor.id, c.amount, "USD", c.frequency, donorID(c.referrer), textOrNull(c.kind), expires, c.createdAt)
-			}
-		}},
-		{"donor_stripe_checkouts", "id checkout_id request_hash request_params stripe_session_id stripe_subscription_id status created_at", func(emit func(...any)) {
-			for c := range p.checkouts {
-				emit(c.attempt, c.id, hex.EncodeToString(c.attempt.Bytes[:]), "{}", textOrNull(c.session), textOrNull(c.subscription), c.status, c.createdAt)
-			}
-		}},
+			},
+		},
+		{
+			"donor_stripe_checkouts",
+			"id checkout_id request_hash request_params stripe_session_id stripe_subscription_id status created_at",
+			func(emit func(...any)) {
+				for c := range p.checkouts {
+					emit(
+						c.attempt,
+						c.id,
+						hex.EncodeToString(c.attempt.Bytes[:]),
+						"{}",
+						textOrNull(c.session),
+						textOrNull(c.subscription),
+						c.status,
+						c.createdAt,
+					)
+				}
+			},
+		},
 		{"donor_recurring_reservations", "id donor_id attempt_id created_at", func(emit func(...any)) {
 			for c := range p.checkouts {
 				if c.frequency == "MONTHLY" && c.status != "EXPIRED" && c.status != "CANCELLED" {
@@ -152,13 +173,17 @@ func (p *population) tables() []table {
 				}
 			}
 		}},
-		{"donor_subscriptions", "id attempt_id donor_id status period_end stops_at billing_anchor observed_at created_at", func(emit func(...any)) {
-			for c := range p.checkouts {
-				if s := c.sub; s != nil {
-					emit(s.id, c.attempt, c.donor.id, s.status, s.periodEnd, timeOrNull(s.stopsAt), s.anchor, s.observed, c.createdAt)
+		{
+			"donor_subscriptions",
+			"id attempt_id donor_id status period_end stops_at billing_anchor observed_at created_at",
+			func(emit func(...any)) {
+				for c := range p.checkouts {
+					if s := c.sub; s != nil {
+						emit(s.id, c.attempt, c.donor.id, s.status, s.periodEnd, timeOrNull(s.stopsAt), s.anchor, s.observed, c.createdAt)
+					}
 				}
-			}
-		}},
+			},
+		},
 		{"donor_cancellations", "id donor_id attempt_id confirmed_period_end completed_at created_at", func(emit func(...any)) {
 			for c := range p.checkouts {
 				if x := c.cancellation; x != nil {
@@ -173,58 +198,88 @@ func (p *population) tables() []table {
 				}
 			}
 		}},
-		{"donor_stripe_events", "id stripe_event_id event_type occurred_at data processed_at attempts available_at created_at", func(emit func(...any)) {
-			write := func(e event) {
-				emit(e.id, "evt_"+hex.EncodeToString(e.id.Bytes[:]), e.kind, e.at, "{}", e.at.Add(2*time.Second), int32(1), e.at, e.at)
-			}
-			for c := range p.checkouts {
-				for _, pd := range c.periods {
-					for _, e := range pd.events() {
+		{
+			"donor_stripe_events",
+			"id stripe_event_id event_type occurred_at data processed_at attempts available_at created_at",
+			func(emit func(...any)) {
+				write := func(e event) {
+					emit(e.id, "evt_"+hex.EncodeToString(e.id.Bytes[:]), e.kind, e.at, "{}", e.at.Add(2*time.Second), int32(1), e.at, e.at)
+				}
+				for c := range p.checkouts {
+					for _, pd := range c.periods {
+						for _, e := range pd.events() {
+							write(e)
+						}
+					}
+				}
+				for g := range p.refunds {
+					for _, e := range g.refund.events() {
 						write(e)
 					}
 				}
-			}
-			for g := range p.refunds {
-				for _, e := range g.refund.events() {
-					write(e)
-				}
-			}
-		}},
-		{"donor_billing_periods", "id donor_id checkout_id stripe_invoice_id stripe_subscription_id due_at ends_at status created_at", func(emit func(...any)) {
-			for c := range p.checkouts {
-				for _, pd := range c.periods {
-					status := "FAILED"
-					if pd.paid {
-						status = "PAID"
-					}
-					emit(pd.id, c.donor.id, c.id, pd.invoice, c.subscription, pd.due, pd.ends, status, pd.events()[0].at)
-				}
-			}
-		}},
-		{"donor_billing_observations", "id period_id source_event_id status amount_minor currency billing_reason occurred_at event_created_at recorded_at", func(emit func(...any)) {
-			for c := range p.checkouts {
-				for i, pd := range c.periods {
-					reason := "subscription_cycle"
-					if i == 0 {
-						reason = "subscription_create"
-					}
-					for _, e := range pd.events() {
-						emit(e.id, pd.id, e.id, e.status, c.amount, "USD", reason, e.at, e.at, e.at.Add(2*time.Second))
+			},
+		},
+		{
+			"donor_billing_periods",
+			"id donor_id checkout_id stripe_invoice_id stripe_subscription_id due_at ends_at status created_at",
+			func(emit func(...any)) {
+				for c := range p.checkouts {
+					for _, pd := range c.periods {
+						status := "FAILED"
+						if pd.paid {
+							status = "PAID"
+						}
+						emit(pd.id, c.donor.id, c.id, pd.invoice, c.subscription, pd.due, pd.ends, status, pd.events()[0].at)
 					}
 				}
-			}
-		}},
-		{"donor_gifts", "id donor_id checkout_id stripe_object_id amount_minor currency frequency paid_at stripe_payment_intent_id period_id referrer_id referral_kind created_at", func(emit func(...any)) {
-			for c := range p.checkouts {
-				for _, g := range c.gifts {
-					var period pgtype.UUID
-					if g.period != nil {
-						period = g.period.id
+			},
+		},
+		{
+			"donor_billing_observations",
+			"id period_id source_event_id status amount_minor currency billing_reason occurred_at event_created_at recorded_at",
+			func(emit func(...any)) {
+				for c := range p.checkouts {
+					for i, pd := range c.periods {
+						reason := "subscription_cycle"
+						if i == 0 {
+							reason = "subscription_create"
+						}
+						for _, e := range pd.events() {
+							emit(e.id, pd.id, e.id, e.status, c.amount, "USD", reason, e.at, e.at, e.at.Add(2*time.Second))
+						}
 					}
-					emit(g.id, c.donor.id, c.id, g.object, g.amount, "USD", g.frequency, g.paidAt, g.paymentIntent, period, donorID(g.referrer), textOrNull(g.kind), g.paidAt.Add(2*time.Second))
 				}
-			}
-		}},
+			},
+		},
+		{
+			"donor_gifts",
+			"id donor_id checkout_id stripe_object_id amount_minor currency frequency paid_at stripe_payment_intent_id period_id referrer_id referral_kind created_at",
+			func(emit func(...any)) {
+				for c := range p.checkouts {
+					for _, g := range c.gifts {
+						var period pgtype.UUID
+						if g.period != nil {
+							period = g.period.id
+						}
+						emit(
+							g.id,
+							c.donor.id,
+							c.id,
+							g.object,
+							g.amount,
+							"USD",
+							g.frequency,
+							g.paidAt,
+							g.paymentIntent,
+							period,
+							donorID(g.referrer),
+							textOrNull(g.kind),
+							g.paidAt.Add(2*time.Second),
+						)
+					}
+				}
+			},
+		},
 		{"donor_refunds", "id gift_id stripe_refund_id amount_minor currency status observed_at created_at", func(emit func(...any)) {
 			for g := range p.refunds {
 				r := g.refund
@@ -365,7 +420,12 @@ func (p *population) sessions(ctx context.Context, pool *pgxpool.Pool, n int) ([
 		}
 		rows[i] = []any{id, c.d.id, store.HashToken(sessions[i].token), expires}
 	}
-	_, err := pool.CopyFrom(ctx, pgx.Identifier{"donor_sessions"}, []string{"id", "donor_id", "token_hash", "expires_at"}, pgx.CopyFromRows(rows))
+	_, err := pool.CopyFrom(
+		ctx,
+		pgx.Identifier{"donor_sessions"},
+		[]string{"id", "donor_id", "token_hash", "expires_at"},
+		pgx.CopyFromRows(rows),
+	)
 	return sessions, err
 }
 

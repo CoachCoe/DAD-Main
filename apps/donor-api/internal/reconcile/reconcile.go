@@ -103,7 +103,12 @@ func InvoicePaymentFacts(o payments.Object) (InvoicePayment, error) {
 		!processorID(payment.Text("payment_intent"), "pi_") || o.Text("currency") != "usd" {
 		return InvoicePayment{}, payments.ErrFacts
 	}
-	return InvoicePayment{InvoiceID: o.Text("invoice"), PaymentIntentID: payment.Text("payment_intent"), Currency: o.Text("currency"), AmountMinor: amount}, nil
+	return InvoicePayment{
+		InvoiceID:       o.Text("invoice"),
+		PaymentIntentID: payment.Text("payment_intent"),
+		Currency:        o.Text("currency"),
+		AmountMinor:     amount,
+	}, nil
 }
 
 // Refund is the subset of a donor_refunds row the diff needs.
@@ -190,7 +195,8 @@ func financialObject(o payments.Object, prefix string) (string, int64, error) {
 	id := o.Text("id")
 	amount, err := o.Int("amount")
 	_, createdErr := o.Unix("created")
-	if !processorID(id, prefix) || amount <= 0 || err != nil || createdErr != nil || !o.BoolIs("livemode", false) || len(o.Text("currency")) != 3 {
+	if !processorID(id, prefix) || amount <= 0 || err != nil || createdErr != nil || !o.BoolIs("livemode", false) ||
+		len(o.Text("currency")) != 3 {
 		return "", 0, payments.ErrFacts
 	}
 	for _, r := range strings.ToLower(o.Text("currency")) {
@@ -262,7 +268,9 @@ func Diff(window Window, stripeCharges, stripeRefunds []payments.Object, dbGifts
 	giftByCharge := map[string]Gift{}
 	giftByIntent := map[string]Gift{}
 	for _, g := range dbGifts {
-		if (!processorID(g.StripeObjectID, "pi_") && !processorID(g.StripeObjectID, "in_") && !processorID(g.StripeObjectID, "ch_")) || g.AmountMinor <= 0 || g.Currency != "USD" {
+		if (!processorID(g.StripeObjectID, "pi_") && !processorID(g.StripeObjectID, "in_") && !processorID(g.StripeObjectID, "ch_")) ||
+			g.AmountMinor <= 0 ||
+			g.Currency != "USD" {
 			report.InvalidObjects++
 		}
 		if g.StripeObjectID != "" {
@@ -277,7 +285,8 @@ func Diff(window Window, stripeCharges, stripeRefunds []payments.Object, dbGifts
 	}
 	refundByID := map[string]Refund{}
 	for _, r := range dbRefunds {
-		if !processorID(r.StripeRefundID, "re_") || r.AmountMinor <= 0 || r.Currency != "USD" || refundStatus(strings.ToLower(r.Status)) == "" {
+		if !processorID(r.StripeRefundID, "re_") || r.AmountMinor <= 0 || r.Currency != "USD" ||
+			refundStatus(strings.ToLower(r.Status)) == "" {
 			report.InvalidObjects++
 		}
 		if r.StripeRefundID != "" {

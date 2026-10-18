@@ -129,7 +129,13 @@ type donorCeremony struct {
 	SessionID pgtype.UUID `json:"session_id"`
 }
 
-func saveDonorCeremony(ctx context.Context, q *queries.Queries, kind string, donorID, sessionID pgtype.UUID, session *webauthn.SessionData) (string, error) {
+func saveDonorCeremony(
+	ctx context.Context,
+	q *queries.Queries,
+	kind string,
+	donorID, sessionID pgtype.UUID,
+	session *webauthn.SessionData,
+) (string, error) {
 	raw, err := json.Marshal(donorCeremony{SessionData: *session, SessionID: sessionID})
 	if err != nil {
 		return "", err
@@ -263,7 +269,12 @@ func (s *DonorPasskeyService) BeginRegister(ctx context.Context, token string) (
 // FinishRegister validates and stores a new passkey for a signed-in donor and
 // queues the essential notice telling them so, returning every passkey the
 // donor now holds.
-func (s *DonorPasskeyService) FinishRegister(ctx context.Context, token, ceremony string, response []byte, name string) (PasskeyList, error) {
+func (s *DonorPasskeyService) FinishRegister(
+	ctx context.Context,
+	token, ceremony string,
+	response []byte,
+	name string,
+) (PasskeyList, error) {
 	if !ValidPasskeyName(name) {
 		return PasskeyList{}, ErrPasskeyDenied
 	}

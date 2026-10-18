@@ -43,6 +43,7 @@ func (g *subscriptionGateway) RetrieveSubscription(ctx context.Context, id strin
 	}
 	return g.financialGateway.RetrieveSubscription(ctx, id)
 }
+
 func (g *subscriptionGateway) CreateCheckout(_ context.Context, _ []byte, key string) (payments.RemoteCheckout, error) {
 	g.intercept(key)
 	live := false
@@ -71,6 +72,7 @@ func (g *subscriptionGateway) intercept(key string) {
 	g.keys = append(g.keys, key)
 	g.mu.Unlock()
 }
+
 func (g *subscriptionGateway) mutate(id, key string, edit func(map[string]any)) error {
 	g.intercept(key)
 	g.mu.Lock()
@@ -95,14 +97,17 @@ func (g *subscriptionGateway) mutate(id, key string, edit func(map[string]any)) 
 	}
 	return nil
 }
+
 func (g *subscriptionGateway) ScheduleCancellation(_ context.Context, id string, end int64, key string) error {
 	return g.mutate(id, key, func(r map[string]any) { r["cancel_at"] = end })
 }
+
 func (g *subscriptionGateway) PauseCollection(_ context.Context, id string, resumes int64, key string) error {
 	return g.mutate(id, key, func(r map[string]any) {
 		r["pause_collection"] = map[string]any{"behavior": "void", "resumes_at": resumes}
 	})
 }
+
 func (g *subscriptionGateway) ChangeMonthlyAmount(_ context.Context, id, item, product string, amount int64, key string) error {
 	return g.mutate(id, key, func(r map[string]any) {
 		line := subscriptionItem(r)
@@ -111,6 +116,7 @@ func (g *subscriptionGateway) ChangeMonthlyAmount(_ context.Context, id, item, p
 		line["price"].(map[string]any)["unit_amount"] = amount
 	})
 }
+
 func (g *subscriptionGateway) ListPaymentRefunds(context.Context, string) ([]payments.Object, error) {
 	g.refundLists++
 	if hook := g.beforeList; hook != nil {
@@ -119,6 +125,7 @@ func (g *subscriptionGateway) ListPaymentRefunds(context.Context, string) ([]pay
 	}
 	return g.refundRows, nil
 }
+
 func (g *subscriptionGateway) CreateRefund(context.Context, string, int64, string) (payments.Object, error) {
 	return nil, payments.ErrProcessorUnavailable
 }
@@ -176,7 +183,17 @@ func newRecurringFixture(t *testing.T) *recurringFixture {
 		t.Fatal(err)
 	}
 	gateway := &subscriptionGateway{financialGateway: f.gateway, t: t}
-	return &recurringFixture{workerFixture: f, checkout: result.CheckoutID, sub: gateway, service: RecurringService{DB: api, Gateway: gateway, Origin: "https://donor.example.org"}, token: tokens.Access, attempt: attempt, subID: subID, start: start, end: end}
+	return &recurringFixture{
+		workerFixture: f,
+		checkout:      result.CheckoutID,
+		sub:           gateway,
+		service:       RecurringService{DB: api, Gateway: gateway, Origin: "https://donor.example.org"},
+		token:         tokens.Access,
+		attempt:       attempt,
+		subID:         subID,
+		start:         start,
+		end:           end,
+	}
 }
 
 // syncSubscription delivers a webhook about checkout's subscription, which
@@ -217,39 +234,51 @@ func (g *offlineGateway) call(name string) error {
 	g.calls = append(g.calls, name)
 	return payments.ErrProcessorUnavailable
 }
+
 func (g *offlineGateway) RetrievePaymentIntent(context.Context, string) (payments.Object, error) {
 	return nil, g.call("RetrievePaymentIntent")
 }
+
 func (g *offlineGateway) RetrieveRefund(context.Context, string) (payments.Object, error) {
 	return nil, g.call("RetrieveRefund")
 }
+
 func (g *offlineGateway) RetrieveSubscription(context.Context, string) (payments.Object, error) {
 	return nil, g.call("RetrieveSubscription")
 }
+
 func (g *offlineGateway) RetrieveCheckout(context.Context, string) (payments.Object, error) {
 	return nil, g.call("RetrieveCheckout")
 }
+
 func (g *offlineGateway) RetrieveSetupIntent(context.Context, string) (payments.Object, error) {
 	return nil, g.call("RetrieveSetupIntent")
 }
+
 func (g *offlineGateway) UpdateSubscriptionPaymentMethod(context.Context, string, string, string) error {
 	return g.call("UpdateSubscriptionPaymentMethod")
 }
+
 func (g *offlineGateway) CreateCheckout(context.Context, []byte, string) (payments.RemoteCheckout, error) {
 	return payments.RemoteCheckout{}, g.call("CreateCheckout")
 }
+
 func (g *offlineGateway) ScheduleCancellation(context.Context, string, int64, string) error {
 	return g.call("ScheduleCancellation")
 }
+
 func (g *offlineGateway) PauseCollection(context.Context, string, int64, string) error {
 	return g.call("PauseCollection")
 }
+
 func (g *offlineGateway) ChangeMonthlyAmount(context.Context, string, string, string, int64, string) error {
 	return g.call("ChangeMonthlyAmount")
 }
+
 func (g *offlineGateway) ListPaymentRefunds(context.Context, string) ([]payments.Object, error) {
 	return nil, g.call("ListPaymentRefunds")
 }
+
 func (g *offlineGateway) CreateRefund(context.Context, string, int64, string) (payments.Object, error) {
 	return nil, g.call("CreateRefund")
 }
@@ -267,6 +296,7 @@ func jsonView(t *testing.T, value any) map[string]any {
 	}
 	return out
 }
+
 func jsonTime(t *testing.T, value any) time.Time {
 	t.Helper()
 	text, _ := value.(string)
@@ -276,6 +306,7 @@ func jsonTime(t *testing.T, value any) time.Time {
 	}
 	return parsed
 }
+
 func assertKeys(t *testing.T, view map[string]any, keys ...string) {
 	t.Helper()
 	if len(view) != len(keys) {
@@ -359,7 +390,12 @@ func TestRecurringCommandReadsProcessorOutsideDonorLock(t *testing.T) {
 				t.Fatal("processor read held the donor lock", err)
 			}
 			if reconciledMeanwhile {
-				mustExec(t, lock, "UPDATE donor_subscriptions SET observed_at=observed_at+interval '1 millisecond' WHERE attempt_id=$1", r.attempt)
+				mustExec(
+					t,
+					lock,
+					"UPDATE donor_subscriptions SET observed_at=observed_at+interval '1 millisecond' WHERE attempt_id=$1",
+					r.attempt,
+				)
 			}
 			if err = lock.Commit(ctx); err != nil {
 				t.Fatal(err)
@@ -423,11 +459,19 @@ func TestViewsServeSyncedStateWithoutCallingProcessor(t *testing.T) {
 	assertKeys(t, view, "mode", "observed_at", "state", "subscription")
 	sub := view["subscription"].(map[string]any)
 	assertKeys(t, sub, "id", "amount_minor", "currency", "status", "period_end", "pause", "stops_at")
-	if view["mode"] != "test" || view["state"] != "ready" || !jsonTime(t, view["observed_at"]).Equal(synced) || sub["id"] != r.attempt.String() || sub["amount_minor"] != float64(3000) || sub["currency"] != "USD" || sub["status"] != "active" || sub["stops_at"] != nil || sub["pause"] != nil || !jsonTime(t, sub["period_end"]).Equal(r.end) {
+	if view["mode"] != "test" || view["state"] != "ready" || !jsonTime(t, view["observed_at"]).Equal(synced) ||
+		sub["id"] != r.attempt.String() ||
+		sub["amount_minor"] != float64(3000) ||
+		sub["currency"] != "USD" ||
+		sub["status"] != "active" ||
+		sub["stops_at"] != nil ||
+		sub["pause"] != nil ||
+		!jsonTime(t, sub["period_end"]).Equal(r.end) {
 		t.Fatalf("details: %v", view)
 	}
 	amount, err := service.AmountOptions(ctx, r.token)
-	if view := jsonView(t, amount); err != nil || view["state"] != "ready" || view["amount_minor"] != float64(3000) || !jsonTime(t, view["effective_at"]).Equal(r.end) {
+	if view := jsonView(t, amount); err != nil || view["state"] != "ready" || view["amount_minor"] != float64(3000) ||
+		!jsonTime(t, view["effective_at"]).Equal(r.end) {
 		t.Fatal("amount options", view, err)
 	}
 	pause, err := service.PauseOptions(ctx, r.token)
@@ -447,7 +491,8 @@ func TestViewsServeSyncedStateWithoutCallingProcessor(t *testing.T) {
 		t.Fatal("cancellation quote", view, err)
 	}
 	refund, err := staff.RefundQuote(ctx, finance, r.donorID, gift)
-	if view := jsonView(t, refund); err != nil || view["available_minor"] != float64(2500) || !jsonTime(t, view["observed_at"]).Equal(refundObserved) {
+	if view := jsonView(t, refund); err != nil || view["available_minor"] != float64(2500) ||
+		!jsonTime(t, view["observed_at"]).Equal(refundObserved) {
 		t.Fatal("refund quote: want 2500 available", view, err)
 	}
 	detail, err := (&StaffService{DB: api}).DonorDetail(ctx, support, r.donorID, 0, 0)
@@ -458,7 +503,10 @@ func TestViewsServeSyncedStateWithoutCallingProcessor(t *testing.T) {
 		t.Fatalf("views called the processor: %v", offline.calls)
 	}
 
-	if _, err = service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end}); !errors.Is(err, payments.ErrProcessorUnavailable) {
+	if _, err = service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end}); !errors.Is(
+		err,
+		payments.ErrProcessorUnavailable,
+	) {
 		t.Fatalf("cancellation without the processor: got %v, want ErrProcessorUnavailable", err)
 	}
 	if len(offline.calls) != 1 || offline.calls[0] != "RetrieveSubscription" {
@@ -508,7 +556,10 @@ func TestViewsFollowWebhookSyncs(t *testing.T) {
 	if amount, pause := states(); amount != "unavailable" || pause != "unavailable" {
 		t.Fatalf("changes offered under a processor schedule: amount %s, pause %s", amount, pause)
 	}
-	if _, err := r.service.ChangeAmount(ctx, r.token, AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}); !errors.Is(err, ErrSubscriptionConflict) {
+	if _, err := r.service.ChangeAmount(ctx, r.token, AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}); !errors.Is(
+		err,
+		ErrSubscriptionConflict,
+	) {
 		t.Fatal("amount change under a processor schedule", err)
 	}
 	if r.sub.retrievals != 1 || len(r.sub.keys) != 0 {
@@ -528,7 +579,8 @@ func TestViewsFollowWebhookSyncs(t *testing.T) {
 		t.Fatal(err)
 	}
 	view := jsonView(t, details)
-	if sub := view["subscription"].(map[string]any); !jsonTime(t, sub["stops_at"]).Equal(r.end) || !jsonTime(t, view["observed_at"]).After(first) {
+	if sub := view["subscription"].(map[string]any); !jsonTime(t, sub["stops_at"]).Equal(r.end) ||
+		!jsonTime(t, view["observed_at"]).After(first) {
 		t.Fatalf("webhook cancellation not shown: %v", view)
 	}
 	if amount, pause := states(); amount != "unavailable" || pause != "unavailable" {
@@ -543,12 +595,17 @@ func TestCommandAfterStripeEndedTheGiftReleasesItsReservation(t *testing.T) {
 	r := newRecurringFixture(t)
 	ctx := context.Background()
 	r.changeRemotely(t, func(remote map[string]any) { remote["status"] = "canceled" })
-	if _, err := r.service.ChangeAmount(ctx, r.token, AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}); !errors.Is(err, ErrSubscriptionConflict) {
+	if _, err := r.service.ChangeAmount(ctx, r.token, AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}); !errors.Is(
+		err,
+		ErrSubscriptionConflict,
+	) {
 		t.Fatalf("amount change for an ended gift: got %v, want ErrSubscriptionConflict", err)
 	}
 	var attempt string
 	var reservations int
-	if err := r.db.QueryRow(ctx, "SELECT a.status,(SELECT count(*) FROM donor_recurring_reservations WHERE donor_id=$2) FROM donor_stripe_checkouts a WHERE a.id=$1", r.attempt, r.donorID).Scan(&attempt, &reservations); err != nil || attempt != "CANCELLED" || reservations != 0 {
+	if err := r.db.QueryRow(ctx, "SELECT a.status,(SELECT count(*) FROM donor_recurring_reservations WHERE donor_id=$2) FROM donor_stripe_checkouts a WHERE a.id=$1", r.attempt, r.donorID).Scan(&attempt, &reservations); err != nil ||
+		attempt != "CANCELLED" ||
+		reservations != 0 {
 		t.Fatalf("attempt %s with %d reservations after the command synced an ended gift: %v", attempt, reservations, err)
 	}
 }
@@ -572,7 +629,10 @@ func TestRefusedCommandLeavesViewsCurrent(t *testing.T) {
 	if !periodEnd().Equal(r.end) {
 		t.Fatal("view changed without a sync")
 	}
-	if _, err := r.service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end}); !errors.Is(err, ErrSubscriptionConflict) {
+	if _, err := r.service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end}); !errors.Is(
+		err,
+		ErrSubscriptionConflict,
+	) {
 		t.Fatal("cancellation at a boundary Stripe has passed", err)
 	}
 	if len(r.sub.keys) != 0 {
@@ -609,7 +669,10 @@ func TestDonorCancellationStopsAtPeriodEndOnce(t *testing.T) {
 	r := newRecurringFixture(t)
 	ctx := context.Background()
 	request := CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end}
-	if _, err := r.service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end.Add(time.Hour)}); !errors.Is(err, ErrSubscriptionConflict) {
+	if _, err := r.service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end.Add(time.Hour)}); !errors.Is(
+		err,
+		ErrSubscriptionConflict,
+	) {
 		t.Fatal("cancellation at a different boundary", err)
 	}
 	if len(r.sub.keys) != 0 {
@@ -630,7 +693,8 @@ func TestDonorCancellationStopsAtPeriodEndOnce(t *testing.T) {
 		t.Fatalf("processor mutations: %v", r.sub.keys)
 	}
 	var completed bool
-	if err = r.db.QueryRow(ctx, "SELECT completed_at IS NOT NULL FROM donor_cancellations WHERE id=$1", request.RequestID).Scan(&completed); err != nil || !completed {
+	if err = r.db.QueryRow(ctx, "SELECT completed_at IS NOT NULL FROM donor_cancellations WHERE id=$1", request.RequestID).Scan(&completed); err != nil ||
+		!completed {
 		t.Fatal("cancellation not completed", err)
 	}
 	changed := request
@@ -662,12 +726,19 @@ func TestPauseOptionsPauseAndEarlyResume(t *testing.T) {
 		choice := raw.(map[string]any)
 		assertKeys(t, choice, "months", "starts_at", "resumes_at")
 		want := r.end.AddDate(0, i+1, 0)
-		if choice["months"] != float64(i+1) || !jsonTime(t, choice["starts_at"]).Equal(r.end) || !jsonTime(t, choice["resumes_at"]).Equal(want) {
+		if choice["months"] != float64(i+1) || !jsonTime(t, choice["starts_at"]).Equal(r.end) ||
+			!jsonTime(t, choice["resumes_at"]).Equal(want) {
 			t.Fatalf("option %d: %v", i, choice)
 		}
 	}
 	two := choices[1].(map[string]any)
-	request := PauseRequest{RequestID: testID(t), AttemptID: r.attempt, Months: 2, StartsAt: r.end, ResumesAt: jsonTime(t, two["resumes_at"])}
+	request := PauseRequest{
+		RequestID: testID(t),
+		AttemptID: r.attempt,
+		Months:    2,
+		StartsAt:  r.end,
+		ResumesAt: jsonTime(t, two["resumes_at"]),
+	}
 	wrong := request
 	wrong.RequestID, wrong.ResumesAt = testID(t), wrong.ResumesAt.Add(24*time.Hour)
 	if _, err = r.service.Pause(ctx, r.token, wrong); !errors.Is(err, ErrSubscriptionConflict) {
@@ -688,7 +759,8 @@ func TestPauseOptionsPauseAndEarlyResume(t *testing.T) {
 	if len(r.sub.keys) != 1 || r.sub.keys[0] != "dad-pause-"+request.RequestID.String() {
 		t.Fatalf("processor mutations: %v", r.sub.keys)
 	}
-	if again, err := r.service.PauseOptions(ctx, r.token); err != nil || len(jsonView(t, again)["options"].([]any)) != 0 || jsonView(t, again)["pause"] == nil {
+	if again, err := r.service.PauseOptions(ctx, r.token); err != nil || len(jsonView(t, again)["options"].([]any)) != 0 ||
+		jsonView(t, again)["pause"] == nil {
 		t.Fatal("active pause still offered new pauses", again, err)
 	}
 	pauseWindow := func() map[string]any {
@@ -700,7 +772,8 @@ func TestPauseOptionsPauseAndEarlyResume(t *testing.T) {
 		pause, _ := jsonView(t, details)["subscription"].(map[string]any)["pause"].(map[string]any)
 		return pause
 	}
-	if pause := pauseWindow(); pause == nil || !jsonTime(t, pause["starts_at"]).Equal(r.end) || !jsonTime(t, pause["resumes_at"]).Equal(request.ResumesAt) {
+	if pause := pauseWindow(); pause == nil || !jsonTime(t, pause["starts_at"]).Equal(r.end) ||
+		!jsonTime(t, pause["resumes_at"]).Equal(request.ResumesAt) {
 		t.Fatal("details do not show the confirmed pause from the next renewal", pause)
 	}
 	resumable, err := r.service.ResumeOptions(ctx, r.token)
@@ -709,7 +782,8 @@ func TestPauseOptionsPauseAndEarlyResume(t *testing.T) {
 	}
 	offer := jsonView(t, resumable)
 	assertKeys(t, offer, "state", "pause_id", "next_renewal", "original_resume")
-	if offer["state"] != "ready" || offer["pause_id"] != request.RequestID.String() || !jsonTime(t, offer["next_renewal"]).Equal(r.end) || !jsonTime(t, offer["original_resume"]).Equal(request.ResumesAt) {
+	if offer["state"] != "ready" || offer["pause_id"] != request.RequestID.String() || !jsonTime(t, offer["next_renewal"]).Equal(r.end) ||
+		!jsonTime(t, offer["original_resume"]).Equal(request.ResumesAt) {
 		t.Fatalf("resume options: %v", offer)
 	}
 	resume := ResumptionRequest{RequestID: testID(t), PauseID: request.RequestID, NextRenewal: r.end}
@@ -717,7 +791,8 @@ func TestPauseOptionsPauseAndEarlyResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view := jsonView(t, resumed); view["confirmed"] != true || view["pause_id"] != request.RequestID.String() || !jsonTime(t, view["next_renewal"]).Equal(r.end) {
+	if view := jsonView(t, resumed); view["confirmed"] != true || view["pause_id"] != request.RequestID.String() ||
+		!jsonTime(t, view["next_renewal"]).Equal(r.end) {
 		t.Fatalf("resumption: %v", view)
 	}
 	if len(r.sub.keys) != 2 || r.sub.keys[1] != "dad-resume-"+resume.RequestID.String() {
@@ -742,7 +817,8 @@ func TestConfirmedPauseStaysShownWhileStripeHoldsAChange(t *testing.T) {
 	r.changeRemotely(t, func(remote map[string]any) { remote["schedule"] = "sub_sched_fixture" })
 	r.syncSubscription(t, r.checkout)
 	options, err := r.service.PauseOptions(ctx, r.token)
-	if err != nil || options.State != "ready" || len(options.Options) != 0 || options.Pause == nil || !options.Pause.Confirmed || !options.Pause.ResumesAt.Equal(resumes) {
+	if err != nil || options.State != "ready" || len(options.Options) != 0 || options.Pause == nil || !options.Pause.Confirmed ||
+		!options.Pause.ResumesAt.Equal(resumes) {
 		t.Fatalf("confirmed pause hidden under a processor schedule: %+v %v", options, err)
 	}
 	if resume, err := r.service.ResumeOptions(ctx, r.token); err != nil || resume.State != "unavailable" {
@@ -759,11 +835,15 @@ func TestAmountChangeAppliesAtNextRenewal(t *testing.T) {
 	}
 	view := jsonView(t, options)
 	assertKeys(t, view, "state", "subscription_id", "amount_minor", "effective_at", "change")
-	if view["state"] != "ready" || view["amount_minor"] != float64(3000) || view["change"] != nil || !jsonTime(t, view["effective_at"]).Equal(r.end) {
+	if view["state"] != "ready" || view["amount_minor"] != float64(3000) || view["change"] != nil ||
+		!jsonTime(t, view["effective_at"]).Equal(r.end) {
 		t.Fatalf("amount options: %v", view)
 	}
 	request := AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}
-	if _, err = r.service.ChangeAmount(ctx, r.token, AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.start}); !errors.Is(err, ErrSubscriptionConflict) {
+	if _, err = r.service.ChangeAmount(ctx, r.token, AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.start}); !errors.Is(
+		err,
+		ErrSubscriptionConflict,
+	) {
 		t.Fatal("mid-period amount change accepted", err)
 	}
 	changed, err := r.service.ChangeAmount(ctx, r.token, request)
@@ -772,7 +852,8 @@ func TestAmountChangeAppliesAtNextRenewal(t *testing.T) {
 	}
 	change := jsonView(t, changed)
 	assertKeys(t, change, "request_id", "amount_minor", "previous_minor", "effective_at", "confirmed")
-	if change["confirmed"] != true || change["amount_minor"] != float64(9000) || change["previous_minor"] != float64(3000) || !jsonTime(t, change["effective_at"]).Equal(r.end) {
+	if change["confirmed"] != true || change["amount_minor"] != float64(9000) || change["previous_minor"] != float64(3000) ||
+		!jsonTime(t, change["effective_at"]).Equal(r.end) {
 		t.Fatalf("amount change: %v", change)
 	}
 	if _, err = r.service.ChangeAmount(ctx, r.token, request); err != nil {
@@ -809,7 +890,13 @@ func TestStaffCancellationIsAuditedWithReasonAndOutcome(t *testing.T) {
 	r := newRecurringFixture(t)
 	ctx := context.Background()
 	s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: r.sub, Origin: "https://donor.example.org"}
-	request := StaffFinancialRequest{RequestID: testID(t), DonorID: r.donorID, TargetID: r.attempt, Reason: "Donor asked by phone to stop", PeriodEnd: r.end}
+	request := StaffFinancialRequest{
+		RequestID: testID(t),
+		DonorID:   r.donorID,
+		TargetID:  r.attempt,
+		Reason:    "Donor asked by phone to stop",
+		PeriodEnd: r.end,
+	}
 	if _, err := s.Cancel(ctx, support, request); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatal("support cancelled a gift", err)
 	}
@@ -838,10 +925,15 @@ func TestStaffCancellationIsAuditedWithReasonAndOutcome(t *testing.T) {
 		t.Fatal("retry changed the processor idempotency key", r.sub.keys)
 	}
 	var status string
-	if err = pool.QueryRow(ctx, "SELECT status FROM donor_staff_actions WHERE id=$1", request.RequestID).Scan(&status); err != nil || status != "OBSERVED" {
+	if err = pool.QueryRow(ctx, "SELECT status FROM donor_staff_actions WHERE id=$1", request.RequestID).Scan(&status); err != nil ||
+		status != "OBSERVED" {
 		t.Fatal("staff action not completed", status, err)
 	}
-	rows, err := pool.Query(ctx, "SELECT action,details::text FROM donor_staff_audit WHERE target=$1 ORDER BY created_at,action", request.RequestID.String())
+	rows, err := pool.Query(
+		ctx,
+		"SELECT action,details::text FROM donor_staff_audit WHERE target=$1 ORDER BY created_at,action",
+		request.RequestID.String(),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -893,7 +985,17 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 			if _, err := pool.Exec(ctx, "INSERT INTO donor_staff_actions(id,actor_id,donor_id,kind,target_id,amount_minor,reason) VALUES($1,$2,$3,'REFUND',$4,1000,'Duplicate gift reported')", action, actor, r.donorID, gift.ID); err != nil {
 				t.Fatal(err)
 			}
-			refund := paymentObject(t, map[string]any{"id": "re_" + action.String(), "payment_intent": gift.StripePaymentIntentID.String, "amount": 1000, "currency": "usd", "status": "succeeded", "metadata": map[string]string{"dad_staff_action": action.String()}})
+			refund := paymentObject(
+				t,
+				map[string]any{
+					"id":             "re_" + action.String(),
+					"payment_intent": gift.StripePaymentIntentID.String,
+					"amount":         1000,
+					"currency":       "usd",
+					"status":         "succeeded",
+					"metadata":       map[string]string{"dad_staff_action": action.String()},
+				},
+			)
 			r.sub.refundRows = []payments.Object{refund}
 			s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: r.sub, Origin: "https://donor.example.org"}
 			quote, err := s.RefundQuote(ctx, finance, r.donorID, gift.ID)
@@ -902,7 +1004,8 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 			}
 			view := jsonView(t, quote)
 			assertKeys(t, view, "gift_id", "donor_id", "amount_minor", "available_minor", "currency", "mode")
-			if view["available_minor"] != float64(3000) || view["amount_minor"] != float64(3000) || view["gift_id"] != gift.ID.String() || r.sub.refundLists != 0 {
+			if view["available_minor"] != float64(3000) || view["amount_minor"] != float64(3000) || view["gift_id"] != gift.ID.String() ||
+				r.sub.refundLists != 0 {
 				t.Fatalf("quote: %v after %d processor lists", view, r.sub.refundLists)
 			}
 			pending, err := (&StaffService{DB: api}).PendingAction(ctx, finance, r.donorID, gift.ID, "REFUND")
@@ -912,13 +1015,40 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 			if recordedMeanwhile {
 				// A webhook records the refund between the retry's processor read and its lock.
 				r.sub.beforeList = func() {
-					event := r.receive(t, "refund.updated", map[string]any{"id": "re_" + action.String(), "payment_intent": gift.StripePaymentIntentID.String, "status": "pending"})
-					r.gateway.refunds["re_"+action.String()] = paymentObject(t, map[string]any{"id": "re_" + action.String(), "payment_intent": gift.StripePaymentIntentID.String, "amount": 1000, "currency": "usd", "status": "pending"})
+					event := r.receive(
+						t,
+						"refund.updated",
+						map[string]any{
+							"id":             "re_" + action.String(),
+							"payment_intent": gift.StripePaymentIntentID.String,
+							"status":         "pending",
+						},
+					)
+					r.gateway.refunds["re_"+action.String()] = paymentObject(
+						t,
+						map[string]any{
+							"id":             "re_" + action.String(),
+							"payment_intent": gift.StripePaymentIntentID.String,
+							"amount":         1000,
+							"currency":       "usd",
+							"status":         "pending",
+						},
+					)
 					r.process(t)
 					assertEventProcessed(t, r.workerFixture, event, true)
 				}
 			}
-			result, err := s.Refund(ctx, finance, StaffFinancialRequest{RequestID: action, DonorID: r.donorID, TargetID: gift.ID, Amount: 1000, Reason: "Duplicate gift reported"})
+			result, err := s.Refund(
+				ctx,
+				finance,
+				StaffFinancialRequest{
+					RequestID: action,
+					DonorID:   r.donorID,
+					TargetID:  gift.ID,
+					Amount:    1000,
+					Reason:    "Duplicate gift reported",
+				},
+			)
 			if err != nil || result.Status != "SUCCEEDED" {
 				t.Fatal("retry did not settle the refund", result, err)
 			}
@@ -930,11 +1060,15 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 				t.Fatalf("processor lists=%d want %d", r.sub.refundLists, lists)
 			}
 			var status, refundStatus string
-			if err = pool.QueryRow(ctx, "SELECT a.status,r.status FROM donor_staff_actions a JOIN donor_refunds r ON r.stripe_refund_id=a.stripe_refund_id WHERE a.id=$1", action).Scan(&status, &refundStatus); err != nil || status != "OBSERVED" || refundStatus != "SUCCEEDED" {
+			if err = pool.QueryRow(ctx, "SELECT a.status,r.status FROM donor_staff_actions a JOIN donor_refunds r ON r.stripe_refund_id=a.stripe_refund_id WHERE a.id=$1", action).Scan(&status, &refundStatus); err != nil ||
+				status != "OBSERVED" ||
+				refundStatus != "SUCCEEDED" {
 				t.Fatal("staff refund not settled", status, refundStatus, err)
 			}
 			var observedAudits, previews int
-			if err = pool.QueryRow(ctx, "SELECT count(*) FILTER (WHERE action='gift.refund_observed' AND target=$2),count(*) FILTER (WHERE action='gift.refund_preview' AND target=$3) FROM donor_staff_audit WHERE actor_id=$1", actor, action.String(), gift.ID.String()).Scan(&observedAudits, &previews); err != nil || observedAudits != 1 || previews != 1 {
+			if err = pool.QueryRow(ctx, "SELECT count(*) FILTER (WHERE action='gift.refund_observed' AND target=$2),count(*) FILTER (WHERE action='gift.refund_preview' AND target=$3) FROM donor_staff_audit WHERE actor_id=$1", actor, action.String(), gift.ID.String()).Scan(&observedAudits, &previews); err != nil ||
+				observedAudits != 1 ||
+				previews != 1 {
 				t.Fatal("refund not audited", observedAudits, previews, err)
 			}
 			p, err := queries.New(pool).Projection(ctx, r.donorID)
@@ -942,7 +1076,8 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 				t.Fatal("settled refund not projected", err)
 			}
 			quote, err = s.RefundQuote(ctx, finance, r.donorID, gift.ID)
-			if view := jsonView(t, quote); err != nil || view["available_minor"] != float64(2000) || view["observed_at"] == nil || r.sub.refundLists != lists {
+			if view := jsonView(t, quote); err != nil || view["available_minor"] != float64(2000) || view["observed_at"] == nil ||
+				r.sub.refundLists != lists {
 				t.Fatal("quote after the settled refund", view, err)
 			}
 		})
@@ -989,7 +1124,9 @@ func TestGiftListsAndStaffDetailShowRefundsAndSubscription(t *testing.T) {
 	}
 	view := jsonView(t, detail)
 	sub, _ := view["subscription"].(map[string]any)
-	if view["claimed"] != true || view["founding_donor"] == nil || sub == nil || sub["status"] != "active" || sub["amount_minor"] != float64(3000) || !jsonTime(t, sub["next_renewal"]).Equal(r.end) {
+	if view["claimed"] != true || view["founding_donor"] == nil || sub == nil || sub["status"] != "active" ||
+		sub["amount_minor"] != float64(3000) ||
+		!jsonTime(t, sub["next_renewal"]).Equal(r.end) {
 		t.Fatalf("staff detail: %v", view)
 	}
 }

@@ -30,22 +30,42 @@ type journeyGateway struct{}
 
 func (journeyGateway) CreateCheckout(_ context.Context, _ []byte, key string) (payments.RemoteCheckout, error) {
 	live := false
-	return payments.RemoteCheckout{ID: "cs_test_" + strings.TrimPrefix(key, "dad-checkout-"), URL: "https://checkout.stripe.com/c/test", Livemode: &live}, nil
+	return payments.RemoteCheckout{
+		ID:       "cs_test_" + strings.TrimPrefix(key, "dad-checkout-"),
+		URL:      "https://checkout.stripe.com/c/test",
+		Livemode: &live,
+	}, nil
 }
 
 // journeyCharges reports each payment intent's card charge as succeeding at a fixed time.
 type journeyCharges struct{ at time.Time }
 
 func (g journeyCharges) RetrievePaymentIntent(_ context.Context, id string) (payments.Object, error) {
-	raw, err := json.Marshal(map[string]any{"id": id, "status": "succeeded", "livemode": false, "latest_charge": map[string]any{"id": "ch_" + id, "payment_intent": id, "status": "succeeded", "paid": true, "livemode": false, "created": g.at.Unix()}})
+	raw, err := json.Marshal(
+		map[string]any{
+			"id":       id,
+			"status":   "succeeded",
+			"livemode": false,
+			"latest_charge": map[string]any{
+				"id":             "ch_" + id,
+				"payment_intent": id,
+				"status":         "succeeded",
+				"paid":           true,
+				"livemode":       false,
+				"created":        g.at.Unix(),
+			},
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
 	return payments.DecodeObject(raw)
 }
+
 func (journeyCharges) RetrieveRefund(context.Context, string) (payments.Object, error) {
 	return nil, payments.ErrProcessorUnavailable
 }
+
 func (journeyCharges) RetrieveSubscription(context.Context, string) (payments.Object, error) {
 	return nil, payments.ErrProcessorUnavailable
 }
@@ -61,7 +81,8 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	ctx := context.Background()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil || dsn == "" || (config.ConnConfig.Database != "donor_go" && !strings.HasPrefix(config.ConnConfig.Database, "donor_go_")) {
+	if err != nil || dsn == "" ||
+		(config.ConnConfig.Database != "donor_go" && !strings.HasPrefix(config.ConnConfig.Database, "donor_go_")) {
 		t.Fatal("dedicated migrated donor_go database required")
 	}
 	pool, err := store.Open(ctx, dsn, 10)
@@ -117,7 +138,15 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	const origin = "https://donor.example.org"
 	const secret = "whsec_public_journey_fixture"
 	api := dbrolestest.Open(t, dbroles.API)
-	services := httpapi.Services{Origin: origin, EmailConfigured: true, Account: store.AccountService{DB: api}, Donor: store.DonorService{DB: api, Origin: origin}, Checkout: store.CheckoutService{DB: api, Origin: origin, Gateway: journeyGateway{}}, Dashboard: store.DashboardReader{DB: api}, Webhook: payments.Receiver{Secret: secret, Inbox: store.StripeInbox{DB: api}}}
+	services := httpapi.Services{
+		Origin:          origin,
+		EmailConfigured: true,
+		Account:         store.AccountService{DB: api},
+		Donor:           store.DonorService{DB: api, Origin: origin},
+		Checkout:        store.CheckoutService{DB: api, Origin: origin, Gateway: journeyGateway{}},
+		Dashboard:       store.DashboardReader{DB: api},
+		Webhook:         payments.Receiver{Secret: secret, Inbox: store.StripeInbox{DB: api}},
+	}
 	server := httptest.NewTLSServer(httpapi.NewServer("", services).Handler)
 	defer server.Close()
 	browser := func() *http.Client {
@@ -168,7 +197,14 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	}
 	call(referrer, "POST", "/donor/claim", map[string]string{"token": proof}, nil, 200)
 	call(guest, "GET", "/donor/me/profile", nil, nil, 401)
-	call(referrer, "POST", "/donor/me/sharing", map[string]string{"public_name": "Friendly donor"}, map[string]string{"Origin": "https://other.example"}, 403)
+	call(
+		referrer,
+		"POST",
+		"/donor/me/sharing",
+		map[string]string{"public_name": "Friendly donor"},
+		map[string]string{"Origin": "https://other.example"},
+		403,
+	)
 	body := call(referrer, "POST", "/donor/me/sharing", map[string]string{"public_name": "Friendly donor"}, nil, 200)
 	var sharing store.Sharing
 	if err = json.Unmarshal(body, &sharing); err != nil || sharing.Link == nil {
@@ -180,8 +216,36 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	if !bytes.Contains(body, []byte(`"captured":true`)) || bytes.Contains(body, []byte(ownerEmail)) {
 		t.Fatal("referral capture privacy or state mismatch")
 	}
-	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": true, "marketing_emails": false, "push_referral_converted": true, "push_streak_at_risk": true, "push_streak_milestone": true}, nil, 200)
-	call(referrer, "POST", "/donor/me/preferences", map[string]any{"version": 0, "referral_emails": false, "marketing_emails": false, "push_referral_converted": true, "push_streak_at_risk": true, "push_streak_milestone": true}, nil, 409)
+	call(
+		referrer,
+		"POST",
+		"/donor/me/preferences",
+		map[string]any{
+			"version":                 0,
+			"referral_emails":         true,
+			"marketing_emails":        false,
+			"push_referral_converted": true,
+			"push_streak_at_risk":     true,
+			"push_streak_milestone":   true,
+		},
+		nil,
+		200,
+	)
+	call(
+		referrer,
+		"POST",
+		"/donor/me/preferences",
+		map[string]any{
+			"version":                 0,
+			"referral_emails":         false,
+			"marketing_emails":        false,
+			"push_referral_converted": true,
+			"push_streak_at_risk":     true,
+			"push_streak_milestone":   true,
+		},
+		nil,
+		409,
+	)
 	checkoutBody := map[string]any{"email": guestEmail, "amount_minor": 3000, "frequency": "ONE_TIME"}
 	body = call(guest, "POST", "/donor/checkouts", checkoutBody, map[string]string{"Idempotency-Key": requestID.String()}, 201)
 	var checkout payments.CheckoutResult
@@ -193,7 +257,26 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 		t.Fatal("checkout retry changed response")
 	}
 	now := time.Now()
-	raw, err := json.Marshal(map[string]any{"id": eventID, "object": "event", "type": "payment_intent.succeeded", "api_version": payments.APIVersion, "livemode": false, "created": now.Unix(), "data": map[string]any{"object": map[string]any{"id": "pi_" + requestID.String(), "object": "payment_intent", "status": "succeeded", "currency": "usd", "amount_received": 3000, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}}}})
+	raw, err := json.Marshal(
+		map[string]any{
+			"id":          eventID,
+			"object":      "event",
+			"type":        "payment_intent.succeeded",
+			"api_version": payments.APIVersion,
+			"livemode":    false,
+			"created":     now.Unix(),
+			"data": map[string]any{
+				"object": map[string]any{
+					"id":              "pi_" + requestID.String(),
+					"object":          "payment_intent",
+					"status":          "succeeded",
+					"currency":        "usd",
+					"amount_received": 3000,
+					"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
+				},
+			},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +284,8 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		call(guest, "POST", "/donor/stripe/webhook", raw, map[string]string{"Stripe-Signature": signature}, 200)
 	}
-	if worked, err := (store.EventWorker{DB: dbrolestest.Open(t, dbroles.StripeWorker), Gateway: journeyCharges{at: now}}).ProcessNext(ctx); err != nil || !worked {
+	if worked, err := (store.EventWorker{DB: dbrolestest.Open(t, dbroles.StripeWorker), Gateway: journeyCharges{at: now}}).ProcessNext(ctx); err != nil ||
+		!worked {
 		t.Fatal(worked, err)
 	}
 	body = call(referrer, "GET", "/donor/me/dashboard", nil, nil, 200)
@@ -211,7 +295,8 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 			Total     int64 `json:"total_minor"`
 		}
 	}
-	if err = json.Unmarshal(body, &dashboard); err != nil || dashboard.Referrals.Link != 0 || dashboard.Referrals.IRL != 1 || dashboard.Referrals.Total != 3000 {
+	if err = json.Unmarshal(body, &dashboard); err != nil || dashboard.Referrals.Link != 0 || dashboard.Referrals.IRL != 1 ||
+		dashboard.Referrals.Total != 3000 {
 		t.Fatal("guest credit missing", string(body), err)
 	}
 	transport := &journeyMail{}
@@ -219,7 +304,12 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	email := store.LoginEmailWorker{DB: dbrolestest.Open(t, dbroles.LoginEmailWorker), Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: keys}, Origin: origin, Transport: transport}
+	email := store.LoginEmailWorker{
+		DB:        dbrolestest.Open(t, dbroles.LoginEmailWorker),
+		Settings:  mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: keys},
+		Origin:    origin,
+		Transport: transport,
+	}
 	if worked, err := email.DeliverNext(ctx, time.Now().Add(time.Second)); err != nil || !worked {
 		t.Fatal(worked, err)
 	}

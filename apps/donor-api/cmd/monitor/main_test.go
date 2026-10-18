@@ -46,7 +46,10 @@ func TestRunReportsEveryQueue(t *testing.T) {
 	for _, row := range rows {
 		queues = append(queues, row.Queue)
 	}
-	if want := []string{"email-changes", "login-email", "messages", "projections", "push", "stripe", "subscriptions"}; !slices.Equal(queues, want) {
+	if want := []string{"email-changes", "login-email", "messages", "projections", "push", "stripe", "subscriptions"}; !slices.Equal(
+		queues,
+		want,
+	) {
 		t.Fatalf("queues %v, want %v", queues, want)
 	}
 }
@@ -54,7 +57,12 @@ func TestRunReportsEveryQueue(t *testing.T) {
 func TestRunRefusesTheSchemaOwner(t *testing.T) {
 	owner := os.Getenv("TEST_DATABASE_URL")
 	dbrolestest.URL(t, dbroles.Monitor)
-	err := run(context.Background(), nil, func(name string) string { return map[string]string{dbroles.Monitor.Variable(): owner}[name] }, io.Discard)
+	err := run(
+		context.Background(),
+		nil,
+		func(name string) string { return map[string]string{dbroles.Monitor.Variable(): owner}[name] },
+		io.Discard,
+	)
 	if err == nil || !strings.Contains(err.Error(), "can change the schema") {
 		t.Fatalf("got %v, want the owner refused", err)
 	}

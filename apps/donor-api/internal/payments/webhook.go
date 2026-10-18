@@ -38,6 +38,7 @@ func (e VerifiedEvent) Data() []byte          { return append([]byte(nil), e.dat
 type Inbox interface {
 	SaveVerifiedEvent(context.Context, VerifiedEvent) error
 }
+
 type Receiver struct {
 	Secret string
 	Inbox  Inbox
@@ -74,17 +75,29 @@ func verifyEvent(body []byte, signature, secret string) (*VerifiedEvent, error) 
 		Livemode *bool  `json:"livemode"`
 		Created  *int64 `json:"created"`
 	}
-	if err = json.Unmarshal(body, &envelope); err != nil || envelope.Livemode == nil || *envelope.Livemode || event.Account != "" || event.APIVersion != APIVersion {
+	if err = json.Unmarshal(body, &envelope); err != nil || envelope.Livemode == nil || *envelope.Livemode || event.Account != "" ||
+		event.APIVersion != APIVersion {
 		return nil, ErrInvalidEvent
 	}
 	switch string(event.Type) {
-	case "payment_intent.succeeded", "invoice.payment_succeeded", "invoice.payment_failed", "refund.created", "refund.updated", "refund.failed", "checkout.session.completed", "checkout.session.expired",
-		"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted",
-		"customer.subscription.pending_update_applied", "customer.subscription.pending_update_expired":
+	case "payment_intent.succeeded",
+		"invoice.payment_succeeded",
+		"invoice.payment_failed",
+		"refund.created",
+		"refund.updated",
+		"refund.failed",
+		"checkout.session.completed",
+		"checkout.session.expired",
+		"customer.subscription.created",
+		"customer.subscription.updated",
+		"customer.subscription.deleted",
+		"customer.subscription.pending_update_applied",
+		"customer.subscription.pending_update_expired":
 	default:
 		return nil, nil
 	}
-	if envelope.Created == nil || *envelope.Created < 0 || *envelope.Created > maxUnix || event.ID == "" || len(event.ID) > 255 || event.Data == nil {
+	if envelope.Created == nil || *envelope.Created < 0 || *envelope.Created > maxUnix || event.ID == "" || len(event.ID) > 255 ||
+		event.Data == nil {
 		return nil, ErrEventShape
 	}
 	var obj map[string]any
@@ -117,6 +130,7 @@ func object(value any) (map[string]any, error) {
 	}
 	return result, nil
 }
+
 func pick(obj map[string]any, names ...string) map[string]any {
 	result := map[string]any{}
 	for _, key := range names {
@@ -124,6 +138,7 @@ func pick(obj map[string]any, names ...string) map[string]any {
 	}
 	return result
 }
+
 func uuid(value any) error {
 	if value == nil || value == "" {
 		return nil
@@ -240,6 +255,7 @@ func page(value any) ([]any, bool, error) {
 	}
 	return rows, complete, nil
 }
+
 func invoiceLines(value any) (map[string]any, error) {
 	input, complete, err := page(value)
 	if err != nil {
@@ -272,6 +288,7 @@ func invoiceLines(value any) (map[string]any, error) {
 	}
 	return map[string]any{"lines_complete": complete, "lines": rows}, nil
 }
+
 func invoicePayments(value any) (map[string]any, error) {
 	input, complete, err := page(value)
 	if err != nil {

@@ -18,35 +18,91 @@ import (
 type exportDataset struct{ table, fields, permission string }
 
 var exportDatasets = map[string]exportDataset{
-	"checkouts":            {"donor_checkouts", "id donor_id amount_minor currency frequency referrer_id referral_kind referral_expires_at created_at", "data.export"},
-	"referral-touches":     {"donor_referral_touches", "id referrer_id kind touched_at expires_at", "data.export"},
-	"donors":               {"donors", "id created_at email claimed_at disabled public_name", "data.export"},
-	"email-changes":        {"donor_email_changes", "id donor_id old_email new_email stage expires_at created_at completed_at", "data.export"},
-	"identity-events":      {"donor_identity_events", "id donor_id email_change_id action created_at", "data.export"},
-	"session-events":       {"donor_session_events", "id donor_id session_id action created_at", "data.export"},
-	"gifts":                {"donor_gifts", "id donor_id checkout_id amount_minor currency frequency paid_at period_id referrer_id referral_kind", "data.export"},
-	"refunds":              {"donor_refunds", "id gift_id amount_minor currency status observed_at stripe_refund_id", "data.export"},
-	"refund-history":       {"donor_refund_observations", "id refund_id source_event_id source_action_id status observed_at", "data.export"},
-	"billing-periods":      {"donor_billing_periods", "id donor_id checkout_id stripe_invoice_id due_at ends_at status", "data.export"},
-	"billing-history":      {"donor_billing_observations", "id period_id source_event_id status amount_minor currency billing_reason occurred_at event_created_at recorded_at", "data.export"},
-	"referrals":            {"donor_metric_projections", "donor_id referrer_id referral_kind first_gift_id net_minor computed_at", "data.export"},
-	"referral-corrections": {"donor_referral_corrections", "id donor_id old_first_gift_id new_first_gift_id old_referrer_id new_referrer_id old_kind new_kind recorded_at rules_version", "data.export"},
-	"streaks":              {"donor_metric_projections", "donor_id current_streak best_streak at_risk grace_ends_at founding_awarded_at computed_at", "data.export"},
-	"subscriptions":        {"donor_subscriptions", "id donor_id attempt_id status period_end stops_at observed_at", "data.export"},
-	"pauses":               {"donor_pauses", "id donor_id attempt_id months starts_at resumes_at confirmed_at created_at", "data.export"},
-	"resumptions":          {"donor_resumptions", "id donor_id pause_id next_renewal confirmed_at created_at", "data.export"},
-	"amount-changes":       {"donor_amount_changes", "id donor_id checkout_id previous_minor amount_minor effective_at confirmed_at created_at", "data.export"},
-	"cancellations":        {"donor_cancellations", "id donor_id attempt_id confirmed_period_end completed_at created_at", "data.export"},
-	"preferences":          {"donor_preferences", "donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone", "data.export"},
-	"consent-history":      {"donor_preference_events", "id donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone consent_version source created_at", "data.export"},
-	"messages":             {"donor_messages", "id donor_id kind available_at completed_at attempts last_error suppressed_reason created_at", "data.export"},
-	"staff-actions":        {"donor_staff_actions", "id actor_id donor_id kind target_id amount_minor period_end reason status stripe_refund_id completed_at created_at", "data.export"},
-	"staff":                {"donor_staff", "id name email role disabled created_at", "staff.manage"},
-	"audit":                {"donor_staff_audit", "id actor_id action target created_at details", "audit.read"},
-	"partner-signups":      {"donor_partner_signups", "id organization name email website message consent_version created_at", "content.publish"},
-	"content-sources":      {"donor_content_sources", "id actor_id name sha256 created_at", "content.publish"},
-	"publications":         {"donor_content_publications", "id actor_id payload created_at", "content.publish"},
-	"enrolments":           {"", "enrolment_id program_id submitted_at status", "data.export"},
+	"checkouts": {
+		"donor_checkouts",
+		"id donor_id amount_minor currency frequency referrer_id referral_kind referral_expires_at created_at",
+		"data.export",
+	},
+	"referral-touches": {"donor_referral_touches", "id referrer_id kind touched_at expires_at", "data.export"},
+	"donors":           {"donors", "id created_at email claimed_at disabled public_name", "data.export"},
+	"email-changes": {
+		"donor_email_changes",
+		"id donor_id old_email new_email stage expires_at created_at completed_at",
+		"data.export",
+	},
+	"identity-events": {"donor_identity_events", "id donor_id email_change_id action created_at", "data.export"},
+	"session-events":  {"donor_session_events", "id donor_id session_id action created_at", "data.export"},
+	"gifts": {
+		"donor_gifts",
+		"id donor_id checkout_id amount_minor currency frequency paid_at period_id referrer_id referral_kind",
+		"data.export",
+	},
+	"refunds": {"donor_refunds", "id gift_id amount_minor currency status observed_at stripe_refund_id", "data.export"},
+	"refund-history": {
+		"donor_refund_observations",
+		"id refund_id source_event_id source_action_id status observed_at",
+		"data.export",
+	},
+	"billing-periods": {"donor_billing_periods", "id donor_id checkout_id stripe_invoice_id due_at ends_at status", "data.export"},
+	"billing-history": {
+		"donor_billing_observations",
+		"id period_id source_event_id status amount_minor currency billing_reason occurred_at event_created_at recorded_at",
+		"data.export",
+	},
+	"referrals": {
+		"donor_metric_projections",
+		"donor_id referrer_id referral_kind first_gift_id net_minor computed_at",
+		"data.export",
+	},
+	"referral-corrections": {
+		"donor_referral_corrections",
+		"id donor_id old_first_gift_id new_first_gift_id old_referrer_id new_referrer_id old_kind new_kind recorded_at rules_version",
+		"data.export",
+	},
+	"streaks": {
+		"donor_metric_projections",
+		"donor_id current_streak best_streak at_risk grace_ends_at founding_awarded_at computed_at",
+		"data.export",
+	},
+	"subscriptions": {"donor_subscriptions", "id donor_id attempt_id status period_end stops_at observed_at", "data.export"},
+	"pauses":        {"donor_pauses", "id donor_id attempt_id months starts_at resumes_at confirmed_at created_at", "data.export"},
+	"resumptions":   {"donor_resumptions", "id donor_id pause_id next_renewal confirmed_at created_at", "data.export"},
+	"amount-changes": {
+		"donor_amount_changes",
+		"id donor_id checkout_id previous_minor amount_minor effective_at confirmed_at created_at",
+		"data.export",
+	},
+	"cancellations": {"donor_cancellations", "id donor_id attempt_id confirmed_period_end completed_at created_at", "data.export"},
+	"preferences": {
+		"donor_preferences",
+		"donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone",
+		"data.export",
+	},
+	"consent-history": {
+		"donor_preference_events",
+		"id donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone consent_version source created_at",
+		"data.export",
+	},
+	"messages": {
+		"donor_messages",
+		"id donor_id kind available_at completed_at attempts last_error suppressed_reason created_at",
+		"data.export",
+	},
+	"staff-actions": {
+		"donor_staff_actions",
+		"id actor_id donor_id kind target_id amount_minor period_end reason status stripe_refund_id completed_at created_at",
+		"data.export",
+	},
+	"staff": {"donor_staff", "id name email role disabled created_at", "staff.manage"},
+	"audit": {"donor_staff_audit", "id actor_id action target created_at details", "audit.read"},
+	"partner-signups": {
+		"donor_partner_signups",
+		"id organization name email website message consent_version created_at",
+		"content.publish",
+	},
+	"content-sources": {"donor_content_sources", "id actor_id name sha256 created_at", "content.publish"},
+	"publications":    {"donor_content_publications", "id actor_id payload created_at", "content.publish"},
+	"enrolments":      {"", "enrolment_id program_id submitted_at status", "data.export"},
 }
 
 type ExportDatasets struct {
@@ -94,7 +150,8 @@ func safeCSVCell(value any) (string, error) {
 		return fmt.Sprint(value), nil
 	}
 	trimmed := strings.TrimLeft(text, "\ufeff \t\r\n")
-	if strings.HasPrefix(text, "\t") || strings.HasPrefix(text, "\r") || strings.HasPrefix(text, "\n") || (len(trimmed) > 0 && strings.ContainsRune("=+-@", rune(trimmed[0]))) {
+	if strings.HasPrefix(text, "\t") || strings.HasPrefix(text, "\r") || strings.HasPrefix(text, "\n") ||
+		(len(trimmed) > 0 && strings.ContainsRune("=+-@", rune(trimmed[0]))) {
 		return "'" + text, nil
 	}
 	return text, nil
@@ -114,7 +171,8 @@ func (s *StaffService) Export(ctx context.Context, token, name string, destinati
 		if exportID, err = NewID(); err != nil {
 			return struct{}{}, err
 		}
-		return struct{}{}, queries.New(tx).InsertStaffAudit(ctx, queries.InsertStaffAuditParams{ID: exportID, ActorID: actor.ID, Action: "data.export_started", Target: name, Details: []byte("{}"), CreatedAt: timestamp(now)})
+		return struct{}{}, queries.New(tx).
+			InsertStaffAudit(ctx, queries.InsertStaffAuditParams{ID: exportID, ActorID: actor.ID, Action: "data.export_started", Target: name, Details: []byte("{}"), CreatedAt: timestamp(now)})
 	})
 	if err != nil {
 		return err
@@ -126,7 +184,15 @@ func (s *StaffService) Export(ctx context.Context, token, name string, destinati
 		auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		now := time.Now().UTC()
-		err := auditStaff(auditCtx, queries.New(s.DB), actorID, "data.export_finished", name, map[string]any{"export_id": exportID.String(), "completed": completed, "row_count": count, "finished_at": now}, now)
+		err := auditStaff(
+			auditCtx,
+			queries.New(s.DB),
+			actorID,
+			"data.export_finished",
+			name,
+			map[string]any{"export_id": exportID.String(), "completed": completed, "row_count": count, "finished_at": now},
+			now,
+		)
 		if resultErr == nil && err != nil {
 			resultErr = err
 		}

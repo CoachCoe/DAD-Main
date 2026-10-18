@@ -62,7 +62,13 @@ func TestStaffAuthorizationPrecedesPaymentConfiguration(t *testing.T) {
 	_, finance := staffFixture(t, pool, "FINANCE")
 	_, support := staffFixture(t, pool, "SUPPORT")
 	s := StaffFinanceService{Staff: &StaffService{DB: api}}
-	request := StaffFinancialRequest{RequestID: testID(t), DonorID: testID(t), TargetID: testID(t), Reason: "Donor asked by phone", Amount: 100}
+	request := StaffFinancialRequest{
+		RequestID: testID(t),
+		DonorID:   testID(t),
+		TargetID:  testID(t),
+		Reason:    "Donor asked by phone",
+		Amount:    100,
+	}
 	for _, c := range []struct {
 		token string
 		want  error

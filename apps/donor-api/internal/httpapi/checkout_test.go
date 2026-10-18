@@ -26,6 +26,7 @@ func (s *checkoutStub) BeginCheckout(ctx context.Context, r payments.CheckoutReq
 	s.request = r
 	return payments.CheckoutResult{CheckoutID: r.RequestID.String(), URL: "https://checkout.stripe.com/c/test"}, s.err
 }
+
 func checkoutRequest(body string) *http.Request {
 	r := httptest.NewRequest("POST", "/donor/checkouts", strings.NewReader(body))
 	r.Header.Set("Origin", "http://localhost:3000")
@@ -33,6 +34,7 @@ func checkoutRequest(body string) *http.Request {
 	r.Header.Set("Idempotency-Key", "8f4f52bb-99f6-490e-8313-5156cc4f8b45")
 	return r
 }
+
 func TestCheckoutRejectsInvalidRequestsBeforeTheProcessor(t *testing.T) {
 	valid := `{"email":"donor@example.org","amount_minor":3000}`
 	for _, tc := range []struct {

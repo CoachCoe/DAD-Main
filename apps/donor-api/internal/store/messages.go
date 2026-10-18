@@ -24,7 +24,13 @@ type MessageWorker struct {
 // messageSuppression returns why job should no longer be sent, if it should
 // not: optional messages recheck consent and every message rechecks that its
 // facts still hold.
-func messageSuppression(ctx context.Context, q *queries.Queries, job queries.DonorMessage, donor queries.Donor, now time.Time) (string, error) {
+func messageSuppression(
+	ctx context.Context,
+	q *queries.Queries,
+	job queries.DonorMessage,
+	donor queries.Donor,
+	now time.Time,
+) (string, error) {
 	if donor.Disabled {
 		return "donor_disabled", nil
 	}
@@ -69,7 +75,8 @@ func referralLapsed(ctx context.Context, q *queries.Queries, data payments.Objec
 	if err != nil {
 		return "", err
 	}
-	if projection.ReferrerID != donor.ID || projection.ReferralKind.String != data.Text("kind") || !projection.NetMinor.Valid || projection.NetMinor.Int64 <= 0 {
+	if projection.ReferrerID != donor.ID || projection.ReferralKind.String != data.Text("kind") || !projection.NetMinor.Valid ||
+		projection.NetMinor.Int64 <= 0 {
 		return "referral_no_longer_qualifies", nil
 	}
 	return "", nil
@@ -78,7 +85,13 @@ func referralLapsed(ctx context.Context, q *queries.Queries, data payments.Objec
 // recoverySuppression stops a failed-payment reminder once the payment
 // recovers, the gift is cancelled, grace ends, or a later reminder is due.
 // Reminders go out on the failure day and days 7 and 13 of the 14-day grace.
-func recoverySuppression(ctx context.Context, q *queries.Queries, data payments.Object, donor queries.Donor, now time.Time) (string, error) {
+func recoverySuppression(
+	ctx context.Context,
+	q *queries.Queries,
+	data payments.Object,
+	donor queries.Donor,
+	now time.Time,
+) (string, error) {
 	period, reason, err := failureResolved(ctx, q, data, donor, now)
 	if reason != "" || err != nil {
 		return reason, err
@@ -103,7 +116,13 @@ func recoverySuppression(ctx context.Context, q *queries.Queries, data payments.
 // failureResolved reports why a failed renewal no longer threatens the
 // donor's giving, if it does not: the payment recovered, the gift was
 // cancelled, or grace ended.
-func failureResolved(ctx context.Context, q *queries.Queries, data payments.Object, donor queries.Donor, now time.Time) (queries.DonorBillingPeriod, string, error) {
+func failureResolved(
+	ctx context.Context,
+	q *queries.Queries,
+	data payments.Object,
+	donor queries.Donor,
+	now time.Time,
+) (queries.DonorBillingPeriod, string, error) {
 	id, err := parseID(data.Text("period_id"))
 	if err != nil {
 		return queries.DonorBillingPeriod{}, "", err
@@ -132,7 +151,13 @@ func failureResolved(ctx context.Context, q *queries.Queries, data payments.Obje
 	return period, "", nil
 }
 
-func renderMessage(ctx context.Context, q *queries.Queries, job queries.DonorMessage, site publicSite, now time.Time) (string, string, error) {
+func renderMessage(
+	ctx context.Context,
+	q *queries.Queries,
+	job queries.DonorMessage,
+	site publicSite,
+	now time.Time,
+) (string, string, error) {
 	data, err := payments.DecodeObject(job.Context)
 	if err != nil {
 		return "", "", err
@@ -176,7 +201,9 @@ func renderMessage(ctx context.Context, q *queries.Queries, job queries.DonorMes
 		if err != nil {
 			return "", "", err
 		}
-		return "Your DAD test payment needs attention", "Your monthly test payment was declined. Your giving streak is at risk.\nThe recovery grace period ends " + iso(period.DueAt.Time.Add(recognition.Grace)) + ".\nUpdate your payment method securely: " + site.paymentMethod() + "\nIf signed out, request a sign-in link for the email used to give, then return to payment methods.\nUpdating a card does not itself confirm payment recovery. Stripe's retry sequence handles collection.\nThis essential payment notice concerns sandbox giving, not a real charge.\n", nil
+		return "Your DAD test payment needs attention", "Your monthly test payment was declined. Your giving streak is at risk.\nThe recovery grace period ends " + iso(
+			period.DueAt.Time.Add(recognition.Grace),
+		) + ".\nUpdate your payment method securely: " + site.paymentMethod() + "\nIf signed out, request a sign-in link for the email used to give, then return to payment methods.\nUpdating a card does not itself confirm payment recovery. Stripe's retry sequence handles collection.\nThis essential payment notice concerns sandbox giving, not a real charge.\n", nil
 	case "PASSKEY_ADDED":
 		added := data.Text("added_at")
 		if added == "" {
@@ -206,15 +233,28 @@ const maxDeliveryAttempts = 5
 func messageRetryAt(now time.Time, attempts int32) pgtype.Timestamptz {
 	return timestamp(now.Add(time.Duration(min(60, 1<<uint(attempts))) * time.Minute))
 }
+
 func failMessage(ctx context.Context, q *queries.Queries, job queries.DonorMessage, now time.Time, category string) error {
 	if err := q.IncrementMessageAttempt(ctx, job.ID); err != nil {
 		return err
 	}
-	return q.FailMessage(ctx, queries.FailMessageParams{ID: job.ID, LastError: text(category), AvailableAt: messageRetryAt(now, job.Attempts+1)})
+	return q.FailMessage(
+		ctx,
+		queries.FailMessageParams{ID: job.ID, LastError: text(category), AvailableAt: messageRetryAt(now, job.Attempts+1)},
+	)
 }
+
 func completeMessage(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time, reason string) error {
-	return q.CompleteMessage(ctx, queries.CompleteMessageParams{ID: id, CompletedAt: timestamp(now), SuppressedReason: pgtype.Text{String: reason, Valid: reason != ""}})
+	return q.CompleteMessage(
+		ctx,
+		queries.CompleteMessageParams{
+			ID:               id,
+			CompletedAt:      timestamp(now),
+			SuppressedReason: pgtype.Text{String: reason, Valid: reason != ""},
+		},
+	)
 }
+
 func messageDataError(err error) bool {
 	return errors.Is(err, payments.ErrFacts) || errors.Is(err, ErrReceipt) || errors.Is(err, pgx.ErrNoRows)
 }
@@ -284,7 +324,10 @@ func (w MessageWorker) DeliverNext(ctx context.Context, now time.Time) (bool, er
 	sendErr := w.Transport.Send(ctx, *message)
 	q := queries.New(w.DB)
 	if sendErr != nil {
-		err = q.FailMessage(ctx, queries.FailMessageParams{ID: id, LastError: text("DeliveryError"), AvailableAt: messageRetryAt(now, attempts)})
+		err = q.FailMessage(
+			ctx,
+			queries.FailMessageParams{ID: id, LastError: text("DeliveryError"), AvailableAt: messageRetryAt(now, attempts)},
+		)
 	} else {
 		err = completeMessage(ctx, q, id, now, "")
 	}

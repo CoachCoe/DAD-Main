@@ -20,7 +20,13 @@ type actionsStub struct {
 	kind    string
 }
 
-func (s *actionsStub) PendingAction(_ context.Context, session string, _ pgtype.UUID, target pgtype.UUID, kind string) (store.PendingAction, error) {
+func (s *actionsStub) PendingAction(
+	_ context.Context,
+	session string,
+	_ pgtype.UUID,
+	target pgtype.UUID,
+	kind string,
+) (store.PendingAction, error) {
 	if session != "staff-session" {
 		return store.PendingAction{}, store.ErrStaffDenied
 	}

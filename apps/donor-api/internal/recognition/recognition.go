@@ -44,6 +44,7 @@ type Candidate struct {
 	Kind       string    `json:"kind"`
 	ExpiresAt  time.Time `json:"expires_at"`
 }
+
 type Gift struct {
 	ID        string     `json:"id"`
 	DonorID   string     `json:"donor_id"`
@@ -54,6 +55,7 @@ type Gift struct {
 	PeriodID  string     `json:"period_id"`
 	Currency  string     `json:"currency"`
 }
+
 type Refund struct {
 	ID        string    `json:"id"`
 	GiftID    string    `json:"gift_id"`
@@ -62,6 +64,7 @@ type Refund struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	Currency  string    `json:"currency"`
 }
+
 type Period struct {
 	ID      string    `json:"id"`
 	DonorID string    `json:"donor_id"`
@@ -69,6 +72,7 @@ type Period struct {
 	EndsAt  time.Time `json:"ends_at"`
 	Status  string    `json:"status"`
 }
+
 type Relationship struct {
 	DonorID     string  `json:"donor_id"`
 	FirstGiftID string  `json:"first_gift_id"`
@@ -85,6 +89,7 @@ type Streak struct {
 	GraceEndsAt *time.Time `json:"grace_ends_at"`
 	Since       *time.Time `json:"since"`
 }
+
 type Pause struct {
 	Start time.Time `json:"start"`
 	End   time.Time `json:"end"`
@@ -220,7 +225,16 @@ func FoundingQualifiedAt(input []Gift, donorID string, asOf time.Time) (time.Tim
 // GivingStreak counts consecutive paid monthly periods as of asOf. A renewal
 // that is due but not yet observed keeps the current count for the grace
 // window, after which the history is incomplete until the invoice arrives.
-func GivingStreak(input []Gift, refunds []Refund, inputPeriods []Period, donorID string, asOf time.Time, previousBest int64, stops []time.Time, pauses []Pause) (Streak, error) {
+func GivingStreak(
+	input []Gift,
+	refunds []Refund,
+	inputPeriods []Period,
+	donorID string,
+	asOf time.Time,
+	previousBest int64,
+	stops []time.Time,
+	pauses []Pause,
+) (Streak, error) {
 	if previousBest < 0 {
 		return Streak{}, ErrInvalid
 	}
@@ -277,7 +291,9 @@ func donorPeriods(input []Period, donorID string) ([]Period, error) {
 	periods := []Period{}
 	for _, p := range input {
 		duration := p.EndsAt.Sub(p.DueAt)
-		if p.ID == "" || p.DonorID == "" || p.DueAt.IsZero() || p.EndsAt.IsZero() || duration < 27*24*time.Hour || duration > 32*24*time.Hour || (p.Status != "EXPECTED" && p.Status != "FAILED") {
+		if p.ID == "" || p.DonorID == "" || p.DueAt.IsZero() || p.EndsAt.IsZero() || duration < 27*24*time.Hour ||
+			duration > 32*24*time.Hour ||
+			(p.Status != "EXPECTED" && p.Status != "FAILED") {
 			return nil, ErrInvalid
 		}
 		p.DueAt = utc(p.DueAt)
@@ -371,7 +387,14 @@ func renewalAfter(due time.Time, stopped map[time.Time]bool, pauses []Pause) (ne
 	return next, stopped[next], time.Time{}
 }
 
-func countStreak(elapsed []Period, payments map[string][]Gift, net map[string]int64, asOf time.Time, stopped map[time.Time]bool, pauses []Pause) Streak {
+func countStreak(
+	elapsed []Period,
+	payments map[string][]Gift,
+	net map[string]int64,
+	asOf time.Time,
+	stopped map[time.Time]bool,
+	pauses []Pause,
+) Streak {
 	result := Streak{}
 	var last, lastPaid time.Time
 	for _, p := range elapsed {

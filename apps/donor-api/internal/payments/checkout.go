@@ -34,15 +34,18 @@ type CheckoutRequest struct {
 	Frequency string
 	Visitor   *string
 }
+
 type CheckoutResult struct {
 	CheckoutID string `json:"checkoutId"`
 	URL        string `json:"url"`
 }
+
 type RemoteCheckout struct {
 	ID       string `json:"id"`
 	URL      string `json:"url"`
 	Livemode *bool  `json:"livemode"`
 }
+
 type CheckoutGateway interface {
 	CreateCheckout(context.Context, []byte, string) (RemoteCheckout, error)
 }
@@ -79,7 +82,11 @@ func loopback(host string) bool {
 
 func ValidateRemoteCheckout(remote RemoteCheckout) error {
 	u, err := url.Parse(remote.URL)
-	if err != nil || !strings.HasPrefix(remote.ID, "cs_test_") || len(remote.ID) > 255 || remote.Livemode == nil || *remote.Livemode || u.Scheme != "https" || u.Hostname() != "checkout.stripe.com" || u.User != nil || (u.Port() != "" && u.Port() != "443") {
+	if err != nil || !strings.HasPrefix(remote.ID, "cs_test_") || len(remote.ID) > 255 || remote.Livemode == nil || *remote.Livemode ||
+		u.Scheme != "https" ||
+		u.Hostname() != "checkout.stripe.com" ||
+		u.User != nil ||
+		(u.Port() != "" && u.Port() != "443") {
 		return ErrProcessorUnavailable
 	}
 	return nil

@@ -20,7 +20,10 @@ import (
 )
 
 func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
-	env := map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org", "DONOR_STAFF_CLI_DATABASE_URL": "postgresql://unreachable.invalid/donor"}
+	env := map[string]string{
+		"DONOR_STAFF_ORIGIN":           "https://staff.dad.example.org",
+		"DONOR_STAFF_CLI_DATABASE_URL": "postgresql://unreachable.invalid/donor",
+	}
 	for _, tc := range []struct {
 		name  string
 		args  []string
@@ -48,7 +51,10 @@ func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
 
 func TestRunRefusesTheSchemaOwner(t *testing.T) {
 	dbrolestest.URL(t, dbroles.StaffCLI)
-	env := map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org", dbroles.StaffCLI.Variable(): os.Getenv("TEST_DATABASE_URL")}
+	env := map[string]string{
+		"DONOR_STAFF_ORIGIN":        "https://staff.dad.example.org",
+		dbroles.StaffCLI.Variable(): os.Getenv("TEST_DATABASE_URL"),
+	}
 	err := run([]string{"--recover", "--email=nobody@example.org"}, func(name string) string { return env[name] }, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "can change the schema") {
 		t.Fatalf("got %v, want the owner refused", err)
@@ -93,15 +99,21 @@ func TestRunInvitesTheFirstAdministratorAndRecoversThem(t *testing.T) {
 	if err = migrations.Apply(ctx, pool, false); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org", dbroles.StaffCLI.Variable(): location.String(), dbroles.AllowOwnerVariable: "true"}
+	env := map[string]string{
+		"DONOR_STAFF_ORIGIN":        "https://staff.dad.example.org",
+		dbroles.StaffCLI.Variable(): location.String(),
+		dbroles.AllowOwnerVariable:  "true",
+	}
 	getenv := func(name string) string { return env[name] }
 	for _, args := range [][]string{{"--email=first@example.org", "--name=First Administrator"}, {"--recover", "--email=first@example.org"}} {
 		var out bytes.Buffer
-		if err = run(args, getenv, &out); err != nil || !strings.Contains(out.String(), "https://staff.dad.example.org/staff/activate#token=") {
+		if err = run(args, getenv, &out); err != nil ||
+			!strings.Contains(out.String(), "https://staff.dad.example.org/staff/activate#token=") {
 			t.Fatalf("%v: got %q, %v", args, out.String(), err)
 		}
 	}
-	if err = run([]string{"--email=second@example.org", "--name=Second"}, getenv, io.Discard); err == nil || err.Error() != "staff already exists; use an administrator account" {
+	if err = run([]string{"--email=second@example.org", "--name=Second"}, getenv, io.Discard); err == nil ||
+		err.Error() != "staff already exists; use an administrator account" {
 		t.Fatalf("second bootstrap: %v", err)
 	}
 }

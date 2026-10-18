@@ -44,6 +44,7 @@ func (f fakeGateway) ListInvoicePayments(_ context.Context, invoice, payment str
 func (f fakeGateway) ListChargesByCreated(context.Context, time.Time, time.Time) ([]payments.Object, error) {
 	return f.charges, nil
 }
+
 func (f fakeGateway) ListRefundsByCreated(context.Context, time.Time, time.Time) ([]payments.Object, error) {
 	return f.refunds, nil
 }
@@ -66,7 +67,12 @@ func (f fakeGateway) RetrieveRefund(_ context.Context, id string) (payments.Obje
 }
 
 // reconcileWindow reconciles without pacing, which only the provider needs.
-func reconcileWindow(ctx context.Context, win reconcile.Window, gateway payments.ReconcileGateway, q *queries.Queries) (reconcile.Report, error) {
+func reconcileWindow(
+	ctx context.Context,
+	win reconcile.Window,
+	gateway payments.ReconcileGateway,
+	q *queries.Queries,
+) (reconcile.Report, error) {
 	return reconcileWindowPaced(ctx, win, gateway, q, func(context.Context) error { return nil })
 }
 
@@ -129,7 +135,15 @@ func TestReconcileWindowAgainstSyntheticDB(t *testing.T) {
 	})
 
 	t.Run("missing webhook is one missing gift", func(t *testing.T) {
-		gw := fakeGateway{charges: objects(t, `{"id":"ch_missing","amount":3000,"amount_captured":3000,"currency":"usd","status":"succeeded","paid":true,"captured":true,"livemode":false,"created":`+strconv.FormatInt(noon, 10)+`}`)}
+		gw := fakeGateway{
+			charges: objects(
+				t,
+				`{"id":"ch_missing","amount":3000,"amount_captured":3000,"currency":"usd","status":"succeeded","paid":true,"captured":true,"livemode":false,"created":`+strconv.FormatInt(
+					noon,
+					10,
+				)+`}`,
+			),
+		}
 		report, err := reconcileWindow(context.Background(), win, gw, q)
 		if err != nil {
 			t.Fatal(err)
@@ -178,15 +192,35 @@ func TestReconciliationMatchesAcrossCreationAndObservationDays(t *testing.T) {
 		id, pi string
 		paid   time.Time
 	}{{giftA, piA, win.End.Add(time.Hour)}, {giftB, piB, win.Start.Add(time.Hour)}, {giftC, "pi_" + giftC, win.Start.Add(-48 * time.Hour)}} {
-		exec("INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,stripe_payment_intent_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,$5,3000,'USD','MONTHLY',$6)", gift.id, donor, checkout, "in_"+gift.id, gift.pi, gift.paid)
+		exec(
+			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,stripe_payment_intent_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,$5,3000,'USD','MONTHLY',$6)",
+			gift.id,
+			donor,
+			checkout,
+			"in_"+gift.id,
+			gift.pi,
+			gift.paid,
+		)
 	}
 	for _, refund := range []struct {
 		id, gift, stripe string
 		observed         time.Time
 	}{{refundA, giftB, reA, win.End.Add(2 * time.Hour)}, {refundB, giftC, reB, win.Start.Add(2 * time.Hour)}} {
-		exec("INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,1000,'USD','SUCCEEDED',$4)", refund.id, refund.gift, refund.stripe, refund.observed)
+		exec(
+			"INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,1000,'USD','SUCCEEDED',$4)",
+			refund.id,
+			refund.gift,
+			refund.stripe,
+			refund.observed,
+		)
 	}
-	exec("INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,1000,'USD','PENDING',$4)", refundC, giftC, reC, win.Start.Add(-24*time.Hour))
+	exec(
+		"INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,1000,'USD','PENDING',$4)",
+		refundC,
+		giftC,
+		reC,
+		win.Start.Add(-24*time.Hour),
+	)
 	charge := func(pi string, created time.Time) payments.Object {
 		return objects(t, fmt.Sprintf(`{"id":"ch_%s","payment_intent":%q,"amount":3000,"amount_captured":3000,"currency":"usd","status":"succeeded","paid":true,"captured":true,"livemode":false,"created":%d}`, pi, pi, created.Unix()))[0]
 	}
@@ -203,7 +237,10 @@ func TestReconciliationMatchesAcrossCreationAndObservationDays(t *testing.T) {
 		charges:      []payments.Object{charge(piA, win.Start.Add(time.Hour))},
 		refunds:      []payments.Object{refund(reA, win.Start.Add(2*time.Hour))},
 		paymentsByID: map[string]payments.Object{piB: intent},
-		refundsByID:  map[string]payments.Object{reB: refund(reB, win.Start.Add(-time.Hour)), reC: refund(reC, win.Start.Add(-24*time.Hour))},
+		refundsByID: map[string]payments.Object{
+			reB: refund(reB, win.Start.Add(-time.Hour)),
+			reC: refund(reC, win.Start.Add(-24*time.Hour)),
+		},
 	}
 	gateway.refundsByID[reC]["status"] = []byte(`"pending"`)
 	q := queries.New(reader)
@@ -322,7 +359,8 @@ func TestPendingRefundBacklogIsFullyCheckedInBoundedBatches(t *testing.T) {
 	gw.refundsByID[fmt.Sprintf("re_batch_%05d", count)]["status"] = []byte(`"requires_action"`)
 	wait := func(context.Context) error { return nil }
 	report, err := reconcileWindowPaced(ctx, win, gw, queries.New(reader), wait)
-	if err != nil || report.PendingRefundsChecked != count || report.PendingRefundBatches != 102 || report.StatusMismatches != 1 || report.StatusMismatchIDs[0] != fmt.Sprintf("re_batch_%05d", count) {
+	if err != nil || report.PendingRefundsChecked != count || report.PendingRefundBatches != 102 || report.StatusMismatches != 1 ||
+		report.StatusMismatchIDs[0] != fmt.Sprintf("re_batch_%05d", count) {
 		t.Fatal("last batch was not fully checked", report, err)
 	}
 	if gw.refundReads["re_batch_00000"] != 0 {
@@ -348,14 +386,16 @@ func TestPendingRefundBacklogIsFullyCheckedInBoundedBatches(t *testing.T) {
 		}
 		return nil
 	}
-	if report, err = reconcileWindowPaced(ctx, win, gw, queries.New(reader), wait); !errors.Is(err, context.Canceled) || report.PendingRefundsChecked != 0 {
+	if report, err = reconcileWindowPaced(ctx, win, gw, queries.New(reader), wait); !errors.Is(err, context.Canceled) ||
+		report.PendingRefundsChecked != 0 {
 		t.Fatal("interrupted scan returned a partial verdict", report, err)
 	}
 }
 
 func TestRunRejectsUnboundedJobDeadlines(t *testing.T) {
 	for _, value := range []string{"0", "500ms", "1h1s"} {
-		if err := run(context.Background(), []string{"-timeout", value}, func(string) string { return "" }, io.Discard); err == nil || !strings.Contains(err.Error(), "-timeout") {
+		if err := run(context.Background(), []string{"-timeout", value}, func(string) string { return "" }, io.Discard); err == nil ||
+			!strings.Contains(err.Error(), "-timeout") {
 			t.Fatalf("deadline %s accepted: %v", value, err)
 		}
 	}
@@ -404,7 +444,11 @@ func TestLegacyInvoiceGiftsUseVerifiedPaymentLinksAcrossDays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gw := fakeGateway{charges: []payments.Object{charge(b, win.Start.Add(time.Hour))}, paymentsByID: map[string]payments.Object{"pi_" + a: intent}, invoicePayments: map[string][]payments.Object{"in_" + a: {link(a)}, "pi_" + b: {link(b)}}}
+	gw := fakeGateway{
+		charges:         []payments.Object{charge(b, win.Start.Add(time.Hour))},
+		paymentsByID:    map[string]payments.Object{"pi_" + a: intent},
+		invoicePayments: map[string][]payments.Object{"in_" + a: {link(a)}, "pi_" + b: {link(b)}},
+	}
 	wait := func(context.Context) error { return nil }
 	q := queries.New(reader)
 	report, err := reconcileWindowPaced(ctx, win, gw, q, wait)
@@ -412,7 +456,8 @@ func TestLegacyInvoiceGiftsUseVerifiedPaymentLinksAcrossDays(t *testing.T) {
 		t.Fatal("legacy charge proof or cross-day lookup failed", report, err)
 	}
 	var stored int
-	if err := owner.QueryRow(ctx, "SELECT count(*) FROM donor_gifts WHERE donor_id=$1 AND stripe_payment_intent_id IS NULL", donor).Scan(&stored); err != nil || stored != 2 {
+	if err := owner.QueryRow(ctx, "SELECT count(*) FROM donor_gifts WHERE donor_id=$1 AND stripe_payment_intent_id IS NULL", donor).Scan(&stored); err != nil ||
+		stored != 2 {
 		t.Fatal("read-only verification changed financial facts", stored, err)
 	}
 	proof := gw.invoicePayments["in_"+a][0]

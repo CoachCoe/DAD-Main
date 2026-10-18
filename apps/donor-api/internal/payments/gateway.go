@@ -172,16 +172,42 @@ func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, param
 	}
 	return nil
 }
+
 func (g *StripeGateway) ScheduleCancellation(ctx context.Context, id string, end int64, key string) error {
 	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{CancelAt: stripe.Int64(end)}, key)
 }
+
 func (g *StripeGateway) PauseCollection(ctx context.Context, id string, resumes int64, key string) error {
-	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{PauseCollection: &stripe.SubscriptionUpdatePauseCollectionParams{Behavior: stripe.String("void"), ResumesAt: stripe.Int64(resumes)}}, key)
+	return g.mutateSubscription(
+		ctx,
+		id,
+		&stripe.SubscriptionUpdateParams{
+			PauseCollection: &stripe.SubscriptionUpdatePauseCollectionParams{
+				Behavior:  stripe.String("void"),
+				ResumesAt: stripe.Int64(resumes),
+			},
+		},
+		key,
+	)
 }
+
 func (g *StripeGateway) ChangeMonthlyAmount(ctx context.Context, id, item, product string, amount int64, key string) error {
-	price := &stripe.SubscriptionUpdateItemPriceDataParams{Currency: stripe.String("usd"), Product: stripe.String(product), Recurring: &stripe.SubscriptionUpdateItemPriceDataRecurringParams{Interval: stripe.String("month")}, UnitAmount: stripe.Int64(amount)}
-	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{Items: []*stripe.SubscriptionUpdateItemParams{{ID: stripe.String(item), Quantity: stripe.Int64(1), PriceData: price}}}, key)
+	price := &stripe.SubscriptionUpdateItemPriceDataParams{
+		Currency:   stripe.String("usd"),
+		Product:    stripe.String(product),
+		Recurring:  &stripe.SubscriptionUpdateItemPriceDataRecurringParams{Interval: stripe.String("month")},
+		UnitAmount: stripe.Int64(amount),
+	}
+	return g.mutateSubscription(
+		ctx,
+		id,
+		&stripe.SubscriptionUpdateParams{
+			Items: []*stripe.SubscriptionUpdateItemParams{{ID: stripe.String(item), Quantity: stripe.Int64(1), PriceData: price}},
+		},
+		key,
+	)
 }
+
 func (g *StripeGateway) UpdateSubscriptionPaymentMethod(ctx context.Context, id, method, key string) error {
 	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{DefaultPaymentMethod: stripe.String(method)}, key)
 }
@@ -215,6 +241,7 @@ func (g *StripeGateway) RetrieveCheckout(ctx context.Context, id string) (Object
 	}
 	return rawObject(result.LastResponse)
 }
+
 func (g *StripeGateway) RetrieveSetupIntent(ctx context.Context, id string) (Object, error) {
 	if err := g.acquire(ctx, BucketWorker); err != nil {
 		return nil, err
@@ -240,6 +267,7 @@ func (g *StripeGateway) RetrievePaymentIntent(ctx context.Context, id string) (O
 	}
 	return rawObject(result.LastResponse)
 }
+
 func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, error) {
 	if err := g.acquire(ctx, BucketWorker); err != nil {
 		return nil, err
@@ -250,6 +278,7 @@ func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, 
 	}
 	return rawObject(result.LastResponse)
 }
+
 func (g *StripeGateway) RetrieveSubscription(ctx context.Context, id string) (Object, error) {
 	if err := g.acquire(ctx, BucketWorker); err != nil {
 		return nil, err
@@ -262,7 +291,12 @@ func (g *StripeGateway) RetrieveSubscription(ctx context.Context, id string) (Ob
 }
 
 func (g *StripeGateway) CreateRefund(ctx context.Context, payment string, amount int64, command string) (Object, error) {
-	params := &stripe.RefundCreateParams{PaymentIntent: stripe.String(payment), Amount: stripe.Int64(amount), Reason: stripe.String("requested_by_customer"), Metadata: map[string]string{"dad_staff_action": command}}
+	params := &stripe.RefundCreateParams{
+		PaymentIntent: stripe.String(payment),
+		Amount:        stripe.Int64(amount),
+		Reason:        stripe.String("requested_by_customer"),
+		Metadata:      map[string]string{"dad_staff_action": command},
+	}
 	params.SetIdempotencyKey("dad-staff-refund-" + command)
 	if err := g.acquire(ctx, BucketStaff); err != nil {
 		return nil, err
@@ -349,7 +383,11 @@ type listPage interface {
 // listByCreated runs the shared bounded paging loop ListPaymentRefunds proved:
 // Limit 100, a created range, starting_after, has_more termination, and the
 // non-advancing-cursor guard. Each returned object must be livemode:false.
-func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time, list func(context.Context, *stripe.RangeQueryParams, string) listPage) ([]Object, error) {
+func (g *StripeGateway) listByCreated(
+	ctx context.Context,
+	start, end time.Time,
+	list func(context.Context, *stripe.RangeQueryParams, string) listPage,
+) ([]Object, error) {
 	created := &stripe.RangeQueryParams{GreaterThanOrEqual: start.Unix(), LesserThanOrEqual: end.Unix()}
 	result := []Object{}
 	after := ""

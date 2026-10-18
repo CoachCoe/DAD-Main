@@ -78,7 +78,8 @@ func TestDonorPasskeyRegistersSignsInAndIsDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, err := s.ListPasskeys(ctx, session)
-	if err != nil || len(list.Passkeys) != 1 || list.Passkeys[0].Name == nil || *list.Passkeys[0].Name != "My phone" || list.Passkeys[0].LastUsedAt != nil {
+	if err != nil || len(list.Passkeys) != 1 || list.Passkeys[0].Name == nil || *list.Passkeys[0].Name != "My phone" ||
+		list.Passkeys[0].LastUsedAt != nil {
 		t.Fatal("registered passkey listed as", list, err)
 	}
 	tokens, err := donorSignIn(t, s, key, Client{})
@@ -199,7 +200,8 @@ func TestDonorPasskeyCeremoniesAnswerOnlyTheirOwnKind(t *testing.T) {
 	if _, err = s.FinishSignIn(ctx, register.ID, signer.assert(t, signIn.Options), Client{}); !errors.Is(err, ErrPasskeyDenied) {
 		t.Fatal("registration ceremony signed a passkey in", err)
 	}
-	if list, err := s.FinishRegister(ctx, session, register.ID, key.register(t, register.Options), ""); err != nil || len(list.Passkeys) != 2 {
+	if list, err := s.FinishRegister(ctx, session, register.ID, key.register(t, register.Options), ""); err != nil ||
+		len(list.Passkeys) != 2 {
 		t.Fatal("misdirected answer spent the registration ceremony", list, err)
 	}
 }
@@ -219,7 +221,8 @@ func TestDonorPasskeyRegistrationBelongsToItsDonor(t *testing.T) {
 		t.Fatal("another donor finished the registration", err)
 	}
 	var passkeys int
-	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_passkeys WHERE donor_id=$1", other).Scan(&passkeys); err != nil || passkeys != 0 {
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_passkeys WHERE donor_id=$1", other).Scan(&passkeys); err != nil ||
+		passkeys != 0 {
 		t.Fatal("passkey stored for the wrong donor", passkeys, err)
 	}
 	if _, err = s.BeginRegister(ctx, "not-a-session"); !errors.Is(err, ErrDenied) {
@@ -277,7 +280,10 @@ func TestMalformedDonorPasskeyAnswerSpendsItsCeremony(t *testing.T) {
 		t.Fatal("malformed attestation accepted", err)
 	}
 	other := newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID)
-	if _, err = s.FinishRegister(ctx, session, registration.ID, other.register(t, registration.Options), ""); !errors.Is(err, ErrPasskeyDenied) {
+	if _, err = s.FinishRegister(ctx, session, registration.ID, other.register(t, registration.Options), ""); !errors.Is(
+		err,
+		ErrPasskeyDenied,
+	) {
 		t.Fatal("malformed attestation did not spend the ceremony", err)
 	}
 }
@@ -307,7 +313,10 @@ func TestDonorPasskeyRefusesACredentialRegisteredToAnotherDonor(t *testing.T) {
 func TestDonorPasskeySignInRefusesUnknownKeysAndDisabledDonors(t *testing.T) {
 	pool := database(t)
 	s := donorPasskeyService(t)
-	if _, err := donorSignIn(t, s, newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID), Client{}); !errors.Is(err, ErrPasskeyDenied) {
+	if _, err := donorSignIn(t, s, newAuthenticator(t, donorPasskeyTestOrigin, donorPasskeyTestRPID), Client{}); !errors.Is(
+		err,
+		ErrPasskeyDenied,
+	) {
 		t.Fatal("unregistered passkey signed in", err)
 	}
 	id, session := passkeyDonor(t, pool)
@@ -398,7 +407,8 @@ func TestDonorPasskeyAddedSendsAnEssentialNotice(t *testing.T) {
 	}
 	bodies := transport.messages[0].Body + transport.messages[1].Body
 	for _, m := range transport.messages {
-		if m.To != email || m.Subject != "A passkey was added to your DAD account" || !strings.Contains(m.Body, "https://donor.example.org/account/profile") {
+		if m.To != email || m.Subject != "A passkey was added to your DAD account" ||
+			!strings.Contains(m.Body, "https://donor.example.org/account/profile") {
 			t.Fatal("notice", m)
 		}
 	}

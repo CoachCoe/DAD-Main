@@ -40,7 +40,14 @@ func (s StaffFinanceService) RefundQuote(ctx context.Context, token string, dono
 		if err != nil {
 			return RefundQuote{}, err
 		}
-		quote := RefundQuote{GiftID: gift.ID, DonorID: gift.DonorID, AmountMinor: gift.AmountMinor, AvailableMinor: gift.AmountMinor, Currency: "USD", Mode: "test"}
+		quote := RefundQuote{
+			GiftID:         gift.ID,
+			DonorID:        gift.DonorID,
+			AmountMinor:    gift.AmountMinor,
+			AvailableMinor: gift.AmountMinor,
+			Currency:       "USD",
+			Mode:           "test",
+		}
 		for _, r := range refunds {
 			if r.Status != "FAILED" && r.Status != "CANCELED" {
 				quote.AvailableMinor -= r.AmountMinor
@@ -59,15 +66,21 @@ func (s StaffFinanceService) RefundQuote(ctx context.Context, token string, dono
 // CancellationQuote previews the donor's monthly gift for a staff
 // cancellation.
 func (s StaffFinanceService) CancellationQuote(ctx context.Context, token string, donorID pgtype.UUID) (RecurringDetails, error) {
-	return staffRead(ctx, s.Staff, token, "gift.cancel", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (RecurringDetails, error) {
-		q := queries.New(tx)
-		if _, err := q.StaffDonorByID(ctx, donorID); err != nil {
-			return RecurringDetails{}, err
-		}
-		view, err := storedDetails(ctx, q, donorID, now)
-		if err != nil || view.Subscription == nil {
-			return RecurringDetails{Mode: "test"}, err
-		}
-		return view, auditStaff(ctx, q, actor.ID, "gift.cancel_preview", view.Subscription.ID, nil, now)
-	})
+	return staffRead(
+		ctx,
+		s.Staff,
+		token,
+		"gift.cancel",
+		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (RecurringDetails, error) {
+			q := queries.New(tx)
+			if _, err := q.StaffDonorByID(ctx, donorID); err != nil {
+				return RecurringDetails{}, err
+			}
+			view, err := storedDetails(ctx, q, donorID, now)
+			if err != nil || view.Subscription == nil {
+				return RecurringDetails{Mode: "test"}, err
+			}
+			return view, auditStaff(ctx, q, actor.ID, "gift.cancel_preview", view.Subscription.ID, nil, now)
+		},
+	)
 }

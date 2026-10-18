@@ -16,7 +16,14 @@ import (
 func stripeTestGateway(t *testing.T, handler http.HandlerFunc) (*StripeGateway, func()) {
 	t.Helper()
 	server := httptest.NewServer(handler)
-	backends := stripe.NewBackendsWithConfig(&stripe.BackendConfig{URL: stripe.String(server.URL), HTTPClient: server.Client(), MaxNetworkRetries: stripe.Int64(0), LeveledLogger: &stripe.LeveledLogger{Level: stripe.LevelNull}})
+	backends := stripe.NewBackendsWithConfig(
+		&stripe.BackendConfig{
+			URL:               stripe.String(server.URL),
+			HTTPClient:        server.Client(),
+			MaxNetworkRetries: stripe.Int64(0),
+			LeveledLogger:     &stripe.LeveledLogger{Level: stripe.LevelNull},
+		},
+	)
 	return &StripeGateway{client: stripe.NewClient("sk_test_public_fixture", stripe.WithBackends(backends))}, server.Close
 }
 
@@ -49,7 +56,11 @@ func TestReconcileListPagesByCreatedWindow(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 				// First page has_more=true, second closes the window.
 				if q.Get("starting_after") == "" {
-					_, _ = w.Write([]byte(`{"object":"list","has_more":true,"data":[{"id":"obj_1","amount":3000,"livemode":false,"metadata":{"email":"private@example.org"},"billing_details":{"name":"Private Donor"}},{"id":"obj_2","amount":5000,"livemode":false}]}`))
+					_, _ = w.Write(
+						[]byte(
+							`{"object":"list","has_more":true,"data":[{"id":"obj_1","amount":3000,"livemode":false,"metadata":{"email":"private@example.org"},"billing_details":{"name":"Private Donor"}},{"id":"obj_2","amount":5000,"livemode":false}]}`,
+						),
+					)
 				} else if q.Get("starting_after") == "obj_2" {
 					_, _ = w.Write([]byte(`{"object":"list","has_more":false,"data":[{"id":"obj_3","amount":7000,"livemode":false}]}`))
 				} else {
@@ -113,17 +124,24 @@ func TestInvoicePaymentLookupIsReadOnlyBoundedAndPrivate(t *testing.T) {
 		t.Run(map[bool]string{true: "invoice", false: "payment"}[invoice], func(t *testing.T) {
 			g, closeServer := stripeTestGateway(t, func(w http.ResponseWriter, r *http.Request) {
 				q := r.URL.Query()
-				if r.Method != "GET" || r.URL.Path != "/v1/invoice_payments" || r.Header.Get("Stripe-Version") != APIVersion || q.Get("limit") != "100" || q.Get("status") != "paid" {
+				if r.Method != "GET" || r.URL.Path != "/v1/invoice_payments" || r.Header.Get("Stripe-Version") != APIVersion ||
+					q.Get("limit") != "100" ||
+					q.Get("status") != "paid" {
 					t.Errorf("unsafe invoice lookup: %s %s", r.Method, r.URL)
 				}
 				if invoice && (q.Get("invoice") != "in_test" || q.Get("payment[type]") != "") {
 					t.Error("wrong invoice filter", q)
 				}
-				if !invoice && (q.Get("invoice") != "" || q.Get("payment[type]") != "payment_intent" || q.Get("payment[payment_intent]") != "pi_test") {
+				if !invoice &&
+					(q.Get("invoice") != "" || q.Get("payment[type]") != "payment_intent" || q.Get("payment[payment_intent]") != "pi_test") {
 					t.Error("wrong PaymentIntent filter", q)
 				}
 				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"object":"list","has_more":false,"data":[{"id":"inpay_test","invoice":"in_test","amount_paid":3000,"currency":"usd","status":"paid","livemode":false,"created":1000,"metadata":{"private":"fixture"},"payment":{"type":"payment_intent","payment_intent":"pi_test","private":"fixture"}}]}`))
+				_, _ = w.Write(
+					[]byte(
+						`{"object":"list","has_more":false,"data":[{"id":"inpay_test","invoice":"in_test","amount_paid":3000,"currency":"usd","status":"paid","livemode":false,"created":1000,"metadata":{"private":"fixture"},"payment":{"type":"payment_intent","payment_intent":"pi_test","private":"fixture"}}]}`,
+					),
+				)
 			})
 			defer closeServer()
 			in, pi := "", "pi_test"
@@ -167,7 +185,10 @@ func TestInvoicePaymentLookupRejectsTruncatedAndLiveLists(t *testing.T) {
 }
 
 func TestInvoicePaymentLookupRequiresExactlyOneFilter(t *testing.T) {
-	g, closeServer := stripeTestGateway(t, func(w http.ResponseWriter, r *http.Request) { t.Error("unscoped invoice lookup reached Stripe") })
+	g, closeServer := stripeTestGateway(
+		t,
+		func(w http.ResponseWriter, r *http.Request) { t.Error("unscoped invoice lookup reached Stripe") },
+	)
 	defer closeServer()
 	for _, filters := range [][2]string{{"", ""}, {"in_test", "pi_test"}} {
 		if _, err := g.ListInvoicePayments(context.Background(), filters[0], filters[1]); err == nil {

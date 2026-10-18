@@ -49,8 +49,17 @@ func newRetentionFixture(t *testing.T) retentionFixture {
 func (f retentionFixture) touch(t *testing.T, kind string, at, expires time.Time) pgtype.UUID {
 	t.Helper()
 	id := testID(t)
-	mustExec(t, f.pool, `INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES ($1,$2,$3,$4,$5,$6)`,
-		id, HashToken(id.String()), f.referrer, kind, at, expires)
+	mustExec(
+		t,
+		f.pool,
+		`INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES ($1,$2,$3,$4,$5,$6)`,
+		id,
+		HashToken(id.String()),
+		f.referrer,
+		kind,
+		at,
+		expires,
+	)
 	return id
 }
 
@@ -59,8 +68,18 @@ func (f retentionFixture) touch(t *testing.T, kind string, at, expires time.Time
 func (f retentionFixture) checkout(t *testing.T, kind string, expires time.Time) pgtype.UUID {
 	t.Helper()
 	id := testID(t)
-	mustExec(t, f.pool, `INSERT INTO donor_checkouts (id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at,created_at)
-VALUES ($1,$2,3000,'ONE_TIME',$3,$4,$5,$6)`, id, f.giver, f.referrer, kind, expires, expires.Add(-time.Hour))
+	mustExec(
+		t,
+		f.pool,
+		`INSERT INTO donor_checkouts (id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at,created_at)
+VALUES ($1,$2,3000,'ONE_TIME',$3,$4,$5,$6)`,
+		id,
+		f.giver,
+		f.referrer,
+		kind,
+		expires,
+		expires.Add(-time.Hour),
+	)
 	return id
 }
 
@@ -68,9 +87,19 @@ VALUES ($1,$2,3000,'ONE_TIME',$3,$4,$5,$6)`, id, f.giver, f.referrer, kind, expi
 // when paid before the checkout's attribution expiry.
 func (f retentionFixture) gift(t *testing.T, checkout pgtype.UUID, paid time.Time, attributed bool) {
 	t.Helper()
-	mustExec(t, f.pool, `INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind)
+	mustExec(
+		t,
+		f.pool,
+		`INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind)
 SELECT $1,$2,id,$3,3000,'USD','ONE_TIME',$4,CASE WHEN $5::bool THEN referrer_id END,CASE WHEN $5::bool THEN referral_kind END
-FROM donor_checkouts WHERE id=$6`, testID(t), f.giver, "pi_retention_"+checkout.String(), paid, attributed, checkout)
+FROM donor_checkouts WHERE id=$6`,
+		testID(t),
+		f.giver,
+		"pi_retention_"+checkout.String(),
+		paid,
+		attributed,
+		checkout,
+	)
 }
 
 func (f retentionFixture) remaining(t *testing.T, ids ...pgtype.UUID) map[pgtype.UUID]bool {
@@ -176,7 +205,11 @@ func TestTouchPurgeBatchesAreBoundedAndConcurrentPassesShareTheWork(t *testing.T
 	}
 
 	// Three workers, each with its own pool, as separate processes would have.
-	workers := []*pgxpool.Pool{dbrolestest.Open(t, dbroles.ProjectionWorker), dbrolestest.Open(t, dbroles.ProjectionWorker), dbrolestest.Open(t, dbroles.ProjectionWorker)}
+	workers := []*pgxpool.Pool{
+		dbrolestest.Open(t, dbroles.ProjectionWorker),
+		dbrolestest.Open(t, dbroles.ProjectionWorker),
+		dbrolestest.Open(t, dbroles.ProjectionWorker),
+	}
 	first, err := purgeTouches(context.Background(), workers[0], now, queries.PurgeReferralTouchesRow{}, 4)
 	if err != nil || len(first) != 4 || first[0].ID != ids[0] || first[3].ID != ids[3] {
 		t.Fatal("first batch was not the four oldest touches", err)

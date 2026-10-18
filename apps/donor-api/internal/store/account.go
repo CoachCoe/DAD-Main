@@ -26,7 +26,8 @@ func (s AccountService) ClaimAccount(ctx context.Context, proof, previousSession
 		if _, err = refreshProjection(ctx, tx, donor.ID, now); err != nil {
 			return Tokens{}, err
 		}
-		return issued, queries.New(tx).RevokeSession(ctx, queries.RevokeSessionParams{TokenHash: HashToken(previousSession), RevokedAt: timestamp(now)})
+		return issued, queries.New(tx).
+			RevokeSession(ctx, queries.RevokeSessionParams{TokenHash: HashToken(previousSession), RevokedAt: timestamp(now)})
 	})
 }
 

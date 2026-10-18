@@ -23,9 +23,29 @@ func signed(t *testing.T, event map[string]any, at time.Time) ([]byte, string) {
 	}
 	return body, fmt.Sprintf("t=%d,v1=%x", at.Unix(), stripe.ComputeSignature(at, body, testSecret))
 }
+
 func event() map[string]any {
-	return map[string]any{"object": "event", "id": "evt_test", "type": "payment_intent.succeeded", "api_version": APIVersion, "created": 1700000000, "livemode": false, "data": map[string]any{"object": map[string]any{"id": "pi_test", "metadata": map[string]any{"dad_checkout_id": checkoutID, "private": "must disappear"}, "customer": "cus_private", "description": "private description", "currency": "usd", "status": "succeeded", "amount_received": int64(9007199254740993)}}}
+	return map[string]any{
+		"object":      "event",
+		"id":          "evt_test",
+		"type":        "payment_intent.succeeded",
+		"api_version": APIVersion,
+		"created":     1700000000,
+		"livemode":    false,
+		"data": map[string]any{
+			"object": map[string]any{
+				"id":              "pi_test",
+				"metadata":        map[string]any{"dad_checkout_id": checkoutID, "private": "must disappear"},
+				"customer":        "cus_private",
+				"description":     "private description",
+				"currency":        "usd",
+				"status":          "succeeded",
+				"amount_received": int64(9007199254740993),
+			},
+		},
+	}
 }
+
 func TestSignedWebhookAndMinimalFacts(t *testing.T) {
 	if stripe.APIVersion != APIVersion {
 		t.Fatal("SDK API version drift")
@@ -36,7 +56,8 @@ func TestSignedWebhookAndMinimalFacts(t *testing.T) {
 		t.Fatalf("valid event: %v", err)
 	}
 	data := string(verified.Data())
-	if !strings.Contains(data, "9007199254740993") || strings.Contains(data, "private") || strings.Contains(data, "customer") || strings.Contains(data, "metadata") {
+	if !strings.Contains(data, "9007199254740993") || strings.Contains(data, "private") || strings.Contains(data, "customer") ||
+		strings.Contains(data, "metadata") {
 		t.Fatalf("lossy or non-minimal facts: %s", data)
 	}
 	if verified.ID() != "evt_test" || verified.Kind() != "payment_intent.succeeded" || verified.OccurredAt().Unix() != 1700000000 {
@@ -68,6 +89,7 @@ func TestSignedWebhookAndMinimalFacts(t *testing.T) {
 		}
 	}
 }
+
 func TestIgnoredAndMalformedEvents(t *testing.T) {
 	input := event()
 	input["type"] = "customer.created"
@@ -88,13 +110,16 @@ func TestIgnoredAndMalformedEvents(t *testing.T) {
 		t.Fatal("bad UUID accepted")
 	}
 }
+
 func TestSubscriptionEventsKeepTheSubscription(t *testing.T) {
 	for _, kind := range []string{"customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted",
 		"customer.subscription.pending_update_applied", "customer.subscription.pending_update_expired"} {
 		input := event()
 		input["type"] = kind
-		input["data"] = map[string]any{"object": map[string]any{"id": "sub_test", "object": "subscription", "status": "active", "customer": "cus_private",
-			"metadata": map[string]any{"dad_checkout_id": checkoutID}}}
+		input["data"] = map[string]any{
+			"object": map[string]any{"id": "sub_test", "object": "subscription", "status": "active", "customer": "cus_private",
+				"metadata": map[string]any{"dad_checkout_id": checkoutID}},
+		}
 		body, signature := signed(t, input, time.Now())
 		verified, err := verifyEvent(body, signature, testSecret)
 		if err != nil || verified == nil {
@@ -104,7 +129,8 @@ func TestSubscriptionEventsKeepTheSubscription(t *testing.T) {
 		if err = json.Unmarshal(verified.Data(), &facts); err != nil {
 			t.Fatal(err)
 		}
-		if verified.Kind() != kind || facts["id"] != "sub_test" || facts["checkout_id"] != checkoutID || strings.Contains(string(verified.Data()), "cus_private") {
+		if verified.Kind() != kind || facts["id"] != "sub_test" || facts["checkout_id"] != checkoutID ||
+			strings.Contains(string(verified.Data()), "cus_private") {
 			t.Fatalf("%s facts: %s", kind, verified.Data())
 		}
 	}
@@ -115,13 +141,40 @@ func TestSubscriptionEventsKeepTheSubscription(t *testing.T) {
 		t.Fatal("unhandled subscription event not ignored")
 	}
 }
+
 func TestInvoiceAllowlist(t *testing.T) {
 	input := event()
 	input["type"] = "invoice.payment_succeeded"
 	input["data"] = map[string]any{"object": map[string]any{
 		"id": "in_test", "parent": map[string]any{"subscription_details": map[string]any{"subscription": "sub_test", "metadata": map[string]any{"dad_checkout_id": checkoutID}}},
-		"lines":              map[string]any{"has_more": false, "data": []any{map[string]any{"amount": 3000, "currency": "usd", "description": "private line", "period": map[string]any{"start": 1700000000, "end": 1702592000}, "parent": map[string]any{"type": "subscription_item_details", "subscription_item_details": map[string]any{"subscription": "sub_test", "proration": false}}}}},
-		"payments":           map[string]any{"has_more": false, "data": []any{map[string]any{"status": "paid", "amount_paid": 3000, "currency": "usd", "invoice": "in_test", "livemode": false, "payment": map[string]any{"type": "payment_intent", "payment_intent": "pi_test"}}}},
+		"lines": map[string]any{
+			"has_more": false,
+			"data": []any{
+				map[string]any{
+					"amount":      3000,
+					"currency":    "usd",
+					"description": "private line",
+					"period":      map[string]any{"start": 1700000000, "end": 1702592000},
+					"parent": map[string]any{
+						"type":                      "subscription_item_details",
+						"subscription_item_details": map[string]any{"subscription": "sub_test", "proration": false},
+					},
+				},
+			},
+		},
+		"payments": map[string]any{
+			"has_more": false,
+			"data": []any{
+				map[string]any{
+					"status":      "paid",
+					"amount_paid": 3000,
+					"currency":    "usd",
+					"invoice":     "in_test",
+					"livemode":    false,
+					"payment":     map[string]any{"type": "payment_intent", "payment_intent": "pi_test"},
+				},
+			},
+		},
 		"status_transitions": map[string]any{"paid_at": 1700000001},
 	}}
 	body, signature := signed(t, input, time.Now())
@@ -133,7 +186,9 @@ func TestInvoiceAllowlist(t *testing.T) {
 	if err = json.Unmarshal(verified.Data(), &facts); err != nil {
 		t.Fatal(err)
 	}
-	if facts["lines_complete"] != true || facts["payments_complete"] != true || facts["subscription"] != "sub_test" || facts["checkout_id"] != checkoutID || strings.Contains(string(verified.Data()), "private") {
+	if facts["lines_complete"] != true || facts["payments_complete"] != true || facts["subscription"] != "sub_test" ||
+		facts["checkout_id"] != checkoutID ||
+		strings.Contains(string(verified.Data()), "private") {
 		t.Fatalf("wrong invoice facts: %s", verified.Data())
 	}
 	lines := facts["lines"].([]any)
@@ -148,6 +203,7 @@ func (f *failingInbox) SaveVerifiedEvent(context.Context, VerifiedEvent) error {
 	f.called = true
 	return errors.New("database unavailable")
 }
+
 func TestReceiverPropagatesPersistenceFailure(t *testing.T) {
 	inbox := &failingInbox{}
 	receiver := Receiver{Secret: testSecret, Inbox: inbox}

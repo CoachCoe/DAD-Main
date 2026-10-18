@@ -45,6 +45,7 @@ type historyFixture struct {
 func newHistoryFixture(t *testing.T, tx pgx.Tx) *historyFixture {
 	return &historyFixture{t: t, tx: tx, q: queries.New(tx), donors: map[string]pgtype.UUID{}, objects: map[string]string{}}
 }
+
 func (h *historyFixture) donor(name string) pgtype.UUID {
 	h.t.Helper()
 	if id, ok := h.donors[name]; ok {
@@ -57,6 +58,7 @@ func (h *historyFixture) donor(name string) pgtype.UUID {
 	h.donors[name] = id
 	return id
 }
+
 func (h *historyFixture) gift(g recognition.Gift) {
 	h.t.Helper()
 	ctx := context.Background()
@@ -64,7 +66,13 @@ func (h *historyFixture) gift(g recognition.Gift) {
 		h.t.Fatal("history fixture supports one-time gifts")
 	}
 	donor := h.donor(g.DonorID)
-	draft := queries.InsertCheckoutParams{ID: testID(h.t), DonorID: donor, AmountMinor: g.Amount, Frequency: g.Frequency, CreatedAt: timestamp(g.PaidAt)}
+	draft := queries.InsertCheckoutParams{
+		ID:          testID(h.t),
+		DonorID:     donor,
+		AmountMinor: g.Amount,
+		Frequency:   g.Frequency,
+		CreatedAt:   timestamp(g.PaidAt),
+	}
 	// Checkout never captures a donor's own referral touch, so the schema forbids it.
 	if c := g.Candidate; c != nil && c.ReferrerID != g.DonorID {
 		draft.ReferrerID = h.donor(c.ReferrerID)
@@ -84,6 +92,7 @@ func (h *historyFixture) gift(g recognition.Gift) {
 		h.t.Fatal(err)
 	}
 }
+
 func (h *historyFixture) refund(r recognition.Refund) {
 	h.t.Helper()
 	ctx := context.Background()
@@ -95,7 +104,16 @@ func (h *historyFixture) refund(r recognition.Refund) {
 	if _, err = h.tx.Exec(ctx, `INSERT INTO donor_stripe_events (id,stripe_event_id,event_type,occurred_at,data) VALUES ($1,$2,'refund.updated',$3,'{}')`, event, "evt_"+event.String(), r.UpdatedAt); err != nil {
 		h.t.Fatal(err)
 	}
-	current := paymentObject(h.t, map[string]any{"id": "re_" + event.String(), "payment_intent": gift.StripePaymentIntentID.String, "amount": r.Amount, "currency": "usd", "status": strings.ToLower(r.Status)})
+	current := paymentObject(
+		h.t,
+		map[string]any{
+			"id":             "re_" + event.String(),
+			"payment_intent": gift.StripePaymentIntentID.String,
+			"amount":         r.Amount,
+			"currency":       "usd",
+			"status":         strings.ToLower(r.Status),
+		},
+	)
 	if err = recordRefund(ctx, h.q, gift, current, event, pgtype.UUID{}, r.UpdatedAt); err != nil {
 		h.t.Fatal(err)
 	}
@@ -157,7 +175,12 @@ func TestSharedReferralScenariosAgainstSQLAggregate(t *testing.T) {
 				if referrals == nil {
 					t.Fatalf("%s: referral totals not ready: %+v", name, board)
 				}
-				got := referralTotals{Link: referrals.Link, IRL: referrals.IRL, LinkMinor: referrals.LinkMinor, IRLMinor: referrals.IRLMinor}
+				got := referralTotals{
+					Link:      referrals.Link,
+					IRL:       referrals.IRL,
+					LinkMinor: referrals.LinkMinor,
+					IRLMinor:  referrals.IRLMinor,
+				}
 				if got != want {
 					t.Fatalf("%s: got %+v want %+v", name, got, want)
 				}
@@ -200,7 +223,12 @@ func dashboardTotals(t *testing.T, tx pgx.Tx, id pgtype.UUID, now time.Time) ref
 	if board.Referrals == nil {
 		t.Fatalf("referral totals withheld for %s: %+v", id, board)
 	}
-	return referralTotals{Link: board.Referrals.Link, IRL: board.Referrals.IRL, LinkMinor: board.Referrals.LinkMinor, IRLMinor: board.Referrals.IRLMinor}
+	return referralTotals{
+		Link:      board.Referrals.Link,
+		IRL:       board.Referrals.IRL,
+		LinkMinor: board.Referrals.LinkMinor,
+		IRLMinor:  board.Referrals.IRLMinor,
+	}
 }
 
 // TestDenormalizedReferralTotalsEqualTheOldAggregate pins the denormalized read
@@ -231,9 +259,39 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 		}
 		defer tx.Rollback(ctx)
 		h := newHistoryFixture(t, tx)
-		h.gift(recognition.Gift{ID: "l1", DonorID: "link1", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-72 * time.Hour), Candidate: referred("alice", "LINK")})
-		h.gift(recognition.Gift{ID: "l2", DonorID: "link2", Amount: 5000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-71 * time.Hour), Candidate: referred("alice", "LINK")})
-		h.gift(recognition.Gift{ID: "i1", DonorID: "irl1", Amount: 9000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-70 * time.Hour), Candidate: referred("alice", "IRL")})
+		h.gift(
+			recognition.Gift{
+				ID:        "l1",
+				DonorID:   "link1",
+				Amount:    3000,
+				Currency:  "USD",
+				Frequency: "ONE_TIME",
+				PaidAt:    asOf.Add(-72 * time.Hour),
+				Candidate: referred("alice", "LINK"),
+			},
+		)
+		h.gift(
+			recognition.Gift{
+				ID:        "l2",
+				DonorID:   "link2",
+				Amount:    5000,
+				Currency:  "USD",
+				Frequency: "ONE_TIME",
+				PaidAt:    asOf.Add(-71 * time.Hour),
+				Candidate: referred("alice", "LINK"),
+			},
+		)
+		h.gift(
+			recognition.Gift{
+				ID:        "i1",
+				DonorID:   "irl1",
+				Amount:    9000,
+				Currency:  "USD",
+				Frequency: "ONE_TIME",
+				PaidAt:    asOf.Add(-70 * time.Hour),
+				Candidate: referred("alice", "IRL"),
+			},
+		)
 		actAs(t, tx, dbroles.ProjectionWorker)
 		for _, name := range []string{"alice", "link1", "link2", "irl1"} {
 			project(t, tx, h, name)
@@ -251,8 +309,28 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 		}
 		defer tx.Rollback(ctx)
 		h := newHistoryFixture(t, tx)
-		h.gift(recognition.Gift{ID: "l1", DonorID: "link1", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-72 * time.Hour), Candidate: referred("alice", "LINK")})
-		h.gift(recognition.Gift{ID: "i1", DonorID: "irl1", Amount: 9000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-70 * time.Hour), Candidate: referred("alice", "IRL")})
+		h.gift(
+			recognition.Gift{
+				ID:        "l1",
+				DonorID:   "link1",
+				Amount:    3000,
+				Currency:  "USD",
+				Frequency: "ONE_TIME",
+				PaidAt:    asOf.Add(-72 * time.Hour),
+				Candidate: referred("alice", "LINK"),
+			},
+		)
+		h.gift(
+			recognition.Gift{
+				ID:        "i1",
+				DonorID:   "irl1",
+				Amount:    9000,
+				Currency:  "USD",
+				Frequency: "ONE_TIME",
+				PaidAt:    asOf.Add(-70 * time.Hour),
+				Candidate: referred("alice", "IRL"),
+			},
+		)
 		actAs(t, tx, dbroles.ProjectionWorker)
 		// The referred donors are projected while alice has NO projection row,
 		// so each ApplyReferralDelta hits a 0-row UPDATE and is dropped. Only the
@@ -277,8 +355,28 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 		}
 		defer tx.Rollback(ctx)
 		h := newHistoryFixture(t, tx)
-		h.gift(recognition.Gift{ID: "l1", DonorID: "link1", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-72 * time.Hour), Candidate: referred("alice", "LINK")})
-		h.gift(recognition.Gift{ID: "l2", DonorID: "link2", Amount: 5000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-71 * time.Hour), Candidate: referred("alice", "LINK")})
+		h.gift(
+			recognition.Gift{
+				ID:        "l1",
+				DonorID:   "link1",
+				Amount:    3000,
+				Currency:  "USD",
+				Frequency: "ONE_TIME",
+				PaidAt:    asOf.Add(-72 * time.Hour),
+				Candidate: referred("alice", "LINK"),
+			},
+		)
+		h.gift(
+			recognition.Gift{
+				ID:        "l2",
+				DonorID:   "link2",
+				Amount:    5000,
+				Currency:  "USD",
+				Frequency: "ONE_TIME",
+				PaidAt:    asOf.Add(-71 * time.Hour),
+				Candidate: referred("alice", "LINK"),
+			},
+		)
 		actAs(t, tx, dbroles.ProjectionWorker)
 		for _, name := range []string{"alice", "link1", "link2"} {
 			project(t, tx, h, name)
@@ -331,9 +429,39 @@ func TestReferralTotalsConvergeAfterRulesBumpRecompute(t *testing.T) {
 	ref := func(kind string) *recognition.Candidate {
 		return &recognition.Candidate{ReferrerID: "alice", Kind: kind, ExpiresAt: window}
 	}
-	h.gift(recognition.Gift{ID: "l1", DonorID: "link1", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-72 * time.Hour), Candidate: ref("LINK")})
-	h.gift(recognition.Gift{ID: "l2", DonorID: "link2", Amount: 5000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-71 * time.Hour), Candidate: ref("LINK")})
-	h.gift(recognition.Gift{ID: "i1", DonorID: "irl1", Amount: 9000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: asOf.Add(-70 * time.Hour), Candidate: ref("IRL")})
+	h.gift(
+		recognition.Gift{
+			ID:        "l1",
+			DonorID:   "link1",
+			Amount:    3000,
+			Currency:  "USD",
+			Frequency: "ONE_TIME",
+			PaidAt:    asOf.Add(-72 * time.Hour),
+			Candidate: ref("LINK"),
+		},
+	)
+	h.gift(
+		recognition.Gift{
+			ID:        "l2",
+			DonorID:   "link2",
+			Amount:    5000,
+			Currency:  "USD",
+			Frequency: "ONE_TIME",
+			PaidAt:    asOf.Add(-71 * time.Hour),
+			Candidate: ref("LINK"),
+		},
+	)
+	h.gift(
+		recognition.Gift{
+			ID:        "i1",
+			DonorID:   "irl1",
+			Amount:    9000,
+			Currency:  "USD",
+			Frequency: "ONE_TIME",
+			PaidAt:    asOf.Add(-70 * time.Hour),
+			Candidate: ref("IRL"),
+		},
+	)
 	names := []string{"alice", "link1", "link2", "irl1"}
 	actAs(t, tx, dbroles.ProjectionWorker)
 	for _, name := range names {
@@ -346,7 +474,12 @@ func TestReferralTotalsConvergeAfterRulesBumpRecompute(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return referralTotals{Link: p.ReferredLinkCount, IRL: p.ReferredIrlCount, LinkMinor: p.ReferredLinkMinor, IRLMinor: p.ReferredIrlMinor}
+		return referralTotals{
+			Link:      p.ReferredLinkCount,
+			IRL:       p.ReferredIrlCount,
+			LinkMinor: p.ReferredLinkMinor,
+			IRLMinor:  p.ReferredIrlMinor,
+		}
 	}
 	first := stored()
 	if want := oldReferralAggregate(t, tx, h.donor("alice")); first != want {
@@ -382,7 +515,17 @@ func TestGiftStoresAttributionValidWhenCharged(t *testing.T) {
 	})
 	pay := func(checkout, payment string) {
 		f.charge(t, payment, time.Now())
-		f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+		f.receive(
+			t,
+			"payment_intent.succeeded",
+			map[string]any{
+				"id":              payment,
+				"metadata":        map[string]any{"dad_checkout_id": checkout},
+				"status":          "succeeded",
+				"currency":        "usd",
+				"amount_received": 3000,
+			},
+		)
 		f.process(t)
 	}
 	first := f.checkout(t)
@@ -394,7 +537,9 @@ FROM donor_gifts g JOIN donor_checkouts c ON c.id=g.checkout_id JOIN donor_refer
 WHERE g.stripe_object_id=$1`, "pi_first_"+f.donorID.String(), HashToken(visitor)).Scan(&touchReferrer, &touchKind, &checkoutReferrer, &checkoutKind, &giftReferrer, &giftKind); err != nil {
 		t.Fatal(err)
 	}
-	if giftReferrer != referrer || checkoutReferrer != referrer || touchReferrer != referrer || giftKind != "LINK" || checkoutKind != touchKind || giftKind != touchKind {
+	if giftReferrer != referrer || checkoutReferrer != referrer || touchReferrer != referrer || giftKind != "LINK" ||
+		checkoutKind != touchKind ||
+		giftKind != touchKind {
 		t.Fatal("payment record lost first-touch attribution")
 	}
 	// A charge after the attribution window keeps the checkout's snapshot but is not referred.
@@ -405,7 +550,8 @@ WHERE g.stripe_object_id=$1`, "pi_first_"+f.donorID.String(), HashToken(visitor)
 	}
 	pay(second.CheckoutID, "pi_second_"+f.donorID.String())
 	var attributed bool
-	if err := pool.QueryRow(ctx, "SELECT referrer_id IS NOT NULL OR referral_kind IS NOT NULL FROM donor_gifts WHERE stripe_object_id=$1", "pi_second_"+f.donorID.String()).Scan(&attributed); err != nil || attributed {
+	if err := pool.QueryRow(ctx, "SELECT referrer_id IS NOT NULL OR referral_kind IS NOT NULL FROM donor_gifts WHERE stripe_object_id=$1", "pi_second_"+f.donorID.String()).Scan(&attributed); err != nil ||
+		attributed {
 		t.Fatal("expired attribution written to payment", err)
 	}
 	p, err := queries.New(pool).Projection(ctx, f.donorID)
@@ -426,15 +572,38 @@ func TestEarlierPaymentCorrectsConversionAndPreservesFoundingAward(t *testing.T)
 	later := time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)
 	earlier := later.AddDate(0, -1, 0)
 	window := later.AddDate(0, 1, 0)
-	h.gift(recognition.Gift{ID: "later", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: later, Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: window}})
+	h.gift(
+		recognition.Gift{
+			ID:        "later",
+			DonorID:   "ben",
+			Amount:    3000,
+			Currency:  "USD",
+			Frequency: "ONE_TIME",
+			PaidAt:    later,
+			Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: window},
+		},
+	)
 	first, err := projectFacts(ctx, queries.New(tx), h.donor("ben"), later)
 	if err != nil || first.ReferrerID != h.donor("alice") || !first.FoundingAwardedAt.Time.Equal(later) {
 		t.Fatalf("first projection: %+v %v", first, err)
 	}
 	// Provider collection time, rather than processing order, determines credit.
-	h.gift(recognition.Gift{ID: "earlier", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: earlier, Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: window}})
+	h.gift(
+		recognition.Gift{
+			ID:        "earlier",
+			DonorID:   "ben",
+			Amount:    3000,
+			Currency:  "USD",
+			Frequency: "ONE_TIME",
+			PaidAt:    earlier,
+			Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: window},
+		},
+	)
 	second, err := projectFacts(ctx, queries.New(tx), h.donor("ben"), later.Add(time.Hour))
-	if err != nil || second.ReferrerID != h.donor("cara") || second.ReferralKind.String != "IRL" || second.FirstGiftID.String != h.objects["earlier"] || !second.FoundingAwardedAt.Time.Equal(first.FoundingAwardedAt.Time) || second.NetMinor.Int64 != 6000 {
+	if err != nil || second.ReferrerID != h.donor("cara") || second.ReferralKind.String != "IRL" ||
+		second.FirstGiftID.String != h.objects["earlier"] ||
+		!second.FoundingAwardedAt.Time.Equal(first.FoundingAwardedAt.Time) ||
+		second.NetMinor.Int64 != 6000 {
 		t.Fatalf("incorrect corrected relationship: %+v %v", second, err)
 	}
 }
@@ -516,7 +685,9 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 	}
 	q := queries.New(pool)
 	bad, err := q.Projection(ctx, poisoned)
-	if err != nil || bad.RefreshFailures != 1 || bad.RefreshError.String != "InvalidFacts" || !bad.NextRefreshAt.Time.Equal(now.Add(5*time.Minute)) || bad.NetMinor.Valid {
+	if err != nil || bad.RefreshFailures != 1 || bad.RefreshError.String != "InvalidFacts" ||
+		!bad.NextRefreshAt.Time.Equal(now.Add(5*time.Minute)) ||
+		bad.NetMinor.Valid {
 		t.Fatalf("poisoned projection: %+v %v", bad, err)
 	}
 	good, err := q.Projection(ctx, healthy)
@@ -535,7 +706,8 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 	if worked, err := RefreshNextProjection(ctx, worker, now.Add(5*time.Minute)); err != nil || !worked {
 		t.Fatal(worked, err)
 	}
-	if bad, err = q.Projection(ctx, poisoned); err != nil || bad.RefreshFailures != 2 || !bad.NextRefreshAt.Time.Equal(now.Add(15*time.Minute)) {
+	if bad, err = q.Projection(ctx, poisoned); err != nil || bad.RefreshFailures != 2 ||
+		!bad.NextRefreshAt.Time.Equal(now.Add(15*time.Minute)) {
 		t.Fatalf("backoff did not grow: %+v %v", bad, err)
 	}
 	if _, err = pool.Exec(ctx, "UPDATE donor_refunds SET amount_minor=1000 WHERE gift_id=$1", gift); err != nil {
@@ -544,7 +716,8 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 	if worked, err := RefreshNextProjection(ctx, worker, now.Add(15*time.Minute)); err != nil || !worked {
 		t.Fatal(worked, err)
 	}
-	if bad, err = q.Projection(ctx, poisoned); err != nil || bad.RefreshFailures != 0 || bad.RefreshError.Valid || bad.NetMinor.Int64 != 2000 {
+	if bad, err = q.Projection(ctx, poisoned); err != nil || bad.RefreshFailures != 0 || bad.RefreshError.Valid ||
+		bad.NetMinor.Int64 != 2000 {
 		t.Fatalf("corrected donor not recovered: %+v %v", bad, err)
 	}
 }
@@ -637,9 +810,32 @@ func TestRefreshDueProjectionsDefersPoisonedDonorInBatch(t *testing.T) {
 			testID(t), id, now, now.Add(time.Duration(i-2)*time.Hour))
 	}
 	// A succeeded refund larger than its gift cannot be projected.
-	mustExec(t, pool, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')", checkout, poisoned)
-	mustExec(t, pool, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)", gift, poisoned, checkout, "pi_"+gift.String(), now.Add(-48*time.Hour))
-	mustExec(t, pool, "INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,9000,'USD','SUCCEEDED',$4)", testID(t), gift, "re_"+gift.String(), now.Add(-24*time.Hour))
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')",
+		checkout,
+		poisoned,
+	)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)",
+		gift,
+		poisoned,
+		checkout,
+		"pi_"+gift.String(),
+		now.Add(-48*time.Hour),
+	)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,9000,'USD','SUCCEEDED',$4)",
+		testID(t),
+		gift,
+		"re_"+gift.String(),
+		now.Add(-24*time.Hour),
+	)
 
 	// One poisoned donor in the batch is deferred; the healthy one still refreshes.
 	processed, err := RefreshDueProjections(ctx, worker, now, 16)
@@ -648,7 +844,9 @@ func TestRefreshDueProjectionsDefersPoisonedDonorInBatch(t *testing.T) {
 	}
 	q := queries.New(pool)
 	bad, err := q.Projection(ctx, poisoned)
-	if err != nil || bad.RefreshFailures != 1 || bad.RefreshError.String != "InvalidFacts" || !bad.NextRefreshAt.Time.Equal(now.Add(5*time.Minute)) || bad.NetMinor.Valid {
+	if err != nil || bad.RefreshFailures != 1 || bad.RefreshError.String != "InvalidFacts" ||
+		!bad.NextRefreshAt.Time.Equal(now.Add(5*time.Minute)) ||
+		bad.NetMinor.Valid {
 		t.Fatalf("poisoned donor not deferred (unknown, not zero): %+v %v", bad, err)
 	}
 	good, err := q.Projection(ctx, healthy)
@@ -670,7 +868,8 @@ func TestProjectionWaitsForItsNextBoundaryAndSummarizesAtNewYear(t *testing.T) {
 	h.gift(recognition.Gift{ID: "june", DonorID: "ana", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid})
 	donor := h.donor("ana")
 	summer := paid.Add(time.Hour)
-	if p, err := projectFacts(ctx, h.q, donor, summer); err != nil || !p.NextRefreshAt.Time.Equal(summer.Add(refreshCap(donor))) || p.RulesVersion != projectionRules {
+	if p, err := projectFacts(ctx, h.q, donor, summer); err != nil || !p.NextRefreshAt.Time.Equal(summer.Add(refreshCap(donor))) ||
+		p.RulesVersion != projectionRules {
 		t.Fatalf("a projection with no boundary ahead waits the full interval: %+v %v", p, err)
 	}
 	newYear := time.Date(2028, 1, 1, 0, 0, 0, 0, recognition.NewYork)
@@ -709,8 +908,16 @@ func TestProjectionsFromEarlierRulesAreRecomputed(t *testing.T) {
 	})
 	for id, computed := range map[pgtype.UUID]time.Time{outdated: now.Add(-24 * time.Hour), recent: now.Add(time.Hour)} {
 		mustExec(t, pool, "INSERT INTO donors(id,email,created_at) VALUES($1,$2,$3)", id, id.String()+"@example.org", now)
-		mustExec(t, pool, "INSERT INTO donor_metric_projections(id,donor_id,computed_at,next_refresh_at,rules_version) VALUES($1,$2,$3,$4,$5)",
-			testID(t), id, computed, now.AddDate(0, 6, 0), projectionRules-1)
+		mustExec(
+			t,
+			pool,
+			"INSERT INTO donor_metric_projections(id,donor_id,computed_at,next_refresh_at,rules_version) VALUES($1,$2,$3,$4,$5)",
+			testID(t),
+			id,
+			computed,
+			now.AddDate(0, 6, 0),
+			projectionRules-1,
+		)
 	}
 	if worked, err := RefreshNextProjection(ctx, worker, now); err != nil || !worked {
 		t.Fatal("projection from earlier rules not recomputed", worked, err)

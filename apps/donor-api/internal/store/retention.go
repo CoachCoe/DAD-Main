@@ -49,7 +49,13 @@ func (r *TouchRetention) PurgeNext(ctx context.Context, now time.Time) (bool, er
 
 // purgeTouches deletes up to batch touches past retention that follow after,
 // in capture order, and returns their keys in that order.
-func purgeTouches(ctx context.Context, db *pgxpool.Pool, now time.Time, after queries.PurgeReferralTouchesRow, batch int32) ([]queries.PurgeReferralTouchesRow, error) {
+func purgeTouches(
+	ctx context.Context,
+	db *pgxpool.Pool,
+	now time.Time,
+	after queries.PurgeReferralTouchesRow,
+	batch int32,
+) ([]queries.PurgeReferralTouchesRow, error) {
 	return queries.New(db).PurgeReferralTouches(ctx, queries.PurgeReferralTouchesParams{
 		AfterTouchedAt: pgtype.Timestamptz{Time: after.TouchedAt.Time, Valid: true},
 		AfterID:        pgtype.UUID{Bytes: after.ID.Bytes, Valid: true},

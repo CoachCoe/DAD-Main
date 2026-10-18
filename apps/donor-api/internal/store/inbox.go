@@ -20,5 +20,6 @@ func (inbox StripeInbox) SaveVerifiedEvent(ctx context.Context, event payments.V
 	}
 	// This single autocommit statement finishes before HTTP acknowledgement. A
 	// duplicate delivery keeps the original verified facts and processing state.
-	return queries.New(inbox.DB).InsertStripeEvent(ctx, queries.InsertStripeEventParams{ID: id, StripeEventID: event.ID(), EventType: event.Kind(), OccurredAt: timestamp(event.OccurredAt()), Data: event.Data()})
+	return queries.New(inbox.DB).
+		InsertStripeEvent(ctx, queries.InsertStripeEventParams{ID: id, StripeEventID: event.ID(), EventType: event.Kind(), OccurredAt: timestamp(event.OccurredAt()), Data: event.Data()})
 }

@@ -19,7 +19,13 @@ func obj(t *testing.T, raw string) payments.Object {
 	}
 	defaults := map[string]json.RawMessage{"livemode": json.RawMessage(`false`), "currency": json.RawMessage(`"usd"`)}
 	if strings.HasPrefix(o.Text("id"), "ch_") {
-		defaults["status"], defaults["paid"], defaults["captured"] = json.RawMessage(`"succeeded"`), json.RawMessage(`true`), json.RawMessage(`true`)
+		defaults["status"], defaults["paid"], defaults["captured"] = json.RawMessage(
+			`"succeeded"`,
+		), json.RawMessage(
+			`true`,
+		), json.RawMessage(
+			`true`,
+		)
 		defaults["amount_captured"] = o["amount"]
 	}
 	for key, value := range defaults {
@@ -172,7 +178,13 @@ func TestReportIsIDsOnly(t *testing.T) {
 			t.Errorf("report leaks %q: %s", forbidden, data)
 		}
 	}
-	malformed := Diff(w, nil, nil, []Gift{{StripeObjectID: "private@example.org", AmountMinor: 1, Currency: "USD"}}, []Refund{{StripeRefundID: "private@example.org", AmountMinor: 1, Currency: "USD", Status: "SUCCEEDED"}})
+	malformed := Diff(
+		w,
+		nil,
+		nil,
+		[]Gift{{StripeObjectID: "private@example.org", AmountMinor: 1, Currency: "USD"}},
+		[]Refund{{StripeRefundID: "private@example.org", AmountMinor: 1, Currency: "USD", Status: "SUCCEEDED"}},
+	)
 	data, err = json.Marshal(malformed)
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +199,13 @@ func TestClosedWindowDoesNotHideItsFinalHalfHour(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	charge := obj(t, `{"id":"ch_boundary","payment_intent":"pi_boundary","amount":3000,"amount_captured":3000,"currency":"usd","status":"succeeded","paid":true,"captured":true,"livemode":false,"created":`+strconv.FormatInt(w.End.Add(-time.Minute).Unix(), 10)+`}`)
+	charge := obj(
+		t,
+		`{"id":"ch_boundary","payment_intent":"pi_boundary","amount":3000,"amount_captured":3000,"currency":"usd","status":"succeeded","paid":true,"captured":true,"livemode":false,"created":`+strconv.FormatInt(
+			w.End.Add(-time.Minute).Unix(),
+			10,
+		)+`}`,
+	)
 	if got := Diff(w, []payments.Object{charge}, nil, nil, nil); got.MissingGifts != 1 {
 		t.Fatal("closed window hid a missing boundary gift", got)
 	}
@@ -195,7 +213,10 @@ func TestClosedWindowDoesNotHideItsFinalHalfHour(t *testing.T) {
 
 func TestUncollectedChargeDoesNotRequireAGift(t *testing.T) {
 	w, _ := RangeWindow(time.Unix(1000, 0), time.Unix(2000, 0), 0)
-	charge := obj(t, `{"id":"ch_failed","amount":3000,"amount_captured":0,"currency":"usd","status":"failed","paid":false,"captured":false,"livemode":false,"created":1500}`)
+	charge := obj(
+		t,
+		`{"id":"ch_failed","amount":3000,"amount_captured":0,"currency":"usd","status":"failed","paid":false,"captured":false,"livemode":false,"created":1500}`,
+	)
 	if got := Diff(w, []payments.Object{charge}, nil, nil, nil); got.HasDiscrepancies() {
 		t.Fatal("failed charge reported as a missing gift", got)
 	}
@@ -245,7 +266,10 @@ func TestWindowWaitsForSettlementAndKeepsFractionalBounds(t *testing.T) {
 func TestFailedAttemptBeforeSuccessfulChargeDoesNotInvalidateGift(t *testing.T) {
 	w, _ := RangeWindow(time.Unix(1000, 0), time.Unix(2000, 0), 0)
 	charges := []payments.Object{
-		obj(t, `{"id":"ch_failed","payment_intent":"pi_1","amount":3000,"amount_captured":0,"status":"failed","paid":false,"captured":false,"created":1400}`),
+		obj(
+			t,
+			`{"id":"ch_failed","payment_intent":"pi_1","amount":3000,"amount_captured":0,"status":"failed","paid":false,"captured":false,"created":1400}`,
+		),
 		obj(t, `{"id":"ch_paid","payment_intent":"pi_1","amount":3000,"created":1500}`),
 	}
 	got := Diff(w, charges, nil, []Gift{{StripeObjectID: "pi_1", StripePaymentIntentID: "pi_1", AmountMinor: 3000, Currency: "USD"}}, nil)

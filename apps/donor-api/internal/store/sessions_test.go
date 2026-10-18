@@ -62,8 +62,15 @@ func TestAppSignInIssuesSeparateAccessAndRefreshTokens(t *testing.T) {
 	accountCleanup(t, pool, id)
 	tokens := claimSession(t, pool, id, Client{App: true, Device: " Alex’s\u202e  phone\a ", Platform: "IOS"})
 	family, secret, ok := strings.Cut(tokens.Refresh, ".")
-	if len(tokens.Access) != 43 || !ok || len(family) != 43 || len(secret) != 43 || tokens.AccessTTL != accessLifetime || tokens.RefreshTTL != refreshIdle {
-		t.Fatalf("app tokens are not a 256-bit access token and family-bound refresh token with their lifetimes: %d %q %v %v", len(tokens.Access), tokens.Refresh, tokens.AccessTTL, tokens.RefreshTTL)
+	if len(tokens.Access) != 43 || !ok || len(family) != 43 || len(secret) != 43 || tokens.AccessTTL != accessLifetime ||
+		tokens.RefreshTTL != refreshIdle {
+		t.Fatalf(
+			"app tokens are not a 256-bit access token and family-bound refresh token with their lifetimes: %d %q %v %v",
+			len(tokens.Access),
+			tokens.Refresh,
+			tokens.AccessTTL,
+			tokens.RefreshTTL,
+		)
 	}
 	if !signedInAs(t, pool, tokens.Access) || signedInAs(t, pool, tokens.Refresh) {
 		t.Fatal("only the access token may authenticate requests")
@@ -80,7 +87,8 @@ func TestAppSignInIssuesSeparateAccessAndRefreshTokens(t *testing.T) {
 		t.Fatalf("stored %s %q %s, want the app's sanitized description", client, device, platform)
 	}
 	secrets := []string{tokens.Access, family, tokens.Refresh}
-	if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM donor_sessions WHERE token_hash=ANY($1) OR refresh_family_hash=ANY($1) OR refresh_hash=ANY($1)", secrets).Scan(&stored); err != nil || stored != 0 {
+	if err := pool.QueryRow(context.Background(), "SELECT count(*) FROM donor_sessions WHERE token_hash=ANY($1) OR refresh_family_hash=ANY($1) OR refresh_hash=ANY($1)", secrets).Scan(&stored); err != nil ||
+		stored != 0 {
 		t.Fatalf("a token is stored unhashed: %d %v", stored, err)
 	}
 	if sessionEvents(t, pool, id, "SIGNED_IN") != 1 {
@@ -134,7 +142,8 @@ func TestReusedRefreshTokenRevokesTheWholeSession(t *testing.T) {
 		t.Fatal("reuse must revoke only its own session, recorded once")
 	}
 	forged := strings.SplitN(latest.Refresh, ".", 2)[0] + "." + strings.Repeat("x", 43)
-	if _, err := (AccountService{DB: api}).Refresh(ctx, forged); !errors.Is(err, ErrDenied) || sessionEvents(t, pool, id, "REFRESH_REUSED") != 1 {
+	if _, err := (AccountService{DB: api}).Refresh(ctx, forged); !errors.Is(err, ErrDenied) ||
+		sessionEvents(t, pool, id, "REFRESH_REUSED") != 1 {
 		t.Fatalf("a revoked session answered or recorded again: %v", err)
 	}
 }
@@ -204,7 +213,8 @@ func TestConcurrentRefreshesLetTheLaterAnswerWin(t *testing.T) {
 	if len(winners) != 1 || len(losers) != 1 {
 		t.Fatalf("got %d working and %d superseded answers, want one of each", len(winners), len(losers))
 	}
-	if _, err := (AccountService{DB: api}).Refresh(context.Background(), losers[0].Refresh); !errors.Is(err, ErrDenied) || signedInAs(t, pool, winners[0].Access) {
+	if _, err := (AccountService{DB: api}).Refresh(context.Background(), losers[0].Refresh); !errors.Is(err, ErrDenied) ||
+		signedInAs(t, pool, winners[0].Access) {
 		t.Fatalf("the superseded answer must count as reuse: %v", err)
 	}
 }
@@ -278,7 +288,10 @@ func TestDonorListsAndSignsOutSessions(t *testing.T) {
 		labels = append(labels, session.Client+" "+session.Label)
 	}
 	if len(list.Sessions) != 3 || !list.Sessions[0].Current || list.Sessions[1].Current || list.Sessions[2].Current ||
-		!strings.Contains(strings.Join(labels, ","), "APP Test phone") || !strings.Contains(strings.Join(labels, ","), "APP iOS device") || labels[0] != "BROWSER Web browser" {
+		!strings.Contains(
+			strings.Join(labels, ","),
+			"APP Test phone",
+		) || !strings.Contains(strings.Join(labels, ","), "APP iOS device") || labels[0] != "BROWSER Web browser" {
 		t.Fatalf("listed %v, want this browser first and both apps", labels)
 	}
 	phoneID := list.Sessions[1].ID
@@ -295,7 +308,8 @@ func TestDonorListsAndSignsOutSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = service.SignOutSession(ctx, browser.Access, theirs.Sessions[0].ID); !errors.Is(err, pgx.ErrNoRows) || !signedInAs(t, pool, strangerSession.Access) {
+	if _, err = service.SignOutSession(ctx, browser.Access, theirs.Sessions[0].ID); !errors.Is(err, pgx.ErrNoRows) ||
+		!signedInAs(t, pool, strangerSession.Access) {
 		t.Fatalf("signed out another donor's session: %v", err)
 	}
 
@@ -320,7 +334,8 @@ func TestDonorListsAndSignsOutSessions(t *testing.T) {
 	if signedInAs(t, pool, browser.Access) || !signedInAs(t, pool, tablet.Access) || sessionEvents(t, pool, id, "SIGNED_OUT_OTHERS") != 1 {
 		t.Fatal("sign out others must end every other session at once")
 	}
-	if err = service.SignOutEverywhere(ctx, tablet.Access); err != nil || signedInAs(t, pool, tablet.Access) || sessionEvents(t, pool, id, "SIGNED_OUT_EVERYWHERE") != 1 {
+	if err = service.SignOutEverywhere(ctx, tablet.Access); err != nil || signedInAs(t, pool, tablet.Access) ||
+		sessionEvents(t, pool, id, "SIGNED_OUT_EVERYWHERE") != 1 {
 		t.Fatalf("sign out everywhere: %v", err)
 	}
 }

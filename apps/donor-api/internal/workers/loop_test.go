@@ -22,6 +22,7 @@ func TestOnceAndError(t *testing.T) {
 		}
 	}
 }
+
 func TestEachStepGetsTheBudgetItWasGiven(t *testing.T) {
 	for _, budget := range []time.Duration{StepBudget, ProcessorStepBudget} {
 		started := time.Now()
@@ -37,6 +38,7 @@ func TestEachStepGetsTheBudgetItWasGiven(t *testing.T) {
 		}
 	}
 }
+
 func TestCancellationInterruptsIdle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

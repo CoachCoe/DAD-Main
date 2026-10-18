@@ -23,6 +23,7 @@ func accountCleanup(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID) {
 		}
 	})
 }
+
 func claimProof(t *testing.T, proof string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -40,6 +41,7 @@ func claimProof(t *testing.T, proof string) string {
 	}
 	return tokens.Access
 }
+
 func TestClaimRefreshesAndReplacesOnlyThisBrowser(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
@@ -72,6 +74,7 @@ func TestClaimRefreshesAndReplacesOnlyThisBrowser(t *testing.T) {
 		t.Fatal("proof reused")
 	}
 }
+
 func TestClaimProjectionFailureRollsBackProofAndSession(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
@@ -106,10 +109,12 @@ func TestClaimProjectionFailureRollsBackProofAndSession(t *testing.T) {
 	if _, err := service.ClaimAccount(ctx, proof, "", Client{}); err != nil {
 		t.Fatalf("rolled-back proof unusable: %v", err)
 	}
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 AND kind='RECEIPT'", id).Scan(&count); err != nil || count != 1 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 AND kind='RECEIPT'", id).Scan(&count); err != nil ||
+		count != 1 {
 		t.Fatal("gift receipt not queued with claim")
 	}
 }
+
 func TestLoginQueueDeduplicatesConcurrentRequests(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
