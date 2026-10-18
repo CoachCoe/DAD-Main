@@ -1,45 +1,45 @@
 // Generated from DAD-Main design/tokens.json; do not edit.
 export const tokens = {
-  color: {
-    paper: "#f8f9fa",
-    card: "#fff",
+  "color": {
+    "paper": "#f8f9fa",
+    "card": "#fff",
     "card-quiet": "#fcfdfd",
-    field: "#f9fafa",
-    line: "#e3e6e8",
-    ink: "#0e1e1e",
+    "field": "#f9fafa",
+    "line": "#e3e6e8",
+    "ink": "#0e1e1e",
     "ink-deep": "#0a1616",
     "ink-soft": "#4a5757",
-    muted: "#5a6666",
-    brand: "#ff4a22",
+    "muted": "#5a6666",
+    "brand": "#ff4a22",
     "brand-ink": "#c8340f",
     "brand-wash": "#ffece7",
     "brand-rule": "rgba(255,74,34,.34)",
-    ok: "#007a7a",
+    "ok": "#007a7a",
     "ok-ink": "#0a5f5f",
     "ok-wash": "#d6eded",
-    warn: "#995b0a",
+    "warn": "#995b0a",
     "warn-wash": "#fff2d7",
-    fail: "#9d3434",
+    "fail": "#9d3434",
     "fail-ink": "#7a3030",
     "fail-wash": "#fae4e4",
     "fail-field": "#fdf3f3",
     "fail-line": "#e7b9b9",
-    dkmut: "#b9c6c6",
-    dkline: "rgba(248,249,250,.12)",
-    dkgrid: "rgba(248,249,250,.035)",
+    "dkmut": "#b9c6c6",
+    "dkline": "rgba(248,249,250,.12)",
+    "dkgrid": "rgba(248,249,250,.035)",
     "dk-scrim": "rgba(10,22,22,.55)",
     "glow-brand": "rgba(255,74,34,.16)",
     "glow-ok": "rgba(0,122,122,.22)",
     "ghost-line": "rgba(14,30,30,.55)",
     "ghost-line-dark": "rgba(248,249,250,.42)",
-    shadow: "rgba(14,30,30,.05)",
+    "shadow": "rgba(14,30,30,.05)"
   },
-  radius: {
-    field: 10,
-    card: 18,
-    pill: 100,
+  "radius": {
+    "field": 10,
+    "card": 18,
+    "pill": 100
   },
-  space: {
+  "space": {
     "1": 4,
     "2": 8,
     "3": 12,
@@ -47,15 +47,15 @@ export const tokens = {
     "5": 24,
     "6": 32,
     "7": 48,
-    "8": 64,
+    "8": 64
   },
-  text: {
-    xs: 12,
-    sm: 14,
-    md: 16,
-    lg: 18,
-    xl: 22,
+  "text": {
+    "xs": 12,
+    "sm": 14,
+    "md": 16,
+    "lg": 18,
+    "xl": 22,
     "2xl": 28,
-    "3xl": 36,
-  },
+    "3xl": 36
+  }
 } as const;
