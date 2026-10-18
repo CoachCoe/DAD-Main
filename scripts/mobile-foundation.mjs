@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -13,9 +13,11 @@ export function nativeContract(source) {
   for (const [path, item] of Object.entries(source.paths)) {
     const operations = {};
     for (const [method, operation] of Object.entries(item)) {
-      if (!['get', 'post', 'put', 'patch', 'delete'].includes(method)) continue;
-      if (operation["x-clients"]?.includes("native") ||
-          (method === "get" && (path.startsWith("/donor/me/") || path === "/health/live"))) {
+      if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
+      if (
+        operation["x-clients"]?.includes("native") ||
+        (method === "get" && (path.startsWith("/donor/me/") || path === "/health/live"))
+      ) {
         operations[method] = structuredClone(operation);
       }
     }
@@ -61,7 +63,9 @@ const validToken = (group, value) =>
 // Each platform declares one map per token group, string-valued for colors and numeric otherwise.
 function tokenMaps(tokens, declare, entry, close) {
   const groups = Object.entries(tokens).map(([group, values]) =>
-    [declare(group, group === "color"), ...Object.entries(values).map(([key, value]) => entry(key, value)), close].join("\n"),
+    [declare(group, group === "color"), ...Object.entries(values).map(([key, value]) => entry(key, value)), close].join(
+      "\n",
+    ),
   );
   return groups.join("\n");
 }
@@ -80,7 +84,8 @@ const kotlinTokens = (tokens) =>
   `${header}package org.dad.foundation.generated\n\nobject DADTokens {\n${tokenMaps(
     tokens,
     (group, color) => `    val ${group}: Map<String, ${color ? "String" : "Double"}> = mapOf(`,
-    (key, value) => `        ${JSON.stringify(key)} to ${typeof value === "string" ? JSON.stringify(value) : kotlinNumber(value)},`,
+    (key, value) =>
+      `        ${JSON.stringify(key)} to ${typeof value === "string" ? JSON.stringify(value) : kotlinNumber(value)},`,
     "    )",
   )}\n}\n`;
 
@@ -104,7 +109,8 @@ export async function generateWeb(check = false) {
   const tokens = tokenSources(JSON.parse(await readFile(resolve(root, "design/tokens.json"), "utf8")));
   const target = resolve(root, "apps/web/design/tokens.ts");
   if (check) {
-    if (await readFile(target, "utf8") !== tokens["tokens.ts"]) throw new Error("Web design tokens differ; run make generate-mobile");
+    if ((await readFile(target, "utf8")) !== tokens["tokens.ts"])
+      throw new Error("Web design tokens differ; run make generate-mobile");
   } else await writeFile(target, tokens["tokens.ts"]);
 }
 
@@ -122,9 +128,15 @@ export async function bundle(output) {
     ...tokenSources(JSON.parse(tokens)),
   };
   const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
-  const manifest = { version, source_repository: "CoachCoe/DAD-Main", source_revision: revision, files: Object.fromEntries(Object.entries(files).map(([name, contents]) => [name, digest(contents)])) };
+  const manifest = {
+    version,
+    source_repository: "CoachCoe/DAD-Main",
+    source_revision: revision,
+    files: Object.fromEntries(Object.entries(files).map(([name, contents]) => [name, digest(contents)])),
+  };
   await mkdir(output, { recursive: true });
-  for (const [name, contents] of Object.entries({ ...files, "manifest.json": json(manifest) })) await writeFile(resolve(output, name), contents);
+  for (const [name, contents] of Object.entries({ ...files, "manifest.json": json(manifest) }))
+    await writeFile(resolve(output, name), contents);
   return manifest;
 }
 
@@ -135,5 +147,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     else if (command === "check") await generateWeb(true);
     else if (command === "bundle" && output) console.log(json(await bundle(resolve(output))));
     else throw new Error("Usage: node scripts/mobile-foundation.mjs {generate|check|bundle OUTPUT}");
-  } catch (error) { console.error(error.message); process.exitCode = 1; }
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
 }
