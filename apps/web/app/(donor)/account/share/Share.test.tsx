@@ -1,14 +1,24 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import SharePage from "./Share";
 import CodePage from "../code/Code";
+import SharePage from "./Share";
 
-const sharing = { public_name: "Sam", link: "https://dad.example/r/code", irl_link: "https://dad.example/r/code?via=irl" };
-afterEach(() => { vi.unstubAllGlobals(); });
-function response(data: unknown) { return { ok: true, json: async () => data }; }
+const sharing = {
+  public_name: "Sam",
+  link: "https://dad.example/r/code",
+  irl_link: "https://dad.example/r/code?via=irl",
+};
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+function response(data: unknown) {
+  return { ok: true, json: async () => data };
+}
 
 it("requires a chosen public nickname and keeps QR off the share page", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response({ public_name: null, link: null, irl_link: null }))
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response({ public_name: null, link: null, irl_link: null }))
     .mockResolvedValueOnce(response(sharing));
   vi.stubGlobal("fetch", fetch);
   render(<SharePage />);
@@ -26,8 +36,9 @@ it("opens native sharing with the Link URL and accurate billing disclosure", asy
   vi.stubGlobal("navigator", { share, onLine: true });
   render(<SharePage />);
   fireEvent.click(await screen.findByRole("button", { name: "Share invitation" }));
-  expect(share).toHaveBeenCalledWith(expect.objectContaining({ url: sharing.link,
-    text: expect.stringContaining("$30/month") }));
+  expect(share).toHaveBeenCalledWith(
+    expect.objectContaining({ url: sharing.link, text: expect.stringContaining("$30/month") }),
+  );
 });
 
 it("requires a focused confirmation step before replacing the link, and restores focus on return", async () => {
@@ -77,8 +88,14 @@ it("keeps the screen awake while the code is shown and releases it on leaving", 
 });
 
 it("sends a signed-out visitor to sign-in instead of showing a code", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }),
+  );
   render(<CodePage />);
-  expect(await screen.findByRole("link", { name: "Sign in to show your code" })).toHaveAttribute("href", "/account/sign-in");
+  expect(await screen.findByRole("link", { name: "Sign in to show your code" })).toHaveAttribute(
+    "href",
+    "/account/sign-in",
+  );
   expect(within(document.body).queryByRole("img")).not.toBeInTheDocument();
 });

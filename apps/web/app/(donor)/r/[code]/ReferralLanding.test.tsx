@@ -2,8 +2,13 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest";
 import ReferralLanding from "./ReferralLanding";
 
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
-function response(data: unknown, status = 200) { return { ok: status < 400, status, json: async () => data }; }
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
+function response(data: unknown, status = 200) {
+  return { ok: status < 400, status, json: async () => data };
+}
 
 it("captures the IRL marker from the browser, names the code's owner, and offers giving at once", async () => {
   const fetch = vi.fn().mockResolvedValue(response({ captured: true, public_name: "Sam" }));
@@ -17,7 +22,10 @@ it("captures the IRL marker from the browser, names the code's owner, and offers
 });
 
 it("holds a tap made before the referral is saved, rather than losing the attribution", async () => {
-  vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise(() => {})),
+  );
   render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
   const link = screen.getByRole("link", { name: "Continue to giving" });
   expect(fireEvent.click(link)).toBe(false);
@@ -27,8 +35,19 @@ it("holds a tap made before the referral is saved, rather than losing the attrib
 
 it("never names an earlier first-touch referrer returned by the capture", async () => {
   let captured = () => {};
-  const applied = new Promise<void>((resolve) => { captured = resolve; });
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => { captured(); return { captured: true, public_name: "Earlier Referrer" }; } }));
+  const applied = new Promise<void>((resolve) => {
+    captured = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => {
+        captured();
+        return { captured: true, public_name: "Earlier Referrer" };
+      },
+    }),
+  );
   render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
   await applied;
   await act(async () => {});
@@ -67,7 +86,9 @@ it("keeps an offline failure distinct from successful capture", async () => {
 });
 
 it("explains rate limiting separately from being offline, and retries", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response({ detail: "Too many requests" }, 429))
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response({ detail: "Too many requests" }, 429))
     .mockResolvedValueOnce(response({ captured: true, public_name: "Sam" }));
   vi.stubGlobal("fetch", fetch);
   render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);

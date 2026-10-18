@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { addPasskeyDevice, administratorInvitation, staffURL } from "./staff";
 
 async function expectAccessible(page: Page) {
@@ -45,12 +45,16 @@ test("an invited administrator creates a passkey, then signs out and back in wit
   await page.goto("/");
   const exportURL = staffURL("/api/donor/staff/exports/gifts.csv");
   const crossHost = page.waitForResponse(exportURL);
-  await page.evaluate((url) => { window.location.href = url; }, exportURL);
+  await page.evaluate((url) => {
+    window.location.href = url;
+  }, exportURL);
   expect((await crossHost).status()).toBe(403);
   await page.waitForURL(exportURL);
 
   await page.goto(invitation);
-  await expect(page.getByRole("main").getByRole("alert")).toContainText("This invitation has already been used or has expired.");
+  await expect(page.getByRole("main").getByRole("alert")).toContainText(
+    "This invitation has already been used or has expired.",
+  );
   await page.getByRole("link", { name: "Staff sign-in" }).click();
   await expect(page).toHaveURL(staffURL("/staff/sign-in"));
   await page.goto(staffURL("/staff/activate"));

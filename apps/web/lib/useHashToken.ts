@@ -22,11 +22,13 @@ export function useHashToken(keep?: string) {
       else if (keep) token = sessionStorage.getItem(keep);
     } catch {}
     // StrictMode replays this effect after the hash is gone; keep what the first run found.
-    setLink((current) => current.token ? current : { token: token ?? "", next: params.get("next") ?? undefined });
+    setLink((current) => (current.token ? current : { token: token ?? "", next: params.get("next") ?? undefined }));
   }, [keep]);
   const clear = useCallback(() => {
     setLink({ token: "" });
-    try { if (keep) sessionStorage.removeItem(keep); } catch {}
+    try {
+      if (keep) sessionStorage.removeItem(keep);
+    } catch {}
   }, [keep]);
   return { token: link.token, next: link.next, clear };
 }

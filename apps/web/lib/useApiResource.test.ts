@@ -7,7 +7,10 @@ afterEach(() => vi.unstubAllGlobals());
 const reply = (status: number, body: unknown = {}) => ({ ok: status < 400, status, json: async () => body });
 
 it("loads data, reports it once to onLoad, and reloads on request", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(reply(200, { n: 1 })).mockResolvedValueOnce(reply(200, { n: 2 }));
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(reply(200, { n: 1 }))
+    .mockResolvedValueOnce(reply(200, { n: 2 }));
   vi.stubGlobal("fetch", fetch);
   const onLoad = vi.fn();
   const { result } = renderHook(() => useApiResource<{ n: number }>("/donor/me/thing", { onLoad }));
@@ -67,5 +70,7 @@ it("gives each non-ready state its own copy", () => {
   expect(resourceMessages({ state: "signedOut" }, copy)).toEqual({ status: "", alert: "" });
   expect(resourceMessages({ state: "unconfigured" }, copy).alert).toMatch(/isn’t available in this environment/);
   expect(resourceMessages({ state: "notFound" }, copy).alert).toBe("Could not load.");
-  expect(resourceMessages({ state: "notFound" }, { ...copy, notFound: "No such record." }).alert).toBe("No such record.");
+  expect(resourceMessages({ state: "notFound" }, { ...copy, notFound: "No such record." }).alert).toBe(
+    "No such record.",
+  );
 });

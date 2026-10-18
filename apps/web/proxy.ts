@@ -13,7 +13,11 @@ const staffSurfaceSpelled = new RegExp(staffSurface.source, "i");
 const framework = /^\/(?:_next|__nextjs)/;
 
 const decoded = (pathname: string) => {
-  try { return decodeURIComponent(pathname); } catch { return null; }
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
 };
 
 /**
@@ -33,22 +37,30 @@ export function proxy(request: NextRequest) {
   if (pathname === null) return NextResponse.json({ detail: "Not found" }, { status: 404 });
   if (onStaffHost && pathname === "/") return NextResponse.redirect(`${staffOrigin}/staff`);
   if (onStaffHost && pathname === "/robots.txt") {
-    return new NextResponse("User-agent: *\nDisallow: /\n", { headers: { "Content-Type": "text/plain", "X-Robots-Tag": "noindex, nofollow" } });
+    return new NextResponse("User-agent: *\nDisallow: /\n", {
+      headers: { "Content-Type": "text/plain", "X-Robots-Tag": "noindex, nofollow" },
+    });
   }
-  const served = onStaffHost ? staffSurface.test(pathname) || framework.test(pathname) || pathname === "/icon.svg" : !staffSurfaceSpelled.test(pathname);
+  const served = onStaffHost
+    ? staffSurface.test(pathname) || framework.test(pathname) || pathname === "/icon.svg"
+    : !staffSurfaceSpelled.test(pathname);
   // Staff pages render per request, so Next already marks them uncacheable.
   const staffHeaders = (response: NextResponse) => {
     if (onStaffHost) response.headers.set("X-Robots-Tag", "noindex, nofollow");
     return response;
   };
-  if (!served && pathname.startsWith("/api/")) return staffHeaders(NextResponse.json({ detail: "Not found" }, { status: 404 }));
+  if (!served && pathname.startsWith("/api/"))
+    return staffHeaders(NextResponse.json({ detail: "Not found" }, { status: 404 }));
   const headers = new Headers(request.headers);
   headers.delete(UNSERVED_HEADER);
   if (!served) headers.set(UNSERVED_HEADER, onStaffHost ? "staff" : "public");
   // next.config.ts gives every other path the static policy.
   if (!signedInSurface.test(pathname)) return staffHeaders(NextResponse.next({ request: { headers } }));
   // The public not-found page is prerendered, so it has no nonce to carry.
-  const policy = served || onStaffHost ? contentSecurityPolicy(btoa(crypto.randomUUID()), onStaffHost ? staffOrigin : undefined) : contentSecurityPolicy();
+  const policy =
+    served || onStaffHost
+      ? contentSecurityPolicy(btoa(crypto.randomUUID()), onStaffHost ? staffOrigin : undefined)
+      : contentSecurityPolicy();
   headers.set("Content-Security-Policy", policy);
   const response = NextResponse.next({ request: { headers } });
   response.headers.set("Content-Security-Policy", policy);
@@ -56,7 +68,9 @@ export function proxy(request: NextRequest) {
 }
 
 export const config: ProxyConfig = {
-  matcher: [{
-    source: "/((?!_next/static/|_next/image|favicon.ico).*)",
-  }],
+  matcher: [
+    {
+      source: "/((?!_next/static/|_next/image|favicon.ico).*)",
+    },
+  ],
 };

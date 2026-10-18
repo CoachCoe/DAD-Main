@@ -8,8 +8,14 @@ import { useApiResource } from "@/lib/useApiResource";
 export function AlreadySignedIn() {
   const { data } = useApiResource<Schema<"Profile">>("/donor/me/profile");
   if (!data) return null;
-  return <div className="callout highlight">
-    <p>You’re already signed in as <strong>{data.email}</strong>.</p>
-    <Link className="button" href="/account/dashboard">Go to my dashboard</Link>
-  </div>;
+  return (
+    <div className="callout highlight">
+      <p>
+        You’re already signed in as <strong>{data.email}</strong>.
+      </p>
+      <Link className="button" href="/account/dashboard">
+        Go to my dashboard
+      </Link>
+    </div>
+  );
 }

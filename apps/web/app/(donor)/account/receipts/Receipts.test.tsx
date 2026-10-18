@@ -6,7 +6,15 @@ import Receipts from "./Receipts";
 vi.mock("next/form", () => ({ default: (props: React.ComponentProps<"form">) => <form {...props} /> }));
 afterEach(() => vi.unstubAllGlobals());
 const response = (value: unknown) => ({ ok: true, json: async () => value });
-const gift = { id: "g1", amount_minor: 3000, refunded_minor: 0, net_minor: 3000, paid_at: "2026-10-01T12:00:00Z", frequency: "MONTHLY", refunds: [] };
+const gift = {
+  id: "g1",
+  amount_minor: 3000,
+  refunded_minor: 0,
+  net_minor: 3000,
+  paid_at: "2026-10-01T12:00:00Z",
+  frequency: "MONTHLY",
+  refunds: [],
+};
 
 it("opens the gift named in the address", async () => {
   const fetch = vi.fn().mockResolvedValue(response({ as_of: "2026-10-04T12:00:00Z", receipt_id: "R-1", gift }));
@@ -18,8 +26,17 @@ it("opens the gift named in the address", async () => {
 });
 
 it("waits for a chosen year, then shows that year's summary with linkable gift records", async () => {
-  const fetch = vi.fn().mockResolvedValue(response({ as_of: "2028-01-04T12:00:00Z", year: 2027, timezone: "America/New_York",
-    gifts: [gift], amount_minor: 3000, refunded_minor: 0, net_minor: 3000 }));
+  const fetch = vi.fn().mockResolvedValue(
+    response({
+      as_of: "2028-01-04T12:00:00Z",
+      year: 2027,
+      timezone: "America/New_York",
+      gifts: [gift],
+      amount_minor: 3000,
+      refunded_minor: 0,
+      net_minor: 3000,
+    }),
+  );
   vi.stubGlobal("fetch", fetch);
   const { unmount } = render(<Receipts defaultYear={2027} latestYear={2028} />);
   const year = screen.getByLabelText("Calendar year");
@@ -34,16 +51,24 @@ it("waits for a chosen year, then shows that year's summary with linkable gift r
   expect(screen.getByRole("link", { name: /\$30\.00/ })).toHaveAttribute("href", "/account/receipts?gift=g1");
 });
 
-it.each([["1999"], ["9999"], ["20x7"], [["2027", "2026"]]])("ignores an out-of-range or malformed year in the address: %j", async (year) => {
-  const fetch = vi.fn();
-  vi.stubGlobal("fetch", fetch);
-  render(await ReceiptsPage({ params: Promise.resolve({}), searchParams: Promise.resolve({ year }) }));
-  expect(screen.getByLabelText("Calendar year")).toBeVisible();
-  expect(fetch).not.toHaveBeenCalled();
-});
+it.each([["1999"], ["9999"], ["20x7"], [["2027", "2026"]]])(
+  "ignores an out-of-range or malformed year in the address: %j",
+  async (year) => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    render(await ReceiptsPage({ params: Promise.resolve({}), searchParams: Promise.resolve({ year }) }));
+    expect(screen.getByLabelText("Calendar year")).toBeVisible();
+    expect(fetch).not.toHaveBeenCalled();
+  },
+);
 
 it("says when a linked gift record does not exist, rather than blaming the year", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({ detail: "Record not found" }) }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ ok: false, status: 404, json: async () => ({ detail: "Record not found" }) }),
+  );
   render(<Receipts gift="missing" defaultYear={2026} latestYear={2026} />);
-  expect(await screen.findByText("There is no gift record at this link. Choose a gift from My giving.")).toHaveAttribute("role", "alert");
+  expect(
+    await screen.findByText("There is no gift record at this link. Choose a gift from My giving."),
+  ).toHaveAttribute("role", "alert");
 });

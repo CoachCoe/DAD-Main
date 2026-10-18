@@ -4,8 +4,12 @@ function formatter(currency: string, fractionDigits: number) {
   const key = `${currency}:${fractionDigits}`;
   let value = formatters.get(key);
   if (!value) {
-    value = new Intl.NumberFormat("en-US", { style: "currency", currency,
-      minimumFractionDigits: fractionDigits, maximumFractionDigits: 2 });
+    value = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: fractionDigits,
+      maximumFractionDigits: 2,
+    });
     formatters.set(key, value);
   }
   return value;

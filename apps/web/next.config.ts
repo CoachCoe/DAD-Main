@@ -1,6 +1,6 @@
-import type { NextConfig } from "next";
-import { loadEnvConfig } from "@next/env";
 import path from "node:path";
+import { loadEnvConfig } from "@next/env";
+import type { NextConfig } from "next";
 import { contentSecurityPolicy } from "./lib/csp";
 import { UNSERVED_HEADER } from "./lib/hosts";
 
@@ -30,8 +30,16 @@ const nextConfig: NextConfig = {
   async rewrites() {
     return {
       beforeFiles: [
-        { source: "/:path*", has: [{ type: "header", key: UNSERVED_HEADER, value: "staff" }], destination: "/staff/_unserved" },
-        { source: "/:path*", has: [{ type: "header", key: UNSERVED_HEADER, value: "public" }], destination: "/_unserved" },
+        {
+          source: "/:path*",
+          has: [{ type: "header", key: UNSERVED_HEADER, value: "staff" }],
+          destination: "/staff/_unserved",
+        },
+        {
+          source: "/:path*",
+          has: [{ type: "header", key: UNSERVED_HEADER, value: "public" }],
+          destination: "/_unserved",
+        },
       ],
       afterFiles: [],
       fallback: [],

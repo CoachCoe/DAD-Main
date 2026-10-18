@@ -1,5 +1,14 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { ApiError, OFFLINE_MESSAGE, RATE_LIMITED_MESSAGE, UNCONFIGURED_MESSAGE, api, classifyFailure, failureMessage, unconfirmedMessage } from "./api";
+import {
+  ApiError,
+  api,
+  classifyFailure,
+  failureMessage,
+  OFFLINE_MESSAGE,
+  RATE_LIMITED_MESSAGE,
+  UNCONFIGURED_MESSAGE,
+  unconfirmedMessage,
+} from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 const response = () => ({ ok: true, json: async () => ({ ok: true }) });
@@ -7,7 +16,11 @@ const response = () => ({ ok: true, json: async () => ({ ok: true }) });
 it("marks JSON request bodies so browsers do not send them as text/plain", async () => {
   const fetch = vi.fn().mockResolvedValue(response());
   vi.stubGlobal("fetch", fetch);
-  await api("/donor/example", { method: "POST", body: JSON.stringify({ amount_minor: 3000 }), headers: { "Idempotency-Key": "stable" } });
+  await api("/donor/example", {
+    method: "POST",
+    body: JSON.stringify({ amount_minor: 3000 }),
+    headers: { "Idempotency-Key": "stable" },
+  });
   const request = fetch.mock.calls[0][1];
   expect(new Headers(request.headers).get("Content-Type")).toBe("application/json");
   expect(new Headers(request.headers).get("Idempotency-Key")).toBe("stable");
@@ -17,7 +30,11 @@ it("marks JSON request bodies so browsers do not send them as text/plain", async
 it("preserves explicit content types and Headers instances", async () => {
   const fetch = vi.fn().mockResolvedValue(response());
   vi.stubGlobal("fetch", fetch);
-  await api("/example", { method: "POST", body: "some,csv", headers: new Headers({ "Content-Type": "text/csv", "X-Request": "value" }) });
+  await api("/example", {
+    method: "POST",
+    body: "some,csv",
+    headers: new Headers({ "Content-Type": "text/csv", "X-Request": "value" }),
+  });
   const headers = new Headers(fetch.mock.calls[0][1].headers);
   expect(headers.get("Content-Type")).toBe("text/csv");
   expect(headers.get("X-Request")).toBe("value");
@@ -71,10 +88,26 @@ it("states definitively that a switched-off capability did nothing, and never in
 });
 
 it("reads the coded 503 shape and per-row CSV errors from the API", async () => {
-  vi.stubGlobal("fetch", vi.fn()
-    .mockResolvedValueOnce(Response.json({ detail: "Payments are not configured", code: "PAYMENTS_UNCONFIGURED" }, { status: 503 }))
-    .mockResolvedValueOnce(Response.json({ detail: "Invalid spreadsheet", errors: [{ row: 3, column: "unit", reason: "unknown unit" }] }, { status: 422 })));
-  await expect(api("/donor/checkouts", { method: "POST", body: "{}" })).rejects.toMatchObject({ status: 503, code: "PAYMENTS_UNCONFIGURED" });
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ detail: "Payments are not configured", code: "PAYMENTS_UNCONFIGURED" }, { status: 503 }),
+      )
+      .mockResolvedValueOnce(
+        Response.json(
+          { detail: "Invalid spreadsheet", errors: [{ row: 3, column: "unit", reason: "unknown unit" }] },
+          { status: 422 },
+        ),
+      ),
+  );
+  await expect(api("/donor/checkouts", { method: "POST", body: "{}" })).rejects.toMatchObject({
+    status: 503,
+    code: "PAYMENTS_UNCONFIGURED",
+  });
   await expect(api("/donor/staff/content/publish", { method: "POST", body: "{}" })).rejects.toMatchObject({
-    status: 422, errors: [{ row: 3, column: "unit", reason: "unknown unit" }] });
+    status: 422,
+    errors: [{ row: 3, column: "unit", reason: "unknown unit" }],
+  });
 });

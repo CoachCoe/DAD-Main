@@ -20,17 +20,36 @@ function giftFrom(params: Record<string, string | string[] | undefined>): Gift |
 
 export default async function ThankYouPage({ searchParams }: PageProps<"/donate/thanks">) {
   const gift = giftFrom(await searchParams);
-  return <Page eyebrow="Your gift" title="Thank you for joining the beginning">
-    {gift && <p>Your gift: <GiftFraming minor={gift.minor} monthly={gift.frequency === "MONTHLY"} /></p>}
-    <p>DAD launches in April 2027. A first gift completed before launch earns a permanent Founding Donor badge.</p>
-    <div className="callout highlight">
-      <h2>Next: claim your account</h2>
-      <p>Your account holds your giving streak and your personal referral link and code, so the people you invite count toward your circle.</p>
-      <p>Once Stripe confirms your gift, we’ll email a claim link to the address you gave. If it hasn’t arrived, request a new one.</p>
-      {/* A full page load: account pages need their own per-request security policy. */}
-      <a className="button" href="/account/sign-in">Claim your account</a>
-    </div>
-    <p className="note">Your receipt email follows once Stripe confirms the payment. In this sandbox preview it is a test gift record, not a tax receipt, and no real donation is collected.</p>
-    <Link className="secondary" href="/donate">Make another gift</Link>
-  </Page>;
+  return (
+    <Page eyebrow="Your gift" title="Thank you for joining the beginning">
+      {gift && (
+        <p>
+          Your gift: <GiftFraming minor={gift.minor} monthly={gift.frequency === "MONTHLY"} />
+        </p>
+      )}
+      <p>DAD launches in April 2027. A first gift completed before launch earns a permanent Founding Donor badge.</p>
+      <div className="callout highlight">
+        <h2>Next: claim your account</h2>
+        <p>
+          Your account holds your giving streak and your personal referral link and code, so the people you invite count
+          toward your circle.
+        </p>
+        <p>
+          Once Stripe confirms your gift, we’ll email a claim link to the address you gave. If it hasn’t arrived,
+          request a new one.
+        </p>
+        {/* A full page load: account pages need their own per-request security policy. */}
+        <a className="button" href="/account/sign-in">
+          Claim your account
+        </a>
+      </div>
+      <p className="note">
+        Your receipt email follows once Stripe confirms the payment. In this sandbox preview it is a test gift record,
+        not a tax receipt, and no real donation is collected.
+      </p>
+      <Link className="secondary" href="/donate">
+        Make another gift
+      </Link>
+    </Page>
+  );
 }

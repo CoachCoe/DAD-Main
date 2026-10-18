@@ -14,7 +14,9 @@ it("does not treat returning from Stripe as payment-update confirmation", async 
 });
 
 it("requests a sign-in link in place for a cold recovery visit, without exposing billing controls", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) })
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) })
     .mockResolvedValueOnce(response({ message: "If this email matches a donor account, a link will arrive." }));
   vi.stubGlobal("fetch", fetch);
   render(<PaymentMethodPage />);
@@ -23,11 +25,16 @@ it("requests a sign-in link in place for a cold recovery visit, without exposing
   fireEvent.click(screen.getByRole("button", { name: "Email me a sign-in link" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("If this email matches"));
   expect(fetch.mock.calls[1][0]).toBe("/api/donor/login");
-  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ email: "donor@example.org", next: "/account/payment-method" });
+  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+    email: "donor@example.org",
+    next: "/account/payment-method",
+  });
 });
 
 it("retries a failed setup with the same request key", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response({ status: "NONE", completed_at: null }))
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response({ status: "NONE", completed_at: null }))
     .mockRejectedValue(new Error("Connection lost"));
   vi.stubGlobal("fetch", fetch);
   render(<PaymentMethodPage />);
@@ -39,7 +46,9 @@ it("retries a failed setup with the same request key", async () => {
 });
 
 it("shows a verified update discovered during a retry without opening another setup", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response({ status: "OPEN", completed_at: null }))
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response({ status: "OPEN", completed_at: null }))
     .mockResolvedValueOnce(response({ url: null, status: "APPLIED", completed_at: "2026-10-03T12:00:00Z" }));
   vi.stubGlobal("fetch", fetch);
   render(<PaymentMethodPage />);
@@ -48,8 +57,13 @@ it("shows a verified update discovered during a retry without opening another se
 });
 
 it("rejects an unexpected redirect address", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response({ status: "NONE", completed_at: null }))
-    .mockResolvedValueOnce(response({ url: "https://checkout.stripe.com.attacker.example/" })));
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(response({ status: "NONE", completed_at: null }))
+      .mockResolvedValueOnce(response({ url: "https://checkout.stripe.com.attacker.example/" })),
+  );
   render(<PaymentMethodPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Continue to Stripe" }));
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("We could not open Stripe"));

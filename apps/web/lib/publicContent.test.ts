@@ -3,14 +3,23 @@ import { afterEach, expect, it, vi } from "vitest";
 import { loadPublicContent } from "./publicContent";
 
 vi.mock("next/server", () => ({ connection: async () => {} }));
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 it("bounds a stalled content request and returns the unavailable state", async () => {
   const controller = new AbortController();
   const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
-  vi.stubGlobal("fetch", vi.fn((_url, init: RequestInit) => new Promise((_resolve, reject) => {
-    init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
-  })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      (_url, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    ),
+  );
   const pending = loadPublicContent();
   await vi.waitFor(() => expect(timeout).toHaveBeenCalledWith(3000));
   controller.abort(new DOMException("Timed out", "TimeoutError"));

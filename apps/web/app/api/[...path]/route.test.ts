@@ -5,28 +5,38 @@ import { NextRequest } from "next/server";
 import { afterEach, expect, it, vi } from "vitest";
 import { GET, POST } from "./route";
 
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 it("strips untrusted client address headers at the browser boundary", async () => {
   vi.stubEnv("DONOR_CLIENT_IP_HEADER", "");
   const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true }));
   vi.stubGlobal("fetch", fetch);
-  await GET(new NextRequest("http://localhost:3000/api/donor/public/content", {
-    headers: { "X-Real-IP": "203.0.113.1", "X-Forwarded-For": "203.0.113.2" },
-  }), { params: Promise.resolve({ path: ["donor", "public", "content"] }) });
+  await GET(
+    new NextRequest("http://localhost:3000/api/donor/public/content", {
+      headers: { "X-Real-IP": "203.0.113.1", "X-Forwarded-For": "203.0.113.2" },
+    }),
+    { params: Promise.resolve({ path: ["donor", "public", "content"] }) },
+  );
   const headers = new Headers(fetch.mock.calls[0][1].headers);
   expect(headers.has("x-real-ip")).toBe(false);
   expect(headers.has("x-forwarded-for")).toBe(false);
 });
 
 it.each(["203.0.113.1", "2001:db8::1", "203.0.113.1, 203.0.113.2", "unknown"])(
-  "forwards only a single IP from the configured ingress header: %s", async (address) => {
+  "forwards only a single IP from the configured ingress header: %s",
+  async (address) => {
     vi.stubEnv("DONOR_CLIENT_IP_HEADER", "x-ingress-client");
     const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetch);
-    await GET(new NextRequest("http://localhost:3000/api/donor/public/content", {
-      headers: { "X-Real-IP": "192.0.2.99", "x-ingress-client": address },
-    }), { params: Promise.resolve({ path: ["donor", "public", "content"] }) });
+    await GET(
+      new NextRequest("http://localhost:3000/api/donor/public/content", {
+        headers: { "X-Real-IP": "192.0.2.99", "x-ingress-client": address },
+      }),
+      { params: Promise.resolve({ path: ["donor", "public", "content"] }) },
+    );
     expect(new Headers(fetch.mock.calls[0][1].headers).get("x-real-ip")).toBe(
       ["203.0.113.1", "2001:db8::1"].includes(address) ? address : null,
     );
@@ -57,18 +67,42 @@ it("forwards only the allowlisted request headers", async () => {
   vi.stubEnv("DONOR_API_BASE_URL", "http://api.test:8002");
   const fetch = vi.fn().mockResolvedValue(Response.json({ ok: true }));
   vi.stubGlobal("fetch", fetch);
-  await POST(new NextRequest("http://localhost:3000/api/donor/checkouts", {
-    method: "POST", body: "{}",
-    headers: {
-      cookie: "dad_session=s", "content-type": "application/json", accept: "application/json", "accept-language": "en-US",
-      "idempotency-key": "k", origin: "http://localhost:3000", "user-agent": "browser", "stripe-signature": "t=1,v1=x", "sec-fetch-site": "same-origin",
-      "sec-fetch-mode": "cors", authorization: "Bearer stolen", "x-dad-client": "native", "x-forwarded-host": "evil.example", "x-staff-role": "ADMIN", forwarded: "for=1.2.3.4", host: "evil.example",
-    },
-  }), context("donor", "checkouts"));
+  await POST(
+    new NextRequest("http://localhost:3000/api/donor/checkouts", {
+      method: "POST",
+      body: "{}",
+      headers: {
+        cookie: "dad_session=s",
+        "content-type": "application/json",
+        accept: "application/json",
+        "accept-language": "en-US",
+        "idempotency-key": "k",
+        origin: "http://localhost:3000",
+        "user-agent": "browser",
+        "stripe-signature": "t=1,v1=x",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        authorization: "Bearer stolen",
+        "x-dad-client": "native",
+        "x-forwarded-host": "evil.example",
+        "x-staff-role": "ADMIN",
+        forwarded: "for=1.2.3.4",
+        host: "evil.example",
+      },
+    }),
+    context("donor", "checkouts"),
+  );
   const sent = new Headers(fetch.mock.calls[0][1].headers);
   expect(Object.fromEntries(sent)).toEqual({
-    cookie: "dad_session=s", "content-type": "application/json", accept: "application/json", "accept-language": "en-US",
-    "idempotency-key": "k", origin: "http://localhost:3000", "user-agent": "browser", "stripe-signature": "t=1,v1=x", "sec-fetch-site": "same-origin",
+    cookie: "dad_session=s",
+    "content-type": "application/json",
+    accept: "application/json",
+    "accept-language": "en-US",
+    "idempotency-key": "k",
+    origin: "http://localhost:3000",
+    "user-agent": "browser",
+    "stripe-signature": "t=1,v1=x",
+    "sec-fetch-site": "same-origin",
   });
   expect(fetch.mock.calls[0][0].href).toBe("http://api.test:8002/donor/checkouts");
 });
@@ -80,7 +114,10 @@ it("preserves every Set-Cookie and drops hop-by-hop response headers", async () 
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 201, headers: upstream })));
   const response = await GET(new NextRequest("http://localhost:3000/api/donor/me"), context("donor", "me"));
   expect(response.status).toBe(201);
-  expect(response.headers.getSetCookie()).toEqual(["dad_session=a; Path=/; HttpOnly", "dad_referral=b; Path=/; HttpOnly"]);
+  expect(response.headers.getSetCookie()).toEqual([
+    "dad_session=a; Path=/; HttpOnly",
+    "dad_referral=b; Path=/; HttpOnly",
+  ]);
   expect(response.headers.get("x-request-id")).toBe("r1");
   expect(response.headers.has("connection")).toBe(false);
 });
@@ -89,7 +126,9 @@ it("answers 502 with a structured error when the API is unreachable", async () =
   vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
   const response = await GET(new NextRequest("http://localhost:3000/api/donor/me"), context("donor", "me"));
   expect(response.status).toBe(502);
-  expect(await response.json()).toEqual({ detail: { code: "API_UNREACHABLE", message: "The requested service could not be reached." } });
+  expect(await response.json()).toEqual({
+    detail: { code: "API_UNREACHABLE", message: "The requested service could not be reached." },
+  });
 });
 
 it("relays an upstream rejection of a request body instead of reporting the API unreachable", async () => {
@@ -101,9 +140,14 @@ it("relays an upstream rejection of a request body instead of reporting the API 
   await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
   try {
     vi.stubEnv("DONOR_API_BASE_URL", `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`);
-    const response = await POST(new NextRequest("http://localhost:3000/api/donor/claim", {
-      method: "POST", body: JSON.stringify({ token: "x".repeat(64 * 1024) }), headers: { "content-type": "application/json" },
-    }), context("donor", "claim"));
+    const response = await POST(
+      new NextRequest("http://localhost:3000/api/donor/claim", {
+        method: "POST",
+        body: JSON.stringify({ token: "x".repeat(64 * 1024) }),
+        headers: { "content-type": "application/json" },
+      }),
+      context("donor", "claim"),
+    );
     expect(response.status).toBe(401);
     expect(await response.json()).toEqual({ detail: "This link has expired." });
   } finally {
@@ -114,9 +158,13 @@ it("relays an upstream rejection of a request body instead of reporting the API 
 it("refuses a body larger than the API accepts without contacting it", async () => {
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
-  const response = await POST(new NextRequest("http://localhost:3000/api/donor/staff/content/sources", {
-    method: "POST", body: new Uint8Array((10 << 20) + 1),
-  }), context("donor", "staff", "content", "sources"));
+  const response = await POST(
+    new NextRequest("http://localhost:3000/api/donor/staff/content/sources", {
+      method: "POST",
+      body: new Uint8Array((10 << 20) + 1),
+    }),
+    context("donor", "staff", "content", "sources"),
+  );
   expect(response.status).toBe(413);
   expect(fetch).not.toHaveBeenCalled();
 });
@@ -128,10 +176,15 @@ it("refuses an oversized body that declares no length", async () => {
   let sent = 0;
   const body = new ReadableStream<Uint8Array>({
     pull(controller) {
-      if (sent++ > 12) controller.close(); else controller.enqueue(chunk);
+      if (sent++ > 12) controller.close();
+      else controller.enqueue(chunk);
     },
   });
-  const request = new NextRequest("http://localhost:3000/api/donor/staff/content/sources", { method: "POST", body, duplex: "half" } as ConstructorParameters<typeof NextRequest>[1]);
+  const request = new NextRequest("http://localhost:3000/api/donor/staff/content/sources", {
+    method: "POST",
+    body,
+    duplex: "half",
+  } as ConstructorParameters<typeof NextRequest>[1]);
   expect(request.headers.get("content-length")).toBeNull();
   const response = await POST(request, context("donor", "staff", "content", "sources"));
   expect(response.status).toBe(413);

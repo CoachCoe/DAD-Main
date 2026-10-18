@@ -3,7 +3,8 @@ import { webTokenVariables } from "@/design/web";
 
 function token(name: string): string {
   const value = (webTokenVariables as Record<string, unknown>)[`--${name}`];
-  if (typeof value !== "string" || !/^#[0-9a-fA-F]{3,6}$/.test(value)) throw new Error(`--${name} is not defined as a hex colour`);
+  if (typeof value !== "string" || !/^#[0-9a-fA-F]{3,6}$/.test(value))
+    throw new Error(`--${name} is not defined as a hex colour`);
   return value;
 }
 
@@ -14,11 +15,7 @@ function luminance(hex: string): number {
     const v = parseInt(pair, 16) / 255;
     return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   };
-  return (
-    0.2126 * channel(h.slice(0, 2)) +
-    0.7152 * channel(h.slice(2, 4)) +
-    0.0722 * channel(h.slice(4, 6))
-  );
+  return 0.2126 * channel(h.slice(0, 2)) + 0.7152 * channel(h.slice(2, 4)) + 0.0722 * channel(h.slice(4, 6));
 }
 
 function contrast(foreground: string, background: string): number {
@@ -71,7 +68,9 @@ describe("the palette meets accessible text contrast thresholds", () => {
     ["--fail, a destructive secondary action on a card", "fail", "card", 4.5],
     ["--ink-soft, badge guidance on paper", "ink-soft", "paper", 4.5],
   ])("%s: --%s on --%s reaches %s:1", (_label, foreground, background, minimum) => {
-    expect(contrast(token(foreground as string), token(background as string))).toBeGreaterThanOrEqual(minimum as number);
+    expect(contrast(token(foreground as string), token(background as string))).toBeGreaterThanOrEqual(
+      minimum as number,
+    );
   });
 
   it.each([
