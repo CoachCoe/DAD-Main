@@ -8,9 +8,12 @@ import { ApiError, api, type Schema, unconfirmedMessage } from "@/lib/api";
 import { formatDateTime } from "@/lib/dates";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
+const unconfirmed =
+  "Your update is not confirmed yet. You can continue the Stripe flow or refresh after completing it.";
+
 const states: Partial<Record<Schema<"PaymentMethodStatus">["status"], string>> = {
-  PENDING: "Your update is not confirmed yet. You can continue the Stripe flow or refresh after completing it.",
-  OPEN: "Your update is not confirmed yet. You can continue the Stripe flow or refresh after completing it.",
+  PENDING: unconfirmed,
+  OPEN: unconfirmed,
   EXPIRED: "The Stripe session expired. Start a new update below.",
   CANCELLED: "The monthly gift ended before this update could be applied.",
 };

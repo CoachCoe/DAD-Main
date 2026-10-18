@@ -59,7 +59,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export type Failure =
+type Failure =
   | "signedOut"
   | "forbidden"
   | "notFound"

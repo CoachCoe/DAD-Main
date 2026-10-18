@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, classifyFailure, OFFLINE_MESSAGE, RATE_LIMITED_MESSAGE, UNCONFIGURED_MESSAGE } from "./api";
 
-export type Resource<T> =
+type Resource<T> =
   | { state: "loading" }
   | { state: "ready"; data: T }
   | { state: "signedOut" }

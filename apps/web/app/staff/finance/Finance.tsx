@@ -84,19 +84,21 @@ export default function Finance({ donor, gift }: { donor: string; gift: string }
     setMessage("");
     setInvalid(null);
     if (!quote) return;
+    const audit = reason.trim();
+    const shortReason = () => reject("reason", "Enter an audit reason of at least five characters.");
     if ("gift_id" in quote) {
       const minor = parseDollars(amount);
       if (minor === null) return reject("amount", "Enter a refund in USD with at most two decimal places.");
       if (minor < 1 || minor > quote.available_minor)
         return reject("amount", "Choose an amount within the available refund balance.");
-      if (reason.trim().length < 5) return reject("reason", "Enter an audit reason of at least five characters.");
-      setConfirmation({ amount_minor: minor, reason: reason.trim() });
+      if (audit.length < 5) return shortReason();
+      setConfirmation({ amount_minor: minor, reason: audit });
     } else if (quote.subscription) {
-      if (reason.trim().length < 5) return reject("reason", "Enter an audit reason of at least five characters.");
+      if (audit.length < 5) return shortReason();
       setConfirmation({
         subscription_id: quote.subscription.id,
         period_end: quote.subscription.period_end,
-        reason: reason.trim(),
+        reason: audit,
       });
     }
   }
