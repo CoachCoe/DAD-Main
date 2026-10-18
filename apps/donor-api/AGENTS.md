@@ -64,10 +64,11 @@ fuller write-up in `docs/solutions/` when one exists.
   provider state *before* taking the donor lock; re-fetch on conflict happens
   under the lock. Do not move a provider round trip inside the lock — a test
   (`TestEventWorkerReadsProcessorOutsideDonorLock`) enforces this.
-- **The shared Stripe rate budget reserves per-caller capacity**
+- **Every Stripe call spends from its process's rate budget**
   (`internal/payments/ratebudget.go`, named buckets worker/staff/reconcile).
-  Route a new Stripe caller through the right bucket; don't let one caller
-  consume the whole ~100 req/s ceiling.
+  Route new calls and every list page through the appropriate bucket. The
+  sandbox default is 25 req/s per account; replicas and SDK retries require
+  deployment-wide coordination beyond these process-local limits.
 
 ## Workflow / process
 

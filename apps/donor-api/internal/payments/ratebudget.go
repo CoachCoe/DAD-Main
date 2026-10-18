@@ -6,15 +6,13 @@ import (
 	"time"
 )
 
-// Stripe caps a test-mode account at roughly 100 requests per second shared
-// across every process. Worker reads can consume the whole ceiling and starve
-// staff refund/cancel/amount commands, so the gateway spends from named buckets
-// that each own a fraction of the ceiling. A worker self-limits its reads below
-// the shared ceiling, which leaves provider capacity for the separate staff
-// process without any cross-process coordination.
+// Stripe's default sandbox limit is 25 requests per second per account.
+// These process-local buckets separate worker reads, interactive commands and
+// reconciliation. Replicas and SDK retries still share the account's limit;
+// deployment-wide coordination is required before scaling those callers.
 const (
-	// StripeBudgetPerSecond is the shared Stripe request ceiling in req/s.
-	StripeBudgetPerSecond = 100.0
+	// StripeBudgetPerSecond is the default sandbox request ceiling in req/s.
+	StripeBudgetPerSecond = 25.0
 	// WorkerBudgetFraction is the share of the ceiling worker reads may spend.
 	WorkerBudgetFraction = 0.6
 	// StaffBudgetFraction is the share of the ceiling staff mutations may spend.

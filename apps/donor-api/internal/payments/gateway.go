@@ -151,6 +151,9 @@ func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key stri
 		return RemoteCheckout{}, ErrProcessorUnavailable
 	}
 	params.SetIdempotencyKey(key)
+	if err := g.acquire(ctx, BucketStaff); err != nil {
+		return RemoteCheckout{}, err
+	}
 	session, err := g.client.V1CheckoutSessions.Create(ctx, &params)
 	if err != nil {
 		return RemoteCheckout{}, ErrProcessorUnavailable
@@ -209,6 +212,9 @@ func rawObject(response *stripe.APIResponse) (Object, error) {
 }
 
 func (g *StripeGateway) RetrieveCheckout(ctx context.Context, id string) (Object, error) {
+	if err := g.acquire(ctx, BucketWorker); err != nil {
+		return nil, err
+	}
 	result, err := g.client.V1CheckoutSessions.Retrieve(ctx, id, nil)
 	if err != nil {
 		return nil, ErrProcessorUnavailable
@@ -216,6 +222,9 @@ func (g *StripeGateway) RetrieveCheckout(ctx context.Context, id string) (Object
 	return rawObject(result.LastResponse)
 }
 func (g *StripeGateway) RetrieveSetupIntent(ctx context.Context, id string) (Object, error) {
+	if err := g.acquire(ctx, BucketWorker); err != nil {
+		return nil, err
+	}
 	result, err := g.client.V1SetupIntents.Retrieve(ctx, id, nil)
 	if err != nil {
 		return nil, ErrProcessorUnavailable
@@ -278,6 +287,9 @@ func (g *StripeGateway) ListPaymentRefunds(ctx context.Context, payment string) 
 		params := &stripe.RefundListParams{PaymentIntent: stripe.String(payment), ListParams: stripe.ListParams{Limit: stripe.Int64(100)}}
 		if after != "" {
 			params.StartingAfter = stripe.String(after)
+		}
+		if err := g.acquire(ctx, BucketStaff); err != nil {
+			return nil, err
 		}
 		page := g.client.V1Refunds.List(ctx, params)
 		if page.Err() != nil {

@@ -262,6 +262,16 @@ run `migrate`, which recreates missing roles and grants the declared privileges,
 
 ## Stripe
 
+Stripe's [default sandbox limit](https://docs.stripe.com/rate-limits) is 25 requests
+per second per account. The gateway budgets worker reads, interactive checkout/finance
+commands, and reconciliation separately within each process. Checkout and card-setup
+reads, and each refund-list page, also spend tokens. These limits do not coordinate
+across processes or account for the SDK's automatic retries. Before increasing API or
+Stripe-worker replicas, add an account-wide limiter or allocate conservative budgets
+across every caller, reserve room for retries, and measure provider throttling and
+queue age. The local API load test excludes provider calls and cannot validate that
+capacity.
+
 Use the organization's verified Stripe **test** account and snapshot webhook events at
 API version `2026-09-30.endive`. Subscribe to:
 
