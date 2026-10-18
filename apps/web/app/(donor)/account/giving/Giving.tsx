@@ -44,7 +44,7 @@ export default function Giving() {
         <h2 ref={heading} tabIndex={-1}>Gifts</h2>
         {data.gifts.length === 0 ? <p>No confirmed test gifts yet. Payment confirmation may take a moment.</p> :
           <ul className="rows">{data.gifts.map((gift) => <li key={gift.id}>
-            <span><strong>{formatMoney(gift.amount_minor, gift.currency)}</strong>
+            <span className="rowSummary"><strong>{formatMoney(gift.amount_minor, gift.currency)}</strong>
               {" · "}{gift.frequency === "MONTHLY" ? "Monthly" : "One time"}{" · "}
               <time dateTime={gift.paid_at}>{formatDate(gift.paid_at)}</time>
               {gift.refunded_minor ? <>{" · "}Refunded {formatMoney(gift.refunded_minor, gift.currency)}</> : null}</span>

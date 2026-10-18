@@ -283,6 +283,7 @@ details[open] > summary::after { content: "–"; }
   border-bottom: 1px solid var(--line);
 }
 .rows strong { font-variant-numeric: tabular-nums; }
+.rowSummary { flex: 1 1 12rem; min-width: 0; }
 .session { flex: 1 1 0; display: grid; gap: var(--space-1); min-width: 0; overflow-wrap: anywhere; }
 .badge.current { border-color: var(--ok); background: var(--ok-wash); color: var(--ok-ink); }
 
