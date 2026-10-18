@@ -1,5 +1,6 @@
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
 SQLC := sqlc/sqlc:1.31.1@sha256:70f53171d27b2424e9358869975455a6e955a5aa8e58a998a270a6e34e525537
+GOLINES := go tool -modfile=tools/go.mod golines -m 140
 GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts apps/web/design/tokens.ts
 
 # Load testing against a disposable, seeded deployment; see docs/operations.md.
@@ -10,7 +11,7 @@ LOAD_MIX ?=
 LOAD_ORIGIN ?= http://localhost:3000
 LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixture "$(LOAD_FIXTURE)" -mix "$(LOAD_MIX)" -origin "$(LOAD_ORIGIN)" -client-ips
 
-.PHONY: install db-up migrate provision api donor-go web dev worker reconcile test test-api test-donor-go test-web test-ledger test-browser-e2e lint lint-go lint-web lint-ledger lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
+.PHONY: install db-up migrate provision api donor-go web dev worker reconcile test test-api test-donor-go format-go test-web test-ledger test-browser-e2e lint lint-go lint-web lint-ledger lint-scripts check-ingress smoke-ingress check-images generate check-generated seed loadtest-seeded deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 .PHONY: generate-mobile check-mobile bundle-mobile
 
 install:
@@ -64,7 +65,11 @@ check-generated: generate
 test: test-donor-go test-web test-ledger
 
 test-api test-donor-go:
-	cd apps/donor-api && test -z "$$(gofmt -l .)" && go vet ./... && go test -race ./... && go build ./...
+	cd apps/donor-api && test -z "$$(gofmt -l .)" && test -z "$$($(GOLINES) -l .)" && go vet ./... && go test -race ./... && go build ./...
+
+# golines wraps lines past 140 columns and otherwise formats exactly as gofmt does.
+format-go:
+	cd apps/donor-api && $(GOLINES) -w .
 
 test-web:
 	cd apps/web && npm run lint && npm test -- --run && npm exec next typegen && npm run typecheck && npm run build

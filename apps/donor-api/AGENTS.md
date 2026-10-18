@@ -74,7 +74,7 @@ true; add a rule when a mistake would otherwise be repeated.
 - **Plan first; isolate work in a git worktree + branch; never merge/rebase/
   fast-forward `dev` or `main` from inside a feature worktree.** The owner
   merges after review.
-- **Verify before claiming done:** `gofmt -l` (empty), `go vet ./...`,
+- **Verify before claiming done:** `make format-go` (wraps past 140 columns), `go vet ./...`,
   `go build ./...`, and `go test -race` on the affected packages against a
   synthetic DB. State explicitly what you could not run and why.
 - **Correctness-first on money paths.** This is a 501(c)(3) donation platform.
