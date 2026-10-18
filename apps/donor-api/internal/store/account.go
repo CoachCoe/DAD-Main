@@ -17,20 +17,17 @@ type AccountService struct{ DB *pgxpool.Pool }
 // client and revokes previousSession, the session the client held before, if
 // any.
 func (s AccountService) ClaimAccount(ctx context.Context, proof, previousSession string, client Client) (Tokens, error) {
-	var tokens Tokens
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (Tokens, error) {
 		issued, donor, err := claim(ctx, tx, proof, client)
 		if err != nil {
-			return err
+			return Tokens{}, err
 		}
 		now := time.Now().UTC()
 		if _, err = refreshProjection(ctx, tx, donor.ID, now); err != nil {
-			return err
+			return Tokens{}, err
 		}
-		tokens = issued
-		return queries.New(tx).RevokeSession(ctx, queries.RevokeSessionParams{TokenHash: HashToken(previousSession), RevokedAt: timestamp(now)})
+		return issued, queries.New(tx).RevokeSession(ctx, queries.RevokeSessionParams{TokenHash: HashToken(previousSession), RevokedAt: timestamp(now)})
 	})
-	return tokens, err
 }
 
 // claim consumes a sign-in proof and every other open link for its donor,

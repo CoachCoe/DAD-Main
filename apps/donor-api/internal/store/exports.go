@@ -167,7 +167,7 @@ func (s *StaffService) writeRows(ctx context.Context, writer *csv.Writer, name, 
 	}
 	query += " ORDER BY id"
 	var count int64
-	err := pgx.BeginTxFunc(ctx, s.DB, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+	err := pgx.BeginTxFunc(ctx, s.DB, readSnapshot, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query)
 		if err != nil {
 			return err

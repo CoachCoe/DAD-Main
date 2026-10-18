@@ -16,23 +16,39 @@ import (
 // donor lock, which serializes everything that changes one donor's facts:
 // requests, workers and staff actions alike.
 
-// donorRead runs fn as the signed-in donor holding token.
-func donorRead[T any](ctx context.Context, db *pgxpool.Pool, token string, fn func(*queries.Queries, queries.Donor, time.Time) (T, error)) (T, error) {
+// readSnapshot is a consistent, read-only view across several queries.
+var readSnapshot = pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}
+
+// transact runs fn in a transaction and returns its result once committed,
+// or the zero value with the error that rolled it back.
+func transact[T any](ctx context.Context, db *pgxpool.Pool, opts pgx.TxOptions, fn func(pgx.Tx) (T, error)) (T, error) {
 	var result T
-	var user signedIn
-	now := time.Now().UTC()
-	err := pgx.BeginTxFunc(ctx, db, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
-		q := queries.New(tx)
-		var err error
-		if user, err = authenticate(ctx, q, token, now); err != nil {
-			return err
-		}
-		result, err = fn(q, user.Donor, now)
+	err := pgx.BeginTxFunc(ctx, db, opts, func(tx pgx.Tx) (err error) {
+		result, err = fn(tx)
 		return err
 	})
 	if err != nil {
 		var zero T
 		return zero, err
+	}
+	return result, nil
+}
+
+// donorRead runs fn as the signed-in donor holding token.
+func donorRead[T any](ctx context.Context, db *pgxpool.Pool, token string, fn func(*queries.Queries, queries.Donor, time.Time) (T, error)) (T, error) {
+	var user signedIn
+	now := time.Now().UTC()
+	result, err := transact(ctx, db, readSnapshot, func(tx pgx.Tx) (T, error) {
+		q := queries.New(tx)
+		var err error
+		if user, err = authenticate(ctx, q, token, now); err != nil {
+			var zero T
+			return zero, err
+		}
+		return fn(q, user.Donor, now)
+	})
+	if err != nil {
+		return result, err
 	}
 	// The snapshot is read-only, so the session's use is recorded after it.
 	// It is advisory, and failing to record it must not fail the read.
@@ -72,20 +88,14 @@ func lockSignedIn(ctx context.Context, q *queries.Queries, token string) (signed
 
 // donorWrite runs fn holding the lock of the donor owner resolves.
 func donorWrite[T any](ctx context.Context, db *pgxpool.Pool, owner ownerResolver, fn func(pgx.Tx, queries.Donor, time.Time) (T, error)) (T, error) {
-	var result T
-	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+	return transact(ctx, db, pgx.TxOptions{}, func(tx pgx.Tx) (T, error) {
 		d, err := owner(ctx, tx)
 		if err != nil {
-			return err
+			var zero T
+			return zero, err
 		}
-		result, err = fn(tx, d, time.Now().UTC())
-		return err
+		return fn(tx, d, time.Now().UTC())
 	})
-	if err != nil {
-		var zero T
-		return zero, err
-	}
-	return result, nil
 }
 
 // Staff work is authorized against current database state in the transaction
@@ -95,38 +105,26 @@ func donorWrite[T any](ctx context.Context, db *pgxpool.Pool, owner ownerResolve
 // Access management instead locks every account, in ID order, itself.
 
 func staffRead[T any](ctx context.Context, s *StaffService, token, permission string, fn func(pgx.Tx, queries.DonorStaff, time.Time) (T, error)) (T, error) {
-	var result T
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (T, error) {
 		now := time.Now().UTC()
 		actor, err := requireStaff(ctx, queries.New(tx), token, permission, now)
 		if err != nil {
-			return err
+			var zero T
+			return zero, err
 		}
-		result, err = fn(tx, actor, now)
-		return err
+		return fn(tx, actor, now)
 	})
-	if err != nil {
-		var zero T
-		return zero, err
-	}
-	return result, nil
 }
 
 func staffWrite[T any](ctx context.Context, s *StaffService, token, permission string, fn func(pgx.Tx, queries.DonorStaff, time.Time) (T, error)) (T, error) {
-	var result T
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (T, error) {
 		actor, err := lockStaff(ctx, queries.New(tx), token, permission)
 		if err != nil {
-			return err
+			var zero T
+			return zero, err
 		}
-		result, err = fn(tx, actor, time.Now().UTC())
-		return err
+		return fn(tx, actor, time.Now().UTC())
 	})
-	if err != nil {
-		var zero T
-		return zero, err
-	}
-	return result, nil
 }
 
 // lockStaff authorizes token, locks the actor's account and authorizes again.
@@ -144,20 +142,14 @@ func lockStaff(ctx context.Context, q *queries.Queries, token, permission string
 // staffDonorWrite is staffWrite for work on one donor's facts. The donor lock
 // is taken after the actor's, the order every staff writer uses.
 func staffDonorWrite[T any](ctx context.Context, s *StaffService, token, permission string, donor pgtype.UUID, fn func(pgx.Tx, queries.DonorStaff, time.Time) (T, error)) (T, error) {
-	var result T
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (T, error) {
 		actor, _, err := lockStaffDonor(ctx, queries.New(tx), token, permission, donor)
 		if err != nil {
-			return err
+			var zero T
+			return zero, err
 		}
-		result, err = fn(tx, actor, time.Now().UTC())
-		return err
+		return fn(tx, actor, time.Now().UTC())
 	})
-	if err != nil {
-		var zero T
-		return zero, err
-	}
-	return result, nil
 }
 
 func lockStaffDonor(ctx context.Context, q *queries.Queries, token, permission string, id pgtype.UUID) (queries.DonorStaff, queries.Donor, error) {

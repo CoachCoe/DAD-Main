@@ -82,13 +82,9 @@ func (s CheckoutService) BeginCheckout(ctx context.Context, request payments.Che
 // attempt already recorded for request. A monthly gift reserves the donor's
 // one recurring slot.
 func (s CheckoutService) prepare(ctx context.Context, site publicSite, request payments.CheckoutRequest, digest string, now time.Time) (queries.DonorStripeCheckout, error) {
-	var attempt queries.DonorStripeCheckout
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		var err error
-		attempt, err = prepareAttempt(ctx, queries.New(tx), site, request, digest, now)
-		return err
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (queries.DonorStripeCheckout, error) {
+		return prepareAttempt(ctx, queries.New(tx), site, request, digest, now)
 	})
-	return attempt, err
 }
 
 func prepareAttempt(ctx context.Context, q *queries.Queries, site publicSite, request payments.CheckoutRequest, digest string, now time.Time) (queries.DonorStripeCheckout, error) {

@@ -218,21 +218,18 @@ func (s DonorService) CaptureReferral(ctx context.Context, code, kind, visitor s
 	if kind != "LINK" && kind != "IRL" {
 		return ReferralCapture{}, payments.ErrFacts
 	}
-	var capture ReferralCapture
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (ReferralCapture, error) {
 		q := queries.New(tx)
 		token, err := captureTouch(ctx, q, code, kind, visitor, now)
 		if err != nil || token == "" {
-			return err
+			return ReferralCapture{}, err
 		}
 		name, err := q.CapturedReferrerName(ctx, HashToken(token))
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
+			return ReferralCapture{}, err
 		}
-		capture = ReferralCapture{Token: token, PublicName: textPointer(name)}
-		return nil
+		return ReferralCapture{Token: token, PublicName: textPointer(name)}, nil
 	})
-	return capture, err
 }
 
 func captureTouch(ctx context.Context, q *queries.Queries, code, kind, visitor string, now time.Time) (string, error) {
