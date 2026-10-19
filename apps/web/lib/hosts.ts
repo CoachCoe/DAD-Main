@@ -5,7 +5,11 @@
 export const UNSERVED_HEADER = "x-dad-unserved";
 
 const hostname = (url?: string | null) => {
-  try { return url ? new URL(url).hostname.toLowerCase() : ""; } catch { return ""; }
+  try {
+    return url ? new URL(url).hostname.toLowerCase() : "";
+  } catch {
+    return "";
+  }
 };
 
 /** Whether a Host header names the staff host, DONOR_STAFF_ORIGIN, which is fixed at build time. */

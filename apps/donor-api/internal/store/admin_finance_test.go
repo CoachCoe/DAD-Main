@@ -27,12 +27,23 @@ func (g *refundGateway) ListPaymentRefunds(context.Context, string) ([]payments.
 	}
 	return []payments.Object{g.refund}, nil
 }
+
 func (g *refundGateway) CreateRefund(_ context.Context, payment string, amount int64, command string) (payments.Object, error) {
 	if g.beforeCreate != nil {
 		g.beforeCreate()
 	}
 	g.creates++
-	g.refund = paymentObject(g.t, map[string]any{"id": "re_" + command, "payment_intent": payment, "currency": "usd", "amount": amount, "status": "succeeded", "metadata": map[string]string{"dad_staff_action": command}})
+	g.refund = paymentObject(
+		g.t,
+		map[string]any{
+			"id":             "re_" + command,
+			"payment_intent": payment,
+			"currency":       "usd",
+			"amount":         amount,
+			"status":         "succeeded",
+			"metadata":       map[string]string{"dad_staff_action": command},
+		},
+	)
 	if g.loseAcknowledgement {
 		g.loseAcknowledgement = false
 		return nil, payments.ErrProcessorUnavailable
@@ -66,7 +77,11 @@ func refundFixture(t *testing.T) (StaffFinanceService, *refundGateway, *workerFi
 		}
 	})
 	gateway := &refundGateway{t: t}
-	return StaffFinanceService{Staff: &StaffService{DB: as(t, dbroles.API)}, Gateway: gateway, Origin: "https://example.org"}, gateway, f, giftID
+	return StaffFinanceService{
+		Staff:   &StaffService{DB: as(t, dbroles.API)},
+		Gateway: gateway,
+		Origin:  "https://example.org",
+	}, gateway, f, giftID
 }
 
 func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
@@ -76,7 +91,13 @@ func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 	_, support := staffFixture(t, pool, "SUPPORT")
 	s, gateway, f, giftID := refundFixture(t)
 	gateway.loseAcknowledgement = true
-	r := StaffFinancialRequest{RequestID: testID(t), DonorID: f.donorID, TargetID: giftID, Amount: 1000, Reason: "Donor requested partial refund"}
+	r := StaffFinancialRequest{
+		RequestID: testID(t),
+		DonorID:   f.donorID,
+		TargetID:  giftID,
+		Amount:    1000,
+		Reason:    "Donor requested partial refund",
+	}
 	if _, err := s.Refund(ctx, support, r); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatal("support permitted refund", err)
 	}
@@ -100,7 +121,9 @@ func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 		t.Fatal("partial refund changed recognition incorrectly", err)
 	}
 	var authorizations, observations int
-	if err = pool.QueryRow(ctx, "SELECT count(*) FILTER (WHERE action='gift.action_authorized'),count(*) FILTER (WHERE action='gift.refund_observed') FROM donor_staff_audit WHERE target=$1", r.RequestID.String()).Scan(&authorizations, &observations); err != nil || authorizations != 1 || observations < 1 {
+	if err = pool.QueryRow(ctx, "SELECT count(*) FILTER (WHERE action='gift.action_authorized'),count(*) FILTER (WHERE action='gift.refund_observed') FROM donor_staff_audit WHERE target=$1", r.RequestID.String()).Scan(&authorizations, &observations); err != nil ||
+		authorizations != 1 ||
+		observations < 1 {
 		t.Fatal("refund audit incomplete", err)
 	}
 	r.Amount = 2000
@@ -116,7 +139,11 @@ func TestStaffRefundCallsProcessorOutsideDonorLock(t *testing.T) {
 	_, finance := staffFixture(t, pool, "FINANCE")
 	f := newWorkerFixture(t, "MONTHLY")
 	checkout := f.checkout(t)
-	f.receive(t, "invoice.payment_succeeded", invoice(checkout.CheckoutID, "in_lock_"+f.donorID.String(), time.Now().Add(-48*time.Hour), true))
+	f.receive(
+		t,
+		"invoice.payment_succeeded",
+		invoice(checkout.CheckoutID, "in_lock_"+f.donorID.String(), time.Now().Add(-48*time.Hour), true),
+	)
 	f.process(t)
 	var giftID pgtype.UUID
 	if err := pool.QueryRow(ctx, "SELECT id FROM donor_gifts WHERE donor_id=$1", f.donorID).Scan(&giftID); err != nil {
@@ -135,7 +162,13 @@ func TestStaffRefundCallsProcessorOutsideDonorLock(t *testing.T) {
 	stalled := newGate(t)
 	gateway := &refundGateway{t: t, beforeCreate: stalled.wait}
 	s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: gateway, Origin: "https://example.org"}
-	r := StaffFinancialRequest{RequestID: testID(t), DonorID: f.donorID, TargetID: giftID, Amount: 1000, Reason: "Donor requested partial refund"}
+	r := StaffFinancialRequest{
+		RequestID: testID(t),
+		DonorID:   f.donorID,
+		TargetID:  giftID,
+		Amount:    1000,
+		Reason:    "Donor requested partial refund",
+	}
 	var result StaffRefund
 	err := whileStalled(t, stalled, func() error {
 		var err error
@@ -146,7 +179,8 @@ func TestStaffRefundCallsProcessorOutsideDonorLock(t *testing.T) {
 		t.Fatal("refund not recorded", result, err)
 	}
 	var status string
-	if err = pool.QueryRow(ctx, "SELECT status FROM donor_staff_actions WHERE id=$1", r.RequestID).Scan(&status); err != nil || status != "OBSERVED" {
+	if err = pool.QueryRow(ctx, "SELECT status FROM donor_staff_actions WHERE id=$1", r.RequestID).Scan(&status); err != nil ||
+		status != "OBSERVED" {
 		t.Fatal("staff action not completed", status, err)
 	}
 }
@@ -156,7 +190,13 @@ func TestStaffRefundRefusesMoreThanTheGiftAndASecondWhileOneIsPending(t *testing
 	_, finance := staffFixture(t, database(t), "FINANCE")
 	s, gateway, f, giftID := refundFixture(t)
 	request := func(amount int64) StaffFinancialRequest {
-		return StaffFinancialRequest{RequestID: testID(t), DonorID: f.donorID, TargetID: giftID, Amount: amount, Reason: "Donor requested a refund"}
+		return StaffFinancialRequest{
+			RequestID: testID(t),
+			DonorID:   f.donorID,
+			TargetID:  giftID,
+			Amount:    amount,
+			Reason:    "Donor requested a refund",
+		}
 	}
 	if _, err := s.Refund(ctx, finance, request(3001)); !errors.Is(err, ErrStaffConflict) || gateway.creates != 0 {
 		t.Fatal("refund above the gift authorized", err, gateway.creates)

@@ -1,11 +1,14 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import ClaimPage from "./claim/Claim";
 import { SignInForm } from "@/components/donor/SignInForm";
-import { AlreadySignedIn } from "./sign-in/AlreadySignedIn";
+import ClaimPage from "./claim/Claim";
 import GivingPage from "./giving/Giving";
+import { AlreadySignedIn } from "./sign-in/AlreadySignedIn";
 
-afterEach(() => { vi.unstubAllGlobals(); window.history.replaceState(null, "", "/"); });
+afterEach(() => {
+  vi.unstubAllGlobals();
+  window.history.replaceState(null, "", "/");
+});
 
 it("removes the token from the address and requires a click before redeeming", async () => {
   window.history.replaceState(null, "", "/account/claim#token=secret-link");
@@ -21,8 +24,10 @@ it("removes the token from the address and requires a click before redeeming", a
 
 it("shows an expired link error and replacement path", async () => {
   window.history.replaceState(null, "", "/account/claim#token=expired-link");
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401,
-    json: async () => ({ detail: "Link expired" }) }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Link expired" }) }),
+  );
   render(<ClaimPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Confirm and sign in" }));
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Link expired"));
@@ -30,8 +35,13 @@ it("shows an expired link error and replacement path", async () => {
 });
 
 it("requests email without granting access", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true,
-    json: async () => ({ message: "If this email matches a donor account, a link will arrive." }) }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ message: "If this email matches a donor account, a link will arrive." }),
+    }),
+  );
   render(<SignInForm />);
   fireEvent.change(screen.getByLabelText("Email"), { target: { value: "donor@example.org" } });
   fireEvent.click(screen.getByRole("button", { name: "Email me a sign-in link" }));
@@ -40,8 +50,9 @@ it("requests email without granting access", async () => {
 });
 
 it("renders protected empty history, and removes it after logout", async () => {
-  const fetch = vi.fn().mockResolvedValue({ ok: true,
-    json: async () => ({ email: "donor@example.org", gifts: [], next_offset: null }) });
+  const fetch = vi
+    .fn()
+    .mockResolvedValue({ ok: true, json: async () => ({ email: "donor@example.org", gifts: [], next_offset: null }) });
   vi.stubGlobal("fetch", fetch);
   render(<GivingPage />);
   expect(await screen.findByText(/No confirmed test gifts/)).toBeVisible();
@@ -67,8 +78,20 @@ it("tells a donor who is already signed in, and stays silent for a visitor", asy
   expect(screen.getByRole("link", { name: "Go to my dashboard" })).toHaveAttribute("href", "/account/dashboard");
   unmount();
   let refused = () => {};
-  const answered = new Promise<void>((resolve) => { refused = resolve; });
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => { refused(); return { detail: "Sign in required" }; } }));
+  const answered = new Promise<void>((resolve) => {
+    refused = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => {
+        refused();
+        return { detail: "Sign in required" };
+      },
+    }),
+  );
   const { container } = render(<AlreadySignedIn />);
   await answered;
   await act(async () => {});
@@ -76,10 +99,25 @@ it("tells a donor who is already signed in, and stays silent for a visitor", asy
 });
 
 it("moves focus to the start of the new page of gifts", async () => {
-  const gift = (id: string) => ({ id, amount_minor: 3000, currency: "USD", frequency: "MONTHLY", paid_at: "2026-10-01T12:00:00Z", refunded_minor: id === "b" ? 1000 : 0, net_minor: 3000 });
-  const fetch = vi.fn()
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ email: "donor@example.org", gifts: [gift("a")], next_offset: 50 }) })
-    .mockResolvedValueOnce({ ok: true, json: async () => ({ email: "donor@example.org", gifts: [gift("b")], next_offset: null }) });
+  const gift = (id: string) => ({
+    id,
+    amount_minor: 3000,
+    currency: "USD",
+    frequency: "MONTHLY",
+    paid_at: "2026-10-01T12:00:00Z",
+    refunded_minor: id === "b" ? 1000 : 0,
+    net_minor: 3000,
+  });
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ email: "donor@example.org", gifts: [gift("a")], next_offset: 50 }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ email: "donor@example.org", gifts: [gift("b")], next_offset: null }),
+    });
   vi.stubGlobal("fetch", fetch);
   render(<GivingPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));

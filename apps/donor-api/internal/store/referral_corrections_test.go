@@ -58,7 +58,8 @@ func TestReferralCorrectionsTransferTotalsAndAuditAtomically(t *testing.T) {
 				if c.newOwner != "" {
 					wantOwner = h.donor(c.newOwner)
 				}
-				if got.ReferrerID != wantOwner || got.ReferralKind.String != c.newKind || got.FirstGiftID.String != h.objects["earlier"] || got.NetMinor.Int64 != 6000 {
+				if got.ReferrerID != wantOwner || got.ReferralKind.String != c.newKind || got.FirstGiftID.String != h.objects["earlier"] ||
+					got.NetMinor.Int64 != 6000 {
 					t.Fatalf("corrected projection %+v", got)
 				}
 				for _, owner := range []pgtype.UUID{alice, cara} {
@@ -78,7 +79,8 @@ func TestReferralCorrectionsTransferTotalsAndAuditAtomically(t *testing.T) {
 							want.IRL, want.IRLMinor = 1, 6000
 						}
 					}
-					if got.ReferredLinkCount != want.Link || got.ReferredIrlCount != want.IRL || got.ReferredLinkMinor != want.LinkMinor || got.ReferredIrlMinor != want.IRLMinor {
+					if got.ReferredLinkCount != want.Link || got.ReferredIrlCount != want.IRL || got.ReferredLinkMinor != want.LinkMinor ||
+						got.ReferredIrlMinor != want.IRLMinor {
 						t.Fatalf("owner %s: totals %+v, want %+v", owner.String(), got, want)
 					}
 				}
@@ -87,19 +89,25 @@ func TestReferralCorrectionsTransferTotalsAndAuditAtomically(t *testing.T) {
 			var oldOwner, newOwner pgtype.UUID
 			var oldKind, newKind pgtype.Text
 			var rules, count int
-			if err = tx.QueryRow(ctx, "SELECT count(*) FROM donor_referral_corrections WHERE donor_id=$1", ben).Scan(&count); err != nil || count != 1 {
+			if err = tx.QueryRow(ctx, "SELECT count(*) FROM donor_referral_corrections WHERE donor_id=$1", ben).Scan(&count); err != nil ||
+				count != 1 {
 				t.Fatalf("corrections %d: %v", count, err)
 			}
 			if err = tx.QueryRow(ctx, "SELECT old_first_gift_id,new_first_gift_id,old_referrer_id,new_referrer_id,old_kind,new_kind,rules_version FROM donor_referral_corrections WHERE donor_id=$1", ben).Scan(&oldGift, &newGift, &oldOwner, &newOwner, &oldKind, &newKind, &rules); err != nil {
 				t.Fatal(err)
 			}
-			if oldGift != h.objects["later"] || newGift != h.objects["earlier"] || oldOwner != h.donors[c.oldOwner] || newOwner != h.donors[c.newOwner] || oldKind.String != c.oldKind || newKind.String != c.newKind || rules != projectionRules {
+			if oldGift != h.objects["later"] || newGift != h.objects["earlier"] || oldOwner != h.donors[c.oldOwner] ||
+				newOwner != h.donors[c.newOwner] ||
+				oldKind.String != c.oldKind ||
+				newKind.String != c.newKind ||
+				rules != projectionRules {
 				t.Fatal("correction lost previous or current attribution")
 			}
 			if err = tx.Rollback(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_referral_corrections WHERE donor_id=$1", ben).Scan(&count); err != nil || count != 0 {
+			if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_referral_corrections WHERE donor_id=$1", ben).Scan(&count); err != nil ||
+				count != 0 {
 				t.Fatal("correction survived rollback", err)
 			}
 		})
@@ -119,7 +127,17 @@ func TestCorrectedReferralNoticesRespectLegacyDedupAndCurrentRelationship(t *tes
 	ben, alice, cara := h.donor("ben"), h.donor("alice"), h.donor("cara")
 	appDevice(t, tx, alice, push.IOS, iosToken, now.Add(24*time.Hour))
 	appDevice(t, tx, cara, push.Android, androidToken, now.Add(24*time.Hour))
-	h.gift(recognition.Gift{ID: "later", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: now.Add(-time.Hour), Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: now.Add(time.Hour)}})
+	h.gift(
+		recognition.Gift{
+			ID:        "later",
+			DonorID:   "ben",
+			Amount:    3000,
+			Currency:  "USD",
+			Frequency: "ONE_TIME",
+			PaidAt:    now.Add(-time.Hour),
+			Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: now.Add(time.Hour)},
+		},
+	)
 	if _, err = projectFacts(ctx, h.q, ben, now); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +145,17 @@ func TestCorrectedReferralNoticesRespectLegacyDedupAndCurrentRelationship(t *tes
 	if err = queueMessage(ctx, h.q, alice, "REFERRAL", "referral:"+ben.String(), payload, now); err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, tx, `INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at) VALUES ($1,$2,'REFERRAL_CONVERTED',$3,json_build_object('referred_id',$4::text,'kind','LINK'),$5,$6)`, testID(t), alice, "push:referral:"+ben.String(), ben.String(), now, now.Add(pushLifetime))
+	mustExec(
+		t,
+		tx,
+		`INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at) VALUES ($1,$2,'REFERRAL_CONVERTED',$3,json_build_object('referred_id',$4::text,'kind','LINK'),$5,$6)`,
+		testID(t),
+		alice,
+		"push:referral:"+ben.String(),
+		ben.String(),
+		now,
+		now.Add(pushLifetime),
+	)
 	actAs(t, tx, dbroles.ProjectionWorker)
 	if _, err = refreshProjection(ctx, tx, ben, now); err != nil {
 		t.Fatal(err)
@@ -135,7 +163,8 @@ func TestCorrectedReferralNoticesRespectLegacyDedupAndCurrentRelationship(t *tes
 	assertCount := func(owner pgtype.UUID, want int) {
 		t.Helper()
 		var count int
-		if err := tx.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 AND kind='REFERRAL'", owner).Scan(&count); err != nil || count != want {
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 AND kind='REFERRAL'", owner).Scan(&count); err != nil ||
+			count != want {
 			t.Fatalf("email count %d, want %d: %v", count, want, err)
 		}
 		if got := len(pushIntents(t, tx, owner)); got != want {
@@ -144,7 +173,17 @@ func TestCorrectedReferralNoticesRespectLegacyDedupAndCurrentRelationship(t *tes
 	}
 	assertCount(alice, 1)
 	mustExec(t, tx, "RESET ROLE")
-	h.gift(recognition.Gift{ID: "earlier", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: now.Add(-24 * time.Hour), Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: now.Add(time.Hour)}})
+	h.gift(
+		recognition.Gift{
+			ID:        "earlier",
+			DonorID:   "ben",
+			Amount:    3000,
+			Currency:  "USD",
+			Frequency: "ONE_TIME",
+			PaidAt:    now.Add(-24 * time.Hour),
+			Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: now.Add(time.Hour)},
+		},
+	)
 	actAs(t, tx, dbroles.ProjectionWorker)
 	for range 2 {
 		if _, err = refreshProjection(ctx, tx, ben, now); err != nil {
@@ -154,11 +193,21 @@ func TestCorrectedReferralNoticesRespectLegacyDedupAndCurrentRelationship(t *tes
 	assertCount(alice, 1)
 	assertCount(cara, 1)
 	// Delivery rechecks eligibility even for an intent prepared before correction.
-	reason, err := referralLapsed(ctx, h.q, paymentObject(t, map[string]any{"referred_id": ben.String(), "kind": "LINK"}), queries.Donor{ID: alice})
+	reason, err := referralLapsed(
+		ctx,
+		h.q,
+		paymentObject(t, map[string]any{"referred_id": ben.String(), "kind": "LINK"}),
+		queries.Donor{ID: alice},
+	)
 	if err != nil || reason == "" {
 		t.Fatalf("obsolete notice remains deliverable: %q %v", reason, err)
 	}
-	reason, err = referralLapsed(ctx, h.q, paymentObject(t, map[string]any{"referred_id": ben.String(), "kind": "IRL"}), queries.Donor{ID: cara})
+	reason, err = referralLapsed(
+		ctx,
+		h.q,
+		paymentObject(t, map[string]any{"referred_id": ben.String(), "kind": "IRL"}),
+		queries.Donor{ID: cara},
+	)
 	if err != nil || reason != "" {
 		t.Fatalf("correct notice suppressed: %q %v", reason, err)
 	}
@@ -174,11 +223,31 @@ func TestRefundDoesNotReplaceTheEarliestPaymentWhenCorrectingAttribution(t *test
 	h := newHistoryFixture(t, tx)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	ben, alice, cara := h.donor("ben"), h.donor("alice"), h.donor("cara")
-	h.gift(recognition.Gift{ID: "later", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: now.Add(-time.Hour), Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: now.Add(time.Hour)}})
+	h.gift(
+		recognition.Gift{
+			ID:        "later",
+			DonorID:   "ben",
+			Amount:    3000,
+			Currency:  "USD",
+			Frequency: "ONE_TIME",
+			PaidAt:    now.Add(-time.Hour),
+			Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: now.Add(time.Hour)},
+		},
+	)
 	if _, err = projectFacts(ctx, h.q, ben, now); err != nil {
 		t.Fatal(err)
 	}
-	h.gift(recognition.Gift{ID: "earlier", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: now.Add(-24 * time.Hour), Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: now.Add(time.Hour)}})
+	h.gift(
+		recognition.Gift{
+			ID:        "earlier",
+			DonorID:   "ben",
+			Amount:    3000,
+			Currency:  "USD",
+			Frequency: "ONE_TIME",
+			PaidAt:    now.Add(-24 * time.Hour),
+			Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: now.Add(time.Hour)},
+		},
+	)
 	h.refund(recognition.Refund{GiftID: "earlier", Amount: 3000, Status: "SUCCEEDED", UpdatedAt: now.Add(-time.Minute)})
 	actAs(t, tx, dbroles.ProjectionWorker)
 	p, err := projectFacts(ctx, h.q, ben, now)

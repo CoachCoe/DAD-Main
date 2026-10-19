@@ -54,7 +54,7 @@ func (g *StripeGateway) ListInvoicePayments(ctx context.Context, invoice, paymen
 	if (invoice == "") == (payment == "") {
 		return nil, ErrFacts
 	}
-	if err := WaitReconciliationRead(ctx); err != nil {
+	if err := g.acquire(ctx, BucketReconcile); err != nil {
 		return nil, err
 	}
 	params := &stripe.InvoicePaymentListParams{Status: stripe.String("paid"), ListParams: stripe.ListParams{Limit: stripe.Int64(100)}}
@@ -97,15 +97,6 @@ func (g *StripeGateway) ListInvoicePayments(ctx context.Context, invoice, paymen
 	return rows, nil
 }
 
-// WaitReconciliationRead spends one token from the shared reconcile budget, so
-// the daily job's reads — list pages and the per-intent/invoice verification
-// calls it makes through otherwise worker-bucketed gateway methods — all draw
-// from reconcile's slice of the Stripe ceiling and leave worker and staff
-// capacity intact. It blocks until a token is available or ctx is done.
-func WaitReconciliationRead(ctx context.Context) error {
-	return DefaultRateBudget().Acquire(ctx, BucketReconcile)
-}
-
 func ReconciliationFacts(o Object) Object {
 	out := Object{}
 	for _, key := range []string{"id", "payment_intent", "amount", "amount_captured", "currency", "status", "paid", "captured", "livemode", "created"} {
@@ -118,11 +109,10 @@ func ReconciliationFacts(o Object) Object {
 
 // StripeGateway calls Stripe in test mode. A failed call is reported as
 // ErrProcessorUnavailable, never as the SDK error, which can carry donor inputs.
-// budget bounds how fast this process spends the shared Stripe request ceiling,
-// reserving staff capacity by limiting worker self-consumption.
+// Every call first spends from budget.
 type StripeGateway struct {
 	client *stripe.Client
-	budget *RateBudget
+	budget Budget
 }
 
 func NewStripeGateway(key string) (*StripeGateway, error) {
@@ -141,6 +131,10 @@ func NewStripeGateway(key string) (*StripeGateway, error) {
 	return &StripeGateway{client: stripe.NewClient(key, stripe.WithBackends(backends)), budget: DefaultRateBudget()}, nil
 }
 
+// UseBudget replaces the process-local budget the gateway starts with, such as
+// with one shared by every replica.
+func (g *StripeGateway) UseBudget(budget Budget) { g.budget = budget }
+
 func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key string) (RemoteCheckout, error) {
 	var params stripe.CheckoutSessionCreateParams
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -151,7 +145,7 @@ func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key stri
 		return RemoteCheckout{}, ErrProcessorUnavailable
 	}
 	params.SetIdempotencyKey(key)
-	if err := g.acquire(ctx, BucketStaff); err != nil {
+	if err := g.acquire(ctx, BucketCheckout); err != nil {
 		return RemoteCheckout{}, err
 	}
 	session, err := g.client.V1CheckoutSessions.Create(ctx, &params)
@@ -178,16 +172,42 @@ func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, param
 	}
 	return nil
 }
+
 func (g *StripeGateway) ScheduleCancellation(ctx context.Context, id string, end int64, key string) error {
 	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{CancelAt: stripe.Int64(end)}, key)
 }
+
 func (g *StripeGateway) PauseCollection(ctx context.Context, id string, resumes int64, key string) error {
-	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{PauseCollection: &stripe.SubscriptionUpdatePauseCollectionParams{Behavior: stripe.String("void"), ResumesAt: stripe.Int64(resumes)}}, key)
+	return g.mutateSubscription(
+		ctx,
+		id,
+		&stripe.SubscriptionUpdateParams{
+			PauseCollection: &stripe.SubscriptionUpdatePauseCollectionParams{
+				Behavior:  stripe.String("void"),
+				ResumesAt: stripe.Int64(resumes),
+			},
+		},
+		key,
+	)
 }
+
 func (g *StripeGateway) ChangeMonthlyAmount(ctx context.Context, id, item, product string, amount int64, key string) error {
-	price := &stripe.SubscriptionUpdateItemPriceDataParams{Currency: stripe.String("usd"), Product: stripe.String(product), Recurring: &stripe.SubscriptionUpdateItemPriceDataRecurringParams{Interval: stripe.String("month")}, UnitAmount: stripe.Int64(amount)}
-	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{Items: []*stripe.SubscriptionUpdateItemParams{{ID: stripe.String(item), Quantity: stripe.Int64(1), PriceData: price}}}, key)
+	price := &stripe.SubscriptionUpdateItemPriceDataParams{
+		Currency:   stripe.String("usd"),
+		Product:    stripe.String(product),
+		Recurring:  &stripe.SubscriptionUpdateItemPriceDataRecurringParams{Interval: stripe.String("month")},
+		UnitAmount: stripe.Int64(amount),
+	}
+	return g.mutateSubscription(
+		ctx,
+		id,
+		&stripe.SubscriptionUpdateParams{
+			Items: []*stripe.SubscriptionUpdateItemParams{{ID: stripe.String(item), Quantity: stripe.Int64(1), PriceData: price}},
+		},
+		key,
+	)
 }
+
 func (g *StripeGateway) UpdateSubscriptionPaymentMethod(ctx context.Context, id, method, key string) error {
 	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{DefaultPaymentMethod: stripe.String(method)}, key)
 }
@@ -221,6 +241,7 @@ func (g *StripeGateway) RetrieveCheckout(ctx context.Context, id string) (Object
 	}
 	return rawObject(result.LastResponse)
 }
+
 func (g *StripeGateway) RetrieveSetupIntent(ctx context.Context, id string) (Object, error) {
 	if err := g.acquire(ctx, BucketWorker); err != nil {
 		return nil, err
@@ -246,6 +267,7 @@ func (g *StripeGateway) RetrievePaymentIntent(ctx context.Context, id string) (O
 	}
 	return rawObject(result.LastResponse)
 }
+
 func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, error) {
 	if err := g.acquire(ctx, BucketWorker); err != nil {
 		return nil, err
@@ -256,6 +278,7 @@ func (g *StripeGateway) RetrieveRefund(ctx context.Context, id string) (Object, 
 	}
 	return rawObject(result.LastResponse)
 }
+
 func (g *StripeGateway) RetrieveSubscription(ctx context.Context, id string) (Object, error) {
 	if err := g.acquire(ctx, BucketWorker); err != nil {
 		return nil, err
@@ -268,7 +291,12 @@ func (g *StripeGateway) RetrieveSubscription(ctx context.Context, id string) (Ob
 }
 
 func (g *StripeGateway) CreateRefund(ctx context.Context, payment string, amount int64, command string) (Object, error) {
-	params := &stripe.RefundCreateParams{PaymentIntent: stripe.String(payment), Amount: stripe.Int64(amount), Reason: stripe.String("requested_by_customer"), Metadata: map[string]string{"dad_staff_action": command}}
+	params := &stripe.RefundCreateParams{
+		PaymentIntent: stripe.String(payment),
+		Amount:        stripe.Int64(amount),
+		Reason:        stripe.String("requested_by_customer"),
+		Metadata:      map[string]string{"dad_staff_action": command},
+	}
 	params.SetIdempotencyKey("dad-staff-refund-" + command)
 	if err := g.acquire(ctx, BucketStaff); err != nil {
 		return nil, err
@@ -281,48 +309,18 @@ func (g *StripeGateway) CreateRefund(ctx context.Context, payment string, amount
 }
 
 func (g *StripeGateway) ListPaymentRefunds(ctx context.Context, payment string) ([]Object, error) {
-	result := []Object{}
-	after := ""
-	for range 10 {
+	return g.paginate(ctx, BucketStaff, 10, ErrProcessorUnavailable, func(after string) listPage {
 		params := &stripe.RefundListParams{PaymentIntent: stripe.String(payment), ListParams: stripe.ListParams{Limit: stripe.Int64(100)}}
 		if after != "" {
 			params.StartingAfter = stripe.String(after)
 		}
-		if err := g.acquire(ctx, BucketStaff); err != nil {
-			return nil, err
-		}
-		page := g.client.V1Refunds.List(ctx, params)
-		if page.Err() != nil {
-			return nil, ErrProcessorUnavailable
-		}
-		raw, err := rawObject(page.LastResponse())
-		if err != nil {
-			return nil, err
-		}
-		rows, err := raw.Array("data")
-		if err != nil || len(rows) > 100 {
-			return nil, ErrFacts
-		}
-		result = append(result, rows...)
-		if raw.BoolIs("has_more", false) {
-			return result, nil
-		}
-		if !raw.BoolIs("has_more", true) || len(rows) == 0 {
-			return nil, ErrFacts
-		}
-		last := rows[len(rows)-1].Text("id")
-		if last == "" || last == after {
-			return nil, ErrFacts
-		}
-		after = last
-	}
-	return nil, ErrProcessorUnavailable
+		return g.client.V1Refunds.List(ctx, params)
+	}, func(row Object) (Object, error) { return row, nil })
 }
 
 // ListChargesByCreated lists every charge Stripe created in [start, end],
-// read-only, for the daily reconciliation job. It pages exactly as
-// ListPaymentRefunds does and rejects any live-mode object, so this test-only
-// build never reconciles a live fact.
+// read-only, for the daily reconciliation job. It rejects any live-mode
+// object, so this test-only build never reconciles a live fact.
 func (g *StripeGateway) ListChargesByCreated(ctx context.Context, start, end time.Time) ([]Object, error) {
 	return g.listByCreated(ctx, start, end, func(ctx context.Context, created *stripe.RangeQueryParams, after string) listPage {
 		params := &stripe.ChargeListParams{CreatedRange: created, ListParams: stripe.ListParams{Limit: stripe.Int64(100)}}
@@ -352,21 +350,45 @@ type listPage interface {
 	LastResponse() *stripe.APIResponse
 }
 
-// listByCreated runs the shared bounded paging loop ListPaymentRefunds proved:
-// Limit 100, a created range, starting_after, has_more termination, and the
-// non-advancing-cursor guard. Each returned object must be livemode:false.
-func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time, list func(context.Context, *stripe.RangeQueryParams, string) listPage) ([]Object, error) {
+// listByCreated lists the objects created in [start, end] for reconciliation,
+// each of which must be livemode:false.
+func (g *StripeGateway) listByCreated(
+	ctx context.Context,
+	start, end time.Time,
+	list func(context.Context, *stripe.RangeQueryParams, string) listPage,
+) ([]Object, error) {
 	created := &stripe.RangeQueryParams{GreaterThanOrEqual: start.Unix(), LesserThanOrEqual: end.Unix()}
-	result := []Object{}
-	after := ""
-	// A sub-day slice should fit well within this bound; a slice that reaches it
+	// A sub-day slice should fit well within the cap; a slice that reaches it
 	// returns ErrListPageCap so the caller halves the range and retries, rather
 	// than silently truncating or failing a legitimately busy day.
-	for range listPageCap {
-		if err := WaitReconciliationRead(ctx); err != nil {
+	return g.paginate(ctx, BucketReconcile, listPageCap, ErrListPageCap, func(after string) listPage {
+		return list(ctx, created, after)
+	}, func(row Object) (Object, error) {
+		if !row.BoolIs("livemode", false) {
+			return nil, ErrFacts
+		}
+		return ReconciliationFacts(row), nil
+	})
+}
+
+// paginate reads at most pages pages of 100 rows, following starting_after
+// until has_more is false, and keeps each row as keep returns it. A page that
+// does not advance the cursor is refused; a longer list returns exhausted.
+func (g *StripeGateway) paginate(
+	ctx context.Context,
+	bucket string,
+	pages int,
+	exhausted error,
+	list func(after string) listPage,
+	keep func(Object) (Object, error),
+) ([]Object, error) {
+	result := []Object{}
+	after := ""
+	for range pages {
+		if err := g.acquire(ctx, bucket); err != nil {
 			return nil, err
 		}
-		page := list(ctx, created, after)
+		page := list(after)
 		if page.Err() != nil {
 			return nil, ErrProcessorUnavailable
 		}
@@ -379,12 +401,11 @@ func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time,
 			return nil, ErrFacts
 		}
 		for _, row := range rows {
-			if !row.BoolIs("livemode", false) {
-				return nil, ErrFacts
+			kept, err := keep(row)
+			if err != nil {
+				return nil, err
 			}
-		}
-		for _, row := range rows {
-			result = append(result, ReconciliationFacts(row))
+			result = append(result, kept)
 		}
 		if raw.BoolIs("has_more", false) {
 			return result, nil
@@ -398,7 +419,7 @@ func (g *StripeGateway) listByCreated(ctx context.Context, start, end time.Time,
 		}
 		after = last
 	}
-	return nil, ErrListPageCap
+	return nil, exhausted
 }
 
 // listPageCap bounds pages per listByCreated call. At 100 rows per page it caps

@@ -28,7 +28,14 @@ type paymentUpdateFacts struct {
 // never recorded as a gift. Once verified, the card becomes the subscription's
 // default under the update's stable idempotency key, so the durable command
 // survives a lost provider acknowledgement or DB rollback.
-func fetchPaymentUpdate(ctx context.Context, q *queries.Queries, gateway payments.PaymentMethodGateway, row queries.DonorPaymentUpdate, sessionID string, now time.Time) (paymentUpdateFacts, error) {
+func fetchPaymentUpdate(
+	ctx context.Context,
+	q *queries.Queries,
+	gateway payments.PaymentMethodGateway,
+	row queries.DonorPaymentUpdate,
+	sessionID string,
+	now time.Time,
+) (paymentUpdateFacts, error) {
 	if sessionID == "" {
 		sessionID = row.StripeSessionID.String
 	}
@@ -55,13 +62,21 @@ func fetchPaymentUpdate(ctx context.Context, q *queries.Queries, gateway payment
 // verifiedSetup returns the card a completed setup session verified for the
 // update's customer, or the status of a session that did not complete: empty
 // while it is still open.
-func verifiedSetup(ctx context.Context, gateway payments.PaymentMethodGateway, row queries.DonorPaymentUpdate, sessionID string) (string, string, error) {
+func verifiedSetup(
+	ctx context.Context,
+	gateway payments.PaymentMethodGateway,
+	row queries.DonorPaymentUpdate,
+	sessionID string,
+) (string, string, error) {
 	remote, err := gateway.RetrieveCheckout(ctx, sessionID)
 	if err != nil {
 		return "", "", err
 	}
 	metadata, err := remote.Object("metadata")
-	if err != nil || metadata.Text("dad_payment_update_id") != row.ID.String() || remote.Text("id") != sessionID || !remote.BoolIs("livemode", false) || remote.Text("mode") != "setup" || remote.Text("customer") != row.CustomerID {
+	if err != nil || metadata.Text("dad_payment_update_id") != row.ID.String() || remote.Text("id") != sessionID ||
+		!remote.BoolIs("livemode", false) ||
+		remote.Text("mode") != "setup" ||
+		remote.Text("customer") != row.CustomerID {
 		return "", "", payments.ErrFacts
 	}
 	switch remote.Text("status") {
@@ -85,7 +100,15 @@ func verifiedSetup(ctx context.Context, gateway payments.PaymentMethodGateway, r
 	var types []string
 	typesErr := json.Unmarshal(setup["payment_method_types"], &types)
 	method := setup.Text("payment_method")
-	if err != nil || metadata.Text("dad_payment_update_id") != row.ID.String() || setup.Text("id") != setupID || !setup.BoolIs("livemode", false) || setup.Text("customer") != row.CustomerID || setup.Text("status") != "succeeded" || setup.Text("usage") != "off_session" || typesErr != nil || len(types) != 1 || types[0] != "card" || !strings.HasPrefix(method, "pm_") {
+	if err != nil || metadata.Text("dad_payment_update_id") != row.ID.String() || setup.Text("id") != setupID ||
+		!setup.BoolIs("livemode", false) ||
+		setup.Text("customer") != row.CustomerID ||
+		setup.Text("status") != "succeeded" ||
+		setup.Text("usage") != "off_session" ||
+		typesErr != nil ||
+		len(types) != 1 ||
+		types[0] != "card" ||
+		!strings.HasPrefix(method, "pm_") {
 		return "", "", payments.ErrFacts
 	}
 	return method, "", nil
@@ -93,7 +116,14 @@ func verifiedSetup(ctx context.Context, gateway payments.PaymentMethodGateway, r
 
 // applyDefaultMethod makes method the update's subscription's default card
 // and returns the update's resulting status.
-func applyDefaultMethod(ctx context.Context, q *queries.Queries, gateway payments.PaymentMethodGateway, row queries.DonorPaymentUpdate, method string, now time.Time) (string, error) {
+func applyDefaultMethod(
+	ctx context.Context,
+	q *queries.Queries,
+	gateway payments.PaymentMethodGateway,
+	row queries.DonorPaymentUpdate,
+	method string,
+	now time.Time,
+) (string, error) {
 	attempt, err := q.AttemptSnapshotByID(ctx, row.AttemptID)
 	if err != nil {
 		return "", err
@@ -112,7 +142,10 @@ func applyDefaultMethod(ctx context.Context, q *queries.Queries, gateway payment
 			return nil, err
 		}
 		metadata, err := sub.Object("metadata")
-		if err != nil || metadata.Text("dad_checkout_id") != draft.ID.String() || sub.Text("id") != subscription || !sub.BoolIs("livemode", false) || !strings.HasPrefix(sub.Text("customer"), "cus_") || sub.Text("customer") != row.CustomerID {
+		if err != nil || metadata.Text("dad_checkout_id") != draft.ID.String() || sub.Text("id") != subscription ||
+			!sub.BoolIs("livemode", false) ||
+			!strings.HasPrefix(sub.Text("customer"), "cus_") ||
+			sub.Text("customer") != row.CustomerID {
 			return nil, payments.ErrFacts
 		}
 		return sub, nil
@@ -147,7 +180,13 @@ func applyDefaultMethod(ctx context.Context, q *queries.Queries, gateway payment
 
 // applyPaymentUpdate records fetched facts on the update, which the caller has
 // locked along with its donor.
-func applyPaymentUpdate(ctx context.Context, q *queries.Queries, row queries.DonorPaymentUpdate, facts paymentUpdateFacts, now time.Time) (string, error) {
+func applyPaymentUpdate(
+	ctx context.Context,
+	q *queries.Queries,
+	row queries.DonorPaymentUpdate,
+	facts paymentUpdateFacts,
+	now time.Time,
+) (string, error) {
 	if terminalPaymentUpdate(row.Status) {
 		return row.Status, nil
 	}
@@ -164,6 +203,15 @@ func applyPaymentUpdate(ctx context.Context, q *queries.Queries, row queries.Don
 	if status == "APPLIED" {
 		completed = timestamp(now)
 	}
-	err := q.SavePaymentUpdate(ctx, queries.SavePaymentUpdateParams{ID: row.ID, StripeSessionID: text(facts.session), Status: status, HostedUrl: url, CompletedAt: completed})
+	err := q.SavePaymentUpdate(
+		ctx,
+		queries.SavePaymentUpdateParams{
+			ID:              row.ID,
+			StripeSessionID: text(facts.session),
+			Status:          status,
+			HostedUrl:       url,
+			CompletedAt:     completed,
+		},
+	)
 	return status, err
 }

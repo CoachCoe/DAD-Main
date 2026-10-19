@@ -7,7 +7,9 @@ const response = (value: unknown) => ({ ok: true, json: async () => value });
 afterEach(() => vi.unstubAllGlobals());
 
 it("requires explicit confirmation and sends the displayed renewal date", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response(options))
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response(options))
     .mockResolvedValueOnce(response({ ...options, request_id: "command", confirmed: true }));
   vi.stubGlobal("fetch", fetch);
   render(<ResumePage />);
@@ -18,7 +20,10 @@ it("requires explicit confirmation and sends the displayed renewal date", async 
   expect(screen.getByRole("heading", { name: "Confirm resumption" })).toHaveFocus();
   fireEvent.click(screen.getByRole("button", { name: "Confirm resume giving" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Resumption confirmed for"));
-  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ pause_id: options.pause_id, next_renewal: options.next_renewal });
+  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+    pause_id: options.pause_id,
+    next_renewal: options.next_renewal,
+  });
 });
 
 it("retains the same request key when a response is lost", async () => {
@@ -35,7 +40,9 @@ it("retains the same request key when a response is lost", async () => {
 });
 
 it("can retry a saved request from another browser visit", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response({ ...options, state: "saved", request_id: "saved-command", confirmed: false }))
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response({ ...options, state: "saved", request_id: "saved-command", confirmed: false }))
     .mockResolvedValueOnce(response({ ...options, request_id: "saved-command", confirmed: true }));
   vi.stubGlobal("fetch", fetch);
   render(<ResumePage />);
@@ -52,9 +59,15 @@ it("does not offer resumption for an unavailable or cancelled pause", async () =
 });
 
 it("offers sign-in when the donor session expired", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }),
+  );
   render(<ResumePage />);
-  expect(await screen.findByRole("link", { name: "Sign in to manage your giving" })).toHaveAttribute("href", "/account/sign-in");
+  expect(await screen.findByRole("link", { name: "Sign in to manage your giving" })).toHaveAttribute(
+    "href",
+    "/account/sign-in",
+  );
 });
 
 it("returns focus to the opening control when backing out", async () => {

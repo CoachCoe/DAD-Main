@@ -26,6 +26,8 @@ export function useStepFocus<Trigger extends HTMLElement = HTMLButtonElement>(ac
  */
 export function useFocusOnSuccess(succeeded: boolean) {
   const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { if (succeeded) heading.current?.focus(); }, [succeeded]);
+  useEffect(() => {
+    if (succeeded) heading.current?.focus();
+  }, [succeeded]);
   return heading;
 }

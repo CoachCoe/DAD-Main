@@ -16,7 +16,14 @@ func TestPartnerInquiryIsIdempotentAndShownToStaff(t *testing.T) {
 	id := testID(t)
 	_, admin := staffFixture(t, pool, "ADMIN")
 	t.Cleanup(func() { mustExec(t, pool, "DELETE FROM donor_partner_signups WHERE id=$1", id) })
-	inquiry := PartnerRequest{Organization: "Org", Name: "Name", Email: "partner-" + id.String() + "@example.org", Website: "https://partner.example.org", Message: "Hello", Consent: true}
+	inquiry := PartnerRequest{
+		Organization: "Org",
+		Name:         "Name",
+		Email:        "partner-" + id.String() + "@example.org",
+		Website:      "https://partner.example.org",
+		Message:      "Hello",
+		Consent:      true,
+	}
 	for range 2 {
 		if err := (PartnerService{DB: api}).Signup(ctx, id, inquiry); err != nil {
 			t.Fatalf("signup or its retry: %v", err)

@@ -24,12 +24,16 @@ func (s walletDonor) Sharing(_ context.Context, token string) (store.Sharing, er
 	}
 	return store.Sharing{IRLLink: s.link}, nil
 }
+
 func TestWalletHTTPRequiresSessionOriginAndSharing(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
-	issuer := &wallet.Issuer{Origin: "https://dad.example", Google: &wallet.Google{Email: "wallet@test.iam.gserviceaccount.com", ClassID: "123.dad", Key: key}}
+	issuer := &wallet.Issuer{
+		Origin: "https://dad.example",
+		Google: &wallet.Google{Email: "wallet@test.iam.gserviceaccount.com", ClassID: "123.dad", Key: key},
+	}
 	link := "https://dad.example/r/code?via=irl"
 	for _, tc := range []struct {
 		path, method, token, origin string
@@ -50,8 +54,18 @@ func TestWalletHTTPRequiresSessionOriginAndSharing(t *testing.T) {
 		request.AddCookie(&http.Cookie{Name: "dad_donor_session", Value: tc.token})
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, request)
-		if response.Code != tc.status || response.Header().Get("Cache-Control") != "no-store" || strings.Contains(response.Body.String(), "PRIVATE KEY") {
-			t.Errorf("%s %s session %q origin %q: got %d %s, want %d", tc.method, tc.path, tc.token, tc.origin, response.Code, response.Body, tc.status)
+		if response.Code != tc.status || response.Header().Get("Cache-Control") != "no-store" ||
+			strings.Contains(response.Body.String(), "PRIVATE KEY") {
+			t.Errorf(
+				"%s %s session %q origin %q: got %d %s, want %d",
+				tc.method,
+				tc.path,
+				tc.token,
+				tc.origin,
+				response.Code,
+				response.Body,
+				tc.status,
+			)
 		}
 		if tc.status == 200 && tc.method == "POST" && !strings.Contains(response.Body.String(), "https://pay.google.com/gp/v/save/") {
 			t.Errorf("%s: got %s, want a signed Google Wallet link", tc.path, response.Body)

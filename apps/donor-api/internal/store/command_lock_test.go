@@ -25,10 +25,12 @@ func newGate(t *testing.T) *gate {
 	t.Cleanup(g.open)
 	return g
 }
+
 func (g *gate) wait() {
 	close(g.started)
 	<-g.release
 }
+
 func (g *gate) open() { g.once.Do(func() { close(g.release) }) }
 
 // assertDonorUnlocked fails unless another transaction can take the donor
@@ -118,7 +120,12 @@ func TestRecurringCommandsCallProcessorOutsideDonorLock(t *testing.T) {
 				target = c.prepare(r)
 			}
 			before := len(r.sub.keys)
-			err := whileStalled(t, r.sub.stall(t), func() error { return c.run(r, target) }, func() { assertDonorUnlocked(t, pool, r.donorID) })
+			err := whileStalled(
+				t,
+				r.sub.stall(t),
+				func() error { return c.run(r, target) },
+				func() { assertDonorUnlocked(t, pool, r.donorID) },
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -144,7 +151,8 @@ func TestOutstandingProcessorRequestBlocksOtherSubscriptionCommands(t *testing.T
 			t.Error("duplicate request raced its outstanding processor call", err)
 		}
 		var holder pgtype.UUID
-		if err := pool.QueryRow(ctx, "SELECT command_id FROM donor_subscription_leases WHERE attempt_id=$1", r.attempt).Scan(&holder); err != nil || holder != pause.RequestID {
+		if err := pool.QueryRow(ctx, "SELECT command_id FROM donor_subscription_leases WHERE attempt_id=$1", r.attempt).Scan(&holder); err != nil ||
+			holder != pause.RequestID {
 			t.Error("duplicate request released the active lease", holder, err)
 		}
 		if _, err := r.service.ChangeAmount(ctx, r.token, amount); !errors.Is(err, ErrSubscriptionConflict) {
@@ -161,7 +169,8 @@ func TestOutstandingProcessorRequestBlocksOtherSubscriptionCommands(t *testing.T
 		t.Fatalf("processor mutations: %v", r.sub.keys)
 	}
 	var rejected int
-	if err = pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM donor_amount_changes WHERE id=$1)+(SELECT count(*) FROM donor_cancellations WHERE id=$2)", amount.RequestID, cancel.RequestID).Scan(&rejected); err != nil || rejected != 0 {
+	if err = pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM donor_amount_changes WHERE id=$1)+(SELECT count(*) FROM donor_cancellations WHERE id=$2)", amount.RequestID, cancel.RequestID).Scan(&rejected); err != nil ||
+		rejected != 0 {
 		t.Fatal("rejected commands were persisted", rejected, err)
 	}
 	cancel.RequestID = testID(t)
@@ -212,7 +221,8 @@ func TestRetryAfterCrashAppliesProcessorResultOnce(t *testing.T) {
 		t.Fatalf("processor mutations: %v", r.sub.keys)
 	}
 	var leases int
-	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_subscription_leases WHERE attempt_id=$1", r.attempt).Scan(&leases); err != nil || leases != 0 {
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_subscription_leases WHERE attempt_id=$1", r.attempt).Scan(&leases); err != nil ||
+		leases != 0 {
 		t.Fatal("completed command kept its lease", leases, err)
 	}
 }
@@ -230,14 +240,17 @@ func (g *stalledReads) read() {
 	g.reads++
 	g.once.Do(g.gate.wait)
 }
+
 func (g *stalledReads) RetrievePaymentIntent(ctx context.Context, id string) (payments.Object, error) {
 	g.read()
 	return g.financialGateway.RetrievePaymentIntent(ctx, id)
 }
+
 func (g *stalledReads) RetrieveRefund(ctx context.Context, id string) (payments.Object, error) {
 	g.read()
 	return g.financialGateway.RetrieveRefund(ctx, id)
 }
+
 func (g *stalledReads) RetrieveSubscription(ctx context.Context, id string) (payments.Object, error) {
 	g.read()
 	return g.financialGateway.RetrieveSubscription(ctx, id)
@@ -278,7 +291,17 @@ func TestEventWorkerReadsProcessorOutsideDonorLock(t *testing.T) {
 		checkout := f.checkout(t)
 		payment := "pi_" + f.donorID.String()
 		f.charge(t, payment, time.Now())
-		event := f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+		event := f.receive(
+			t,
+			"payment_intent.succeeded",
+			map[string]any{
+				"id":              payment,
+				"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
+				"status":          "succeeded",
+				"currency":        "usd",
+				"amount_received": 3000,
+			},
+		)
 		process(t, f, nil)
 		assertEventProcessed(t, f, event, true)
 	})
@@ -292,10 +315,23 @@ func TestEventWorkerReadsProcessorOutsideDonorLock(t *testing.T) {
 			checkout := f.checkout(t)
 			payment := "pi_" + f.donorID.String()
 			f.charge(t, payment, time.Now())
-			f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+			f.receive(
+				t,
+				"payment_intent.succeeded",
+				map[string]any{
+					"id":              payment,
+					"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
+					"status":          "succeeded",
+					"currency":        "usd",
+					"amount_received": 3000,
+				},
+			)
 			f.process(t)
 			refund := "re_" + f.donorID.String()
-			f.gateway.refunds[refund] = paymentObject(t, map[string]any{"id": refund, "payment_intent": payment, "amount": 3000, "currency": "usd", "status": "succeeded"})
+			f.gateway.refunds[refund] = paymentObject(
+				t,
+				map[string]any{"id": refund, "payment_intent": payment, "amount": 3000, "currency": "usd", "status": "succeeded"},
+			)
 			event := f.receive(t, "refund.created", map[string]any{"id": refund, "payment_intent": payment, "status": "succeeded"})
 			var later string
 			if recordedMeanwhile {

@@ -15,7 +15,11 @@ import (
 
 func TestTrustedProxiesAcceptsProxyNetworksAndRefusesOpenRanges(t *testing.T) {
 	got, err := trustedProxies(" 172.30.42.10/32, ,10.0.0.0/8,fd00::/48")
-	want := []netip.Prefix{netip.MustParsePrefix("172.30.42.10/32"), netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("fd00::/48")}
+	want := []netip.Prefix{
+		netip.MustParsePrefix("172.30.42.10/32"),
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("fd00::/48"),
+	}
 	if err != nil || !slices.Equal(got, want) {
 		t.Fatalf("got %v, %v", got, err)
 	}
@@ -37,6 +41,7 @@ func TestConfigureRejectsInvalidEnvironmentBeforeTheDatabase(t *testing.T) {
 		{"plain HTTP origin", map[string]string{"DONOR_PUBLIC_ORIGIN": "http://dad.example.org"}},
 		{"origin with path", map[string]string{"DONOR_PUBLIC_ORIGIN": "https://dad.example.org/app"}},
 		{"half of Stripe", map[string]string{"STRIPE_SECRET_KEY": "sk_test_123"}},
+		{"Stripe ceiling", map[string]string{"DONOR_STRIPE_REQUESTS_PER_SECOND": "0"}},
 		{"retired staff key without a staff origin", map[string]string{"DONOR_STAFF_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA="}},
 		{"plain HTTP staff origin", map[string]string{"DONOR_STAFF_ORIGIN": "http://staff.dad.example.org"}},
 		{"staff origin with path", map[string]string{"DONOR_STAFF_ORIGIN": "https://staff.dad.example.org/staff"}},
@@ -111,7 +116,11 @@ func TestConfigureConnectsAsTheAPIRole(t *testing.T) {
 
 func TestConfigureOffersDonorPasskeysOnlyOnAHostName(t *testing.T) {
 	for origin, want := range map[string]bool{"http://localhost:3000": true, "https://dad.example.org": true, "http://127.0.0.1:3000": false} {
-		env := map[string]string{"DONOR_API_DATABASE_URL": dbrolestest.URL(t, dbroles.API), "DONOR_ALLOW_OWNER_CONNECTION": "true", "DONOR_PUBLIC_ORIGIN": origin}
+		env := map[string]string{
+			"DONOR_API_DATABASE_URL":       dbrolestest.URL(t, dbroles.API),
+			"DONOR_ALLOW_OWNER_CONNECTION": "true",
+			"DONOR_PUBLIC_ORIGIN":          origin,
+		}
 		services, release, err := configure(context.Background(), func(name string) string { return env[name] })
 		release()
 		if err != nil || (services.DonorPasskeys != nil) != want {

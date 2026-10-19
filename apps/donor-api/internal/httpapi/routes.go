@@ -154,13 +154,17 @@ func (a *api) donorWrite(pattern string, handler sessionHandler) route {
 // browser does not have. The session is checked first, so an anonymous
 // request is unauthenticated, as on every other donor route.
 func (a *api) appWrite(pattern string, handler sessionHandler) route {
-	return route{pattern, donorAuth, a.guarded(a.Origin, accountLimit, true, signedIn(donorSession, func(w http.ResponseWriter, r *http.Request, session string) {
-		if !native(r) {
-			writeError(w, r, http.StatusForbidden, "Request origin is not allowed", nil)
-			return
-		}
-		handler(w, r, session)
-	}))}
+	return route{
+		pattern,
+		donorAuth,
+		a.guarded(a.Origin, accountLimit, true, signedIn(donorSession, func(w http.ResponseWriter, r *http.Request, session string) {
+			if !native(r) {
+				writeError(w, r, http.StatusForbidden, "Request origin is not allowed", nil)
+				return
+			}
+			handler(w, r, session)
+		})),
+	}
 }
 
 // staffChallenge routes start passkey ceremonies. A page asks for one before

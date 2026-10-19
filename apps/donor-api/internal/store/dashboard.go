@@ -22,6 +22,7 @@ type DonorDashboard struct {
 	State         string           `json:"state"`
 	Streak        *StreakSummary   `json:"streak"`
 }
+
 type ReferralSummary struct {
 	Currency   string `json:"currency"`
 	IRL        int64  `json:"irl"`
@@ -30,6 +31,7 @@ type ReferralSummary struct {
 	LinkMinor  int64  `json:"link_minor"`
 	TotalMinor int64  `json:"total_minor"`
 }
+
 type StreakSummary struct {
 	AtRisk      bool       `json:"at_risk"`
 	Current     int32      `json:"current"`
@@ -72,7 +74,14 @@ func dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time
 	linkMinor, irlMinor := linkAmount.Int64, irlAmount.Int64
 	result := DonorDashboard{Mode: "test", State: "ready", ComputedAt: row.ComputedAt.Time, FoundingDonor: row.FoundingAwardedAt.Valid}
 	if ready && irlMinor <= math.MaxInt64-linkMinor {
-		result.Referrals = &ReferralSummary{Link: referred.LinkCount, IRL: referred.IrlCount, LinkMinor: linkMinor, IRLMinor: irlMinor, TotalMinor: linkMinor + irlMinor, Currency: "USD"}
+		result.Referrals = &ReferralSummary{
+			Link:       referred.LinkCount,
+			IRL:        referred.IrlCount,
+			LinkMinor:  linkMinor,
+			IRLMinor:   irlMinor,
+			TotalMinor: linkMinor + irlMinor,
+			Currency:   "USD",
+		}
 	}
 	if row.NextRefreshAt.Time.After(now) && row.CurrentStreak.Valid {
 		result.Streak = &StreakSummary{Current: row.CurrentStreak.Int32, AtRisk: row.AtRisk}

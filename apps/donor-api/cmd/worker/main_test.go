@@ -12,7 +12,10 @@ import (
 )
 
 func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
-	env := map[string]string{"DONOR_GO_WORKERS_ENABLED": "true", "DONOR_WORKER_STRIPE_DATABASE_URL": "postgresql://unreachable.invalid/donor"}
+	env := map[string]string{
+		"DONOR_GO_WORKERS_ENABLED":         "true",
+		"DONOR_WORKER_STRIPE_DATABASE_URL": "postgresql://unreachable.invalid/donor",
+	}
 	for _, tc := range []struct {
 		name  string
 		args  []string
@@ -54,6 +57,13 @@ func TestPushWorkerRunsWithoutProvidersButRefusesPartialOnes(t *testing.T) {
 	}
 }
 
+func TestStripeWorkerRefusesAnInvalidRequestCeiling(t *testing.T) {
+	env := map[string]string{"STRIPE_SECRET_KEY": "sk_test_123", "DONOR_STRIPE_REQUESTS_PER_SECOND": "0"}
+	if _, err := stepFor("stripe", nil, func(name string) string { return env[name] }); !isConfigError(err) {
+		t.Fatalf("got %v, want a configuration error", err)
+	}
+}
+
 func isConfigError(err error) bool {
 	_, ok := errors.AsType[configError](err)
 	return ok
@@ -62,7 +72,11 @@ func isConfigError(err error) bool {
 func TestWorkersRunAsTheirRoles(t *testing.T) {
 	for _, kind := range []string{"projections", "push"} {
 		role := dbroles.Workers[kind]
-		env := map[string]string{"DONOR_GO_WORKERS_ENABLED": "true", role.Variable(): dbrolestest.URL(t, role), dbroles.AllowOwnerVariable: "true"}
+		env := map[string]string{
+			"DONOR_GO_WORKERS_ENABLED": "true",
+			role.Variable():            dbrolestest.URL(t, role),
+			dbroles.AllowOwnerVariable: "true",
+		}
 		if err := run(context.Background(), []string{"--kind=" + kind, "--once"}, func(name string) string { return env[name] }); err != nil {
 			t.Errorf("%s: %v", kind, err)
 		}

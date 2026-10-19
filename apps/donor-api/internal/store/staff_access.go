@@ -32,7 +32,8 @@ func createStaffInvite(ctx context.Context, q *queries.Queries, id pgtype.UUID, 
 
 func inviteStaff(ctx context.Context, q *queries.Queries, actor pgtype.UUID, email, name, role string, now time.Time) (string, error) {
 	canonical, err := identity.NormalizeEmail(email)
-	if err != nil || !plainText(name, false) || identity.TrimSpace(name) == "" || utf8.RuneCountInString(name) > 100 || len(staffPermissions(role)) == 0 {
+	if err != nil || !plainText(name, false) || identity.TrimSpace(name) == "" || utf8.RuneCountInString(name) > 100 ||
+		len(staffPermissions(role)) == 0 {
 		return "", ErrStaffInput
 	}
 	id, err := NewID()
@@ -58,23 +59,20 @@ func inviteStaff(ctx context.Context, q *queries.Queries, actor pgtype.UUID, ema
 // Bootstrap invites the first administrator. It refuses once any staff
 // account exists, so it cannot be used to add access later.
 func (s *StaffService) Bootstrap(ctx context.Context, email, name string) (string, error) {
-	var token string
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (string, error) {
 		if _, err := tx.Exec(ctx, "LOCK TABLE donor_staff IN EXCLUSIVE MODE"); err != nil {
-			return err
+			return "", err
 		}
 		q := queries.New(tx)
 		rows, err := q.LockStaffAccounts(ctx)
 		if err != nil {
-			return err
+			return "", err
 		}
 		if len(rows) > 0 {
-			return ErrStaffConflict
+			return "", ErrStaffConflict
 		}
-		token, err = inviteStaff(ctx, q, pgtype.UUID{}, email, name, "ADMIN", time.Now().UTC())
-		return err
+		return inviteStaff(ctx, q, pgtype.UUID{}, email, name, "ADMIN", time.Now().UTC())
 	})
-	return token, err
 }
 
 func (s *StaffService) Invite(ctx context.Context, token, email, name, role string) (string, error) {
@@ -153,12 +151,11 @@ func (s *StaffService) Recover(ctx context.Context, email string) (string, error
 	if err != nil {
 		return "", ErrStaffInput
 	}
-	var token string
-	err = pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (string, error) {
 		q := queries.New(tx)
 		rows, err := q.LockStaffAccounts(ctx)
 		if err != nil {
-			return err
+			return "", err
 		}
 		var target queries.LockStaffAccountsRow
 		for _, row := range rows {
@@ -167,16 +164,21 @@ func (s *StaffService) Recover(ctx context.Context, email string) (string, error
 			}
 		}
 		if !target.DonorStaff.ID.Valid {
-			return pgx.ErrNoRows
+			return "", pgx.ErrNoRows
 		}
 		change, err := changeAccess(ctx, q, pgtype.UUID{}, target, "recovery", "", time.Now().UTC())
-		token = change.Token
-		return err
+		return change.Token, err
 	})
-	return token, err
 }
 
-func changeAccess(ctx context.Context, q *queries.Queries, actor pgtype.UUID, row queries.LockStaffAccountsRow, action, role string, now time.Time) (AccessChange, error) {
+func changeAccess(
+	ctx context.Context,
+	q *queries.Queries,
+	actor pgtype.UUID,
+	row queries.LockStaffAccountsRow,
+	action, role string,
+	now time.Time,
+) (AccessChange, error) {
 	var result AccessChange
 	var details any
 	var event string

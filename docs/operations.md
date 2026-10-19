@@ -11,7 +11,7 @@ connects with its own login, which holds only what that process needs
 the API opens up to 40 connections, and each worker, the monitor, migrations, the staff
 command, and `rekey` up to 2. A full deployment therefore needs up to 58 of PostgreSQL's
 default 100 `max_connections`, or 60 while a migration runs. When adding API replicas, raise `max_connections` (or put a
-pooler such as PgBouncer in front) so the total stays below it; `pool_max_conns=N` in a
+[transaction-mode pooler](#connection-pooling) in front) so the total stays below it; `pool_max_conns=N` in a
 process's database URL overrides its size.
 
 Back up the database together with its separately stored encryption keys, then verify a
@@ -88,10 +88,10 @@ Staff passkeys belong to the staff hostname; changing it means every staff membe
 again.
 
 Rate limits are per visitor. nginx sets `X-Real-IP` to the client address, which the API
-trusts only from the web container's fixed address `172.30.42.10`
-([edge](edge.md#client-address)). Setting `DONOR_CLIENT_IP_HEADER` empty makes all
-visitors share the proxy's quota. Edit the Compose network if `172.30.42.0/24` clashes on
-the host.
+trusts only from the `app` network, `172.30.43.0/24`, that the web containers alone share
+with it ([edge](edge.md#client-address)). Setting `DONOR_CLIENT_IP_HEADER` empty makes all
+visitors share the proxy's quota. Edit the Compose networks if `172.30.42.0/24` or
+`172.30.43.0/24` clashes on the host.
 
 The API's in-process limiter keeps a token bucket per client and per class, so a burst
 on one surface cannot starve another for visitors sharing an address; the classes and
@@ -123,10 +123,18 @@ Some migrations and releases need more:
   password: changing `POSTGRES_*` does not rename or update an initialized cluster.
   Keep the deployed values and matching process URLs in `.env.database`; use explicit
   `INGRESS_TLS_DIR` if certificates remain at their previous path. The production
-  Compose project remains `impactgraph` to retain its existing `postgres-data` volume.
-  Do not rename the project or delete volumes to complete the rebrand. Local Compose
+  Compose project is now `dad`, and Compose names volumes after the project, so a host
+  deployed before the rebrand would start an empty `dad_postgres-data` volume beside its
+  existing `impactgraph_postgres-data`. On such a host, add
+  `COMPOSE_PROJECT_NAME=impactgraph` to `.env.production`, which overrides the project
+  name, until the database has been backed up, restored into the new project, and
+  verified ([backup and restore drill](#backup-and-restore-drill)). Never delete the old
+  volume to complete the rebrand. Local Compose
   now uses `dad_postgres`; the former `impactgraph_postgres` volume is separate and
-  must be backed up and deliberately migrated if its data is needed.
+  must be backed up and deliberately migrated if its data is needed. A checkout made
+  before the rename may still run that project's PostgreSQL container, which holds port
+  55432 so that `make db-up` fails; stop it with `docker stop impactgraph-postgres-1`,
+  which keeps its volume.
 - The release that binds donor passkey registration to its originating session rejects
   registrations started on an older image. These challenges last five minutes; donors
   can restart registration after the upgrade. Existing passkeys and sessions still work.
@@ -260,17 +268,35 @@ Backups are taken without privileges. After restoring one into an application da
 run `migrate`, which recreates missing roles and grants the declared privileges, then
 `provision-roles`.
 
+### Connection pooling
+
+Every process works through a transaction-mode pooler, such as PgBouncer, RDS Proxy, or a
+managed provider's pooler: none keeps session state between transactions, and migrations
+take only transaction-scoped advisory locks. Point each process's URL at the pooler with
+its own login. pgx prepares and caches statements on each connection, so either the
+pooler must track protocol-level prepared statements (PgBouncer 1.21 or later with
+`max_prepared_statements` above zero), or every URL must add
+`default_query_exec_mode=exec`, which uses unnamed statements only. A pooler that does
+neither fails most requests with SQLSTATE 42P05 or 26000. The `role` URL parameter that
+local development uses is a startup parameter poolers do not forward; deployed processes
+use their own logins instead. Size the pooler's server connections to the database's
+`max_connections`, and leave each process's own pool size unchanged.
+
 ## Stripe
 
-Stripe's [default sandbox limit](https://docs.stripe.com/rate-limits) is 25 requests
-per second per account. The gateway budgets worker reads, interactive checkout/finance
-commands, and reconciliation separately within each process. Checkout and card-setup
-reads, and each refund-list page, also spend tokens. These limits do not coordinate
-across processes or account for the SDK's automatic retries. Before increasing API or
-Stripe-worker replicas, add an account-wide limiter or allocate conservative budgets
-across every caller, reserve room for retries, and measure provider throttling and
-queue age. The local API load test excludes provider calls and cannot validate that
-capacity.
+Stripe limits requests per account: by default 25 per second in a sandbox and 100 in
+live mode ([rate limits](https://docs.stripe.com/rate-limits)). Set the account's limit
+as `DONOR_STRIPE_REQUESTS_PER_SECOND` (default 25) for every process. It is divided
+among four buckets so that one kind of traffic cannot starve another: event-processing
+reads 40%, donor checkout and card setup 30%, staff and donor subscription commands
+20%, and the daily reconciliation 10%. Each bucket admits a burst of one second of its
+rate. The API and Stripe worker reserve every request in the `donor_stripe_budgets`
+table, so any number of their replicas together stay within the limit; a request whose
+turn would come after its deadline fails at once and is retried like any processor
+outage. The reconciliation job, which runs once a day as a single process, paces itself
+within its own share. The SDK's automatic retries are not budgeted, so leave headroom
+below the account's real limit. The local API load test excludes provider calls and
+cannot validate that capacity.
 
 Use the organization's verified Stripe **test** account and snapshot webhook events at
 API version `2026-09-30.endive`. Subscribe to:
@@ -467,8 +493,7 @@ docker compose up -d --wait mailpit
 ```
 
 The `certs/` directory holds a local, disposable key and is git-ignored; never reuse it
-anywhere real. This capture inbox is also the prerequisite the Two-Bot QA loop depends on
-(`docs/testing/two-bot-qa-loop-plan.md`).
+anywhere real.
 
 ## App notifications
 
@@ -622,8 +647,8 @@ make seed SEED_DATABASE_URL=postgresql://user:pass@db:5432/dad_load SEED_CONFIRM
   LOAD_FIXTURE=/secure/dad-load.json
 ```
 
-`SEED_DONORS` (default 50,000, at most 200,000) donors are generated deterministically
-from `-seed` and held in memory, about 8 KB of RSS per donor (400 MB at 50,000): mostly
+`SEED_DONORS` (default 50,000, at most 1,000,000) donors are generated deterministically
+from `-seed` and held in memory, about 8 KB of RSS per donor (400 MB at 50,000, 8 GB at 1,000,000): mostly
 monthly gifts at the preselected $30, some at the $90 and $150 presets or at custom
 amounts such as $10, $50 and $100, one-time gifts, abandoned checkouts, up to two years of
 anniversary renewals with failures recovered within and after the 14-day grace,
@@ -663,11 +688,10 @@ Referral captures are rate limited per client, and one generator is one client. 
 that header only from `DONOR_TRUSTED_PROXY_CIDRS`, so have the generator reach the API
 directly, not through the ingress, which overwrites the header. Otherwise captures fail
 with 429. The Compose API publishes its port on host loopback only, and connections
-through it arrive from the `default` network's gateway, not from the load host. Docker 28
-takes the gateway from the start of the network's `ip_range`, 172.30.42.128; older
-releases use 172.30.42.1. Either add that address to the staging API's list for the
-run, which lets any local process choose its client address, or run the generator in a
-container on that network with `LOAD_API=http://api:8002`.
+through it arrive from the `default` network's gateway, 172.30.42.1, not from the load
+host. Either add that address to the staging API's list for the run, which lets any local
+process choose its client address, or run the generator in a container on the `app`
+network with `LOAD_API=http://api:8002`.
 
 ```sh
 make loadtest-seeded LOAD_API=http://api.staging.internal:8002 LOAD_ORIGIN=https://staging.example.org \

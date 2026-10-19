@@ -192,7 +192,10 @@ func cookieValue(r *http.Request, name string) string {
 }
 
 func (a *api) setCookie(w http.ResponseWriter, name, value string, maxAge int, sameSite http.SameSite) {
-	http.SetCookie(w, &http.Cookie{Name: name, Value: value, MaxAge: maxAge, Path: "/", HttpOnly: true, Secure: a.secure, SameSite: sameSite})
+	http.SetCookie(
+		w,
+		&http.Cookie{Name: name, Value: value, MaxAge: maxAge, Path: "/", HttpOnly: true, Secure: a.secure, SameSite: sameSite},
+	)
 }
 
 func withTimeout(r *http.Request, d time.Duration) (context.Context, context.CancelFunc) {

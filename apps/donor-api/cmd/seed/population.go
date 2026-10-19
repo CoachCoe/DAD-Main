@@ -256,7 +256,14 @@ func (g *generator) join(d *donor, sharers *sharerPool) {
 		c.amount, c.frequency, c.status = g.amount(monthlyAmounts), "MONTHLY", "COMPLETE"
 		g.monthly(c)
 		if g.r.Float64() < extraGiftShare {
-			extra := &checkout{id: g.uuid(), attempt: g.uuid(), donor: d, amount: g.amount(oneTimeAmounts), frequency: "ONE_TIME", status: "COMPLETE"}
+			extra := &checkout{
+				id:        g.uuid(),
+				attempt:   g.uuid(),
+				donor:     d,
+				amount:    g.amount(oneTimeAmounts),
+				frequency: "ONE_TIME",
+				status:    "COMPLETE",
+			}
 			extra.createdAt = d.createdAt.Add(g.seconds(g.now.Sub(d.createdAt) - 15*time.Minute))
 			d.checkouts = append(d.checkouts, extra)
 			g.oneTime(extra, extra.createdAt.Add(g.seconds(10*time.Minute)))
@@ -321,7 +328,14 @@ func (g *generator) monthly(c *checkout) {
 		if k == pauseAt {
 			months := 1 + g.r.IntN(3)
 			created := due.Add(-g.seconds(10 * day))
-			c.pause = &pause{id: g.uuid(), months: months, starts: due, resumes: addMonths(anchor, k+months), created: created, confirmed: created.Add(time.Minute)}
+			c.pause = &pause{
+				id:        g.uuid(),
+				months:    months,
+				starts:    due,
+				resumes:   addMonths(anchor, k+months),
+				created:   created,
+				confirmed: created.Add(time.Minute),
+			}
 			k += months - 1
 			continue
 		}
@@ -360,7 +374,18 @@ func (g *generator) monthly(c *checkout) {
 			p.paidAt = time.Time{}
 		}
 		if p.paid = !p.paidAt.IsZero(); p.paid {
-			g.addGift(c, &gift{id: g.uuid(), object: p.invoice, paymentIntent: g.stripeID("pi_"), amount: c.amount, frequency: "MONTHLY", paidAt: p.paidAt, period: p})
+			g.addGift(
+				c,
+				&gift{
+					id:            g.uuid(),
+					object:        p.invoice,
+					paymentIntent: g.stripeID("pi_"),
+					amount:        c.amount,
+					frequency:     "MONTHLY",
+					paidAt:        p.paidAt,
+					period:        p,
+				},
+			)
 		}
 		if !p.paid && p.failedAt.IsZero() {
 			break // the processor has reported neither outcome yet

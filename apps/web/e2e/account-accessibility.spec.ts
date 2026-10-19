@@ -2,14 +2,19 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
 const dashboard = {
-  mode: "test", state: "ready", computed_at: "2026-10-04T12:00:00Z", founding_donor: true,
+  mode: "test",
+  state: "ready",
+  computed_at: "2026-10-04T12:00:00Z",
+  founding_donor: true,
   referrals: { link: 12, irl: 7, total_minor: 57000, link_minor: 36000, irl_minor: 21000, currency: "USD" },
   streak: { current: 3, at_risk: false, grace_ends_at: null },
 };
 
 test("dashboard loading preserves the account navigation position", async ({ page }) => {
   let release!: () => void;
-  const ready = new Promise<void>((resolve) => { release = resolve; });
+  const ready = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   await page.route("**/api/donor/me/dashboard", async (route) => {
     await ready;
     await route.fulfill({ json: dashboard });
@@ -19,28 +24,81 @@ test("dashboard loading preserves the account navigation position", async ({ pag
   await expect(page.getByRole("main").getByRole("status")).toContainText("Loading your dashboard");
   const navigation = page.getByRole("navigation", { name: "Account", exact: true });
   const before = await navigation.boundingBox();
-  const placeholders = await page.locator(".metric").evaluateAll((cards) => cards.map((card) => ({ title: card.querySelector("h2")?.textContent, height: card.getBoundingClientRect().height })));
+  const placeholders = await page.locator(".metric").evaluateAll((cards) =>
+    cards.map((card) => ({
+      title: card.querySelector("h2")?.textContent,
+      height: card.getBoundingClientRect().height,
+    })),
+  );
   release();
   await expect(page.getByText("$570.00", { exact: true })).toBeVisible();
   const after = await navigation.boundingBox();
   expect(before).not.toBeNull();
   expect(after).not.toBeNull();
-  const metrics = await page.locator(".metric").evaluateAll((cards) => cards.map((card) => ({ title: card.querySelector("h2")?.textContent, height: card.getBoundingClientRect().height })));
-  expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0)), JSON.stringify({ placeholders, metrics })).toBeLessThanOrEqual(10);
+  const metrics = await page.locator(".metric").evaluateAll((cards) =>
+    cards.map((card) => ({
+      title: card.querySelector("h2")?.textContent,
+      height: card.getBoundingClientRect().height,
+    })),
+  );
+  expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0)), JSON.stringify({ placeholders, metrics })).toBeLessThanOrEqual(
+    10,
+  );
 });
 
 const profiles = {
   "/account/dashboard": { endpoint: "dashboard", data: dashboard },
-  "/account/profile": { endpoint: "profile", data: { email: "browser-test@example.org", public_name: "Alex", version: 1, referral_emails: true, marketing_emails: false,
-    push_referral_converted: true, push_streak_at_risk: true, push_streak_milestone: false } },
-  "/account/share": { endpoint: "sharing", data: { public_name: "Alex", link: "https://dad.example/r/browser-test", irl_link: "https://dad.example/r/browser-test?via=irl" } },
+  "/account/profile": {
+    endpoint: "profile",
+    data: {
+      email: "browser-test@example.org",
+      public_name: "Alex",
+      version: 1,
+      referral_emails: true,
+      marketing_emails: false,
+      push_referral_converted: true,
+      push_streak_at_risk: true,
+      push_streak_milestone: false,
+    },
+  },
+  "/account/share": {
+    endpoint: "sharing",
+    data: {
+      public_name: "Alex",
+      link: "https://dad.example/r/browser-test",
+      irl_link: "https://dad.example/r/browser-test?via=irl",
+    },
+  },
 };
 
-const thisBrowser = { id: "0b8e7c52-3f0e-4c8a-9d51-2f1e6a7b8c9d", client: "BROWSER", platform: null, label: "Web browser",
-  created_at: "2026-10-01T12:00:00Z", last_used_at: "2026-10-08T12:00:00Z", current: true };
-const phone = { id: "5d2c1b0a-9e8f-4a7b-8c6d-5e4f3a2b1c0d", client: "APP", platform: "IOS", label: "Alex’s iPhone",
-  created_at: "2026-09-20T12:00:00Z", last_used_at: "2026-10-07T09:30:00Z", current: false };
-const passkeys = { passkeys: [{ id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", name: "Work laptop", created_at: "2026-09-21T12:00:00Z", last_used_at: null }] };
+const thisBrowser = {
+  id: "0b8e7c52-3f0e-4c8a-9d51-2f1e6a7b8c9d",
+  client: "BROWSER",
+  platform: null,
+  label: "Web browser",
+  created_at: "2026-10-01T12:00:00Z",
+  last_used_at: "2026-10-08T12:00:00Z",
+  current: true,
+};
+const phone = {
+  id: "5d2c1b0a-9e8f-4a7b-8c6d-5e4f3a2b1c0d",
+  client: "APP",
+  platform: "IOS",
+  label: "Alex’s iPhone",
+  created_at: "2026-09-20T12:00:00Z",
+  last_used_at: "2026-10-07T09:30:00Z",
+  current: false,
+};
+const passkeys = {
+  passkeys: [
+    {
+      id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      name: "Work laptop",
+      created_at: "2026-09-21T12:00:00Z",
+      last_used_at: null,
+    },
+  ],
+};
 
 // These isolate authenticated rendering; Go journey tests exercise real session authorization.
 for (const [path, fixture] of Object.entries(profiles)) {
@@ -48,15 +106,24 @@ for (const [path, fixture] of Object.entries(profiles)) {
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route(`**/api/donor/me/${fixture.endpoint}`, (route) => route.fulfill({ json: fixture.data }));
-    await page.route("**/api/donor/me/sessions", (route) => route.fulfill({ json: { sessions: [thisBrowser, phone] } }));
+    await page.route("**/api/donor/me/sessions", (route) =>
+      route.fulfill({ json: { sessions: [thisBrowser, phone] } }),
+    );
     await page.route("**/api/donor/me/passkeys", (route) => route.fulfill({ json: passkeys }));
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
     await expect(page.getByText(/Loading (your dashboard|profile|your sharing details)/)).toHaveCount(0);
     if (path === "/account/dashboard" && (page.viewportSize()?.width ?? 0) > 600) {
-      const link = await page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Link Referrals", exact: true }) }).boundingBox();
-      const irl = await page.getByRole("article").filter({ has: page.getByRole("heading", { name: "IRL Referrals", exact: true }) }).boundingBox();
-      expect(link).not.toBeNull(); expect(irl).not.toBeNull();
+      const link = await page
+        .getByRole("article")
+        .filter({ has: page.getByRole("heading", { name: "Link Referrals", exact: true }) })
+        .boundingBox();
+      const irl = await page
+        .getByRole("article")
+        .filter({ has: page.getByRole("heading", { name: "IRL Referrals", exact: true }) })
+        .boundingBox();
+      expect(link).not.toBeNull();
+      expect(irl).not.toBeNull();
       expect(link?.y).toBe(irl?.y);
       expect(link?.width).toBe(irl?.width);
     }
@@ -85,8 +152,11 @@ test("the profile lists where the donor is signed in and signs out another devic
   const section = page.getByRole("region", { name: "Where you’re signed in" });
   await expect(section.getByRole("listitem")).toHaveCount(2);
   await expect(section.getByRole("listitem").first()).toContainText("This device");
-  await expect(section.getByRole("listitem").nth(1)).toContainText("iOS app · Signed in Sep 20, 2026 · Last active Oct 7, 2026");
-  const accessibility = () => new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  await expect(section.getByRole("listitem").nth(1)).toContainText(
+    "iOS app · Signed in Sep 20, 2026 · Last active Oct 7, 2026",
+  );
+  const accessibility = () =>
+    new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect((await accessibility()).violations).toEqual([]);
   const signOut = section.getByRole("button", { name: /^Sign out Alex’s iPhone, last active / });
   await signOut.focus();
@@ -100,22 +170,50 @@ test("the profile lists where the donor is signed in and signs out another devic
   expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
 });
 
-const subscription = { id: "6f1c2b9e-0d7a-4e55-9b0c-1a2b3c4d5e6f", amount_minor: 3000, currency: "USD", status: "active",
-  period_end: "2026-11-01T14:00:00Z", pause: null, stops_at: null };
+const subscription = {
+  id: "6f1c2b9e-0d7a-4e55-9b0c-1a2b3c4d5e6f",
+  amount_minor: 3000,
+  currency: "USD",
+  status: "active",
+  period_end: "2026-11-01T14:00:00Z",
+  pause: null,
+  stops_at: null,
+};
 const recurring = {
-  active: { subscription, text: /^Next renewal: Nov 1, 2026\.$/, links: ["Update payment method", "Pause monthly giving", "Change monthly amount"] },
-  paused: { subscription: { ...subscription, pause: { starts_at: "2020-11-01T14:00:00Z", resumes_at: "2027-01-01T14:00:00Z" } },
-    text: /^Your monthly gift is paused\. Giving resumes Jan 1, 2027\.$/, links: ["Update payment method", "Resume at next renewal"] },
-  "scheduled-pause": { subscription: { ...subscription, pause: { starts_at: "2099-11-01T14:00:00Z", resumes_at: "2100-01-01T14:00:00Z" } },
-    text: /^Your monthly gift pauses from Nov 1, 2099\. Giving resumes Jan 1, 2100\.$/, links: ["Update payment method", "Resume at next renewal"] },
-  ending: { subscription: { ...subscription, stops_at: subscription.period_end },
-    text: /^Renewals cancelled\. Your last monthly gift period ends Nov 1, 2026; no further gifts will be charged\.$/, links: ["Update payment method"] },
+  active: {
+    subscription,
+    text: /^Next renewal: Nov 1, 2026\.$/,
+    links: ["Update payment method", "Pause monthly giving", "Change monthly amount"],
+  },
+  paused: {
+    subscription: { ...subscription, pause: { starts_at: "2020-11-01T14:00:00Z", resumes_at: "2027-01-01T14:00:00Z" } },
+    text: /^Your monthly gift is paused\. Giving resumes Jan 1, 2027\.$/,
+    links: ["Update payment method", "Resume at next renewal"],
+  },
+  "scheduled-pause": {
+    subscription: { ...subscription, pause: { starts_at: "2099-11-01T14:00:00Z", resumes_at: "2100-01-01T14:00:00Z" } },
+    text: /^Your monthly gift pauses from Nov 1, 2099\. Giving resumes Jan 1, 2100\.$/,
+    links: ["Update payment method", "Resume at next renewal"],
+  },
+  ending: {
+    subscription: { ...subscription, stops_at: subscription.period_end },
+    text: /^Renewals cancelled\. Your last monthly gift period ends Nov 1, 2026; no further gifts will be charged\.$/,
+    links: ["Update payment method"],
+  },
 };
 
 for (const [name, fixture] of Object.entries(recurring)) {
   test(`monthly giving describes a ${name} gift accessibly`, async ({ page }) => {
-    await page.route("**/api/donor/me/recurring", (route) => route.fulfill({ json: {
-      mode: "test", state: "ready", observed_at: "2026-10-07T13:42:00Z", subscription: fixture.subscription } }));
+    await page.route("**/api/donor/me/recurring", (route) =>
+      route.fulfill({
+        json: {
+          mode: "test",
+          state: "ready",
+          observed_at: "2026-10-07T13:42:00Z",
+          subscription: fixture.subscription,
+        },
+      }),
+    );
     await page.goto("/account/recurring");
     await expect(page.getByText(fixture.text)).toBeVisible();
     await expect(page.getByText(/^Billing details last updated from Stripe /)).toBeVisible();
@@ -138,12 +236,16 @@ for (const [name, fixture] of Object.entries(recurring)) {
 }
 
 test("a new monthly gift shows its confirmation first and the sandbox note last", async ({ page }) => {
-  await page.route("**/api/donor/me/recurring", (route) => route.fulfill({ json: { mode: "test", state: "preparing", subscription: null } }));
+  await page.route("**/api/donor/me/recurring", (route) =>
+    route.fulfill({ json: { mode: "test", state: "preparing", subscription: null } }),
+  );
   await page.goto("/account/recurring");
   const callout = page.locator(".callout").filter({ hasText: "We’re confirming your new monthly gift with Stripe." });
   await expect(callout).toBeVisible();
   await expect(callout.getByRole("button", { name: "Refresh billing details" })).toBeVisible();
-  await expect(page.getByRole("main").getByRole("status")).toHaveText("We’re confirming your new monthly gift with Stripe. This usually takes a few seconds.");
+  await expect(page.getByRole("main").getByRole("status")).toHaveText(
+    "We’re confirming your new monthly gift with Stripe. This usually takes a few seconds.",
+  );
   const order = await page.locator(".callout, .note").evaluateAll((nodes) => nodes.map((node) => node.className));
   expect(order).toEqual(["callout", "note"]);
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
@@ -152,9 +254,11 @@ test("a new monthly gift shows its confirmation first and the sandbox note last"
 
 test("dashboard explains partial data and recovers from a connection failure", async ({ page }) => {
   let available = false;
-  await page.route("**/api/donor/me/dashboard", (route) => available
-    ? route.fulfill({ json: { ...dashboard, referrals: null, streak: null } })
-    : route.abort("internetdisconnected"));
+  await page.route("**/api/donor/me/dashboard", (route) =>
+    available
+      ? route.fulfill({ json: { ...dashboard, referrals: null, streak: null } })
+      : route.abort("internetdisconnected"),
+  );
   await page.goto("/account/dashboard");
   await expect(page.getByRole("main").getByRole("alert")).toContainText("Check your connection");
   available = true;
@@ -182,5 +286,7 @@ test("email proof page requires an explicit keyboard confirmation", async ({ pag
   await page.keyboard.press("Enter");
   await expect(page.getByRole("link", { name: /sign in/i })).toBeVisible();
   expect(confirmed).toBe(1);
-  expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations).toEqual([]);
+  expect(
+    (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
+  ).toEqual([]);
 });

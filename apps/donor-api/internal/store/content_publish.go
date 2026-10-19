@@ -132,57 +132,70 @@ type Publication struct {
 // snapshot. An invalid publication, reported as a *PublicationError, leaves
 // the current one in place.
 func (s ContentService) Publish(ctx context.Context, token string, r PublicationRequest) (Publication, error) {
-	return staffWrite(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (Publication, error) {
-		problems := &PublicationError{}
-		today := now.In(recognition.NewYork).Format(time.DateOnly)
-		if asOf, err := time.Parse(time.DateOnly, r.AsOf); err != nil {
-			problems.add("", 0, "as_of", "invalid_date")
-		} else if asOf.Format(time.DateOnly) > today {
-			problems.add("", 0, "as_of", "future_date")
-		}
-		cadence := identity.TrimSpace(r.Cadence)
-		if cadence == "" || !plainText(cadence, false) || utf8.RuneCountInString(cadence) > 100 {
-			problems.add("", 0, "cadence", "invalid_text")
-		}
-		sources := sourceCitations{}
-		initiatives := parseInitiatives(problems, r.InitiativesCSV, today, sources)
-		ledger := parseLedger(problems, r.LedgerCSV, sources)
-		q := queries.New(tx)
-		if err := checkSources(ctx, q, problems, sources); err != nil {
-			return Publication{}, err
-		}
-		if len(problems.Problems) > 0 {
-			slices.SortStableFunc(problems.Problems, func(a, b PublicationProblem) int {
-				return cmp.Or(cmp.Compare(a.Sheet, b.Sheet), cmp.Compare(a.Row, b.Row))
-			})
-			return Publication{}, problems
-		}
-		payload, err := json.Marshal(map[string]any{"initiatives": initiatives, "ledger": ledger, "ledger_as_of": r.AsOf, "cadence": cadence})
-		if err != nil {
-			return Publication{}, err
-		}
-		id, err := NewID()
-		if err != nil {
-			return Publication{}, err
-		}
-		if err = q.InsertPublication(ctx, queries.InsertPublicationParams{ID: id, ActorID: actor.ID, Payload: payload, CreatedAt: timestamp(now)}); err != nil {
-			return Publication{}, err
-		}
-		if err = q.PublishContentHead(ctx, id); err != nil {
-			return Publication{}, err
-		}
-		if err = auditStaff(ctx, q, actor.ID, "content.published", id.String(), map[string]int{"initiatives": len(initiatives), "metrics": len(ledger)}, now); err != nil {
-			return Publication{}, err
-		}
-		return Publication{PublicationID: id}, nil
-	})
+	return staffWrite(
+		ctx,
+		s.Staff,
+		token,
+		"content.publish",
+		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (Publication, error) {
+			problems := &PublicationError{}
+			today := now.In(recognition.NewYork).Format(time.DateOnly)
+			if asOf, err := time.Parse(time.DateOnly, r.AsOf); err != nil {
+				problems.add("", 0, "as_of", "invalid_date")
+			} else if asOf.Format(time.DateOnly) > today {
+				problems.add("", 0, "as_of", "future_date")
+			}
+			cadence := identity.TrimSpace(r.Cadence)
+			if cadence == "" || !plainText(cadence, false) || utf8.RuneCountInString(cadence) > 100 {
+				problems.add("", 0, "cadence", "invalid_text")
+			}
+			sources := sourceCitations{}
+			initiatives := parseInitiatives(problems, r.InitiativesCSV, today, sources)
+			ledger := parseLedger(problems, r.LedgerCSV, sources)
+			q := queries.New(tx)
+			if err := checkSources(ctx, q, problems, sources); err != nil {
+				return Publication{}, err
+			}
+			if len(problems.Problems) > 0 {
+				slices.SortStableFunc(problems.Problems, func(a, b PublicationProblem) int {
+					return cmp.Or(cmp.Compare(a.Sheet, b.Sheet), cmp.Compare(a.Row, b.Row))
+				})
+				return Publication{}, problems
+			}
+			payload, err := json.Marshal(
+				map[string]any{"initiatives": initiatives, "ledger": ledger, "ledger_as_of": r.AsOf, "cadence": cadence},
+			)
+			if err != nil {
+				return Publication{}, err
+			}
+			id, err := NewID()
+			if err != nil {
+				return Publication{}, err
+			}
+			if err = q.InsertPublication(ctx, queries.InsertPublicationParams{ID: id, ActorID: actor.ID, Payload: payload, CreatedAt: timestamp(now)}); err != nil {
+				return Publication{}, err
+			}
+			if err = q.PublishContentHead(ctx, id); err != nil {
+				return Publication{}, err
+			}
+			if err = auditStaff(ctx, q, actor.ID, "content.published", id.String(), map[string]int{"initiatives": len(initiatives), "metrics": len(ledger)}, now); err != nil {
+				return Publication{}, err
+			}
+			return Publication{PublicationID: id}, nil
+		},
+	)
 }
 
 // parseInitiatives validates the initiatives spreadsheet, citing each board
 // approval source in sources.
 func parseInitiatives(problems *PublicationError, sheet, today string, sources sourceCitations) []map[string]string {
 	const name = "initiatives"
-	rows := spreadsheetRows(problems, name, sheet, []string{"slug", "title", "summary", "partner", "planned_start", "board_approval_source_id", "approved_on"})
+	rows := spreadsheetRows(
+		problems,
+		name,
+		sheet,
+		[]string{"slug", "title", "summary", "partner", "planned_start", "board_approval_source_id", "approved_on"},
+	)
 	initiatives := make([]map[string]string, 0, len(rows))
 	slugs := map[string]bool{}
 	for _, row := range rows {
@@ -246,7 +259,16 @@ func parseLedger(problems *PublicationError, sheet string, sources sourceCitatio
 		if cells["source_id"] != "" || !illustrative {
 			source = sources.cite(problems, name, row, "source_id")
 		}
-		ledger = append(ledger, map[string]any{"metric": cells["metric"], "value": value, "unit": cells["unit"], "source_id": source, "illustrative": illustrative})
+		ledger = append(
+			ledger,
+			map[string]any{
+				"metric":       cells["metric"],
+				"value":        value,
+				"unit":         cells["unit"],
+				"source_id":    source,
+				"illustrative": illustrative,
+			},
+		)
 	}
 	return ledger
 }

@@ -14,7 +14,17 @@ export const dynamic = "force-dynamic";
 
 // Only what the API reads crosses the boundary; anything else a browser or an
 // intermediary adds (including spoofable forwarding headers) is dropped.
-const REQUEST_HEADERS = ["accept", "accept-language", "content-type", "cookie", "idempotency-key", "origin", "sec-fetch-site", "stripe-signature", "user-agent"];
+const REQUEST_HEADERS = [
+  "accept",
+  "accept-language",
+  "content-type",
+  "cookie",
+  "idempotency-key",
+  "origin",
+  "sec-fetch-site",
+  "stripe-signature",
+  "user-agent",
+];
 
 // Response headers not relayed as they are: hop-by-hop ones, a length and encoding that
 // fetch has already undone, and Set-Cookie, which is appended separately below.
@@ -53,7 +63,10 @@ async function readBody(request: NextRequest): Promise<Uint8Array<ArrayBuffer> |
   }
   const body = new Uint8Array(size);
   let offset = 0;
-  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   return body;
 }
 

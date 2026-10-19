@@ -134,7 +134,8 @@ func TestAdoptionPreservesExistingRecordsAndRejectsDrift(t *testing.T) {
 				t.Fatal("legacy data changed", err)
 			}
 			var leaked bool
-			if err = pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='dad_baseline_validation')").Scan(&leaked); err != nil || leaked {
+			if err = pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_namespace WHERE nspname='dad_baseline_validation')").Scan(&leaked); err != nil ||
+				leaked {
 				t.Fatal("validation schema leaked", err)
 			}
 		})
@@ -171,9 +172,12 @@ func applyBefore(t *testing.T, ctx context.Context, pool *pgxpool.Pool, name str
 func TestPasskeyMigrationRetiresPasswordCredentials(t *testing.T) {
 	pool, ctx := isolatedDatabase(t)
 	applyBefore(t, ctx, pool, "0007_staff_passkeys.sql")
-	_, err := pool.Exec(ctx, `INSERT INTO donor_staff(id,email,name,role,password_hash,totp_secret,totp_counter) VALUES('00000000-0000-4000-8000-000000000001','admin@example.org','Admin','ADMIN','$argon2id$legacy','\x00',7);
+	_, err := pool.Exec(
+		ctx,
+		`INSERT INTO donor_staff(id,email,name,role,password_hash,totp_secret,totp_counter) VALUES('00000000-0000-4000-8000-000000000001','admin@example.org','Admin','ADMIN','$argon2id$legacy','\x00',7);
 INSERT INTO donor_staff_sessions(id,staff_id,token_hash,expires_at) VALUES('00000000-0000-4000-8000-000000000002','00000000-0000-4000-8000-000000000001','session',now()+interval '1 hour');
-INSERT INTO donor_staff_invites(id,staff_id,token_hash,expires_at,pending_secret) VALUES('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','invite',now()+interval '1 hour','\x00')`)
+INSERT INTO donor_staff_invites(id,staff_id,token_hash,expires_at,pending_secret) VALUES('00000000-0000-4000-8000-000000000003','00000000-0000-4000-8000-000000000001','invite',now()+interval '1 hour','\x00')`,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +195,13 @@ INSERT INTO donor_staff_invites(id,staff_id,token_hash,expires_at,pending_secret
 		t.Fatal(err)
 	}
 	if staff != 1 || credentialColumns != 0 || openSessions != 0 || openInvites != 0 {
-		t.Fatalf("got %d accounts, %d credential columns, %d open sessions, %d open invitations", staff, credentialColumns, openSessions, openInvites)
+		t.Fatalf(
+			"got %d accounts, %d credential columns, %d open sessions, %d open invitations",
+			staff,
+			credentialColumns,
+			openSessions,
+			openInvites,
+		)
 	}
 }
 

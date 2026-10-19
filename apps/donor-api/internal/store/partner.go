@@ -24,6 +24,7 @@ type PartnerRequest struct {
 	Message      string `json:"message"`
 	Consent      bool   `json:"contact_consent"`
 }
+
 type PartnerService struct{ DB *pgxpool.Pool }
 
 // Signup records a partner inquiry. id makes it idempotent: a retry with the
@@ -41,7 +42,15 @@ func (s PartnerService) Signup(ctx context.Context, id pgtype.UUID, r PartnerReq
 			return ErrStaffInput
 		}
 	}
-	r.Organization, r.Name, r.Website, r.Message = identity.TrimSpace(r.Organization), identity.TrimSpace(r.Name), identity.TrimSpace(r.Website), identity.TrimSpace(r.Message)
+	r.Organization, r.Name, r.Website, r.Message = identity.TrimSpace(
+		r.Organization,
+	), identity.TrimSpace(
+		r.Name,
+	), identity.TrimSpace(
+		r.Website,
+	), identity.TrimSpace(
+		r.Message,
+	)
 	var err error
 	r.Email, err = identity.NormalizeEmail(r.Email)
 	if err != nil || r.Organization == "" || r.Name == "" {

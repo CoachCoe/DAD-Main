@@ -65,10 +65,25 @@ func replayFixture(months int, random *rand.Rand) (history, []recognition.Refund
 		if random != nil {
 			delay = random.IntN(20)
 		}
-		gift := recognition.Gift{ID: "gift-" + id, DonorID: "donor", PeriodID: id, Amount: 3000, Currency: "USD", Frequency: "MONTHLY", PaidAt: due.Add(time.Duration(delay) * 24 * time.Hour)}
+		gift := recognition.Gift{
+			ID:        "gift-" + id,
+			DonorID:   "donor",
+			PeriodID:  id,
+			Amount:    3000,
+			Currency:  "USD",
+			Frequency: "MONTHLY",
+			PaidAt:    due.Add(time.Duration(delay) * 24 * time.Hour),
+		}
 		h.Gifts = append(h.Gifts, gift)
 		if random != nil && random.IntN(3) == 0 {
-			r := recognition.Refund{ID: "refund-" + id, GiftID: gift.ID, Amount: 3000, Currency: "USD", Status: "PENDING", UpdatedAt: gift.PaidAt.Add(time.Hour)}
+			r := recognition.Refund{
+				ID:        "refund-" + id,
+				GiftID:    gift.ID,
+				Amount:    3000,
+				Currency:  "USD",
+				Status:    "PENDING",
+				UpdatedAt: gift.PaidAt.Add(time.Hour),
+			}
 			if random.IntN(2) == 0 {
 				r.Amount = 1000
 			}

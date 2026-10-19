@@ -1,21 +1,22 @@
-import { Buffer } from "node:buffer";
 import { DurableObject } from "cloudflare:workers";
+import { Buffer } from "node:buffer";
 import {
 	applyDelta,
 	canonical,
 	check,
+	type Delta,
 	digest,
 	emptyLedger,
+	hex,
+	type Ledger,
 	LedgerError,
 	object as objectFields,
+	type Principal,
 	publication,
+	type Snapshot,
 	sha,
 	triage,
 	validateLedger,
-	type Delta,
-	type Ledger,
-	type Principal,
-	type Snapshot,
 } from "./ledger";
 
 type Head = {
@@ -47,6 +48,20 @@ interface Event {
 	requestDigest: string;
 }
 const ZERO = "0".repeat(64);
+const MAX_ARCHIVED_BYTES = 2 * 1024 * 1024;
+const UPSERT_HEAD =
+	"INSERT INTO head(id,version,digest,history_hash,ledger) VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,digest=excluded.digest,history_hash=excluded.history_hash,ledger=excluded.ledger";
+
+const envelope = (row: EventRow) =>
+	canonical({ hash: row.hash, event: JSON.parse(row.payload) });
+
+async function holds(object: R2ObjectBody | null, bytes: string) {
+	return (
+		object !== null &&
+		object.size <= MAX_ARCHIVED_BYTES &&
+		(await object.text()) === bytes
+	);
+}
 
 export class LedgerStore extends DurableObject<Env> {
 	async request(
@@ -179,6 +194,23 @@ export class LedgerStore extends DurableObject<Env> {
 		return `events/${encodeURIComponent(this.env.SOURCE)}/${String(version).padStart(12, "0")}-${hash}.json`;
 	}
 
+	private genesis(): Snapshot {
+		const ledger = emptyLedger(this.env.SOURCE);
+		return { version: 0, digest: digest(ledger), historyHash: ZERO, ledger };
+	}
+
+	private event(operation: string) {
+		return this.ctx.storage.sql
+			.exec<EventRow>("SELECT * FROM events WHERE operation=?", operation)
+			.toArray()[0];
+	}
+
+	private eventCount() {
+		return this.ctx.storage.sql
+			.exec<{ n: number }>("SELECT COUNT(*) n FROM events")
+			.one().n;
+	}
+
 	private async archive(): Promise<void> {
 		const pending = this.ctx.storage.sql
 			.exec<EventRow>(
@@ -186,38 +218,26 @@ export class LedgerStore extends DurableObject<Env> {
 			)
 			.toArray();
 		for (const event of pending) {
-			const bytes = canonical({
-				hash: event.hash,
-				event: JSON.parse(event.payload),
-			});
+			const bytes = envelope(event);
 			for (const key of [
 				this.eventKey(event.version, event.hash),
 				this.key(event.version, event.hash),
 			]) {
 				const existing = await this.env.ARCHIVE.get(key);
 				if (existing) {
+					check(await holds(existing, bytes), "Archive integrity failure", 503);
+					continue;
+				}
+				const stored = await this.env.ARCHIVE.put(key, bytes, {
+					onlyIf: { etagDoesNotMatch: "*" },
+					httpMetadata: { contentType: "application/json" },
+				});
+				if (!stored)
 					check(
-						existing.size <= 2 * 1024 * 1024 &&
-							(await existing.text()) === bytes,
-						"Archive integrity failure",
+						await holds(await this.env.ARCHIVE.get(key), bytes),
+						"Archive collision",
 						503,
 					);
-				} else {
-					const stored = await this.env.ARCHIVE.put(key, bytes, {
-						onlyIf: { etagDoesNotMatch: "*" },
-						httpMetadata: { contentType: "application/json" },
-					});
-					if (!stored) {
-						const concurrent = await this.env.ARCHIVE.get(key);
-						check(
-							concurrent &&
-								concurrent.size <= 2 * 1024 * 1024 &&
-								(await concurrent.text()) === bytes,
-							"Archive collision",
-							503,
-						);
-					}
-				}
 			}
 			this.ctx.storage.sql.exec(
 				"DELETE FROM archive_pending WHERE version=?",
@@ -250,10 +270,7 @@ export class LedgerStore extends DurableObject<Env> {
 			.exec<EventRow>("SELECT * FROM events WHERE version=?", head.version)
 			.one();
 		check(
-			archived &&
-				archived.size <= 2 * 1024 * 1024 &&
-				(await archived.text()) ===
-					canonical({ hash: event.hash, event: JSON.parse(event.payload) }),
+			await holds(archived, envelope(event)),
 			"Archive integrity failure",
 			503,
 		);
@@ -304,17 +321,18 @@ export class LedgerStore extends DurableObject<Env> {
 			...(legacy ? { legacy } : {}),
 		};
 		const hash = digest(event);
+		const payload = canonical(event);
 		check(
-			Buffer.byteLength(canonical(event)) <= 512 * 1024,
+			Buffer.byteLength(payload) <= 512 * 1024,
 			"Event capacity exceeded",
 			413,
 		);
-		this.reserveEvent(canonical(event), hash);
+		this.reserveEvent(payload, hash);
 		this.ctx.storage.sql.exec(
 			"INSERT INTO events(version,hash,payload,operation,request_digest) VALUES(?,?,?,?,?)",
 			event.version,
 			hash,
-			canonical(event),
+			payload,
 			operation,
 			requestDigest,
 		);
@@ -323,12 +341,51 @@ export class LedgerStore extends DurableObject<Env> {
 			event.version,
 		);
 		this.ctx.storage.sql.exec(
-			"INSERT INTO head(id,version,digest,history_hash,ledger) VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,digest=excluded.digest,history_hash=excluded.history_hash,ledger=excluded.ledger",
+			UPSERT_HEAD,
 			event.version,
 			event.afterDigest,
 			hash,
 			canonical(next),
 		);
+	}
+
+	// A command is keyed by its kind and GitHub execution, so a retry of the
+	// same request is acknowledged once and a different one is refused.
+	private async command(
+		kind: "publish" | "triage",
+		body: Record<string, unknown>,
+		principal: Principal,
+		conflict: string,
+		apply: (prior: Snapshot) => { ledger: Ledger; delta: Delta },
+	): Promise<Snapshot> {
+		await this.snapshot();
+		const operation = `${kind}:${principal.execution}`;
+		const requestDigest = digest(body);
+		this.ctx.storage.transactionSync(() => {
+			const duplicate = this.event(operation);
+			if (duplicate) {
+				check(duplicate.request_digest === requestDigest, conflict, 409);
+				return;
+			}
+			const prior = this.head();
+			check(
+				body.expectedVersion === prior.version &&
+					body.previousDigest === prior.digest,
+				"Stale ledger revision",
+				409,
+			);
+			const { ledger, delta } = apply(prior);
+			this.append(
+				prior,
+				ledger,
+				kind,
+				operation,
+				requestDigest,
+				principal,
+				delta,
+			);
+		});
+		return this.snapshot();
 	}
 
 	async publish(body: unknown, principal: Principal): Promise<Snapshot> {
@@ -338,44 +395,18 @@ export class LedgerStore extends DurableObject<Env> {
 			403,
 		);
 		objectFields(body, ["expectedVersion", "previousDigest", "ledger"]);
-		validateLedger(body.ledger, this.env.SOURCE);
-		await this.snapshot();
 		const ledger = body.ledger;
-		const requestDigest = digest(body);
-		this.ctx.storage.transactionSync(() => {
-			const duplicate = this.ctx.storage.sql
-				.exec<EventRow>(
-					"SELECT * FROM events WHERE operation=?",
-					`publish:${principal.execution}`,
-				)
-				.toArray()[0];
-			if (duplicate) {
-				check(
-					duplicate.request_digest === requestDigest,
-					"Conflicting publication retry",
-					409,
-				);
-				return;
-			}
-			const prior = this.head();
-			check(
-				body.expectedVersion === prior.version &&
-					body.previousDigest === prior.digest,
-				"Stale ledger revision",
-				409,
-			);
-			const changes = publication(prior.ledger, ledger, principal.execution);
-			this.append(
-				prior,
+		validateLedger(ledger, this.env.SOURCE);
+		return this.command(
+			"publish",
+			body,
+			principal,
+			"Conflicting publication retry",
+			(prior) => ({
 				ledger,
-				"publish",
-				`publish:${principal.execution}`,
-				requestDigest,
-				principal,
-				changes,
-			);
-		});
-		return this.snapshot();
+				delta: publication(prior.ledger, ledger, principal.execution),
+			}),
+		);
 	}
 
 	async classify(body: unknown, principal: Principal): Promise<Snapshot> {
@@ -385,47 +416,19 @@ export class LedgerStore extends DurableObject<Env> {
 			403,
 		);
 		objectFields(body, ["expectedVersion", "previousDigest", "change"]);
-		await this.snapshot();
-		this.ctx.storage.transactionSync(() => {
-			const requestDigest = digest(body);
-			const duplicate = this.ctx.storage.sql
-				.exec<EventRow>(
-					"SELECT * FROM events WHERE operation=?",
-					`triage:${principal.execution}`,
-				)
-				.toArray()[0];
-			if (duplicate) {
-				check(
-					duplicate.request_digest === requestDigest,
-					"Conflicting triage retry",
-					409,
-				);
-				return;
-			}
-			const prior = this.head();
-			check(
-				body.expectedVersion === prior.version &&
-					body.previousDigest === prior.digest,
-				"Stale ledger revision",
-				409,
-			);
-			const next = triage(
-				prior.ledger,
-				body.change,
-				principal.actor,
-				new Date().toISOString(),
-			);
-			this.append(
-				prior,
-				next.ledger,
-				"triage",
-				`triage:${principal.execution}`,
-				requestDigest,
-				principal,
-				next.delta,
-			);
-		});
-		return this.snapshot();
+		return this.command(
+			"triage",
+			body,
+			principal,
+			"Conflicting triage retry",
+			(prior) =>
+				triage(
+					prior.ledger,
+					body.change,
+					principal.actor,
+					new Date().toISOString(),
+				),
+		);
 	}
 
 	async migrate(body: unknown, principal: Principal): Promise<Snapshot> {
@@ -442,11 +445,7 @@ export class LedgerStore extends DurableObject<Env> {
 				body.history.length <= 1000,
 			"Invalid migration history",
 		);
-		if (
-			this.ctx.storage.sql
-				.exec<{ n: number }>("SELECT COUNT(*) n FROM events")
-				.one().n === 0
-		) {
+		if (this.eventCount() === 0) {
 			for (const index of ["events", "history"]) {
 				const archived = await this.env.ARCHIVE.list({
 					prefix: `${index}/${encodeURIComponent(this.env.SOURCE)}/`,
@@ -462,11 +461,7 @@ export class LedgerStore extends DurableObject<Env> {
 		const history = body.history;
 		const requestDigest = digest(body);
 		this.ctx.storage.transactionSync(() => {
-			const existing = this.ctx.storage.sql
-				.exec<EventRow>(
-					"SELECT * FROM events WHERE operation='migration:begin'",
-				)
-				.toArray()[0];
+			const existing = this.event("migration:begin");
 			if (existing) {
 				check(
 					existing.request_digest === requestDigest,
@@ -475,19 +470,8 @@ export class LedgerStore extends DurableObject<Env> {
 				);
 				return;
 			}
-			check(
-				this.ctx.storage.sql
-					.exec<{ n: number }>("SELECT COUNT(*) n FROM events")
-					.one().n === 0,
-				"Ledger already initialized",
-				409,
-			);
-			let prior: Snapshot = {
-				version: 0,
-				digest: digest(emptyLedger(this.env.SOURCE)),
-				historyHash: ZERO,
-				ledger: emptyLedger(this.env.SOURCE),
-			};
+			check(this.eventCount() === 0, "Ledger already initialized", 409);
+			let prior = this.genesis();
 			let parent: string | null = null;
 			for (const [i, entry] of history.entries()) {
 				objectFields(entry, ["commit", "parent", "at", "ledger"]);
@@ -573,16 +557,11 @@ export class LedgerStore extends DurableObject<Env> {
 		);
 		await this.archive();
 		const prefix = `events/${encodeURIComponent(this.env.SOURCE)}/`;
-		let head: Snapshot = this.ctx.storage.sql
+		let head = this.ctx.storage.sql
 			.exec<{ n: number }>("SELECT COUNT(*) n FROM head")
 			.one().n
 			? this.head()
-			: {
-					version: 0,
-					digest: digest(emptyLedger(this.env.SOURCE)),
-					historyHash: ZERO,
-					ledger: emptyLedger(this.env.SOURCE),
-				};
+			: this.genesis();
 		const startingVersion = head.version;
 		const listing = await this.env.ARCHIVE.list({
 			prefix,
@@ -596,7 +575,7 @@ export class LedgerStore extends DurableObject<Env> {
 			if (position <= head.version) continue;
 			const archived = await this.env.ARCHIVE.get(object.key);
 			check(
-				archived && archived.size <= 2 * 1024 * 1024,
+				archived && archived.size <= MAX_ARCHIVED_BYTES,
 				"Missing or oversized archive entry",
 				503,
 			);
@@ -653,7 +632,7 @@ export class LedgerStore extends DurableObject<Env> {
 				digest(next) === event.afterDigest &&
 					typeof event.operation === "string" &&
 					typeof event.requestDigest === "string" &&
-					/^[a-f0-9]{64}$/.test(event.requestDigest),
+					hex.test(event.requestDigest),
 				"Archive projection mismatch",
 				503,
 			);
@@ -685,7 +664,7 @@ export class LedgerStore extends DurableObject<Env> {
 					);
 				}
 				this.ctx.storage.sql.exec(
-					"INSERT INTO head(id,version,digest,history_hash,ledger) VALUES(1,?,?,?,?) ON CONFLICT(id) DO UPDATE SET version=excluded.version,digest=excluded.digest,history_hash=excluded.history_hash,ledger=excluded.ledger",
+					UPSERT_HEAD,
 					event.version,
 					event.afterDigest,
 					envelope.hash,

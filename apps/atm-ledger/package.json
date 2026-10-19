@@ -6,7 +6,8 @@
   "scripts": {
     "types": "wrangler types",
     "typecheck": "wrangler types && tsc --noEmit",
-    "lint": "biome lint --error-on-warnings src test",
+    "lint": "biome check --error-on-warnings src test vitest.config.ts",
+    "format": "biome format --write src test vitest.config.ts",
     "test": "vitest run",
     "build": "wrangler deploy --dry-run --outdir dist",
     "deploy": "wrangler deploy"

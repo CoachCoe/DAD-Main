@@ -15,8 +15,14 @@ import (
 )
 
 func notificationWorker(t *testing.T, transport *recordingMail) MessageWorker {
-	return MessageWorker{DB: as(t, dbroles.MessageWorker), Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys}, Origin: "https://donor.example.org", Transport: transport}
+	return MessageWorker{
+		DB:        as(t, dbroles.MessageWorker),
+		Settings:  mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys},
+		Origin:    "https://donor.example.org",
+		Transport: transport,
+	}
 }
+
 func TestReceiptMessagePersistsBodyBeforeSendAndRetriesUnchanged(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	result := f.checkout(t)
@@ -28,7 +34,8 @@ func TestReceiptMessagePersistsBodyBeforeSendAndRetriesUnchanged(t *testing.T) {
 	now := time.Now().Add(time.Second)
 	transport.check = func(m mail.Message) {
 		var saved string
-		if err := f.db.QueryRow(ctx, "SELECT body FROM donor_messages WHERE donor_id=$1 AND kind='RECEIPT'", f.donorID).Scan(&saved); err != nil || saved != m.Body {
+		if err := f.db.QueryRow(ctx, "SELECT body FROM donor_messages WHERE donor_id=$1 AND kind='RECEIPT'", f.donorID).Scan(&saved); err != nil ||
+			saved != m.Body {
 			t.Fatal("uncommitted rendering sent", err)
 		}
 	}
@@ -48,10 +55,12 @@ func TestReceiptMessagePersistsBodyBeforeSendAndRetriesUnchanged(t *testing.T) {
 	if worked, err := w.DeliverNext(ctx, now.Add(2*time.Minute)); err != nil || !worked {
 		t.Fatal(worked, err)
 	}
-	if len(transport.messages) != 2 || transport.messages[0] != transport.messages[1] || !strings.Contains(transport.messages[0].Body, "Net test amount: $30.00") {
+	if len(transport.messages) != 2 || transport.messages[0] != transport.messages[1] ||
+		!strings.Contains(transport.messages[0].Body, "Net test amount: $30.00") {
 		t.Fatal("message changed across retry")
 	}
 }
+
 func TestRecoveryMessagesSuppressObsoleteAndRecoveredReminders(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	result := f.checkout(t)
@@ -72,7 +81,8 @@ func TestRecoveryMessagesSuppressObsoleteAndRecoveredReminders(t *testing.T) {
 		t.Fatal("wrong reminder delivery")
 	}
 	var reason string
-	if err := f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='0'", f.donorID).Scan(&reason); err != nil || reason != "newer_reminder_due" {
+	if err := f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='0'", f.donorID).Scan(&reason); err != nil ||
+		reason != "newer_reminder_due" {
 		t.Fatal(reason, err)
 	}
 	if _, err := f.db.Exec(ctx, "UPDATE donor_billing_periods SET status='PAID' WHERE donor_id=$1", f.donorID); err != nil {
@@ -84,10 +94,12 @@ func TestRecoveryMessagesSuppressObsoleteAndRecoveredReminders(t *testing.T) {
 	if len(transport.messages) != 1 {
 		t.Fatal("recovered gift received another warning")
 	}
-	if err := f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='13'", f.donorID).Scan(&reason); err != nil || reason != "payment_recovered" {
+	if err := f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='13'", f.donorID).Scan(&reason); err != nil ||
+		reason != "payment_recovered" {
 		t.Fatal(reason, err)
 	}
 }
+
 func TestReferralSuppressionRechecksPreferencesAfterRendering(t *testing.T) {
 	f := newWorkerFixture(t, "ONE_TIME")
 	ctx := context.Background()
@@ -141,7 +153,8 @@ func TestReferralSuppressionRechecksPreferencesAfterRendering(t *testing.T) {
 		t.Fatal("opt-out ignored on retry")
 	}
 	var reason string
-	if err = f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1", f.donorID).Scan(&reason); err != nil || reason != "opted_out" {
+	if err = f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1", f.donorID).Scan(&reason); err != nil ||
+		reason != "opted_out" {
 		t.Fatal(reason, err)
 	}
 }

@@ -46,7 +46,10 @@ type APNs struct {
 // 10-character key ID, the team ID, and the app's bundle ID as the topic.
 func NewAPNs(keyPEM []byte, keyID, teamID, topic string) (*APNs, error) {
 	if !appleIDPattern.MatchString(keyID) || !appleIDPattern.MatchString(teamID) || !topicPattern.MatchString(topic) {
-		return nil, fmt.Errorf("%w: DONOR_PUSH_APNS_KEY_ID and DONOR_PUSH_APNS_TEAM_ID must be 10-character Apple IDs and DONOR_PUSH_APNS_TOPIC the app's bundle ID", ErrConfiguration)
+		return nil, fmt.Errorf(
+			"%w: DONOR_PUSH_APNS_KEY_ID and DONOR_PUSH_APNS_TEAM_ID must be 10-character Apple IDs and DONOR_PUSH_APNS_TOPIC the app's bundle ID",
+			ErrConfiguration,
+		)
 	}
 	block, rest := pem.Decode(keyPEM)
 	if block == nil || block.Type != "PRIVATE KEY" || len(bytes.TrimSpace(rest)) != 0 {
@@ -72,17 +75,21 @@ func (a *APNs) bearer() (string, error) {
 	if a.token != "" && now.Sub(a.issued) < apnsTokenLifetime {
 		return a.token, nil
 	}
-	token, err := jwt(map[string]string{"alg": "ES256", "kid": a.keyID}, map[string]any{"iss": a.teamID, "iat": now.Unix()}, func(digest []byte) ([]byte, error) {
-		r, s, err := ecdsa.Sign(rand.Reader, a.key, digest)
-		if err != nil {
-			return nil, err
-		}
-		// JWS encodes an ES256 signature as fixed-width r and s, not ASN.1.
-		signature := make([]byte, 64)
-		r.FillBytes(signature[:32])
-		s.FillBytes(signature[32:])
-		return signature, nil
-	})
+	token, err := jwt(
+		map[string]string{"alg": "ES256", "kid": a.keyID},
+		map[string]any{"iss": a.teamID, "iat": now.Unix()},
+		func(digest []byte) ([]byte, error) {
+			r, s, err := ecdsa.Sign(rand.Reader, a.key, digest)
+			if err != nil {
+				return nil, err
+			}
+			// JWS encodes an ES256 signature as fixed-width r and s, not ASN.1.
+			signature := make([]byte, 64)
+			r.FillBytes(signature[:32])
+			s.FillBytes(signature[32:])
+			return signature, nil
+		},
+	)
 	if err != nil {
 		return "", err
 	}

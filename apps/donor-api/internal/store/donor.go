@@ -51,6 +51,7 @@ type DonorService struct {
 	DB     *pgxpool.Pool
 	Origin string
 }
+
 type Profile struct {
 	Email          string  `json:"email"`
 	PublicName     *string `json:"public_name"`
@@ -89,10 +90,12 @@ type Sharing struct {
 	Link       *string `json:"link"`
 	IRLLink    *string `json:"irl_link"`
 }
+
 type ReferralCapture struct {
 	Token      string
 	PublicName *string
 }
+
 type GiftsPage struct {
 	Email      string                      `json:"email"`
 	Mode       string                      `json:"mode"`
@@ -104,8 +107,14 @@ func readProfile(ctx context.Context, q *queries.Queries, donor queries.Donor) (
 	pref, err := readPreferences(ctx, q, donor.ID)
 	return Profile{Email: donor.Email, PublicName: textPointer(donor.PublicName), ConsentVersion: consentVersion, Preferences: pref}, err
 }
+
 func (s DonorService) Profile(ctx context.Context, token string) (Profile, error) {
-	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (Profile, error) { return readProfile(ctx, q, d) })
+	return donorRead(
+		ctx,
+		s.DB,
+		token,
+		func(q *queries.Queries, d queries.Donor, _ time.Time) (Profile, error) { return readProfile(ctx, q, d) },
+	)
 }
 
 // SavePreferences replaces the donor's notification choices if pref.Version
@@ -155,12 +164,18 @@ func sharing(d queries.Donor, site publicSite) Sharing {
 	}
 	return out
 }
+
 func (s DonorService) Sharing(ctx context.Context, token string) (Sharing, error) {
 	site, err := site(s.Origin)
 	if err != nil {
 		return Sharing{}, err
 	}
-	return donorRead(ctx, s.DB, token, func(_ *queries.Queries, d queries.Donor, _ time.Time) (Sharing, error) { return sharing(d, site), nil })
+	return donorRead(
+		ctx,
+		s.DB,
+		token,
+		func(_ *queries.Queries, d queries.Donor, _ time.Time) (Sharing, error) { return sharing(d, site), nil },
+	)
 }
 
 // SaveSharing sets the donor's public name, issuing a referral code on first
@@ -218,21 +233,18 @@ func (s DonorService) CaptureReferral(ctx context.Context, code, kind, visitor s
 	if kind != "LINK" && kind != "IRL" {
 		return ReferralCapture{}, payments.ErrFacts
 	}
-	var capture ReferralCapture
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (ReferralCapture, error) {
 		q := queries.New(tx)
 		token, err := captureTouch(ctx, q, code, kind, visitor, now)
 		if err != nil || token == "" {
-			return err
+			return ReferralCapture{}, err
 		}
 		name, err := q.CapturedReferrerName(ctx, HashToken(token))
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
+			return ReferralCapture{}, err
 		}
-		capture = ReferralCapture{Token: token, PublicName: textPointer(name)}
-		return nil
+		return ReferralCapture{Token: token, PublicName: textPointer(name)}, nil
 	})
-	return capture, err
 }
 
 func captureTouch(ctx context.Context, q *queries.Queries, code, kind, visitor string, now time.Time) (string, error) {
@@ -263,7 +275,17 @@ func captureTouch(ctx context.Context, q *queries.Queries, code, kind, visitor s
 	if err != nil {
 		return "", err
 	}
-	return token, q.InsertReferralTouch(ctx, queries.InsertReferralTouchParams{ID: id, TokenHash: HashToken(token), ReferrerID: referrer.ID, Kind: kind, TouchedAt: timestamp(now), ExpiresAt: timestamp(now.Add(referralWindow))})
+	return token, q.InsertReferralTouch(
+		ctx,
+		queries.InsertReferralTouchParams{
+			ID:         id,
+			TokenHash:  HashToken(token),
+			ReferrerID: referrer.ID,
+			Kind:       kind,
+			TouchedAt:  timestamp(now),
+			ExpiresAt:  timestamp(now.Add(referralWindow)),
+		},
+	)
 }
 
 func (s DonorService) Gifts(ctx context.Context, token string, offset int64) (GiftsPage, error) {
@@ -316,6 +338,7 @@ func (s DonorService) Receipt(ctx context.Context, token string, gift pgtype.UUI
 		return readReceipt(ctx, q, d.ID, gift, now)
 	})
 }
+
 func (s DonorService) AnnualSummary(ctx context.Context, token string, year int) (AnnualSummary, error) {
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (AnnualSummary, error) {
 		return readAnnualSummary(ctx, q, d.ID, year, now)

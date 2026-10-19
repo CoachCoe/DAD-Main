@@ -80,7 +80,14 @@ FROM pg_roles r WHERE r.rolname=$1`, role.Name).Scan(&attributes, &owned, &schem
 			t.Fatalf("%s: %v", role.Name, err)
 		}
 		if attributes+owned+schemas+memberships > 0 {
-			t.Errorf("%s: attributes %d, owned objects %d, schemas or databases it may create in %d, memberships %d; want none", role.Name, attributes, owned, schemas, memberships)
+			t.Errorf(
+				"%s: attributes %d, owned objects %d, schemas or databases it may create in %d, memberships %d; want none",
+				role.Name,
+				attributes,
+				owned,
+				schemas,
+				memberships,
+			)
 		}
 	}
 }
@@ -170,7 +177,8 @@ func TestRolesAreRefusedWhatTheyDoNotNeed(t *testing.T) {
 func TestCheckRefusesOwnersAndOtherRoles(t *testing.T) {
 	ctx := context.Background()
 	pool := owner(t)
-	if err := dbroles.API.Check(ctx, pool, false); err == nil || !strings.Contains(err.Error(), "DONOR_API_DATABASE_URL connects as a user that can change the schema") {
+	if err := dbroles.API.Check(ctx, pool, false); err == nil ||
+		!strings.Contains(err.Error(), "DONOR_API_DATABASE_URL connects as a user that can change the schema") {
 		t.Errorf("owner: got %v", err)
 	}
 	if err := dbroles.API.Check(ctx, pool, true); err != nil {
@@ -186,13 +194,17 @@ func TestCheckRefusesOwnersAndOtherRoles(t *testing.T) {
 			t.Errorf("%s assumed on a local machine: %v", role.Name, err)
 		}
 	}
-	if err := dbroles.API.Check(ctx, dbrolestest.Open(t, dbroles.Monitor), true); err == nil || !strings.Contains(err.Error(), "not a member of dad_api") {
+	if err := dbroles.API.Check(ctx, dbrolestest.Open(t, dbroles.Monitor), true); err == nil ||
+		!strings.Contains(err.Error(), "not a member of dad_api") {
 		t.Errorf("another role: got %v", err)
 	}
 }
 
 func TestEachProcessReadsItsOwnURL(t *testing.T) {
-	env := map[string]string{"DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL": "postgresql://login@db/app", dbroles.OwnerVariable: "postgresql://owner@db/app"}
+	env := map[string]string{
+		"DONOR_WORKER_LOGIN_EMAIL_DATABASE_URL": "postgresql://login@db/app",
+		dbroles.OwnerVariable:                   "postgresql://owner@db/app",
+	}
 	getenv := func(name string) string { return env[name] }
 	if got := dbroles.Workers["login-email"].URL(getenv); got != "postgresql://login@db/app" {
 		t.Errorf("own URL: %q", got)

@@ -29,7 +29,14 @@ func loadHistory(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (
 		return result, err
 	}
 	for _, g := range gifts {
-		gift := recognition.Gift{ID: g.StripeObjectID, DonorID: g.DonorID.String(), Amount: g.AmountMinor, Currency: g.Currency, Frequency: g.Frequency, PaidAt: g.PaidAt.Time}
+		gift := recognition.Gift{
+			ID:        g.StripeObjectID,
+			DonorID:   g.DonorID.String(),
+			Amount:    g.AmountMinor,
+			Currency:  g.Currency,
+			Frequency: g.Frequency,
+			PaidAt:    g.PaidAt.Time,
+		}
 		if g.PeriodID.Valid {
 			gift.PeriodID = g.PeriodID.String()
 		}
@@ -37,7 +44,11 @@ func loadHistory(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (
 			if !g.ReferralKind.Valid || !g.ReferralExpiresAt.Valid {
 				return result, recognition.ErrInvalid
 			}
-			gift.Candidate = &recognition.Candidate{ReferrerID: g.ReferrerID.String(), Kind: g.ReferralKind.String, ExpiresAt: g.ReferralExpiresAt.Time}
+			gift.Candidate = &recognition.Candidate{
+				ReferrerID: g.ReferrerID.String(),
+				Kind:       g.ReferralKind.String,
+				ExpiresAt:  g.ReferralExpiresAt.Time,
+			}
 		}
 		result.Gifts = append(result.Gifts, gift)
 	}
@@ -46,7 +57,17 @@ func loadHistory(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (
 		return result, err
 	}
 	for _, r := range refunds {
-		result.Refunds = append(result.Refunds, recognition.Refund{ID: r.StripeRefundID, GiftID: r.StripeObjectID, Amount: r.AmountMinor, Currency: r.Currency, Status: r.Status, UpdatedAt: r.ObservedAt.Time})
+		result.Refunds = append(
+			result.Refunds,
+			recognition.Refund{
+				ID:        r.StripeRefundID,
+				GiftID:    r.StripeObjectID,
+				Amount:    r.AmountMinor,
+				Currency:  r.Currency,
+				Status:    r.Status,
+				UpdatedAt: r.ObservedAt.Time,
+			},
+		)
 	}
 	periods, err := q.PeriodHistory(ctx, donorID)
 	if err != nil {
@@ -57,14 +78,26 @@ func loadHistory(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (
 		if p.Status == "FAILED" {
 			status = "FAILED"
 		}
-		result.Periods = append(result.Periods, recognition.Period{ID: p.ID.String(), DonorID: p.DonorID.String(), DueAt: p.DueAt.Time, EndsAt: p.EndsAt.Time, Status: status})
+		result.Periods = append(
+			result.Periods,
+			recognition.Period{ID: p.ID.String(), DonorID: p.DonorID.String(), DueAt: p.DueAt.Time, EndsAt: p.EndsAt.Time, Status: status},
+		)
 	}
 	return result, nil
 }
 
 // historicalBest replays refund observations made by asOf so a full refund
 // cannot erase a best streak the donor had already attained.
-func historicalBest(ctx context.Context, id pgtype.UUID, h history, observations []queries.RefundObservationsRow, now time.Time, previous int64, stops []time.Time, pauses []recognition.Pause) (int64, error) {
+func historicalBest(
+	ctx context.Context,
+	id pgtype.UUID,
+	h history,
+	observations []queries.RefundObservationsRow,
+	now time.Time,
+	previous int64,
+	stops []time.Time,
+	pauses []recognition.Pause,
+) (int64, error) {
 	byID := map[string]recognition.Refund{}
 	for _, r := range h.Refunds {
 		byID[r.ID] = r
@@ -92,7 +125,11 @@ func historicalBest(ctx context.Context, id pgtype.UUID, h history, observations
 // refundsAsOf returns each refund's state as of asOf. A refund last updated
 // after asOf, as another process with a later clock may record, takes its
 // latest earlier observation; the later update is returned as a refresh boundary.
-func refundsAsOf(current []recognition.Refund, observations []queries.RefundObservationsRow, asOf time.Time) ([]recognition.Refund, []time.Time) {
+func refundsAsOf(
+	current []recognition.Refund,
+	observations []queries.RefundObservationsRow,
+	asOf time.Time,
+) ([]recognition.Refund, []time.Time) {
 	latest := map[string]queries.RefundObservationsRow{}
 	for _, o := range observations {
 		latest[o.StripeRefundID] = o
@@ -113,7 +150,16 @@ func refundsAsOf(current []recognition.Refund, observations []queries.RefundObse
 	return result, later
 }
 
-func replayBest(ctx context.Context, donorID string, h history, history []recognition.Refund, now time.Time, previous int64, stops []time.Time, pauses []recognition.Pause) (int64, error) {
+func replayBest(
+	ctx context.Context,
+	donorID string,
+	h history,
+	history []recognition.Refund,
+	now time.Time,
+	previous int64,
+	stops []time.Time,
+	pauses []recognition.Pause,
+) (int64, error) {
 	slices.SortStableFunc(history, func(a, b recognition.Refund) int { return a.UpdatedAt.Compare(b.UpdatedAt) })
 	gifts := slices.Clone(h.Gifts)
 	slices.SortStableFunc(gifts, func(a, b recognition.Gift) int { return a.PaidAt.Compare(b.PaidAt) })
@@ -193,7 +239,12 @@ func refreshCap(donor pgtype.UUID) time.Duration {
 // projectFacts recomputes and saves the donor's recognition projection
 // under the donor lock.
 func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (projection, error) {
-	out := queries.SaveProjectionParams{DonorID: id, ComputedAt: timestamp(now), NextRefreshAt: timestamp(now.Add(refreshCap(id))), RulesVersion: projectionRules}
+	out := queries.SaveProjectionParams{
+		DonorID:       id,
+		ComputedAt:    timestamp(now),
+		NextRefreshAt: timestamp(now.Add(refreshCap(id))),
+		RulesVersion:  projectionRules,
+	}
 	if _, err := q.LockDonor(ctx, id); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
@@ -260,7 +311,8 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 	if err = applyReferralDelta(ctx, q, old, out, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
-	if old.FirstGiftID.Valid && (old.FirstGiftID != out.FirstGiftID || old.ReferrerID != out.ReferrerID || old.ReferralKind != out.ReferralKind) {
+	if old.FirstGiftID.Valid &&
+		(old.FirstGiftID != out.FirstGiftID || old.ReferrerID != out.ReferrerID || old.ReferralKind != out.ReferralKind) {
 		if err = q.InsertReferralCorrection(ctx, queries.InsertReferralCorrectionParams{
 			DonorID: id, OldFirstGiftID: old.FirstGiftID.String, NewFirstGiftID: out.FirstGiftID,
 			OldReferrerID: old.ReferrerID, NewReferrerID: out.ReferrerID,
@@ -316,7 +368,13 @@ func referralContribution(referrer pgtype.UUID, kind pgtype.Text, net pgtype.Int
 }
 
 // applyReferralDelta transfers contributions atomically with the projection.
-func applyReferralDelta(ctx context.Context, q *queries.Queries, old queries.DonorMetricProjection, out queries.SaveProjectionParams, now time.Time) error {
+func applyReferralDelta(
+	ctx context.Context,
+	q *queries.Queries,
+	old queries.DonorMetricProjection,
+	out queries.SaveProjectionParams,
+	now time.Time,
+) error {
 	deltas := map[pgtype.UUID]queries.ApplyReferralDeltaParams{}
 	add := func(referrer pgtype.UUID, kind pgtype.Text, net pgtype.Int8, sign int64) {
 		if !referrer.Valid {
@@ -351,7 +409,13 @@ func applyReferralDelta(ctx context.Context, q *queries.Queries, old queries.Don
 
 // nextRefresh is the earliest moment after now at which the projection can
 // change without new facts arriving, and at most its default refresh time.
-func nextRefresh(out queries.SaveProjectionParams, h history, refundBoundaries, stops []time.Time, pauses []recognition.Pause, now time.Time) pgtype.Timestamptz {
+func nextRefresh(
+	out queries.SaveProjectionParams,
+	h history,
+	refundBoundaries, stops []time.Time,
+	pauses []recognition.Pause,
+	now time.Time,
+) pgtype.Timestamptz {
 	boundaries := slices.Concat(refundBoundaries, stops)
 	for _, p := range h.Periods {
 		boundaries = append(boundaries, p.DueAt, p.EndsAt, p.EndsAt.Add(recognition.Grace))

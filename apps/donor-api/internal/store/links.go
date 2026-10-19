@@ -36,6 +36,7 @@ func (s publicSite) claim(token, next string) string {
 	}
 	return link
 }
+
 func (s publicSite) emailChange(token string) string {
 	return string(s) + "/account/email-change#token=" + token
 }
@@ -54,5 +55,10 @@ func (s publicSite) donate() string        { return string(s) + "/donate" }
 // checkoutReturn is where hosted checkout returns a donor; Stripe substitutes
 // the session placeholder.
 func (s publicSite) checkoutReturn(amount int64, frequency string) string {
-	return string(s) + "/donate/thanks?session_id={CHECKOUT_SESSION_ID}&amount_minor=" + strconv.FormatInt(amount, 10) + "&frequency=" + frequency
+	return string(
+		s,
+	) + "/donate/thanks?session_id={CHECKOUT_SESSION_ID}&amount_minor=" + strconv.FormatInt(
+		amount,
+		10,
+	) + "&frequency=" + frequency
 }

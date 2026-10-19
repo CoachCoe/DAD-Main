@@ -9,7 +9,14 @@ export const dynamic = "force-static";
 const APP_ID = /^[A-Z0-9]{10}\.[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
 /** The account pages the app handles; giving and the rest of the public site stay in the browser. */
-const APP_PATHS = ["/r/*", "/account/claim", "/account/email-change", "/account/payment-method", "/account/dashboard", "/account/profile"];
+const APP_PATHS = [
+  "/r/*",
+  "/account/claim",
+  "/account/email-change",
+  "/account/payment-method",
+  "/account/dashboard",
+  "/account/profile",
+];
 
 /** DONOR_IOS_APP_ID, "<team ID>.<bundle ID>", fixed at build time. */
 export function GET() {

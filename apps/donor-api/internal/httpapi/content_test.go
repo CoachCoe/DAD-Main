@@ -19,13 +19,18 @@ type contentFunc func(context.Context) (store.PublicContent, error)
 func (f contentFunc) PublicContent(ctx context.Context) (store.PublicContent, error) {
 	return f(ctx)
 }
+
 func TestPublishedContentCacheAndBoundedDatabaseContext(t *testing.T) {
 	reader := contentFunc(func(ctx context.Context) (store.PublicContent, error) {
 		deadline, ok := ctx.Deadline()
 		if !ok || time.Until(deadline) > 3*time.Second {
 			t.Error("database request lacks bounded deadline")
 		}
-		return store.PublicContent{State: "unpublished", Initiatives: []map[string]json.RawMessage{}, Ledger: []map[string]json.RawMessage{}}, nil
+		return store.PublicContent{
+			State:       "unpublished",
+			Initiatives: []map[string]json.RawMessage{},
+			Ledger:      []map[string]json.RawMessage{},
+		}, nil
 	})
 	response := httptest.NewRecorder()
 	server := NewServer("", Services{Content: reader})
@@ -34,6 +39,7 @@ func TestPublishedContentCacheAndBoundedDatabaseContext(t *testing.T) {
 		t.Fatalf("bad published response %d %v", response.Code, response.Header())
 	}
 }
+
 func TestDatabaseFailureIsPrivateAndNotCached(t *testing.T) {
 	reader := contentFunc(func(ctx context.Context) (store.PublicContent, error) {
 		return store.PublicContent{}, errors.New("private database detail")
@@ -100,8 +106,14 @@ func (s publishStub) Publish(context.Context, string, store.PublicationRequest) 
 }
 
 func TestRefusedPublicationListsEveryProblem(t *testing.T) {
-	refused := &store.PublicationError{Problems: []store.PublicationProblem{{Sheet: "ledger", Row: 3, Column: "value", Reason: "not_integer"}}}
-	r := httptest.NewRequest("POST", "/donor/staff/content/publish", strings.NewReader(`{"initiatives_csv":"","ledger_csv":"","as_of":"2026-10-01","cadence":"monthly"}`))
+	refused := &store.PublicationError{
+		Problems: []store.PublicationProblem{{Sheet: "ledger", Row: 3, Column: "value", Reason: "not_integer"}},
+	}
+	r := httptest.NewRequest(
+		"POST",
+		"/donor/staff/content/publish",
+		strings.NewReader(`{"initiatives_csv":"","ledger_csv":"","as_of":"2026-10-01","cadence":"monthly"}`),
+	)
 	r.Header.Set("Origin", testStaffOrigin)
 	r.AddCookie(&http.Cookie{Name: staffCookie, Value: "staff-session"})
 	response := httptest.NewRecorder()

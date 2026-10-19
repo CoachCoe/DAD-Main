@@ -33,7 +33,16 @@ var (
 var rolePermissions = map[string][]string{
 	"SUPPORT": {"donor.read", "message.resend"},
 	"FINANCE": {"data.export", "donor.read", "gift.cancel", "gift.refund", "message.resend"},
-	"ADMIN":   {"audit.read", "content.publish", "data.export", "donor.read", "gift.cancel", "gift.refund", "message.resend", "staff.manage"},
+	"ADMIN": {
+		"audit.read",
+		"content.publish",
+		"data.export",
+		"donor.read",
+		"gift.cancel",
+		"gift.refund",
+		"message.resend",
+		"staff.manage",
+	},
 }
 
 func staffPermissions(role string) []string { return rolePermissions[role] }
@@ -50,7 +59,15 @@ type StaffView struct {
 
 // staffView shows an account; it is active while it holds a passkey.
 func staffView(s queries.DonorStaff, active bool) StaffView {
-	return StaffView{ID: s.ID.String(), Email: s.Email, Name: s.Name, Role: s.Role, Disabled: s.Disabled, Active: active, Permissions: staffPermissions(s.Role)}
+	return StaffView{
+		ID:          s.ID.String(),
+		Email:       s.Email,
+		Name:        s.Name,
+		Role:        s.Role,
+		Disabled:    s.Disabled,
+		Active:      active,
+		Permissions: staffPermissions(s.Role),
+	}
 }
 
 type StaffService struct {
@@ -113,7 +130,10 @@ func auditStaff(ctx context.Context, q *queries.Queries, actor pgtype.UUID, acti
 	if err != nil {
 		return err
 	}
-	return q.InsertStaffAudit(ctx, queries.InsertStaffAuditParams{ID: id, ActorID: actor, Action: action, Target: target, Details: raw, CreatedAt: timestamp(now)})
+	return q.InsertStaffAudit(
+		ctx,
+		queries.InsertStaffAuditParams{ID: id, ActorID: actor, Action: action, Target: target, Details: raw, CreatedAt: timestamp(now)},
+	)
 }
 
 func (s *StaffService) Me(ctx context.Context, token string) (StaffView, error) {

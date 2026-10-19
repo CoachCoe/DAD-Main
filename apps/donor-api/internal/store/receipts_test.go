@@ -37,12 +37,35 @@ func TestAnnualSummaryReadsGiftsAndRefundsInTwoQueries(t *testing.T) {
 	defer tx.Rollback(ctx)
 	owner, checkout := testID(t), testID(t)
 	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", owner, owner.String()+"@example.org")
-	mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')", checkout, owner)
+	mustExec(
+		t,
+		tx,
+		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')",
+		checkout,
+		owner,
+	)
 	paid := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
 	for i := range 100 {
 		gift, refund := testID(t), testID(t)
-		mustExec(t, tx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)", gift, owner, checkout, "pi_"+gift.String(), paid.Add(time.Duration(i)*time.Minute))
-		mustExec(t, tx, "INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,500,'USD','SUCCEEDED',$4)", refund, gift, "re_"+refund.String(), paid.Add(time.Hour))
+		mustExec(
+			t,
+			tx,
+			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)",
+			gift,
+			owner,
+			checkout,
+			"pi_"+gift.String(),
+			paid.Add(time.Duration(i)*time.Minute),
+		)
+		mustExec(
+			t,
+			tx,
+			"INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,500,'USD','SUCCEEDED',$4)",
+			refund,
+			gift,
+			"re_"+refund.String(),
+			paid.Add(time.Hour),
+		)
 	}
 	actAs(t, tx, dbroles.MessageWorker)
 	db := &countedQueries{DBTX: tx}
@@ -54,7 +77,8 @@ func TestAnnualSummaryReadsGiftsAndRefundsInTwoQueries(t *testing.T) {
 		t.Fatal("incorrect or unbatched annual summary", db.reads, summary)
 	}
 	for i, gift := range summary.Gifts {
-		if len(gift.Refunds) != 1 || gift.Net != 2500 || gift.Refunds[0].ID == "" || gift.PaidAt != iso(paid.Add(time.Duration(i)*time.Minute)) {
+		if len(gift.Refunds) != 1 || gift.Net != 2500 || gift.Refunds[0].ID == "" ||
+			gift.PaidAt != iso(paid.Add(time.Duration(i)*time.Minute)) {
 			t.Fatal("gift/refund ordering or identity lost", gift)
 		}
 	}
@@ -74,7 +98,13 @@ func TestReceiptsScopeNewYorkYearAndLaterRefunds(t *testing.T) {
 		mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", id, id+"@example.org")
 	}
 	checkout := testID(t)
-	mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')", checkout, owner)
+	mustExec(
+		t,
+		tx,
+		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')",
+		checkout,
+		owner,
+	)
 	early, late, future := testID(t), testID(t), testID(t)
 	boundary := time.Date(2027, 1, 1, 5, 0, 0, 0, time.UTC)
 	for i, id := range []string{early.String(), late.String(), future.String()} {
@@ -82,13 +112,32 @@ func TestReceiptsScopeNewYorkYearAndLaterRefunds(t *testing.T) {
 		if i == 2 {
 			at = boundary.AddDate(2, 0, 0)
 		}
-		mustExec(t, tx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)", id, owner, checkout, "pi_"+id, at)
+		mustExec(
+			t,
+			tx,
+			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)",
+			id,
+			owner,
+			checkout,
+			"pi_"+id,
+			at,
+		)
 	}
 	now := boundary.AddDate(1, 0, 0)
 	refund := testID(t)
-	mustExec(t, tx, "INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,500,'USD','SUCCEEDED',$4)", refund, early, "re_"+refund.String(), now)
+	mustExec(
+		t,
+		tx,
+		"INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,500,'USD','SUCCEEDED',$4)",
+		refund,
+		early,
+		"re_"+refund.String(),
+		now,
+	)
 	summary, err := readAnnualSummary(ctx, q, owner, 2026, now)
-	if err != nil || len(summary.Gifts) != 1 || summary.Gifts[0].ID != early.String() || summary.Amount != 3000 || summary.Refunded != 500 || summary.Net != 2500 {
+	if err != nil || len(summary.Gifts) != 1 || summary.Gifts[0].ID != early.String() || summary.Amount != 3000 ||
+		summary.Refunded != 500 ||
+		summary.Net != 2500 {
 		t.Fatal("annual boundary/refund mismatch", summary, err)
 	}
 	if summary.TaxReceipt || !strings.Contains(renderSummary(summary), "NOT A TAX RECEIPT") {

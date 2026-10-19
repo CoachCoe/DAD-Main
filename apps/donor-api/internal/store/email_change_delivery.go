@@ -32,7 +32,10 @@ func (w EmailChangeWorker) DeliverNext(ctx context.Context, now time.Time) (bool
 	}
 	q := queries.New(w.DB)
 	if err = w.Transport.Send(ctx, send.message); err != nil {
-		err = q.RetryEmailChangeDelivery(ctx, queries.RetryEmailChangeDeliveryParams{ID: send.id, AvailableAt: timestamp(now.Add(time.Minute)), Stage: send.stage})
+		err = q.RetryEmailChangeDelivery(
+			ctx,
+			queries.RetryEmailChangeDeliveryParams{ID: send.id, AvailableAt: timestamp(now.Add(time.Minute)), Stage: send.stage},
+		)
 	} else {
 		err = q.EmailChangeDelivered(ctx, queries.EmailChangeDeliveredParams{ID: send.id, SentAt: timestamp(now), Stage: send.stage})
 	}
@@ -72,7 +75,10 @@ func (w EmailChangeWorker) claim(ctx context.Context, site publicSite, now time.
 		}
 		proof, err := w.Settings.EncryptionKeys.Decrypt(job.EncryptedToken)
 		if err != nil {
-			return q.EmailChangeDeliveryFailed(ctx, queries.EmailChangeDeliveryFailedParams{ID: job.ID, AvailableAt: timestamp(now.Add(time.Minute))})
+			return q.EmailChangeDeliveryFailed(
+				ctx,
+				queries.EmailChangeDeliveryFailedParams{ID: job.ID, AvailableAt: timestamp(now.Add(time.Minute))},
+			)
 		}
 		messageID, err := mail.MessageID(w.Settings.Sender, "email-change-"+job.Stage, job.ID.String())
 		if err != nil {
@@ -87,7 +93,15 @@ func (w EmailChangeWorker) claim(ctx context.Context, site publicSite, now time.
 		if err = q.ClaimEmailChangeDelivery(ctx, queries.ClaimEmailChangeDeliveryParams{ID: job.ID, AvailableAt: timestamp(now.Add(deliveryLease))}); err != nil {
 			return err
 		}
-		message := mail.Message{From: w.Settings.Sender, To: recipient, ID: messageID, Subject: "Confirm your DAD account email change", Body: body + "\n\n" + site.emailChange(string(proof)) + "\n\nConfirm on the page. This link is single-use and expires 15 minutes after it was requested. If you did not request this, ignore this message. No change will be made without both confirmations.\n"}
+		message := mail.Message{
+			From:    w.Settings.Sender,
+			To:      recipient,
+			ID:      messageID,
+			Subject: "Confirm your DAD account email change",
+			Body: body + "\n\n" + site.emailChange(
+				string(proof),
+			) + "\n\nConfirm on the page. This link is single-use and expires 15 minutes after it was requested. If you did not request this, ignore this message. No change will be made without both confirmations.\n",
+		}
 		send = &emailChangeSend{id: job.ID, stage: job.Stage, message: message}
 		return nil
 	})

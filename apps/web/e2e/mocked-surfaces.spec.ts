@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { staffURL } from "./staff";
 
 // These isolate rendering of states that need a session or a live referral code; Go
@@ -52,7 +52,10 @@ test("a shared link without the marker is captured as a Link Referral", async ({
 // The real API does not know this code, so the page leads with "no longer available".
 test("an unavailable referral link offers giving without a referral and no capture error", async ({ page }) => {
   let attempts = 0;
-  await page.route("**/api/donor/referrals/*", (route) => { attempts += 1; return route.fulfill({ status: 429, json: { detail: "Too many requests" } }); });
+  await page.route("**/api/donor/referrals/*", (route) => {
+    attempts += 1;
+    return route.fulfill({ status: 429, json: { detail: "Too many requests" } });
+  });
   await page.goto("/r/e2e-browser-code");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("This referral link is no longer available");
   await expect.poll(() => attempts).toBeGreaterThan(0);
@@ -64,8 +67,14 @@ test("an unavailable referral link offers giving without a referral and no captu
 
 test("the referral code page is accessible and shows the code", async ({ page }) => {
   const errors = collectErrors(page);
-  await page.route("**/api/donor/me/sharing", (route) => route.fulfill({ json: { public_name: "Alex", link: "https://dad.example/r/x", irl_link: "https://dad.example/r/x?via=irl" } }));
-  await page.route("**/api/donor/me/referral-code.svg*", (route) => route.fulfill({ contentType: "image/svg+xml", body: code }));
+  await page.route("**/api/donor/me/sharing", (route) =>
+    route.fulfill({
+      json: { public_name: "Alex", link: "https://dad.example/r/x", irl_link: "https://dad.example/r/x?via=irl" },
+    }),
+  );
+  await page.route("**/api/donor/me/referral-code.svg*", (route) =>
+    route.fulfill({ contentType: "image/svg+xml", body: code }),
+  );
   await page.route("**/api/donor/me/wallet", (route) => route.fulfill({ json: { apple: false, google: false } }));
   await page.goto("/account/code");
   await expect(page.getByRole("img", { name: "Your scannable in-person DAD referral code" })).toBeVisible();
@@ -76,10 +85,19 @@ test("the referral code page is accessible and shows the code", async ({ page })
 
 test("a staff page past sign-in is accessible", async ({ page }) => {
   const errors = collectErrors(page);
-  await page.route("**/api/donor/staff/me", (route) => route.fulfill({ json: {
-    id: "staff-1", email: "admin@example.org", name: "Ada Admin", role: "ADMIN", active: true, disabled: false,
-    permissions: ["data.export", "content.publish", "audit.read", "gift.refund", "gift.cancel", "staff.manage"],
-  } }));
+  await page.route("**/api/donor/staff/me", (route) =>
+    route.fulfill({
+      json: {
+        id: "staff-1",
+        email: "admin@example.org",
+        name: "Ada Admin",
+        role: "ADMIN",
+        active: true,
+        disabled: false,
+        permissions: ["data.export", "content.publish", "audit.read", "gift.refund", "gift.cancel", "staff.manage"],
+      },
+    }),
+  );
   await page.goto(staffURL("/staff"));
   await expect(page.getByText("Signed in as Ada Admin · ADMIN")).toBeVisible();
   await expect(page.getByRole("button", { name: "Search donors" })).toBeVisible();
@@ -87,29 +105,85 @@ test("a staff page past sign-in is accessible", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-const staffDetail = { id: "donor-1", email: "pat.donor@example.org", public_name: "Pat",
+const staffDetail = {
+  id: "donor-1",
+  email: "pat.donor@example.org",
+  public_name: "Pat",
   streak: { current: 4, best: 6, at_risk: false, computed_at: "2027-01-01T00:00:00Z" },
   referrer: { id: "donor-0", email: "friend@example.org", type: "IRL" },
-  claimed: true, founding_donor: true,
-  subscription: { amount_minor: 3000, next_renewal: "2027-02-01T00:00:00Z", observed_at: "2027-01-01T00:00:00Z", status: "active", stops_at: null },
-  gifts: [{ id: "4f1c2b9e-0d7a-4e55-9b0c-1a2b3c4d5e6f", amount_minor: 3000, currency: "USD", frequency: "MONTHLY", paid_at: "2027-01-01T00:00:00Z", refunded_minor: 0, net_minor: 3000 }],
+  claimed: true,
+  founding_donor: true,
+  subscription: {
+    amount_minor: 3000,
+    next_renewal: "2027-02-01T00:00:00Z",
+    observed_at: "2027-01-01T00:00:00Z",
+    status: "active",
+    stops_at: null,
+  },
+  gifts: [
+    {
+      id: "4f1c2b9e-0d7a-4e55-9b0c-1a2b3c4d5e6f",
+      amount_minor: 3000,
+      currency: "USD",
+      frequency: "MONTHLY",
+      paid_at: "2027-01-01T00:00:00Z",
+      refunded_minor: 0,
+      net_minor: 3000,
+    },
+  ],
   referred: [{ id: "donor-2", email: "invitee@example.org", type: "LINK", net_minor: 3000 }],
-  next_gifts_offset: null, next_referrals_offset: null };
+  next_gifts_offset: null,
+  next_referrals_offset: null,
+};
 
 async function mockStaffDonor(page: Page) {
   await page.route("**/api/donor/staff/**", (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/api", "");
-    if (path === "/donor/staff/me") return route.fulfill({ json: {
-      id: "staff-1", email: "finance@example.org", name: "Fin Ance", role: "FINANCE", active: true, disabled: false,
-      permissions: ["gift.refund", "gift.cancel"] } });
-    if (path === "/donor/staff/donors") return route.fulfill({ json: { donors: [
-      { id: "donor-1", email: "pat.donor@example.org", public_name: null, claimed: true, disabled: false }], next_offset: null } });
+    if (path === "/donor/staff/me")
+      return route.fulfill({
+        json: {
+          id: "staff-1",
+          email: "finance@example.org",
+          name: "Fin Ance",
+          role: "FINANCE",
+          active: true,
+          disabled: false,
+          permissions: ["gift.refund", "gift.cancel"],
+        },
+      });
+    if (path === "/donor/staff/donors")
+      return route.fulfill({
+        json: {
+          donors: [
+            { id: "donor-1", email: "pat.donor@example.org", public_name: null, claimed: true, disabled: false },
+          ],
+          next_offset: null,
+        },
+      });
     if (path === "/donor/staff/donors/donor-1") return route.fulfill({ json: staffDetail });
-    if (path === "/donor/staff/donors/donor-1/actions") return route.fulfill({ json: url.searchParams.get("offset") === "0"
-      ? { actions: [{ id: "action-1", actor_id: "staff-1", kind: "REFUND", target_id: staffDetail.gifts[0].id, amount_minor: 1000,
-        period_end: null, reason: "Donor asked for a partial refund", status: "SUCCEEDED", completed_at: "2027-01-02T00:00:00Z" }], next_offset: 50 }
-      : { actions: [], next_offset: null } });
+    if (path === "/donor/staff/donors/donor-1/actions")
+      return route.fulfill({
+        json:
+          url.searchParams.get("offset") === "0"
+            ? {
+                actions: [
+                  {
+                    id: "action-1",
+                    actor_id: "staff-1",
+                    kind: "REFUND",
+                    target_id: staffDetail.gifts[0].id,
+                    amount_minor: 1000,
+                    period_end: null,
+                    reason: "Donor asked for a partial refund",
+                    status: "SUCCEEDED",
+                    completed_at: "2027-01-02T00:00:00Z",
+                  },
+                ],
+                next_offset: 50,
+              }
+            : { actions: [], next_offset: null },
+      });
     return route.fulfill({ status: 404, json: { detail: "Not found" } });
   });
 }
@@ -128,7 +202,9 @@ test("a donor record has its own accessible page and Back returns to the search"
   await expect(page.getByRole("heading", { level: 1, name: "pat.donor@example.org" })).toBeVisible();
   await expect(page.getByText("Donor asked for a partial refund", { exact: false })).toBeVisible();
   await expect(page.getByRole("link", { name: "Refund gift" })).toBeVisible();
-  await expect(page.getByText(/^Monthly gift: \$30\.00\/month · Active · Next renewal [A-Z][a-z]{2} \d{1,2}, \d{4} ·/)).toBeVisible();
+  await expect(
+    page.getByText(/^Monthly gift: \$30\.00\/month · Active · Next renewal [A-Z][a-z]{2} \d{1,2}, \d{4} ·/),
+  ).toBeVisible();
   await expect(page.locator("p.note").filter({ hasText: /^Last updated from Stripe / })).toBeVisible();
   await expectAccessible(page);
   await page.getByRole("button", { name: "Older actions" }).click();
@@ -159,10 +235,21 @@ test("staff resume an uncertain refund with the saved key and amount", async ({ 
     if (url.pathname.endsWith("/actions/pending")) {
       expect(url.searchParams.get("target_id")).toBe(gift);
       expect(url.searchParams.get("kind")).toBe("REFUND");
-      return route.fulfill({ json: { action: resumed ? null : {
-        id: "saved-refund", kind: "REFUND", target_id: gift, amount_minor: 1000,
-        period_end: null, reason: "Donor requested a partial refund", status: "AUTHORIZED",
-      } } });
+      return route.fulfill({
+        json: {
+          action: resumed
+            ? null
+            : {
+                id: "saved-refund",
+                kind: "REFUND",
+                target_id: gift,
+                amount_minor: 1000,
+                period_end: null,
+                reason: "Donor requested a partial refund",
+                status: "AUTHORIZED",
+              },
+        },
+      });
     }
     if (url.pathname.endsWith("/refund")) {
       if (request.method() === "POST") {
@@ -171,7 +258,9 @@ test("staff resume an uncertain refund with the saved key and amount", async ({ 
         resumed = true;
         return route.fulfill({ json: { status: "SUCCEEDED" } });
       }
-      return route.fulfill({ json: { gift_id: gift, donor_id: "donor-1", amount_minor: 3000, available_minor: resumed ? 2000 : 3000 } });
+      return route.fulfill({
+        json: { gift_id: gift, donor_id: "donor-1", amount_minor: 3000, available_minor: resumed ? 2000 : 3000 },
+      });
     }
     return route.fulfill({ status: 404, json: { detail: "Unexpected staff lookup" } });
   });
@@ -179,7 +268,9 @@ test("staff resume an uncertain refund with the saved key and amount", async ({ 
   await expect(page.getByText("Refund $10.00 USD to the original payment method.")).toBeVisible();
   await expectAccessible(page);
   await page.getByRole("button", { name: "Retry original financial action" }).click();
-  await expect(page.getByRole("status")).toHaveText("Stripe refund status: SUCCEEDED. Only successful refunds reduce collected totals.");
+  await expect(page.getByRole("status")).toHaveText(
+    "Stripe refund status: SUCCEEDED. Only successful refunds reduce collected totals.",
+  );
   await expect(page.getByText(/Available to refund: \$20.00/)).toBeVisible();
   expect(resumed).toBe(true);
   expect(requests.every((path) => path.endsWith("/actions/pending") || path.endsWith("/refund"))).toBe(true);
@@ -187,7 +278,9 @@ test("staff resume an uncertain refund with the saved key and amount", async ({ 
 });
 
 test("staff pages separate a missing session from a missing permission", async ({ page }) => {
-  await page.route("**/api/donor/staff/audit*", (route) => route.fulfill({ status: 403, json: { detail: "Forbidden" } }));
+  await page.route("**/api/donor/staff/audit*", (route) =>
+    route.fulfill({ status: 403, json: { detail: "Forbidden" } }),
+  );
   await page.goto(staffURL("/staff/audit"));
   await expect(page.getByRole("main").getByRole("alert")).toContainText("requires administrator access");
   await expect(page.getByRole("link", { name: "Staff sign-in" })).toHaveCount(0);

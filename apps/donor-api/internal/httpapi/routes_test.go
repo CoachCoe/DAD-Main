@@ -116,7 +116,8 @@ func TestFailuresAreLoggedWithoutPrivateDetail(t *testing.T) {
 	server.Handler.ServeHTTP(httptest.NewRecorder(), r)
 
 	out := logs.String()
-	if !strings.Contains(out, `"route":"GET /donor/me/dashboard"`) || !strings.Contains(out, `"status":503`) || !strings.Contains(out, `"cause":"*errors.errorString"`) {
+	if !strings.Contains(out, `"route":"GET /donor/me/dashboard"`) || !strings.Contains(out, `"status":503`) ||
+		!strings.Contains(out, `"cause":"*errors.errorString"`) {
 		t.Fatalf("failure not logged with route, status, and class: %s", out)
 	}
 	if strings.Contains(out, "donor@example.org") {

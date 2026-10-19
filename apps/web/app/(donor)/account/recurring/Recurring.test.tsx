@@ -3,16 +3,28 @@ import { afterEach, expect, it, vi } from "vitest";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import RecurringPage from "./Recurring";
 
-const subscription = { id: "owned-id", amount_minor: 3000, currency: "USD", status: "active",
-  period_end: "2026-11-01T12:00:00Z", pause: null, stops_at: null };
+const subscription = {
+  id: "owned-id",
+  amount_minor: 3000,
+  currency: "USD",
+  status: "active",
+  period_end: "2026-11-01T12:00:00Z",
+  pause: null,
+  stops_at: null,
+};
 const response = (value: unknown) => ({ ok: true, json: async () => value });
 afterEach(() => vi.unstubAllGlobals());
 // Matches a paragraph by its whole text, which <time> elements split.
-const paragraph = (text: string) => (_: string, node: Element | null) => node?.tagName === "P" && node.textContent === text;
+const paragraph = (text: string) => (_: string, node: Element | null) =>
+  node?.tagName === "P" && node.textContent === text;
 
 it("requires explicit confirmation and sends the displayed billing boundary", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response({ state: "ready", subscription }))
-    .mockResolvedValueOnce(response({ state: "ready", subscription: { ...subscription, stops_at: subscription.period_end } }));
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response({ state: "ready", subscription }))
+    .mockResolvedValueOnce(
+      response({ state: "ready", subscription: { ...subscription, stops_at: subscription.period_end } }),
+    );
   vi.stubGlobal("fetch", fetch);
   render(<RecurringPage />);
   fireEvent.click(await screen.findByRole("button", { name: "Cancel monthly giving" }));
@@ -20,16 +32,24 @@ it("requires explicit confirmation and sends the displayed billing boundary", as
   expect(screen.getByText(/does not refund past gifts/)).toBeVisible();
   expect(screen.getByRole("heading", { name: "Confirm cancellation" })).toHaveFocus();
   fireEvent.click(screen.getByRole("button", { name: "Yes, stop renewals" }));
-  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(
-    `Renewals cancelled. Your last monthly gift period ends ${formatDate(subscription.period_end)}; no further gifts will be charged.`));
+  await waitFor(() =>
+    expect(screen.getByRole("status")).toHaveTextContent(
+      `Renewals cancelled. Your last monthly gift period ends ${formatDate(subscription.period_end)}; no further gifts will be charged.`,
+    ),
+  );
   expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "My monthly giving" })).toHaveFocus());
-  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ subscription_id: "owned-id", period_end: subscription.period_end });
+  expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
+    subscription_id: "owned-id",
+    period_end: subscription.period_end,
+  });
   expect(fetch.mock.calls[1][1].headers["Idempotency-Key"]).toMatch(/^[a-f0-9-]{36}$/);
 });
 
 it("retries an uncertain cancellation with the same key and never claims success", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response({ state: "ready", subscription }))
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response({ state: "ready", subscription }))
     .mockRejectedValue(new Error("Connection lost"));
   vi.stubGlobal("fetch", fetch);
   render(<RecurringPage />);
@@ -43,9 +63,15 @@ it("retries an uncertain cancellation with the same key and never claims success
 });
 
 it("offers a sign-in path when opened without a session", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }),
+  );
   render(<RecurringPage />);
-  expect(await screen.findByRole("link", { name: "Sign in to manage your giving" })).toHaveAttribute("href", "/account/sign-in");
+  expect(await screen.findByRole("link", { name: "Sign in to manage your giving" })).toHaveAttribute(
+    "href",
+    "/account/sign-in",
+  );
   expect(screen.queryByRole("button", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
 });
 
@@ -66,18 +92,37 @@ it("distinguishes unconfirmed checkout from having no monthly gift", async () =>
 
 it("says when a confirmed pause begins while the current period runs", async () => {
   const pause = { starts_at: "2099-11-01T12:00:00Z", resumes_at: "2100-01-01T12:00:00Z" };
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, pause } })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, pause } })),
+  );
   render(<RecurringPage />);
-  expect(await screen.findByText(paragraph(`Your monthly gift pauses from ${formatDate(pause.starts_at)}. Giving resumes ${formatDate(pause.resumes_at)}.`))).toBeVisible();
+  expect(
+    await screen.findByText(
+      paragraph(
+        `Your monthly gift pauses from ${formatDate(pause.starts_at)}. Giving resumes ${formatDate(pause.resumes_at)}.`,
+      ),
+    ),
+  ).toBeVisible();
   expect(screen.getByRole("link", { name: "Resume at next renewal" })).toHaveAttribute("href", "/account/resume");
   expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
 });
 
 it("shows a pause in effect and offers to resume it instead of another pause", async () => {
   const resumes = "2027-01-01T12:00:00Z";
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, pause: { starts_at: "2020-11-01T12:00:00Z", resumes_at: resumes } } })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      response({
+        state: "ready",
+        subscription: { ...subscription, pause: { starts_at: "2020-11-01T12:00:00Z", resumes_at: resumes } },
+      }),
+    ),
+  );
   render(<RecurringPage />);
-  expect(await screen.findByText(paragraph(`Your monthly gift is paused. Giving resumes ${formatDate(resumes)}.`))).toBeVisible();
+  expect(
+    await screen.findByText(paragraph(`Your monthly gift is paused. Giving resumes ${formatDate(resumes)}.`)),
+  ).toBeVisible();
   expect(screen.getByRole("link", { name: "Resume at next renewal" })).toHaveAttribute("href", "/account/resume");
   expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Change monthly amount" })).not.toBeInTheDocument();
@@ -86,7 +131,10 @@ it("shows a pause in effect and offers to resume it instead of another pause", a
 });
 
 it("describes a subscription Stripe paused without offering changes", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, status: "paused" } })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, status: "paused" } })),
+  );
   render(<RecurringPage />);
   expect(await screen.findByText("Your monthly gift is paused.")).toBeVisible();
   expect(screen.getByRole("link", { name: "Update payment method" })).toBeVisible();
@@ -98,7 +146,10 @@ it("describes a subscription Stripe paused without offering changes", async () =
 });
 
 it("says a gift still being set up is being set up", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, status: "incomplete" } })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, status: "incomplete" } })),
+  );
   render(<RecurringPage />);
   expect(await screen.findByText("Your monthly gift is still being set up. Refresh in a moment.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Refresh billing details" })).toBeVisible();
@@ -108,9 +159,18 @@ it("says a gift still being set up is being set up", async () => {
 
 it("offers only a payment method update for an ending gift", async () => {
   const stops = subscription.period_end;
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, stops_at: stops } })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, stops_at: stops } })),
+  );
   render(<RecurringPage />);
-  expect(await screen.findByText(paragraph(`Renewals cancelled. Your last monthly gift period ends ${formatDate(stops)}; no further gifts will be charged.`))).toBeVisible();
+  expect(
+    await screen.findByText(
+      paragraph(
+        `Renewals cancelled. Your last monthly gift period ends ${formatDate(stops)}; no further gifts will be charged.`,
+      ),
+    ),
+  ).toBeVisible();
   expect(screen.getByRole("link", { name: "Update payment method" })).toBeVisible();
   expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Change monthly amount" })).not.toBeInTheDocument();
@@ -142,8 +202,14 @@ it("dates billing details by their last Stripe sync and offers changes from them
 
 it("offers current billing details after Stripe refuses a cancellation shown from stored ones", async () => {
   const renewed = { ...subscription, period_end: "2026-12-01T12:00:00Z" };
-  const fetch = vi.fn().mockResolvedValueOnce(response({ state: "ready", subscription }))
-    .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ detail: "Billing details changed or require reconciliation. Refresh before confirming" }) })
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response({ state: "ready", subscription }))
+    .mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ detail: "Billing details changed or require reconciliation. Refresh before confirming" }),
+    })
     .mockResolvedValueOnce(response({ state: "ready", subscription: renewed }));
   vi.stubGlobal("fetch", fetch);
   render(<RecurringPage />);

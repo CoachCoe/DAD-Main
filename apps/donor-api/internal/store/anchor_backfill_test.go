@@ -45,7 +45,8 @@ func TestAnchorBackfillSyncsSubscriptionsSavedWithoutOne(t *testing.T) {
 		t.Fatal(failures)
 	}
 	var observed time.Time
-	if err := r.db.QueryRow(ctx, "SELECT observed_at FROM donor_subscriptions WHERE attempt_id=$1 AND billing_anchor=$2", r.attempt, r.start).Scan(&observed); err != nil || !observed.After(stale) {
+	if err := r.db.QueryRow(ctx, "SELECT observed_at FROM donor_subscriptions WHERE attempt_id=$1 AND billing_anchor=$2", r.attempt, r.start).Scan(&observed); err != nil ||
+		!observed.After(stale) {
 		t.Fatal("backfill did not sync the billing anchor", observed, err)
 	}
 	if pause, err := r.service.PauseOptions(ctx, r.token); err != nil || pause.State != "ready" || len(pause.Options) != 3 {
@@ -79,7 +80,8 @@ func TestAnchorBackfillPassesOverFailures(t *testing.T) {
 	r.gateway.subscriptions[r.subID] = remote
 	runAnchorPass(t, backfill, now.Add(anchorBackfillInterval))
 	var anchored bool
-	if err := r.db.QueryRow(ctx, "SELECT billing_anchor IS NOT NULL FROM donor_subscriptions WHERE attempt_id=$1", r.attempt).Scan(&anchored); err != nil || !anchored {
+	if err := r.db.QueryRow(ctx, "SELECT billing_anchor IS NOT NULL FROM donor_subscriptions WHERE attempt_id=$1", r.attempt).Scan(&anchored); err != nil ||
+		!anchored {
 		t.Fatal("next pass did not retry the failed subscription", err)
 	}
 }

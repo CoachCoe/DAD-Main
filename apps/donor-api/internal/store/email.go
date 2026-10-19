@@ -50,7 +50,10 @@ func (w LoginEmailWorker) DeliverNext(ctx context.Context, now time.Time) (bool,
 	}
 	q := queries.New(w.DB)
 	if err = w.Transport.Send(ctx, *message); err != nil {
-		err = q.FailLoginEmail(ctx, queries.FailLoginEmailParams{ID: id, LastError: text("DeliveryError"), AvailableAt: timestamp(now.Add(time.Minute))})
+		err = q.FailLoginEmail(
+			ctx,
+			queries.FailLoginEmailParams{ID: id, LastError: text("DeliveryError"), AvailableAt: timestamp(now.Add(time.Minute))},
+		)
 	} else {
 		err = q.CompleteLoginEmail(ctx, queries.CompleteLoginEmailParams{ID: id, CompletedAt: timestamp(now)})
 	}
@@ -87,15 +90,27 @@ func (w LoginEmailWorker) claim(ctx context.Context, site publicSite, id pgtype.
 			if errors.Is(err, credentials.ErrInvalid) {
 				category = "InvalidToken"
 			}
-			return q.FailLoginEmail(ctx, queries.FailLoginEmailParams{ID: id, LastError: text(category), AvailableAt: timestamp(now.Add(time.Minute))})
+			return q.FailLoginEmail(
+				ctx,
+				queries.FailLoginEmailParams{ID: id, LastError: text(category), AvailableAt: timestamp(now.Add(time.Minute))},
+			)
 		}
 		messageID, err := mail.MessageID(w.Settings.Sender, "login", id.String())
 		if err != nil {
 			return err
 		}
-		message = &mail.Message{From: w.Settings.Sender, To: donor.Email, Subject: "Sign in to your DAD sandbox account", ID: messageID, Body: "Use this link to claim or sign in to your DAD sandbox donor account.\n\n" + site.claim(token, job.ReturnPath.String) + "\n\n" +
-			"Confirm on the page to continue. This single-use link expires in 15 minutes.\n" +
-			"If you did not request it, ignore this email. No account access is granted until you confirm. This is an account access message, not a tax receipt.\n"}
+		message = &mail.Message{
+			From:    w.Settings.Sender,
+			To:      donor.Email,
+			Subject: "Sign in to your DAD sandbox account",
+			ID:      messageID,
+			Body: "Use this link to claim or sign in to your DAD sandbox donor account.\n\n" + site.claim(
+				token,
+				job.ReturnPath.String,
+			) + "\n\n" +
+				"Confirm on the page to continue. This single-use link expires in 15 minutes.\n" +
+				"If you did not request it, ignore this email. No account access is granted until you confirm. This is an account access message, not a tax receipt.\n",
+		}
 		return nil
 	})
 	if err != nil {

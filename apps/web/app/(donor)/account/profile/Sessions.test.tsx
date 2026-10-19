@@ -4,12 +4,33 @@ import { Sessions } from "./Sessions";
 
 afterEach(() => vi.unstubAllGlobals());
 
-const browser = { id: "b1", client: "BROWSER", platform: null, label: "Web browser", created_at: "2026-10-01T12:00:00Z",
-  last_used_at: "2026-10-08T12:00:00Z", current: true };
-const phone = { id: "p1", client: "APP", platform: "IOS", label: "Alex’s iPhone", created_at: "2026-09-20T12:00:00Z",
-  last_used_at: "2026-10-07T09:30:00Z", current: false };
-const tablet = { id: "t1", client: "APP", platform: null, label: "Mobile device", created_at: "2026-09-02T12:00:00Z",
-  last_used_at: "2026-10-02T09:30:00Z", current: false };
+const browser = {
+  id: "b1",
+  client: "BROWSER",
+  platform: null,
+  label: "Web browser",
+  created_at: "2026-10-01T12:00:00Z",
+  last_used_at: "2026-10-08T12:00:00Z",
+  current: true,
+};
+const phone = {
+  id: "p1",
+  client: "APP",
+  platform: "IOS",
+  label: "Alex’s iPhone",
+  created_at: "2026-09-20T12:00:00Z",
+  last_used_at: "2026-10-07T09:30:00Z",
+  current: false,
+};
+const tablet = {
+  id: "t1",
+  client: "APP",
+  platform: null,
+  label: "Mobile device",
+  created_at: "2026-09-02T12:00:00Z",
+  last_used_at: "2026-10-02T09:30:00Z",
+  current: false,
+};
 
 const json = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: async () => body });
 
@@ -48,7 +69,10 @@ it("signs out one other session and keeps keyboard focus in the list", async () 
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Signed out of Mobile device."));
   await waitFor(() => expect(screen.getByRole("heading", { name: "Where you’re signed in" })).toHaveFocus());
   expect(screen.getByText("You’re not signed in anywhere else.")).toBeVisible();
-  expect(fetch).toHaveBeenCalledWith("/api/donor/me/sessions/p1/revoke", expect.objectContaining({ method: "POST", credentials: "include" }));
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/donor/me/sessions/p1/revoke",
+    expect.objectContaining({ method: "POST", credentials: "include" }),
+  );
 });
 
 it("signs out every other device at once", async () => {
@@ -67,12 +91,19 @@ it("signs out every other device at once", async () => {
 it("keeps the list and offers a refresh when a sign-out is not confirmed", async () => {
   let listed = 0;
   serve({
-    "GET /api/donor/me/sessions": () => { listed += 1; return json({ sessions: [browser, phone] }); },
+    "GET /api/donor/me/sessions": () => {
+      listed += 1;
+      return json({ sessions: [browser, phone] });
+    },
     "POST /api/donor/me/sessions/p1/revoke": () => json({ detail: "Donor account is temporarily unavailable" }, 503),
   });
   render(<Sessions onSignedOut={vi.fn()} />);
   fireEvent.click(await screen.findByRole("button", { name: /^Sign out Alex’s iPhone/ }));
-  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Sign-out was not confirmed. Refresh the list to check before retrying."));
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Sign-out was not confirmed. Refresh the list to check before retrying.",
+    ),
+  );
   expect(screen.getByText("Alex’s iPhone")).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Refresh signed-in devices" }));
   await waitFor(() => expect(listed).toBe(2));
@@ -82,7 +113,9 @@ it("keeps the list and offers a refresh when a sign-out is not confirmed", async
 it("explains a list that could not load, and hands an ended session back to the page", async () => {
   serve({ "GET /api/donor/me/sessions": () => json({ detail: "Unavailable" }, 503) });
   const { unmount } = render(<Sessions onSignedOut={vi.fn()} />);
-  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Your signed-in devices could not be loaded right now."));
+  await waitFor(() =>
+    expect(screen.getByRole("alert")).toHaveTextContent("Your signed-in devices could not be loaded right now."),
+  );
   expect(screen.getByRole("button", { name: "Refresh signed-in devices" })).toBeVisible();
   unmount();
 

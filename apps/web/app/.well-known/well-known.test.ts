@@ -24,10 +24,21 @@ it("associates the iOS app with the account pages and its passkeys", async () =>
   expect(response.headers.get("Content-Type")).toBe("application/json");
   expect(response.headers.get("Cache-Control")).toBe("public, max-age=3600");
   expect(await response.json()).toEqual({
-    applinks: { details: [{ appIDs: ["ABCDE12345.org.dynamicaid.donor"], components: [
-      { "/": "/r/*" }, { "/": "/account/claim" }, { "/": "/account/email-change" },
-      { "/": "/account/payment-method" }, { "/": "/account/dashboard" }, { "/": "/account/profile" },
-    ] }] },
+    applinks: {
+      details: [
+        {
+          appIDs: ["ABCDE12345.org.dynamicaid.donor"],
+          components: [
+            { "/": "/r/*" },
+            { "/": "/account/claim" },
+            { "/": "/account/email-change" },
+            { "/": "/account/payment-method" },
+            { "/": "/account/dashboard" },
+            { "/": "/account/profile" },
+          ],
+        },
+      ],
+    },
     webcredentials: { apps: ["ABCDE12345.org.dynamicaid.donor"] },
   });
 });
@@ -38,11 +49,16 @@ it("associates the Android app with its links and passkeys for every signing key
   const response = androidAssociation();
   expect(response.status).toBe(200);
   expect(response.headers.get("Content-Type")).toBe("application/json");
-  expect(await response.json()).toEqual([{
-    relation: ["delegate_permission/common.handle_all_urls", "delegate_permission/common.get_login_creds"],
-    target: { namespace: "android_app", package_name: "org.dynamicaid.donor",
-      sha256_cert_fingerprints: [signingKey.toUpperCase(), signingKey.replace(/^00/, "FF").toUpperCase()] },
-  }]);
+  expect(await response.json()).toEqual([
+    {
+      relation: ["delegate_permission/common.handle_all_urls", "delegate_permission/common.get_login_creds"],
+      target: {
+        namespace: "android_app",
+        package_name: "org.dynamicaid.donor",
+        sha256_cert_fingerprints: [signingKey.toUpperCase(), signingKey.replace(/^00/, "FF").toUpperCase()],
+      },
+    },
+  ]);
 });
 
 it("fails the build on a malformed association rather than publish it", () => {

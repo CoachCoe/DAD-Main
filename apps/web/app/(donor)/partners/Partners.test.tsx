@@ -24,7 +24,10 @@ it("accepts a bare domain and sends it as an HTTPS address", async () => {
 });
 
 it("shows the API's own reason for a rejected form instead of blaming the website", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ detail: "Enter a valid email address." }, { status: 422 })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(Response.json({ detail: "Enter a valid email address." }, { status: 422 })),
+  );
   render(<Partners />);
   fill();
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Enter a valid email address."));

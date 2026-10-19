@@ -76,13 +76,17 @@ func TestStaffPermissionMatrixAndExpiredSessions(t *testing.T) {
 	for _, role := range []string{"SUPPORT", "FINANCE", "ADMIN"} {
 		id, token := staffFixture(t, pool, role)
 		for _, permission := range []string{"donor.read", "message.resend", "gift.refund", "gift.cancel", "data.export", "staff.manage", "content.publish", "audit.read"} {
-			allowed := role == "ADMIN" || permission == "donor.read" || permission == "message.resend" || (role == "FINANCE" && (permission == "gift.refund" || permission == "gift.cancel" || permission == "data.export"))
+			allowed := role == "ADMIN" || permission == "donor.read" || permission == "message.resend" ||
+				(role == "FINANCE" && (permission == "gift.refund" || permission == "gift.cancel" || permission == "data.export"))
 			_, err := requireStaff(ctx, queries.New(pool), token, permission, time.Now())
 			if (allowed && err != nil) || (!allowed && !errors.Is(err, ErrStaffForbidden)) {
 				t.Fatalf("%s / %s: %v", role, permission, err)
 			}
 		}
-		if _, err := requireStaff(ctx, queries.New(pool), token, "donor.read", time.Now().Add(2*time.Hour)); !errors.Is(err, ErrStaffDenied) {
+		if _, err := requireStaff(ctx, queries.New(pool), token, "donor.read", time.Now().Add(2*time.Hour)); !errors.Is(
+			err,
+			ErrStaffDenied,
+		) {
 			t.Fatal("expired session accepted", err)
 		}
 		if _, err := pool.Exec(ctx, "UPDATE donor_staff SET disabled=true WHERE id=$1", id); err != nil {
@@ -128,7 +132,8 @@ func TestRecoveryReplacesPasskeysAndRevokesSessions(t *testing.T) {
 		}
 	}
 	var details string
-	if err = pool.QueryRow(ctx, "SELECT details::text FROM donor_staff_audit WHERE target=$1 AND action='staff.recovery_invited'", target.String()).Scan(&details); err != nil || details != `{"previously_active":true,"previously_disabled":false}` {
+	if err = pool.QueryRow(ctx, "SELECT details::text FROM donor_staff_audit WHERE target=$1 AND action='staff.recovery_invited'", target.String()).Scan(&details); err != nil ||
+		details != `{"previously_active":true,"previously_disabled":false}` {
 		t.Fatal("recovery audit missing", details, err)
 	}
 	invitation, err := s.BeginActivation(ctx, change.Token)
@@ -206,7 +211,8 @@ func TestBreakGlassRecoveryReplacesOnlyAnEnabledAdministratorsPasskeys(t *testin
 		t.Fatal("break-glass recovery left a passkey usable", err)
 	}
 	var actor pgtype.UUID
-	if err = pool.QueryRow(ctx, "SELECT actor_id FROM donor_staff_audit WHERE target=$1 AND action='staff.recovery_invited'", admin.String()).Scan(&actor); err != nil || actor.Valid {
+	if err = pool.QueryRow(ctx, "SELECT actor_id FROM donor_staff_audit WHERE target=$1 AND action='staff.recovery_invited'", admin.String()).Scan(&actor); err != nil ||
+		actor.Valid {
 		t.Fatal("break-glass recovery not audited as an operator action", err)
 	}
 	invitation, err := s.BeginActivation(ctx, token)

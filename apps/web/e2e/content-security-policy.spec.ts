@@ -1,11 +1,12 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { staffOrigin, staffURL } from "./staff";
 
 // Init scripts run outside the page's policy, so the listener sees every violation.
 async function recordViolations(page: Page) {
   const violations: string[] = [];
   page.on("console", (message) => {
-    if (/Content Security Policy|Refused to (execute|load|apply)/i.test(message.text())) violations.push(message.text());
+    if (/Content Security Policy|Refused to (execute|load|apply)/i.test(message.text()))
+      violations.push(message.text());
   });
   await page.addInitScript(() => {
     document.addEventListener("securitypolicyviolation", (event) => {
@@ -16,12 +17,21 @@ async function recordViolations(page: Page) {
 }
 
 const hydrated = (page: Page, selector: string) =>
-  page.locator(selector).first().evaluate((element) => Object.keys(element).some((key) => key.startsWith("__reactFiber")));
+  page
+    .locator(selector)
+    .first()
+    .evaluate((element) => Object.keys(element).some((key) => key.startsWith("__reactFiber")));
 
 test("prefetch headers cannot remove a private document's security policy", async ({ request }) => {
   // The staff host is named by Host rather than resolved, so the runner's resolver cannot matter.
-  for (const [path, host] of [["/account/sign-in", ""], ["/staff/sign-in", new URL(staffOrigin).host]]) {
-    for (const [name, value] of [["next-router-prefetch", "1"], ["purpose", "prefetch"]]) {
+  for (const [path, host] of [
+    ["/account/sign-in", ""],
+    ["/staff/sign-in", new URL(staffOrigin).host],
+  ]) {
+    for (const [name, value] of [
+      ["next-router-prefetch", "1"],
+      ["purpose", "prefetch"],
+    ]) {
       const response = await request.get(path, { headers: { ...(host ? { host } : {}), [name]: value } });
       expect(response.status()).toBe(200);
       expect(response.headers()["content-security-policy"]).toMatch(/'nonce-[^']+' 'strict-dynamic'/);
@@ -70,11 +80,13 @@ test("public account links load a new document with the private CSP", async ({ p
   ]) {
     await page.goto(source);
     await expect.poll(() => hydrated(page, "main")).toBe(true);
-    if (label === "My account" && await page.getByRole("button", { name: "Menu", exact: true }).isVisible()) {
+    if (label === "My account" && (await page.getByRole("button", { name: "Menu", exact: true }).isVisible())) {
       await page.getByRole("button", { name: "Menu", exact: true }).click();
     }
-    const documentResponse = page.waitForResponse((response) =>
-      new URL(response.url()).pathname === destination && response.request().resourceType() === "document");
+    const documentResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === destination && response.request().resourceType() === "document",
+    );
     await page.getByRole("link", { name: label, exact: true }).click();
     const response = await documentResponse;
     expect(response.headers()["content-security-policy"]).toMatch(/'nonce-[^']+' 'strict-dynamic'/);

@@ -39,13 +39,17 @@ func TestLoadCountsOutcomesPerScenario(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := load(context.Background(), config{scenarios: scenarios, duration: 200 * time.Millisecond, concurrency: 4, sessions: []string{"dad_donor_session=synthetic"}})
+	r := load(
+		context.Background(),
+		config{scenarios: scenarios, duration: 200 * time.Millisecond, concurrency: 4, sessions: []string{"dad_donor_session=synthetic"}},
+	)
 	if r.Requests == 0 || r.Requests != good.Load()+bad.Load() || cookies.Load() != r.Requests {
 		t.Fatalf("reported %d requests; server saw %d, %d with the session cookie", r.Requests, good.Load()+bad.Load(), cookies.Load())
 	}
 	host := strings.TrimPrefix(server.URL, "http://")
 	ok, unavailable, large := r.Scenarios[host+"/ok"], r.Scenarios[host+"/unavailable"], r.Scenarios[host+"/large"]
-	if r.Failed != bad.Load() || ok.Failed != 0 || unavailable.Failed != unavailable.Requests || large.Errors["oversized"] != large.Requests {
+	if r.Failed != bad.Load() || ok.Failed != 0 || unavailable.Failed != unavailable.Requests ||
+		large.Errors["oversized"] != large.Requests {
 		t.Fatalf("failures misattributed: %+v", r)
 	}
 	if ok.Statuses["200"] != ok.Requests || unavailable.Statuses["503"] != unavailable.Requests || ok.Requests != good.Load() {
@@ -88,7 +92,8 @@ func TestSeededMixActsLikeBrowsersAppsAndVisitors(t *testing.T) {
 		case r.Method == http.MethodPost:
 			seen["capture"]++
 			body, _ := io.ReadAll(r.Body)
-			if r.Header.Get("Origin") != "https://donor.example.org" || cookie != "" || bearer != "" || !strings.Contains(string(body), `"kind"`) {
+			if r.Header.Get("Origin") != "https://donor.example.org" || cookie != "" || bearer != "" ||
+				!strings.Contains(string(body), `"kind"`) {
 				problems = append(problems, "capture without the site's Origin or with credentials")
 			}
 			visitorAddresses[r.Header.Get("X-Real-IP")] = true
@@ -108,7 +113,12 @@ func TestSeededMixActsLikeBrowsersAppsAndVisitors(t *testing.T) {
 	}))
 	defer server.Close()
 
-	scenarios, err := seededMix(server.URL, "https://donor.example.org", fixture{ReferralCodes: []string{"codeA", "codeB"}}, map[string]int{"dashboard": 0})
+	scenarios, err := seededMix(
+		server.URL,
+		"https://donor.example.org",
+		fixture{ReferralCodes: []string{"codeA", "codeB"}},
+		map[string]int{"dashboard": 0},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +167,8 @@ func TestRunEnforcesPerScenarioBudgets(t *testing.T) {
 	if err := run(context.Background(), args("1s,"+host+"/fast?page=1=1s"), noEnv, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if err := run(context.Background(), args("1s,"+host+"/slow=5ms"), noEnv, io.Discard); err == nil || !strings.Contains(err.Error(), "/slow") {
+	if err := run(context.Background(), args("1s,"+host+"/slow=5ms"), noEnv, io.Discard); err == nil ||
+		!strings.Contains(err.Error(), "/slow") {
 		t.Fatalf("slow scenario passed its budget: %v", err)
 	}
 	for name, invalid := range map[string][]string{
@@ -230,12 +241,24 @@ func TestRunReadsTheSeedFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out strings.Builder
-	args := []string{"-api", server.URL, "-fixture", path, "-mix", "profile=1,referral-lookup=0,referral-capture=0,referral-missing=0,content=0,dashboard=0,gifts=0,sharing=0,recurring=0,annual-summary=0", "-duration", "100ms", "-concurrency", "2"}
+	args := []string{
+		"-api",
+		server.URL,
+		"-fixture",
+		path,
+		"-mix",
+		"profile=1,referral-lookup=0,referral-capture=0,referral-missing=0,content=0,dashboard=0,gifts=0,sharing=0,recurring=0,annual-summary=0",
+		"-duration",
+		"100ms",
+		"-concurrency",
+		"2",
+	}
 	if err := run(context.Background(), args, func(string) string { return "" }, &out); err != nil {
 		t.Fatal(err)
 	}
 	var r result
-	if err := json.Unmarshal([]byte(out.String()), &r); err != nil || r.Scenarios["profile"].Requests == 0 || r.Scenarios["profile"].Requests != signedIn.Load() {
+	if err := json.Unmarshal([]byte(out.String()), &r); err != nil || r.Scenarios["profile"].Requests == 0 ||
+		r.Scenarios["profile"].Requests != signedIn.Load() {
 		t.Fatalf("fixture sessions not used: %s %v", out.String(), err)
 	}
 }
@@ -249,7 +272,8 @@ func TestParsersRejectUnsafeInput(t *testing.T) {
 			t.Errorf("target %q accepted", invalid)
 		}
 	}
-	if b, err := parseBudgets("250ms,dashboard=400ms"); err != nil || b.of("dashboard") != 400*time.Millisecond || b.of("content") != 250*time.Millisecond {
+	if b, err := parseBudgets("250ms,dashboard=400ms"); err != nil || b.of("dashboard") != 400*time.Millisecond ||
+		b.of("content") != 250*time.Millisecond {
 		t.Fatalf("budgets misread: %+v %v", b, err)
 	}
 	for _, invalid := range []string{"fast", "-1ms", "dashboard=0", "1s,2s", "1s,dashboard"} {

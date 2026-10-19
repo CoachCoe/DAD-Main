@@ -25,7 +25,10 @@ func queueMessage(ctx context.Context, q *queries.Queries, donor pgtype.UUID, ki
 	if err != nil {
 		return err
 	}
-	return q.InsertFinancialMessage(ctx, queries.InsertFinancialMessageParams{ID: id, DonorID: donor, Kind: kind, DedupKey: key, Context: data, AvailableAt: timestamp(at)})
+	return q.InsertFinancialMessage(
+		ctx,
+		queries.InsertFinancialMessageParams{ID: id, DonorID: donor, Kind: kind, DedupKey: key, Context: data, AvailableAt: timestamp(at)},
+	)
 }
 
 // refreshProjection recomputes the donor's recognition and queues the
@@ -81,7 +84,10 @@ func RefreshDueProjections(ctx context.Context, pool *pgxpool.Pool, now time.Tim
 			return err
 		}
 		if len(ids) == 0 {
-			ids, err = q.OutdatedProjectionDonors(ctx, queries.OutdatedProjectionDonorsParams{RulesVersion: projectionRules, ComputedAt: timestamp(now), Batch: int32(batch)})
+			ids, err = q.OutdatedProjectionDonors(
+				ctx,
+				queries.OutdatedProjectionDonorsParams{RulesVersion: projectionRules, ComputedAt: timestamp(now), Batch: int32(batch)},
+			)
 			if err != nil {
 				return err
 			}
@@ -147,5 +153,13 @@ func queueLoginEmail(ctx context.Context, q *queries.Queries, email, next string
 	if err != nil {
 		return err
 	}
-	return q.QueueLoginEmail(ctx, queries.QueueLoginEmailParams{ID: id, DonorID: donor.ID, AvailableAt: timestamp(now), ReturnPath: pgtype.Text{String: next, Valid: next != ""}})
+	return q.QueueLoginEmail(
+		ctx,
+		queries.QueueLoginEmailParams{
+			ID:          id,
+			DonorID:     donor.ID,
+			AvailableAt: timestamp(now),
+			ReturnPath:  pgtype.Text{String: next, Valid: next != ""},
+		},
+	)
 }

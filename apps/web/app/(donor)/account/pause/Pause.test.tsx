@@ -9,15 +9,24 @@ const response = (value: unknown) => ({ ok: true, json: async () => value });
 afterEach(() => vi.unstubAllGlobals());
 
 it("requires confirmation of the exact skipped and resumed renewal dates", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response(options))
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response(options))
     .mockResolvedValueOnce(response({ pause: { ...dates, request_id: "command", confirmed: true } }));
   vi.stubGlobal("fetch", fetch);
   render(<PausePage />);
   fireEvent.click(await screen.findByRole("button", { name: "Skip 2 renewals" }));
   expect(fetch).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("heading", { name: "Confirm your pause" })).toHaveFocus();
-  expect(screen.getByText((_, node) => node?.tagName === "P" && node.textContent === `Giving automatically resumes ${formatDate(dates.resumes_at)}.`)).toBeVisible();
-  expect(screen.getByText(/streak is frozen during a pause of up to three months and continues when giving resumes/)).toBeVisible();
+  expect(
+    screen.getByText(
+      (_, node) =>
+        node?.tagName === "P" && node.textContent === `Giving automatically resumes ${formatDate(dates.resumes_at)}.`,
+    ),
+  ).toBeVisible();
+  expect(
+    screen.getByText(/streak is frozen during a pause of up to three months and continues when giving resumes/),
+  ).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Confirm pause" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Pause confirmed."));
   expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ subscription_id: "owned", ...dates });
@@ -38,8 +47,11 @@ it("retries a lost response with the same key and never claims success", async (
 });
 
 it("can retry a saved pending pause after a browser refresh", async () => {
-  const fetch = vi.fn().mockResolvedValueOnce(response({ ...options, options: [],
-    pause: { ...dates, request_id: "saved-command", confirmed: false } }))
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(
+      response({ ...options, options: [], pause: { ...dates, request_id: "saved-command", confirmed: false } }),
+    )
     .mockResolvedValueOnce(response({ pause: { ...dates, request_id: "saved-command", confirmed: true } }));
   vi.stubGlobal("fetch", fetch);
   render(<PausePage />);
@@ -49,9 +61,15 @@ it("can retry a saved pending pause after a browser refresh", async () => {
 });
 
 it("requires sign-in and does not offer controls to an anonymous visitor", async () => {
-  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ detail: "Sign in required" }) }),
+  );
   render(<PausePage />);
-  expect(await screen.findByRole("link", { name: "Sign in to manage your giving" })).toHaveAttribute("href", "/account/sign-in");
+  expect(await screen.findByRole("link", { name: "Sign in to manage your giving" })).toHaveAttribute(
+    "href",
+    "/account/sign-in",
+  );
   expect(screen.queryByRole("button", { name: "Confirm pause" })).not.toBeInTheDocument();
 });
 
@@ -65,8 +83,14 @@ it("returns focus to the chosen option when backing out", async () => {
 
 it("offers current dates after Stripe refuses ones shown from stored billing details", async () => {
   const later = { months: 2, starts_at: "2026-12-01T12:00:00Z", resumes_at: "2027-02-01T12:00:00Z" };
-  const fetch = vi.fn().mockResolvedValueOnce(response(options))
-    .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ detail: "Billing details changed or require reconciliation. Refresh before confirming" }) })
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response(options))
+    .mockResolvedValueOnce({
+      ok: false,
+      status: 409,
+      json: async () => ({ detail: "Billing details changed or require reconciliation. Refresh before confirming" }),
+    })
     .mockResolvedValueOnce(response({ ...options, options: [later] }))
     .mockResolvedValueOnce(response({ pause: { ...later, request_id: "command", confirmed: true } }));
   vi.stubGlobal("fetch", fetch);

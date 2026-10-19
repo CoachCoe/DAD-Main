@@ -84,6 +84,10 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 		return errors.New("reconciliation window has not settled; wait until its end plus max-lag")
 	}
 
+	ceiling, err := payments.RequestsPerSecond(getenv)
+	if err != nil {
+		return err
+	}
 	dsn := dbroles.ReconcileJob.URL(getenv)
 	if dsn == "" {
 		return errors.New(dbroles.ReconcileJob.Variable() + " is required")
@@ -106,11 +110,15 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	if err != nil {
 		return errors.New("stripe gateway unavailable")
 	}
+	// The daily job is a single process, so it paces itself within its share.
+	requests := payments.NewRateBudget(ceiling)
+	gateway.UseBudget(requests)
+	wait := func(ctx context.Context) error { return requests.Acquire(ctx, payments.BucketReconcile) }
 
 	var report reconcile.Report
 	err = pgx.BeginTxFunc(ctx, pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		var err error
-		report, err = reconcileWindow(ctx, win, gateway, queries.New(tx))
+		report, err = reconcileWindowPaced(ctx, win, gateway, queries.New(tx), wait)
 		return err
 	})
 	if err != nil {
@@ -125,13 +133,16 @@ func run(ctx context.Context, args []string, getenv func(string) string, out io.
 	return nil
 }
 
-// reconcileWindow lists the window's Stripe charges and refunds and the
-// matching database rows, then diffs them. Both sides are read-only.
-func reconcileWindow(ctx context.Context, win reconcile.Window, gateway payments.ReconcileGateway, q *queries.Queries) (reconcile.Report, error) {
-	return reconcileWindowPaced(ctx, win, gateway, q, payments.WaitReconciliationRead)
-}
-
-func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway payments.ReconcileGateway, q *queries.Queries, wait func(context.Context) error) (reconcile.Report, error) {
+// reconcileWindowPaced lists the window's Stripe charges and refunds and the
+// matching database rows, then diffs them; wait paces each provider read.
+// Both sides are read-only.
+func reconcileWindowPaced(
+	ctx context.Context,
+	win reconcile.Window,
+	gateway payments.ReconcileGateway,
+	q *queries.Queries,
+	wait func(context.Context) error,
+) (reconcile.Report, error) {
 	gte, lte := win.StripeCreatedRange()
 	start := time.Unix(gte, 0).UTC()
 	end := time.Unix(lte, 0).UTC()
@@ -165,7 +176,12 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 		seenRefunds[id] = true
 	}
 	bound := func(t time.Time) pgtype.Timestamptz { return pgtype.Timestamptz{Time: t, Valid: true} }
-	giftParams := queries.ReconciliationGiftsParams{Start: bound(win.Start), EndAt: bound(win.End), StripeObjects: append(chargeIDs, paymentIDs...), PaymentIntents: paymentIDs}
+	giftParams := queries.ReconciliationGiftsParams{
+		Start:          bound(win.Start),
+		EndAt:          bound(win.End),
+		StripeObjects:  append(chargeIDs, paymentIDs...),
+		PaymentIntents: paymentIDs,
+	}
 	giftRows, err := q.ReconciliationGifts(ctx, giftParams)
 	if err != nil {
 		return reconcile.Report{}, errors.New("gift window query failed")
@@ -206,7 +222,10 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 			return reconcile.Report{}, errors.New("legacy gift lookup failed")
 		}
 	}
-	refundRows, err := q.ReconciliationRefunds(ctx, queries.ReconciliationRefundsParams{Start: bound(win.Start), EndAt: bound(win.End), StripeRefunds: refundIDs})
+	refundRows, err := q.ReconciliationRefunds(
+		ctx,
+		queries.ReconciliationRefundsParams{Start: bound(win.Start), EndAt: bound(win.End), StripeRefunds: refundIDs},
+	)
 	if err != nil {
 		return reconcile.Report{}, errors.New("refund window query failed")
 	}
@@ -311,7 +330,10 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 	}
 	var after pgtype.UUID
 	for {
-		rows, err := q.PendingReconciliationRefunds(ctx, queries.PendingReconciliationRefundsParams{AfterID: after, ExcludedRefunds: excluded})
+		rows, err := q.PendingReconciliationRefunds(
+			ctx,
+			queries.PendingReconciliationRefundsParams{AfterID: after, ExcludedRefunds: excluded},
+		)
 		if err != nil {
 			return reconcile.Report{}, errors.New("pending refund batch query failed")
 		}
@@ -332,7 +354,16 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 				return reconcile.Report{}, errors.New("stripe pending refund verification failed")
 			}
 			remote = append(remote, payments.ReconciliationFacts(refund))
-			local = append(local, reconcile.Refund{StripeRefundID: row.StripeRefundID, AmountMinor: row.AmountMinor, Currency: row.Currency, Status: row.Status, ObservedAt: row.ObservedAt.Time})
+			local = append(
+				local,
+				reconcile.Refund{
+					StripeRefundID: row.StripeRefundID,
+					AmountMinor:    row.AmountMinor,
+					Currency:       row.Currency,
+					Status:         row.Status,
+					ObservedAt:     row.ObservedAt.Time,
+				},
+			)
 		}
 		report.Add(reconcile.Diff(win, nil, remote, nil, local))
 		report.PendingRefundsChecked += len(rows)
@@ -349,7 +380,11 @@ func reconcileWindowPaced(ctx context.Context, win reconcile.Window, gateway pay
 // half (left ends one second before mid) to avoid returning a boundary object
 // twice. A range that cannot be split further (a single second over the cap)
 // surfaces ErrListPageCap rather than looping.
-func listSplitting(ctx context.Context, start, end time.Time, list func(context.Context, time.Time, time.Time) ([]payments.Object, error)) ([]payments.Object, error) {
+func listSplitting(
+	ctx context.Context,
+	start, end time.Time,
+	list func(context.Context, time.Time, time.Time) ([]payments.Object, error),
+) ([]payments.Object, error) {
 	objects, err := list(ctx, start, end)
 	if err == nil {
 		return objects, nil

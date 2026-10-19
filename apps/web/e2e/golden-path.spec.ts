@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 async function navigateByHeader(page: Page, name: string) {
   const menu = page.getByRole("button", { name: "Menu" });
@@ -24,7 +24,12 @@ test("a mobile or desktop visitor can reach giving without an account", async ({
 
 test("every public header destination works at this viewport", async ({ page }) => {
   await page.goto("/");
-  for (const [name, path] of [["Initiatives", "/initiatives"], ["Impact ledger", "/ledger"], ["How it works", "/how-it-works"], ["My account", "/account/dashboard"]]) {
+  for (const [name, path] of [
+    ["Initiatives", "/initiatives"],
+    ["Impact ledger", "/ledger"],
+    ["How it works", "/how-it-works"],
+    ["My account", "/account/dashboard"],
+  ]) {
     await navigateByHeader(page, name);
     await expect(page).toHaveURL(new RegExp(`${path}$`));
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
@@ -47,11 +52,16 @@ test("the mobile menu announces its state and restores keyboard focus", async ({
   await expect(menu).toBeFocused();
 });
 
-test("a cold payment-recovery visit requests a sign-in link in place without exposing account data", async ({ page }) => {
+test("a cold payment-recovery visit requests a sign-in link in place without exposing account data", async ({
+  page,
+}) => {
   let request: unknown;
   await page.route("**/api/donor/login", async (route) => {
     request = route.request().postDataJSON();
-    await route.fulfill({ status: 202, json: { message: "If this email matches a donor account, a sign-in link will arrive shortly." } });
+    await route.fulfill({
+      status: 202,
+      json: { message: "If this email matches a donor account, a sign-in link will arrive shortly." },
+    });
   });
   await page.goto("/account/payment-method");
   await expect(page.getByRole("button", { name: "Continue to Stripe" })).toHaveCount(0);
@@ -65,7 +75,9 @@ test("a cold payment-recovery visit requests a sign-in link in place without exp
 test("an expired claim link explains itself instead of reporting an outage", async ({ page }) => {
   await page.goto(`/account/claim#token=${"e".repeat(43)}`);
   await page.getByRole("button", { name: "Confirm and sign in" }).click();
-  await expect(page.getByRole("main").getByRole("alert")).toHaveText("This link is invalid or expired. Request a new link.");
+  await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+    "This link is invalid or expired. Request a new link.",
+  );
   await expect(page.getByRole("link", { name: "Request a new link" })).toBeVisible();
 });
 

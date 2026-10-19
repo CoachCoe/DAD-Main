@@ -120,7 +120,12 @@ func (s EmailChangeService) Confirm(ctx context.Context, proof string) (string, 
 
 // advanceEmailChange replaces the current address's proof with a fresh one
 // for the new address.
-func (s EmailChangeService) advanceEmailChange(ctx context.Context, q *queries.Queries, change queries.DonorEmailChange, now time.Time) error {
+func (s EmailChangeService) advanceEmailChange(
+	ctx context.Context,
+	q *queries.Queries,
+	change queries.DonorEmailChange,
+	now time.Time,
+) error {
 	hash, encrypted, err := emailChangeProof(s.EncryptionKeys)
 	if err != nil {
 		return err

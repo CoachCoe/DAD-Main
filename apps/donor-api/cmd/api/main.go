@@ -59,7 +59,9 @@ func trustedProxies(value string) ([]netip.Prefix, error) {
 func validateStaffOrigin(staff, public string, getenv func(string) string) error {
 	if staff == "" {
 		if getenv("DONOR_STAFF_ENCRYPTION_KEY") != "" {
-			return errors.New("set DONOR_STAFF_ORIGIN: staff now sign in with passkeys on their own host, and DONOR_STAFF_ENCRYPTION_KEY is no longer used")
+			return errors.New(
+				"set DONOR_STAFF_ORIGIN: staff now sign in with passkeys on their own host, and DONOR_STAFF_ENCRYPTION_KEY is no longer used",
+			)
 		}
 		return nil
 	}
@@ -69,7 +71,8 @@ func validateStaffOrigin(staff, public string, getenv func(string) string) error
 	staffURL, _ := url.Parse(staff)
 	publicURL, _ := url.Parse(public)
 	// The public site may claim a parent domain as its passkey relying party.
-	if staffHost, publicHost := staffURL.Hostname(), publicURL.Hostname(); publicHost == staffHost || strings.HasSuffix(publicHost, "."+staffHost) {
+	if staffHost, publicHost := staffURL.Hostname(), publicURL.Hostname(); publicHost == staffHost ||
+		strings.HasSuffix(publicHost, "."+staffHost) {
 		return errors.New("DONOR_STAFF_ORIGIN must use its own host, neither DONOR_PUBLIC_ORIGIN's host nor a parent domain of it")
 	}
 	return nil
@@ -101,11 +104,17 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if (stripeKey == "") != (webhookSecret == "") {
 		return services, release, errors.New("set both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or neither")
 	}
+	stripeCeiling, err := payments.RequestsPerSecond(getenv)
+	if err != nil {
+		return services, release, err
+	}
+	var stripeGateway *payments.StripeGateway
 	var gateway payments.StaffFinanceGateway
 	if stripeKey != "" {
-		if gateway, err = payments.NewStripeGateway(stripeKey); err != nil {
+		if stripeGateway, err = payments.NewStripeGateway(stripeKey); err != nil {
 			return services, release, err
 		}
+		gateway = stripeGateway
 	}
 	services.StaffOrigin = getenv("DONOR_STAFF_ORIGIN")
 	if err = validateStaffOrigin(services.StaffOrigin, services.Origin, getenv); err != nil {
@@ -161,6 +170,9 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if err = dbroles.API.Check(startup, pool, getenv(dbroles.AllowOwnerVariable) == "true"); err != nil {
 		pool.Close()
 		return services, release, err
+	}
+	if stripeGateway != nil {
+		stripeGateway.UseBudget(store.StripeBudget{DB: pool, PerSecond: stripeCeiling})
 	}
 	services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
 	services.Content = store.ContentReader{DB: pool}

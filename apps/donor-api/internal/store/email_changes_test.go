@@ -27,7 +27,12 @@ func changeFixture(t *testing.T) (EmailChangeService, EmailChangeWorker, pgtype.
 		}
 	})
 	transport := &recordingMail{}
-	w := EmailChangeWorker{DB: as(t, dbroles.EmailChangeWorker), Settings: mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys}, Origin: "https://donor.example.org", Transport: transport}
+	w := EmailChangeWorker{
+		DB:        as(t, dbroles.EmailChangeWorker),
+		Settings:  mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys},
+		Origin:    "https://donor.example.org",
+		Transport: transport,
+	}
 	return EmailChangeService{DB: as(t, dbroles.API), EncryptionKeys: emailTestKeys}, w, id, email, session, transport
 }
 
@@ -111,7 +116,8 @@ func TestEmailChangeRequiresBothAddressesAndRevokesAccess(t *testing.T) {
 		t.Fatal("identity not preserved", err)
 	}
 	var events int
-	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_identity_events WHERE donor_id=$1", id).Scan(&events); err != nil || events != 3 {
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_identity_events WHERE donor_id=$1", id).Scan(&events); err != nil ||
+		events != 3 {
 		t.Fatal("identity audit incomplete", err)
 	}
 }
@@ -136,7 +142,8 @@ func TestEmailChangeConflictsExpiryReplacementAndDeliveryRetry(t *testing.T) {
 	if _, err := w.DeliverNext(ctx, time.Now().Add(2*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
-	if len(transport.messages) != 2 || tokenFromMail(t, transport.messages[1]) != first || transport.messages[0].ID != transport.messages[1].ID {
+	if len(transport.messages) != 2 || tokenFromMail(t, transport.messages[1]) != first ||
+		transport.messages[0].ID != transport.messages[1].ID {
 		t.Fatal("delivery retry changed proof or message ID")
 	}
 	if _, err := s.Confirm(ctx, first); err != nil {

@@ -81,8 +81,9 @@ need no change; a staff-host path outside those prefixes needs the allowlist in
 nginx sets `X-Real-IP` and `X-Forwarded-For` to the client address on every request and
 drops `Forwarded`, `CF-Connecting-IP`, `True-Client-IP`, and Next's internal
 `X-Middleware-Subrequest`. The web service forwards `X-Real-IP` (its
-`DONOR_CLIENT_IP_HEADER`) to the API, which trusts it only from the web container's fixed
-address (`DONOR_TRUSTED_PROXY_CIDRS=172.30.42.10/32`).
+`DONOR_CLIENT_IP_HEADER`) to the API, which trusts it only from the internal `app`
+network that the web containers alone share with it
+(`DONOR_TRUSTED_PROXY_CIDRS=172.30.43.0/24`), however many web replicas run.
 
 `deploy/nginx/conf/cloudflare/edge-ranges.conf` is generated from
 <https://www.cloudflare.com/ips-v4> and <https://www.cloudflare.com/ips-v6>. The
@@ -235,18 +236,30 @@ capture at the origin: it is the hottest origin path during a referral spike. Th
 referrer's name it shows is looked up once a minute per code and web process, not per
 visit; an unknown code is looked up every time.
 
-## Scaling beyond one origin
+## Scaling
 
-One Compose host runs nginx, one Next.js process, one API process, and PostgreSQL.
-Cloudflare absorbs attacks and static pages, but every referral landing, account page,
-and API call still reaches that host; its capacity is unmeasured until load-tested
-against the agreed spike. The next limits, in order:
+An origin is one Compose host running nginx, `WEB_REPLICAS` Next.js processes, one API
+process, and PostgreSQL. Cloudflare absorbs attacks and static pages, but every referral
+landing, account page, and API call reaches an origin. Measure against the agreed spike
+with a seeded population at the target size
+([load testing](operations.md#load-testing-with-representative-data)), and the web tier
+as well as the API. In order of what limits an origin:
 
-- **PostgreSQL** is a single instance on the same host. Move it to a managed service
-  with connection pooling first; read replicas for donor reads require application work.
+- **Web processes.** Each Next.js process renders on about one core, and a referral
+  landing is rendered per request. Set `WEB_REPLICAS` to the cores left after the API and
+  nginx. nginx balances across them, re-resolving the service every 10 seconds, and the
+  API trusts each one's `X-Real-IP` because they alone share its `app` network.
+- **The API** is one Go process that uses every core. Donor reads are indexed lookups of
+  one donor's rows, so their cost barely grows with the population.
+- **PostgreSQL.** Move it to a managed service before adding origins. Each origin's API
+  opens up to 40 connections, so put a transaction-mode pooler in front once their total
+  approaches `max_connections` ([connection pooling](operations.md#connection-pooling)).
+  Donor reads need no read replicas at this scale, and moving them to one would need
+  application work: a lagging replica could still accept a session that was just ended.
 - **Multiple origins** behind Cloudflare Load Balancing, each running nginx, web, and API.
-  Keep each worker kind on one host until concurrent workers are verified.
-- **Per-instance limits.** The nginx zones and the API's buckets are per host and per
-  process, so N origins grant a client up to N times the quota. Cloudflare's rules are
-  then the only shared limit, and they are approximate. Exact global quotas need a
-  shared store.
+  Keep each worker kind on one host until concurrent workers are verified. Every API and
+  Stripe worker shares the Stripe account's request limit through PostgreSQL
+  ([Stripe](operations.md#stripe)).
+- **Per-origin limits.** nginx's zones and the API's buckets are per origin, so N origins
+  grant a client up to N times its quota there. Cloudflare's rate limiting rules, applied
+  before any origin, are the shared limit; they are approximate.

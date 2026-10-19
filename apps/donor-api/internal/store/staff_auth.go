@@ -75,7 +75,9 @@ func lockStaffUser(ctx context.Context, q *queries.Queries, id pgtype.UUID) (sta
 		}
 		user.passkeys = append(user.passkeys, webauthn.Credential{
 			ID: row.CredentialID, PublicKey: row.PublicKey, AttestationFormat: row.AttestationFormat, Transport: transports,
-			Flags: webauthn.NewCredentialFlags(flags), Authenticator: webauthn.Authenticator{AAGUID: row.Aaguid, SignCount: uint32(row.SignCount)},
+			Flags: webauthn.NewCredentialFlags(
+				flags,
+			), Authenticator: webauthn.Authenticator{AAGUID: row.Aaguid, SignCount: uint32(row.SignCount)},
 		})
 	}
 	return user, nil
@@ -99,7 +101,16 @@ func saveCeremony(ctx context.Context, q *queries.Queries, kind string, invite p
 	if err != nil {
 		return "", err
 	}
-	return id, q.InsertStaffCeremony(ctx, queries.InsertStaffCeremonyParams{TokenHash: HashToken(id), Kind: kind, InviteID: invite, Session: raw, ExpiresAt: timestamp(session.Expires)})
+	return id, q.InsertStaffCeremony(
+		ctx,
+		queries.InsertStaffCeremonyParams{
+			TokenHash: HashToken(id),
+			Kind:      kind,
+			InviteID:  invite,
+			Session:   raw,
+			ExpiresAt: timestamp(session.Expires),
+		},
+	)
 }
 
 // takeCeremony deletes a ceremony and returns its challenge, so each one can
@@ -125,7 +136,15 @@ func startStaffSession(ctx context.Context, q *queries.Queries, staff pgtype.UUI
 	if err != nil {
 		return "", err
 	}
-	return token, q.InsertStaffSession(ctx, queries.InsertStaffSessionParams{ID: id, StaffID: staff, TokenHash: HashToken(token), ExpiresAt: timestamp(now.Add(staffSessionLifetime))})
+	return token, q.InsertStaffSession(
+		ctx,
+		queries.InsertStaffSessionParams{
+			ID:        id,
+			StaffID:   staff,
+			TokenHash: HashToken(token),
+			ExpiresAt: timestamp(now.Add(staffSessionLifetime)),
+		},
+	)
 }
 
 // BeginSignIn issues a usernameless challenge: any of the browser's passkeys
@@ -171,7 +190,11 @@ func (s *StaffService) SignIn(ctx context.Context, ceremony string, response []b
 		if err != nil {
 			return err
 		}
-		_, passkey, err := s.WebAuthn.ValidatePasskeyLogin(func([]byte, []byte) (webauthn.User, error) { return user, nil }, session, assertion)
+		_, passkey, err := s.WebAuthn.ValidatePasskeyLogin(
+			func([]byte, []byte) (webauthn.User, error) { return user, nil },
+			session,
+			assertion,
+		)
 		var reason string
 		switch {
 		case err != nil:
@@ -204,7 +227,12 @@ func (s *StaffService) SignIn(ctx context.Context, ceremony string, response []b
 
 // lockInvitation locks an account and then its invitation, the order every
 // staff write takes, and checks that the invitation is still open.
-func lockInvitation(ctx context.Context, q *queries.Queries, staffID pgtype.UUID, invitation func() (queries.DonorStaffInvite, error)) (queries.DonorStaffInvite, staffUser, error) {
+func lockInvitation(
+	ctx context.Context,
+	q *queries.Queries,
+	staffID pgtype.UUID,
+	invitation func() (queries.DonorStaffInvite, error),
+) (queries.DonorStaffInvite, staffUser, error) {
 	user, err := lockStaffUser(ctx, q, staffID)
 	if err != nil {
 		return queries.DonorStaffInvite{}, user, err
@@ -213,7 +241,8 @@ func lockInvitation(ctx context.Context, q *queries.Queries, staffID pgtype.UUID
 	if err != nil {
 		return invite, user, err
 	}
-	if invite.StaffID != user.staff.ID || user.staff.Disabled || invite.ConsumedAt.Valid || !invite.ExpiresAt.Time.After(time.Now()) || invite.Attempts >= maxInviteAttempts {
+	if invite.StaffID != user.staff.ID || user.staff.Disabled || invite.ConsumedAt.Valid || !invite.ExpiresAt.Time.After(time.Now()) ||
+		invite.Attempts >= maxInviteAttempts {
 		return invite, user, ErrStaffDenied
 	}
 	return invite, user, nil
@@ -276,7 +305,12 @@ func (s *StaffService) Activate(ctx context.Context, ceremony string, response [
 			return ErrStaffDenied
 		}
 		owner := pgtype.UUID{Bytes: [16]byte(session.UserID), Valid: true}
-		invite, user, err := lockInvitation(ctx, q, owner, func() (queries.DonorStaffInvite, error) { return q.StaffInviteByID(ctx, inviteID) })
+		invite, user, err := lockInvitation(
+			ctx,
+			q,
+			owner,
+			func() (queries.DonorStaffInvite, error) { return q.StaffInviteByID(ctx, inviteID) },
+		)
 		if err != nil {
 			return err
 		}
@@ -287,7 +321,10 @@ func (s *StaffService) Activate(ctx context.Context, ceremony string, response [
 		if token != "" {
 			invite.ConsumedAt = timestamp(now)
 		}
-		return q.SaveStaffInvite(ctx, queries.SaveStaffInviteParams{ID: invite.ID, Attempts: invite.Attempts, ConsumedAt: invite.ConsumedAt})
+		return q.SaveStaffInvite(
+			ctx,
+			queries.SaveStaffInviteParams{ID: invite.ID, Attempts: invite.Attempts, ConsumedAt: invite.ConsumedAt},
+		)
 	})
 	if err != nil {
 		return "", err
@@ -300,14 +337,36 @@ func (s *StaffService) Activate(ctx context.Context, ceremony string, response [
 
 // knownTransports are the transports a passkey may be stored with. The
 // browser reports them unchecked, and the column holds only short names.
-var knownTransports = []protocol.AuthenticatorTransport{protocol.USB, protocol.NFC, protocol.BLE, protocol.SmartCard, protocol.Hybrid, protocol.Internal}
+var knownTransports = []protocol.AuthenticatorTransport{
+	protocol.USB,
+	protocol.NFC,
+	protocol.BLE,
+	protocol.SmartCard,
+	protocol.Hybrid,
+	protocol.Internal,
+}
 
 // register stores a verified new passkey and starts a session, or audits the
 // failure and returns no token when the attestation is rejected or its
 // credential is registered already.
-func (s *StaffService) register(ctx context.Context, q *queries.Queries, user staffUser, session webauthn.SessionData, attestation *protocol.ParsedCredentialCreationData, now time.Time) (string, error) {
+func (s *StaffService) register(
+	ctx context.Context,
+	q *queries.Queries,
+	user staffUser,
+	session webauthn.SessionData,
+	attestation *protocol.ParsedCredentialCreationData,
+	now time.Time,
+) (string, error) {
 	failed := func(reason string) (string, error) {
-		return "", auditStaff(ctx, q, pgtype.UUID{}, "staff.activation_failed", user.staff.ID.String(), map[string]string{"reason": reason}, now)
+		return "", auditStaff(
+			ctx,
+			q,
+			pgtype.UUID{},
+			"staff.activation_failed",
+			user.staff.ID.String(),
+			map[string]string{"reason": reason},
+			now,
+		)
 	}
 	passkey, err := s.WebAuthn.CreateCredential(user, session, attestation)
 	if err != nil {

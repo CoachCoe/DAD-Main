@@ -74,7 +74,18 @@ func staffCommand[T requestBody](a *api, w http.ResponseWriter, r *http.Request,
 // setStaffCookie keeps the staff session on the staff host: it never has a
 // Domain, and over HTTPS the __Host- prefix makes browsers refuse one.
 func (a *api) setStaffCookie(w http.ResponseWriter, value string, maxAge int) {
-	http.SetCookie(w, &http.Cookie{Name: a.staffCookie, Value: value, MaxAge: maxAge, Path: "/", HttpOnly: true, Secure: a.staffSecure, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(
+		w,
+		&http.Cookie{
+			Name:     a.staffCookie,
+			Value:    value,
+			MaxAge:   maxAge,
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   a.staffSecure,
+			SameSite: http.SameSiteStrictMode,
+		},
+	)
 }
 
 func (a *api) staffSession(r *http.Request) string { return cookieValue(r, a.staffCookie) }

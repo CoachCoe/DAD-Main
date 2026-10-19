@@ -13,7 +13,8 @@ func TestGenerateIsDeterministic(t *testing.T) {
 	differs := false
 	for i := range a.donors {
 		x, y := a.donors[i], b.donors[i]
-		if x.id != y.id || x.email != y.email || x.code != y.code || len(x.gifts()) != len(y.gifts()) || x.streak != y.streak || x.net() != y.net() {
+		if x.id != y.id || x.email != y.email || x.code != y.code || len(x.gifts()) != len(y.gifts()) || x.streak != y.streak ||
+			x.net() != y.net() {
 			t.Fatalf("donor %d differs between runs with the same seed", i)
 		}
 		differs = differs || x.id != other.donors[i].id
@@ -101,7 +102,15 @@ func TestPopulationHasALaunchShape(t *testing.T) {
 		t.Errorf("referrals are not heavy-tailed: %d referrers, %d with 100+, most %d", referrers, heavy, mostReferrals)
 	}
 	if longest < 20 || atRisk == 0 || paused == 0 || cancelled == 0 || pastDue == 0 || refunds == 0 {
-		t.Errorf("missing recognition edge cases: longest streak %d, %d at risk, %d paused, %d cancelled, %d past due, %d refunds", longest, atRisk, paused, cancelled, pastDue, refunds)
+		t.Errorf(
+			"missing recognition edge cases: longest streak %d, %d at risk, %d paused, %d cancelled, %d past due, %d refunds",
+			longest,
+			atRisk,
+			paused,
+			cancelled,
+			pastDue,
+			refunds,
+		)
 	}
 }
 
@@ -166,7 +175,8 @@ func TestFactsKeepTheSchemaAndDomainRules(t *testing.T) {
 			if s := c.sub; s != nil && s.status == "canceled" && s.stopsAt.IsZero() {
 				t.Fatalf("cancelled subscription for donor %d keeps renewing", d.index)
 			}
-			if p := c.pause; p != nil && (p.months < 1 || p.months > 3 || p.resumes.Sub(p.starts) < time.Duration(p.months)*28*day || p.resumes.Sub(p.starts) > time.Duration(p.months)*31*day) {
+			if p := c.pause; p != nil &&
+				(p.months < 1 || p.months > 3 || p.resumes.Sub(p.starts) < time.Duration(p.months)*28*day || p.resumes.Sub(p.starts) > time.Duration(p.months)*31*day) {
 				t.Fatalf("pause for donor %d skips the wrong renewals", d.index)
 			}
 		}

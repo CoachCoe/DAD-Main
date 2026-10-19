@@ -3,18 +3,56 @@ import { afterEach, expect, it, vi } from "vitest";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import DonorDetail from "./DonorDetail";
 
-const detail = { id: "donor-1", email: "donor@example.org", public_name: "Sam",
+const detail = {
+  id: "donor-1",
+  email: "donor@example.org",
+  public_name: "Sam",
   streak: { current: 3, best: 5, at_risk: true, computed_at: "2027-01-01T00:00:00Z" },
   referrer: { id: "donor-0", email: "friend@example.org", type: "IRL" },
-  claimed: true, founding_donor: true,
-  subscription: { amount_minor: 3000, next_renewal: "2027-02-01T00:00:00Z", observed_at: "2027-01-01T00:00:00Z", status: "active", stops_at: null },
-  gifts: [{ id: "gift-1", amount_minor: 3000, currency: "USD", frequency: "MONTHLY", paid_at: "2027-01-01T00:00:00Z", refunded_minor: 0, net_minor: 3000 }],
+  claimed: true,
+  founding_donor: true,
+  subscription: {
+    amount_minor: 3000,
+    next_renewal: "2027-02-01T00:00:00Z",
+    observed_at: "2027-01-01T00:00:00Z",
+    status: "active",
+    stops_at: null,
+  },
+  gifts: [
+    {
+      id: "gift-1",
+      amount_minor: 3000,
+      currency: "USD",
+      frequency: "MONTHLY",
+      paid_at: "2027-01-01T00:00:00Z",
+      refunded_minor: 0,
+      net_minor: 3000,
+    },
+  ],
   referred: [{ id: "donor-2", email: "invitee@example.org", type: "LINK", net_minor: 4500 }],
-  next_gifts_offset: null, next_referrals_offset: null };
-const actor = { id: "staff-1", email: "f@example.org", name: "Fin", role: "FINANCE", active: true, disabled: false,
-  permissions: ["donor.read", "gift.refund", "gift.cancel"] };
-const action = (id: string) => ({ id, actor_id: "staff-1", kind: "REFUND", target_id: "gift-1", amount_minor: 1000,
-  period_end: null, reason: "Donor asked", status: "SUCCEEDED", completed_at: "2027-01-02T00:00:00Z" });
+  next_gifts_offset: null,
+  next_referrals_offset: null,
+};
+const actor = {
+  id: "staff-1",
+  email: "f@example.org",
+  name: "Fin",
+  role: "FINANCE",
+  active: true,
+  disabled: false,
+  permissions: ["donor.read", "gift.refund", "gift.cancel"],
+};
+const action = (id: string) => ({
+  id,
+  actor_id: "staff-1",
+  kind: "REFUND",
+  target_id: "gift-1",
+  amount_minor: 1000,
+  period_end: null,
+  reason: "Donor asked",
+  status: "SUCCEEDED",
+  completed_at: "2027-01-02T00:00:00Z",
+});
 const reply = (status: number, body: unknown) => ({ ok: status < 400, status, json: async () => body });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -30,20 +68,37 @@ function serve(routes: Record<string, ReturnType<typeof reply>>) {
 }
 
 it("shows the donor record with links scoped to the staff member's permissions", async () => {
-  serve({ "/donor/staff/donors/donor-1": reply(200, detail), "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [action("a1")], next_offset: null }) });
+  serve({
+    "/donor/staff/donors/donor-1": reply(200, detail),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [action("a1")], next_offset: null }),
+  });
   render(<DonorDetail donor="donor-1" />);
   expect(await screen.findByRole("heading", { level: 1, name: "donor@example.org" })).toBeVisible();
   expect(screen.getByText("Streak: 3 · Best: 5 · At risk")).toBeVisible();
   expect(screen.getByRole("link", { name: "friend@example.org" })).toHaveAttribute("href", "/staff/donors/donor-0");
-  expect(screen.getByRole("link", { name: "friend@example.org" }).closest("p")).toHaveTextContent("Referrer: friend@example.org · IRL");
+  expect(screen.getByRole("link", { name: "friend@example.org" }).closest("p")).toHaveTextContent(
+    "Referrer: friend@example.org · IRL",
+  );
   expect(screen.getByRole("link", { name: "invitee@example.org" })).toHaveAttribute("href", "/staff/donors/donor-2");
-  expect(screen.getByRole("link", { name: "invitee@example.org" }).closest("li")).toHaveTextContent("invitee@example.org · LINK · Net $45.00");
-  expect(screen.getByRole("link", { name: "Delivery history and resends" })).toHaveAttribute("href", "/staff/messages?donor=donor-1");
-  expect(screen.getByRole("link", { name: "Refund gift" })).toHaveAttribute("href", "/staff/finance?donor=donor-1&gift=gift-1");
-  expect(screen.getByRole("link", { name: "Cancel monthly giving" })).toHaveAttribute("href", "/staff/finance?donor=donor-1");
-  expect(screen.getByRole("link", { name: "Cancel monthly giving" }).closest("p"))
-    .toHaveTextContent(`Monthly gift: $30.00/month · Active · Next renewal ${formatDate(detail.subscription.next_renewal)} · Cancel monthly giving`);
+  expect(screen.getByRole("link", { name: "invitee@example.org" }).closest("li")).toHaveTextContent(
+    "invitee@example.org · LINK · Net $45.00",
+  );
+  expect(screen.getByRole("link", { name: "Delivery history and resends" })).toHaveAttribute(
+    "href",
+    "/staff/messages?donor=donor-1",
+  );
+  expect(screen.getByRole("link", { name: "Refund gift" })).toHaveAttribute(
+    "href",
+    "/staff/finance?donor=donor-1&gift=gift-1",
+  );
+  expect(screen.getByRole("link", { name: "Cancel monthly giving" })).toHaveAttribute(
+    "href",
+    "/staff/finance?donor=donor-1",
+  );
+  expect(screen.getByRole("link", { name: "Cancel monthly giving" }).closest("p")).toHaveTextContent(
+    `Monthly gift: $30.00/month · Active · Next renewal ${formatDate(detail.subscription.next_renewal)} · Cancel monthly giving`,
+  );
   const synced = screen.getByText(/Last updated from Stripe/);
   expect(synced).toHaveClass("note");
   expect(synced).toHaveTextContent(`Last updated from Stripe ${formatDateTime(detail.subscription.observed_at)}.`);
@@ -54,8 +109,11 @@ it("shows the donor record with links scoped to the staff member's permissions",
 });
 
 it("hides financial links from a role without those permissions", async () => {
-  serve({ "/donor/staff/donors/donor-1": reply(200, detail), "/donor/staff/me": reply(200, { ...actor, permissions: ["donor.read"] }),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }) });
+  serve({
+    "/donor/staff/donors/donor-1": reply(200, detail),
+    "/donor/staff/me": reply(200, { ...actor, permissions: ["donor.read"] }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+  });
   render(<DonorDetail donor="donor-1" />);
   expect(await screen.findByText("No refunds or cancellations recorded.")).toBeVisible();
   expect(screen.queryByRole("link", { name: "Refund gift" })).not.toBeInTheDocument();
@@ -63,9 +121,12 @@ it("hides financial links from a role without those permissions", async () => {
 });
 
 it("pages through the action history by the offset the API returns", async () => {
-  const fetch = serve({ "/donor/staff/donors/donor-1": reply(200, detail), "/donor/staff/me": reply(200, actor),
+  const fetch = serve({
+    "/donor/staff/donors/donor-1": reply(200, detail),
+    "/donor/staff/me": reply(200, actor),
     "/donor/staff/donors/donor-1/actions?offset=0": reply(200, { actions: [action("a1")], next_offset: 50 }),
-    "/donor/staff/donors/donor-1/actions?offset=50": reply(200, { actions: [action("a51")], next_offset: null }) });
+    "/donor/staff/donors/donor-1/actions?offset=50": reply(200, { actions: [action("a51")], next_offset: null }),
+  });
   render(<DonorDetail donor="donor-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Older actions" }));
   expect(await screen.findByRole("button", { name: "Newest actions" })).toBeVisible();
@@ -76,18 +137,27 @@ it("pages through the action history by the offset the API returns", async () =>
 });
 
 it("requests the next page of gifts from the detail endpoint", async () => {
-  const fetch = serve({ "/donor/staff/donors/donor-1?gifts_offset=0&referrals_offset=0": reply(200, { ...detail, next_gifts_offset: 50 }),
-    "/donor/staff/donors/donor-1?gifts_offset=50&referrals_offset=0": reply(200, detail), "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }) });
+  const fetch = serve({
+    "/donor/staff/donors/donor-1?gifts_offset=0&referrals_offset=0": reply(200, { ...detail, next_gifts_offset: 50 }),
+    "/donor/staff/donors/donor-1?gifts_offset=50&referrals_offset=0": reply(200, detail),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+  });
   render(<DonorDetail donor="donor-1" />);
   fireEvent.click(await screen.findByRole("button", { name: "Older gifts" }));
   expect(await screen.findByRole("button", { name: "Newest gifts" })).toBeVisible();
-  expect(fetch).toHaveBeenCalledWith("/api/donor/staff/donors/donor-1?gifts_offset=50&referrals_offset=0", expect.anything());
+  expect(fetch).toHaveBeenCalledWith(
+    "/api/donor/staff/donors/donor-1?gifts_offset=50&referrals_offset=0",
+    expect.anything(),
+  );
 });
 
 it("announces loading until the record arrives", async () => {
-  serve({ "/donor/staff/donors/donor-1": reply(200, detail), "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }) });
+  serve({
+    "/donor/staff/donors/donor-1": reply(200, detail),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+  });
   render(<DonorDetail donor="donor-1" />);
   expect(screen.getAllByRole("status")[0]).toHaveTextContent("Loading donor record…");
   expect(await screen.findByRole("heading", { level: 1, name: "donor@example.org" })).toBeVisible();
@@ -103,7 +173,10 @@ it("says when no donor matches the link", async () => {
 });
 
 it("offers sign-in to a signed-out visitor without an error", async () => {
-  serve({ "/donor/staff/donors/donor-1": reply(401, { detail: "Sign in" }), "/donor/staff/me": reply(401, { detail: "Sign in" }) });
+  serve({
+    "/donor/staff/donors/donor-1": reply(401, { detail: "Sign in" }),
+    "/donor/staff/me": reply(401, { detail: "Sign in" }),
+  });
   render(<DonorDetail donor="donor-1" />);
   expect(await screen.findByRole("link", { name: "Staff sign-in" })).toHaveAttribute("href", "/staff/sign-in");
   expect(screen.getByRole("alert")).toBeEmptyDOMElement();
@@ -124,36 +197,64 @@ it("offers a retry when the service is unavailable", async () => {
 });
 
 it("shows refund adjustments and offers no refund for a fully refunded gift when the API reports them", async () => {
-  const gifts = [{ ...detail.gifts[0], refunded_minor: 3000, net_minor: 0 },
-    { ...detail.gifts[0], id: "gift-2", refunded_minor: 1000, net_minor: 2000 }];
-  serve({ "/donor/staff/donors/donor-1": reply(200, { ...detail, gifts, claimed: false }), "/donor/staff/me": reply(200, actor),
-    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }) });
+  const gifts = [
+    { ...detail.gifts[0], refunded_minor: 3000, net_minor: 0 },
+    { ...detail.gifts[0], id: "gift-2", refunded_minor: 1000, net_minor: 2000 },
+  ];
+  serve({
+    "/donor/staff/donors/donor-1": reply(200, { ...detail, gifts, claimed: false }),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+  });
   render(<DonorDetail donor="donor-1" />);
   expect(await screen.findByText(/Guest \(unclaimed\)/)).toBeVisible();
   expect(screen.getAllByRole("link", { name: "Refund gift" })).toHaveLength(1);
-  expect(screen.getByRole("link", { name: "Refund gift" })).toHaveAttribute("href", "/staff/finance?donor=donor-1&gift=gift-2");
+  expect(screen.getByRole("link", { name: "Refund gift" })).toHaveAttribute(
+    "href",
+    "/staff/finance?donor=donor-1&gift=gift-2",
+  );
   expect(screen.getByText(/Refunded \$30\.00/)).toBeVisible();
 });
 
 it("offers cancellation only for a monthly gift that is still renewing", async () => {
-  serve({ "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: { ...detail.subscription, stops_at: "2027-02-01T00:00:00Z" } }),
-    "/donor/staff/me": reply(200, actor), "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }) });
+  serve({
+    "/donor/staff/donors/donor-1": reply(200, {
+      ...detail,
+      subscription: { ...detail.subscription, stops_at: "2027-02-01T00:00:00Z" },
+    }),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+  });
   const { unmount } = render(<DonorDetail donor="donor-1" />);
-  expect(await screen.findByText(`Monthly gift: $30.00/month · Active · Ends ${formatDate("2027-02-01T00:00:00Z")}`)).toBeVisible();
+  expect(
+    await screen.findByText(`Monthly gift: $30.00/month · Active · Ends ${formatDate("2027-02-01T00:00:00Z")}`),
+  ).toBeVisible();
   expect(screen.queryByRole("link", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
   unmount();
-  serve({ "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: null }),
-    "/donor/staff/me": reply(200, actor), "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }) });
+  serve({
+    "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: null }),
+    "/donor/staff/me": reply(200, actor),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+  });
   render(<DonorDetail donor="donor-1" />);
   expect(await screen.findByText("No active monthly gift.")).toBeVisible();
   expect(screen.queryByRole("link", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
 });
 
 it("names Stripe statuses in words", async () => {
-  for (const [status, words] of [["past_due", "Payment overdue"], ["unpaid", "Payment overdue"], ["paused", "Paused"],
-    ["canceled", "Cancelled"], ["incomplete", "Setting up"], ["trialing", "Setting up"]]) {
-    serve({ "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: { ...detail.subscription, status } }),
-      "/donor/staff/me": reply(200, actor), "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }) });
+  for (const [status, words] of [
+    ["past_due", "Payment overdue"],
+    ["unpaid", "Payment overdue"],
+    ["paused", "Paused"],
+    ["canceled", "Cancelled"],
+    ["incomplete", "Setting up"],
+    ["trialing", "Setting up"],
+  ]) {
+    serve({
+      "/donor/staff/donors/donor-1": reply(200, { ...detail, subscription: { ...detail.subscription, status } }),
+      "/donor/staff/me": reply(200, actor),
+      "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+    });
     const { unmount } = render(<DonorDetail donor="donor-1" />);
     expect(await screen.findByText(new RegExp(`/month · ${words} · Next renewal`))).toBeVisible();
     unmount();

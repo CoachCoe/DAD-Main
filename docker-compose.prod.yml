@@ -1,5 +1,4 @@
-# Preserve the deployed project identity and its PostgreSQL volume across the rebrand.
-name: impactgraph
+name: dad
 
 # Every donor service receives ENV_FILE, so it holds no database credentials. Each service
 # instead gets its own login's URL from the database environment file, which Compose only
@@ -37,8 +36,9 @@ services:
     <<: *donor
     environment:
       DONOR_GO_LISTEN: 0.0.0.0:8002
-      # Only the web proxy may supply X-Real-IP; it strips any client-sent copy.
-      DONOR_TRUSTED_PROXY_CIDRS: 172.30.42.10/32
+      # Only the web proxies, which alone share the app network with the API, may supply
+      # X-Real-IP; they strip any client-sent copy.
+      DONOR_TRUSTED_PROXY_CIDRS: 172.30.43.0/24
       DONOR_STAFF_ORIGIN: ${DONOR_STAFF_ORIGIN:?set DONOR_STAFF_ORIGIN}
       DONOR_API_DATABASE_URL: ${DONOR_API_DATABASE_URL:?set DONOR_API_DATABASE_URL}
     # Wallet signing and push provider keys stay outside the image. Mount them read-only
@@ -53,6 +53,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks: [default, app]
     restart: unless-stopped
 
   migrate:
@@ -182,10 +183,10 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    networks:
-      default:
-        ipv4_address: 172.30.42.10
-      edge: {}
+    # One Node.js process renders on one core; run one replica per core to spare.
+    deploy:
+      replicas: ${WEB_REPLICAS:-1}
+    networks: [app, edge]
     read_only: true
     tmpfs: [/tmp, /app/.next/cache]
     security_opt: [no-new-privileges:true]
@@ -218,7 +219,7 @@ services:
     ports: ["80:8080", "443:8443"]
     # Set by scripts/deploy.sh; a change makes Compose recreate the container.
     labels:
-      org.impactgraph.ingress-config: ${INGRESS_CONFIG_HASH:-}
+      org.dad.ingress-config: ${INGRESS_CONFIG_HASH:-}
     networks: [edge]
     depends_on:
       web:
@@ -246,9 +247,13 @@ networks:
   default:
     ipam:
       config:
-        # Dynamic addresses come from ip_range so the web proxy's fixed address stays free.
         - subnet: 172.30.42.0/24
-          ip_range: 172.30.42.128/25
+  # Web proxies to the API, and nothing else, so its subnet is the API's trusted proxies.
+  app:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.43.0/24
 
 volumes:
   postgres-data:

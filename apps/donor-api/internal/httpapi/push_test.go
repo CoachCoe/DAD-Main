@@ -87,7 +87,8 @@ func TestPushDeviceRegistrationValidatesAndReportsConfiguration(t *testing.T) {
 	if len(devices.devices) != 0 {
 		t.Fatal("invalid registrations reached storage")
 	}
-	if response := call(`{"platform":"ANDROID","token":"fcm-token"}`); response.Code != http.StatusOK || devices.devices[0] != (store.PushDevice{Platform: "ANDROID", Token: "fcm-token"}) {
+	if response := call(`{"platform":"ANDROID","token":"fcm-token"}`); response.Code != http.StatusOK ||
+		devices.devices[0] != (store.PushDevice{Platform: "ANDROID", Token: "fcm-token"}) {
 		t.Fatalf("android registration: got %d %+v", response.Code, devices.devices)
 	}
 	devices.err = store.ErrPushToken
@@ -97,7 +98,8 @@ func TestPushDeviceRegistrationValidatesAndReportsConfiguration(t *testing.T) {
 	devices.err = store.ErrPushUnconfigured
 	response := call(deviceBody)
 	var problem struct{ Code string }
-	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil || response.Code != http.StatusServiceUnavailable || problem.Code != "PUSH_UNCONFIGURED" {
+	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil || response.Code != http.StatusServiceUnavailable ||
+		problem.Code != "PUSH_UNCONFIGURED" {
 		t.Fatalf("unconfigured platform: got %d %s", response.Code, response.Body)
 	}
 }
@@ -118,7 +120,8 @@ func TestConversionsServeBothClients(t *testing.T) {
 	server := NewServer("", Services{Donor: donor})
 	response := httptest.NewRecorder()
 	server.Handler.ServeHTTP(response, appRequest("GET", "/donor/me/conversions?since=2026-10-01T12:00:00.25Z", ""))
-	if want := time.Date(2026, 10, 1, 12, 0, 0, 250_000_000, time.UTC); response.Code != http.StatusOK || donor.since == nil || !donor.since.Equal(want) {
+	if want := time.Date(2026, 10, 1, 12, 0, 0, 250_000_000, time.UTC); response.Code != http.StatusOK || donor.since == nil ||
+		!donor.since.Equal(want) {
 		t.Fatalf("app request: got %d with since %v", response.Code, donor.since)
 	}
 	browser := httptest.NewRequest("GET", "/donor/me/conversions", nil)

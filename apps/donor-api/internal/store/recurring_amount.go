@@ -43,7 +43,9 @@ func (s RecurringService) ChangeAmount(ctx context.Context, token string, r Amou
 			return nil, nil, err
 		}
 		if !fresh {
-			if command.DonorID != d.ID || command.CheckoutID != attempt.CheckoutID || command.AmountMinor != r.Amount || command.PreviousMinor != r.Previous || !command.EffectiveAt.Time.Equal(r.EffectiveAt) {
+			if command.DonorID != d.ID || command.CheckoutID != attempt.CheckoutID || command.AmountMinor != r.Amount ||
+				command.PreviousMinor != r.Previous ||
+				!command.EffectiveAt.Time.Equal(r.EffectiveAt) {
 				return nil, nil, ErrSubscriptionConflict
 			}
 			if command.ConfirmedAt.Valid {
@@ -73,7 +75,14 @@ func (s RecurringService) ChangeAmount(ctx context.Context, token string, r Amou
 		return nil, lease, err
 	}
 	mutate := func(ctx context.Context, lease *subscriptionLease) error {
-		return s.Gateway.ChangeMonthlyAmount(ctx, lease.subscription, pending.ItemID, pending.ProductID, pending.AmountMinor, "dad-amount-"+pending.ID.String())
+		return s.Gateway.ChangeMonthlyAmount(
+			ctx,
+			lease.subscription,
+			pending.ItemID,
+			pending.ProductID,
+			pending.AmountMinor,
+			"dad-amount-"+pending.ID.String(),
+		)
 	}
 	complete := func(tx pgx.Tx, d queries.Donor, now time.Time, snapshot *subscriptionSnapshot) (AmountChange, error) {
 		q := queries.New(tx)
@@ -99,12 +108,21 @@ func (s RecurringService) ChangeAmount(ctx context.Context, token string, r Amou
 // amountChangeable reports whether a change effective at the subscription's
 // next renewal can still be sent: the processor needs a minute's margin.
 func amountChangeable(schedule queries.DonorSubscription, effective, now time.Time) bool {
-	return schedule.Status == "active" && !schedule.StopsAt.Valid && schedule.PeriodEnd.Time.Equal(effective) && now.Before(effective.Add(-time.Minute))
+	return schedule.Status == "active" && !schedule.StopsAt.Valid && schedule.PeriodEnd.Time.Equal(effective) &&
+		now.Before(effective.Add(-time.Minute))
 }
 
 // insertAmountChange records r if no earlier change is still unconfirmed and
 // r.Previous is what the next renewal would charge.
-func insertAmountChange(ctx context.Context, q *queries.Queries, donor, checkout pgtype.UUID, schedule queries.DonorSubscription, remote payments.Object, r AmountRequest, now time.Time) error {
+func insertAmountChange(
+	ctx context.Context,
+	q *queries.Queries,
+	donor, checkout pgtype.UUID,
+	schedule queries.DonorSubscription,
+	remote payments.Object,
+	r AmountRequest,
+	now time.Time,
+) error {
 	draft, err := q.CheckoutDraft(ctx, checkout)
 	if err != nil {
 		return err
@@ -127,7 +145,20 @@ func insertAmountChange(ctx context.Context, q *queries.Queries, donor, checkout
 	if err != nil {
 		return err
 	}
-	return q.InsertAmountChange(ctx, queries.InsertAmountChangeParams{ID: r.RequestID, DonorID: donor, CheckoutID: draft.ID, PreviousMinor: r.Previous, AmountMinor: r.Amount, EffectiveAt: timestamp(r.EffectiveAt), ItemID: itemID, ProductID: product, CreatedAt: timestamp(now)})
+	return q.InsertAmountChange(
+		ctx,
+		queries.InsertAmountChangeParams{
+			ID:            r.RequestID,
+			DonorID:       donor,
+			CheckoutID:    draft.ID,
+			PreviousMinor: r.Previous,
+			AmountMinor:   r.Amount,
+			EffectiveAt:   timestamp(r.EffectiveAt),
+			ItemID:        itemID,
+			ProductID:     product,
+			CreatedAt:     timestamp(now),
+		},
+	)
 }
 
 // amountChangeItem returns the single monthly item and its product, which an

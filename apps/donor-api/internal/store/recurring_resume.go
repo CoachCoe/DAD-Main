@@ -65,7 +65,8 @@ func (s RecurringService) Resume(ctx context.Context, token string, r Resumption
 			result, err := completeResumption(ctx, tx, d.ID, attempt.ID, command, now)
 			return &result, nil, err
 		}
-		if !schedule.PeriodEnd.Time.Equal(command.NextRenewal.Time) || !now.Before(command.NextRenewal.Time) || now.Sub(command.CreatedAt.Time) >= commandRetryWindow {
+		if !schedule.PeriodEnd.Time.Equal(command.NextRenewal.Time) || !now.Before(command.NextRenewal.Time) ||
+			now.Sub(command.CreatedAt.Time) >= commandRetryWindow {
 			return nil, nil, ErrSubscriptionConflict
 		}
 		lease, err := leaseSubscription(ctx, q, d.ID, attempt, command.ID, now)
@@ -120,20 +121,46 @@ func requireResumable(ctx context.Context, q *queries.Queries, pause queries.Don
 
 // insertResumption records r once the processor shows the confirmed pause
 // still voiding renewals and r.NextRenewal is the next renewal it would skip.
-func insertResumption(ctx context.Context, q *queries.Queries, donor, pauseID pgtype.UUID, schedule queries.DonorSubscription, remote payments.Object, r ResumptionRequest, now time.Time) error {
+func insertResumption(
+	ctx context.Context,
+	q *queries.Queries,
+	donor, pauseID pgtype.UUID,
+	schedule queries.DonorSubscription,
+	remote payments.Object,
+	r ResumptionRequest,
+	now time.Time,
+) error {
 	pause, err := q.PauseByID(ctx, pauseID)
 	if err != nil {
 		return err
 	}
-	if !pause.ConfirmedAt.Valid || remote.Absent("pause_collection") || !schedule.PeriodEnd.Time.Equal(r.NextRenewal) || !now.Before(r.NextRenewal) || !r.NextRenewal.Before(pause.ResumesAt.Time) {
+	if !pause.ConfirmedAt.Valid || remote.Absent("pause_collection") || !schedule.PeriodEnd.Time.Equal(r.NextRenewal) ||
+		!now.Before(r.NextRenewal) ||
+		!r.NextRenewal.Before(pause.ResumesAt.Time) {
 		return ErrSubscriptionConflict
 	}
-	return q.InsertResumption(ctx, queries.InsertResumptionParams{ID: r.RequestID, DonorID: donor, PauseID: pause.ID, NextRenewal: timestamp(r.NextRenewal), CreatedAt: timestamp(now)})
+	return q.InsertResumption(
+		ctx,
+		queries.InsertResumptionParams{
+			ID:          r.RequestID,
+			DonorID:     donor,
+			PauseID:     pause.ID,
+			NextRenewal: timestamp(r.NextRenewal),
+			CreatedAt:   timestamp(now),
+		},
+	)
 }
 
 // readResumable reads the paused subscription, which must still be active and
 // renewing for an early resumption to apply.
-func (s RecurringService) readResumable(ctx context.Context, tx pgx.Tx, donor pgtype.UUID, pause queries.DonorPause, now time.Time, snapshot *subscriptionSnapshot) (queries.DonorStripeCheckout, queries.DonorSubscription, payments.Object, error) {
+func (s RecurringService) readResumable(
+	ctx context.Context,
+	tx pgx.Tx,
+	donor pgtype.UUID,
+	pause queries.DonorPause,
+	now time.Time,
+	snapshot *subscriptionSnapshot,
+) (queries.DonorStripeCheckout, queries.DonorSubscription, payments.Object, error) {
 	attempt, err := ownedAttempt(ctx, queries.New(tx), donor, pause.AttemptID)
 	if err != nil {
 		return attempt, queries.DonorSubscription{}, nil, err
@@ -148,7 +175,13 @@ func (s RecurringService) readResumable(ctx context.Context, tx pgx.Tx, donor pg
 	return attempt, schedule, remote, nil
 }
 
-func completeResumption(ctx context.Context, tx pgx.Tx, donor, attempt pgtype.UUID, command queries.DonorResumption, now time.Time) (Resumption, error) {
+func completeResumption(
+	ctx context.Context,
+	tx pgx.Tx,
+	donor, attempt pgtype.UUID,
+	command queries.DonorResumption,
+	now time.Time,
+) (Resumption, error) {
 	if err := releaseLease(ctx, queries.New(tx), attempt, command.ID); err != nil {
 		return Resumption{}, err
 	}

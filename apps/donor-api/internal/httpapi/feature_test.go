@@ -52,7 +52,8 @@ func TestUnconfiguredFeaturesAnswerWithCodesWithoutErrorLogs(t *testing.T) {
 		NewServer("", tc.services).Handler.ServeHTTP(response, r)
 		var body problem
 		_ = json.Unmarshal(response.Body.Bytes(), &body)
-		if response.Code != http.StatusServiceUnavailable || body.Code != tc.code || strings.Contains(strings.ToLower(body.Detail), "retry") {
+		if response.Code != http.StatusServiceUnavailable || body.Code != tc.code ||
+			strings.Contains(strings.ToLower(body.Detail), "retry") {
 			t.Errorf("%s: got %d %s, want 503 with code %s and no retry advice", tc.name, response.Code, response.Body, tc.code)
 		}
 	}

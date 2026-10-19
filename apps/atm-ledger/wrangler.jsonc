@@ -38,11 +38,6 @@
 		{
 			"binding": "ARCHIVE",
 			"bucket_name": "dad-atm-ledger-history"
-		},
-		{
-			"bucket_name": "dad-atm-ledger-history",
-			"binding": "dad_atm_ledger_history",
-			"remote": true
 		}
 	],
 	"vars": {

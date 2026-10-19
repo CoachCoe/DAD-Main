@@ -7,12 +7,18 @@ type HttpMethod = "get" | "post";
 type Json<Content> = Content extends { content: { "application/json": infer Body } } ? Body : never;
 
 /** The JSON body an operation takes. */
-export type RequestBody<Path extends keyof paths, Method extends HttpMethod> =
-  paths[Path][Method] extends { requestBody?: infer Body } ? Json<Body> : never;
+export type RequestBody<Path extends keyof paths, Method extends HttpMethod> = paths[Path][Method] extends {
+  requestBody?: infer Body;
+}
+  ? Json<Body>
+  : never;
 
 /** The JSON a successful call to an operation returns. */
-export type ResponseBody<Path extends keyof paths, Method extends HttpMethod> =
-  paths[Path][Method] extends { responses: infer Responses } ? Json<Responses[keyof Responses & (200 | 201 | 202)]> : never;
+export type ResponseBody<Path extends keyof paths, Method extends HttpMethod> = paths[Path][Method] extends {
+  responses: infer Responses;
+}
+  ? Json<Responses[keyof Responses & (200 | 201 | 202)]>
+  : never;
 
 export type FieldError = Schema<"PublicationProblem">;
 
@@ -30,16 +36,21 @@ export class ApiError extends Error {
 async function toError(response: Response): Promise<ApiError> {
   const payload = await response.json().catch(() => null);
   const detail = payload?.detail;
-  const message =
-    (typeof detail === "string" ? detail : detail?.message) ??
-    `Request failed (${response.status})`;
-  return new ApiError(message, response.status, payload?.code ?? detail?.code, Array.isArray(payload?.errors) ? payload.errors : []);
+  const message = (typeof detail === "string" ? detail : detail?.message) ?? `Request failed (${response.status})`;
+  return new ApiError(
+    message,
+    response.status,
+    payload?.code ?? detail?.code,
+    Array.isArray(payload?.errors) ? payload.errors : [],
+  );
 }
 
 /** Browser-side call. Always sends the session cookie. */
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = init.headers instanceof Headers || Array.isArray(init.headers)
-    ? Object.fromEntries(init.headers) : { ...init.headers };
+  const headers: Record<string, string> =
+    init.headers instanceof Headers || Array.isArray(init.headers)
+      ? Object.fromEntries(init.headers)
+      : { ...init.headers };
   if (typeof init.body === "string" && !Object.keys(headers).some((name) => name.toLowerCase() === "content-type")) {
     headers["Content-Type"] = "application/json";
   }
@@ -48,7 +59,15 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export type Failure = "signedOut" | "forbidden" | "notFound" | "rateLimited" | "unconfigured" | "unavailable" | "rejected" | "offline";
+type Failure =
+  | "signedOut"
+  | "forbidden"
+  | "notFound"
+  | "rateLimited"
+  | "unconfigured"
+  | "unavailable"
+  | "rejected"
+  | "offline";
 
 export function classifyFailure(cause: unknown): Failure {
   if (cause instanceof ApiError) {

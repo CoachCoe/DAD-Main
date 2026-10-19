@@ -15,19 +15,38 @@ export function SignInForm({ next }: { next?: SignInReturn }) {
   const [error, setError] = useState("");
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    setBusy(true); setError(""); setMessage("");
+    setBusy(true);
+    setError("");
+    setMessage("");
     try {
-      const result = await api<ResponseBody<"/donor/login", "post">>("/donor/login", { method: "POST",
-        body: JSON.stringify((next ? { email, next } : { email }) satisfies RequestBody<"/donor/login", "post">) });
+      const result = await api<ResponseBody<"/donor/login", "post">>("/donor/login", {
+        method: "POST",
+        body: JSON.stringify((next ? { email, next } : { email }) satisfies RequestBody<"/donor/login", "post">),
+      });
       setMessage(result.message);
     } catch (cause) {
       setError(failureMessage(cause, "We couldn’t request a link right now. Please retry in a moment."));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   }
-  return <form onSubmit={submit}>
-    <label>Email<input type="email" autoComplete="email" required maxLength={320}
-      value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-    <button type="submit" className="button full" disabled={busy}>{busy ? "Requesting…" : "Email me a sign-in link"}</button>
-    <Announcer status={message} alert={error} />
-  </form>;
+  return (
+    <form onSubmit={submit}>
+      <label>
+        Email
+        <input
+          type="email"
+          autoComplete="email"
+          required
+          maxLength={320}
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+      </label>
+      <button type="submit" className="button full" disabled={busy}>
+        {busy ? "Requesting…" : "Email me a sign-in link"}
+      </button>
+      <Announcer status={message} alert={error} />
+    </form>
+  );
 }

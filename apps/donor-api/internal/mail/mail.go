@@ -99,6 +99,7 @@ func (s Settings) validateServer() error {
 	_, err := address(s.Sender)
 	return err
 }
+
 func MessageID(sender, kind, id string) (string, error) {
 	from, err := address(sender)
 	if err != nil {
@@ -110,6 +111,7 @@ func MessageID(sender, kind, id string) (string, error) {
 	_, domain, _ := strings.Cut(from.Address, "@")
 	return "<dad-" + kind + "-" + id + "@" + domain + ">", nil
 }
+
 func (m Message) wire() ([]byte, string, string, error) {
 	from, err := address(m.From)
 	if err != nil {
@@ -123,7 +125,15 @@ func (m Message) wire() ([]byte, string, string, error) {
 		return nil, "", "", ErrConfiguration
 	}
 	var b bytes.Buffer
-	fmt.Fprintf(&b, "Date: %s\r\nFrom: %s\r\nTo: %s\r\nSubject: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n", time.Now().Format(time.RFC1123Z), from.String(), to.String(), mime.QEncoding.Encode("utf-8", m.Subject), m.ID)
+	fmt.Fprintf(
+		&b,
+		"Date: %s\r\nFrom: %s\r\nTo: %s\r\nSubject: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n",
+		time.Now().Format(time.RFC1123Z),
+		from.String(),
+		to.String(),
+		mime.QEncoding.Encode("utf-8", m.Subject),
+		m.ID,
+	)
 	writer := quotedprintable.NewWriter(&b)
 	if _, err = writer.Write([]byte(m.Body)); err != nil {
 		return nil, "", "", err

@@ -36,6 +36,7 @@ func (g *financialGateway) RetrievePaymentIntent(_ context.Context, id string) (
 	}
 	return value, nil
 }
+
 func (g *financialGateway) RetrieveRefund(_ context.Context, id string) (payments.Object, error) {
 	value, ok := g.refunds[id]
 	if !ok {
@@ -43,6 +44,7 @@ func (g *financialGateway) RetrieveRefund(_ context.Context, id string) (payment
 	}
 	return value, nil
 }
+
 func (g *financialGateway) RetrieveSubscription(_ context.Context, id string) (payments.Object, error) {
 	value, ok := g.subscriptions[id]
 	if !ok {
@@ -50,6 +52,7 @@ func (g *financialGateway) RetrieveSubscription(_ context.Context, id string) (p
 	}
 	return value, nil
 }
+
 func (g *financialGateway) RetrieveCheckout(_ context.Context, id string) (payments.Object, error) {
 	value, ok := g.sessions[id]
 	if !ok {
@@ -57,6 +60,7 @@ func (g *financialGateway) RetrieveCheckout(_ context.Context, id string) (payme
 	}
 	return value, nil
 }
+
 func (g *financialGateway) RetrieveSetupIntent(_ context.Context, id string) (payments.Object, error) {
 	value, ok := g.setups[id]
 	if !ok {
@@ -64,6 +68,7 @@ func (g *financialGateway) RetrieveSetupIntent(_ context.Context, id string) (pa
 	}
 	return value, nil
 }
+
 func (g *financialGateway) UpdateSubscriptionPaymentMethod(_ context.Context, id, method, key string) error {
 	g.updateKeys = append(g.updateKeys, key)
 	value, ok := g.subscriptions[id]
@@ -93,8 +98,21 @@ func newWorkerFixture(t *testing.T, frequency string) *workerFixture {
 	t.Helper()
 	service, request, id, _ := checkoutFixture(t)
 	request.Frequency = frequency
-	gateway := &financialGateway{intents: map[string]payments.Object{}, refunds: map[string]payments.Object{}, subscriptions: map[string]payments.Object{}, sessions: map[string]payments.Object{}, setups: map[string]payments.Object{}}
-	f := &workerFixture{db: database(t), service: service, request: request, donorID: id, worker: EventWorker{DB: as(t, dbroles.StripeWorker), Gateway: gateway}, gateway: gateway}
+	gateway := &financialGateway{
+		intents:       map[string]payments.Object{},
+		refunds:       map[string]payments.Object{},
+		subscriptions: map[string]payments.Object{},
+		sessions:      map[string]payments.Object{},
+		setups:        map[string]payments.Object{},
+	}
+	f := &workerFixture{
+		db:      database(t),
+		service: service,
+		request: request,
+		donorID: id,
+		worker:  EventWorker{DB: as(t, dbroles.StripeWorker), Gateway: gateway},
+		gateway: gateway,
+	}
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, sql := range []string{
@@ -128,6 +146,7 @@ func newWorkerFixture(t *testing.T, frequency string) *workerFixture {
 	})
 	return f
 }
+
 func (f *workerFixture) checkout(t *testing.T) payments.CheckoutResult {
 	t.Helper()
 	result, err := f.service.BeginCheckout(context.Background(), f.request)
@@ -140,9 +159,22 @@ func (f *workerFixture) checkout(t *testing.T) payments.CheckoutResult {
 // charge publishes a one-time payment whose card charge succeeded at the given time.
 func (f *workerFixture) charge(t *testing.T, payment string, at time.Time) {
 	t.Helper()
-	f.gateway.intents[payment] = paymentObject(t, map[string]any{"id": payment, "object": "payment_intent", "status": "succeeded", "livemode": false, "amount_received": 3000,
-		"latest_charge": map[string]any{"id": "ch_" + payment, "object": "charge", "payment_intent": payment, "status": "succeeded", "paid": true, "livemode": false, "amount": 3000, "created": at.Unix()}})
+	f.gateway.intents[payment] = paymentObject(
+		t,
+		map[string]any{"id": payment, "object": "payment_intent", "status": "succeeded", "livemode": false, "amount_received": 3000,
+			"latest_charge": map[string]any{
+				"id":             "ch_" + payment,
+				"object":         "charge",
+				"payment_intent": payment,
+				"status":         "succeeded",
+				"paid":           true,
+				"livemode":       false,
+				"amount":         3000,
+				"created":        at.Unix(),
+			}},
+	)
 }
+
 func (f *workerFixture) receive(t *testing.T, kind string, obj map[string]any) string {
 	t.Helper()
 	return f.receiveAt(t, kind, obj, time.Now())
@@ -153,7 +185,17 @@ func (f *workerFixture) receiveAt(t *testing.T, kind string, obj map[string]any,
 	eventID := "evt_" + f.request.RequestID.String() + "_" + strconv.Itoa(len(f.events))
 	f.events = append(f.events, eventID)
 	now := time.Now()
-	body, err := json.Marshal(map[string]any{"id": eventID, "object": "event", "type": kind, "api_version": payments.APIVersion, "created": occurred.Unix(), "livemode": false, "data": map[string]any{"object": obj}})
+	body, err := json.Marshal(
+		map[string]any{
+			"id":          eventID,
+			"object":      "event",
+			"type":        kind,
+			"api_version": payments.APIVersion,
+			"created":     occurred.Unix(),
+			"livemode":    false,
+			"data":        map[string]any{"object": obj},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,6 +207,7 @@ func (f *workerFixture) receiveAt(t *testing.T, kind string, obj map[string]any,
 	}
 	return eventID
 }
+
 func (f *workerFixture) process(t *testing.T) {
 	t.Helper()
 	worked, err := f.worker.ProcessNext(context.Background())
@@ -180,6 +223,7 @@ func (f *workerFixture) retryNow(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func invoice(checkout, id string, start time.Time, paid bool) map[string]any {
 	status, amountPaid := "open", 0
 	var paidAt any
@@ -188,13 +232,53 @@ func invoice(checkout, id string, start time.Time, paid bool) map[string]any {
 		amountPaid = 3000
 		paidAt = start.Add(time.Hour).Unix()
 	}
-	return map[string]any{"id": id, "status": status, "currency": "usd", "amount_paid": amountPaid, "amount_due": 3000, "total": 3000, "starting_balance": 0, "ending_balance": 0, "billing_reason": "subscription_cycle",
-		"parent":             map[string]any{"subscription_details": map[string]any{"subscription": "sub_" + checkout, "metadata": map[string]any{"dad_checkout_id": checkout}}},
+	return map[string]any{
+		"id":               id,
+		"status":           status,
+		"currency":         "usd",
+		"amount_paid":      amountPaid,
+		"amount_due":       3000,
+		"total":            3000,
+		"starting_balance": 0,
+		"ending_balance":   0,
+		"billing_reason":   "subscription_cycle",
+		"parent": map[string]any{
+			"subscription_details": map[string]any{
+				"subscription": "sub_" + checkout,
+				"metadata":     map[string]any{"dad_checkout_id": checkout},
+			},
+		},
 		"status_transitions": map[string]any{"paid_at": paidAt},
-		"lines":              map[string]any{"has_more": false, "data": []any{map[string]any{"amount": 3000, "currency": "usd", "period": map[string]any{"start": start.Unix(), "end": start.Add(30 * 24 * time.Hour).Unix()}, "parent": map[string]any{"type": "subscription_item_details", "subscription_item_details": map[string]any{"subscription": "sub_" + checkout, "proration": false}}}}},
-		"payments":           map[string]any{"has_more": false, "data": []any{map[string]any{"status": "paid", "amount_paid": 3000, "currency": "usd", "invoice": id, "livemode": false, "payment": map[string]any{"type": "payment_intent", "payment_intent": "pi_" + id}}}},
+		"lines": map[string]any{
+			"has_more": false,
+			"data": []any{
+				map[string]any{
+					"amount":   3000,
+					"currency": "usd",
+					"period":   map[string]any{"start": start.Unix(), "end": start.Add(30 * 24 * time.Hour).Unix()},
+					"parent": map[string]any{
+						"type":                      "subscription_item_details",
+						"subscription_item_details": map[string]any{"subscription": "sub_" + checkout, "proration": false},
+					},
+				},
+			},
+		},
+		"payments": map[string]any{
+			"has_more": false,
+			"data": []any{
+				map[string]any{
+					"status":      "paid",
+					"amount_paid": 3000,
+					"currency":    "usd",
+					"invoice":     id,
+					"livemode":    false,
+					"payment":     map[string]any{"type": "payment_intent", "payment_intent": "pi_" + id},
+				},
+			},
+		},
 	}
 }
+
 func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	pool := database(t)
 	referrer, _ := donor(t, pool)
@@ -218,7 +302,8 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	eventID := f.receive(t, "invoice.payment_succeeded", obj)
 	f.process(t)
 	var processed *time.Time
-	if err := pool.QueryRow(ctx, "SELECT processed_at FROM donor_stripe_events WHERE stripe_event_id=$1", eventID).Scan(&processed); err != nil || processed == nil {
+	if err := pool.QueryRow(ctx, "SELECT processed_at FROM donor_stripe_events WHERE stripe_event_id=$1", eventID).Scan(&processed); err != nil ||
+		processed == nil {
 		t.Fatal("valid gift not committed")
 	}
 	f.receive(t, "invoice.payment_succeeded", obj)
@@ -263,7 +348,9 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 		t.Fatal("guest referral not credited")
 	}
 	refundID := "re_" + f.donorID.String()
-	raw, err := json.Marshal(map[string]any{"id": refundID, "payment_intent": "pi_" + invoiceID, "amount": 3000, "currency": "usd", "status": "succeeded"})
+	raw, err := json.Marshal(
+		map[string]any{"id": refundID, "payment_intent": "pi_" + invoiceID, "amount": 3000, "currency": "usd", "status": "succeeded"},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +361,8 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 	f.receive(t, "refund.updated", map[string]any{"id": refundID, "payment_intent": "pi_" + invoiceID, "status": "pending"})
 	f.process(t)
 	projection, err := queries.New(pool).Projection(ctx, f.donorID)
-	if err != nil || projection.NetMinor.Int64 != 0 || projection.CurrentStreak.Int32 != 0 || projection.BestStreak != 1 || !projection.FoundingAwardedAt.Valid {
+	if err != nil || projection.NetMinor.Int64 != 0 || projection.CurrentStreak.Int32 != 0 || projection.BestStreak != 1 ||
+		!projection.FoundingAwardedAt.Valid {
 		t.Fatalf("refund recognition: %+v %v", projection, err)
 	}
 	refDashboard, err = (DashboardReader{DB: api}).DonorDashboard(ctx, refToken.Access)
@@ -286,6 +374,7 @@ func TestGuestInvoiceClaimDashboardAndRefund(t *testing.T) {
 		t.Fatal("refund retained collected dollars")
 	}
 }
+
 func TestInvoiceFailureRecoveryPreservesGrace(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	checkout := f.checkout(t)
@@ -298,7 +387,8 @@ func TestInvoiceFailureRecoveryPreservesGrace(t *testing.T) {
 	f.receive(t, "invoice.payment_failed", invoice(checkout.CheckoutID, second, due, false))
 	f.process(t)
 	p, err := queries.New(f.db).Projection(ctx, f.donorID)
-	if err != nil || !p.CurrentStreak.Valid || p.CurrentStreak.Int32 != 1 || !p.AtRisk || !p.GraceEndsAt.Time.Equal(due.Add(14*24*time.Hour)) {
+	if err != nil || !p.CurrentStreak.Valid || p.CurrentStreak.Int32 != 1 || !p.AtRisk ||
+		!p.GraceEndsAt.Time.Equal(due.Add(14*24*time.Hour)) {
 		t.Fatalf("grace lost: %+v %v", p, err)
 	}
 	f.receive(t, "invoice.payment_succeeded", invoice(checkout.CheckoutID, second, due, true))
@@ -308,6 +398,7 @@ func TestInvoiceFailureRecoveryPreservesGrace(t *testing.T) {
 		t.Fatal("recovery did not restore streak")
 	}
 }
+
 func TestInvalidInvoiceRollsBackAllFinancialEffects(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	checkout := f.checkout(t)
@@ -340,16 +431,30 @@ func TestInvalidInvoiceRollsBackAllFinancialEffects(t *testing.T) {
 	var attempts int
 	var processed *time.Time
 	var failure string
-	if err := f.db.QueryRow(ctx, "SELECT attempts,processed_at,last_error FROM donor_stripe_events WHERE stripe_event_id=$1", eventID).Scan(&attempts, &processed, &failure); err != nil || attempts != 10 || processed != nil || failure != "InvalidFacts" {
+	if err := f.db.QueryRow(ctx, "SELECT attempts,processed_at,last_error FROM donor_stripe_events WHERE stripe_event_id=$1", eventID).Scan(&attempts, &processed, &failure); err != nil ||
+		attempts != 10 ||
+		processed != nil ||
+		failure != "InvalidFacts" {
 		t.Fatal("failure budget not durable")
 	}
 }
+
 func TestOneTimeInboxConcurrentWorkers(t *testing.T) {
 	f := newWorkerFixture(t, "ONE_TIME")
 	checkout := f.checkout(t)
 	ctx := context.Background()
 	f.charge(t, "pi_"+f.donorID.String(), time.Now())
-	f.receive(t, "payment_intent.succeeded", map[string]any{"id": "pi_" + f.donorID.String(), "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+	f.receive(
+		t,
+		"payment_intent.succeeded",
+		map[string]any{
+			"id":              "pi_" + f.donorID.String(),
+			"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
+			"status":          "succeeded",
+			"currency":        "usd",
+			"amount_received": 3000,
+		},
+	)
 	var wg sync.WaitGroup
 	results := make(chan bool, 2)
 	failures := make(chan error, 2)
@@ -375,7 +480,8 @@ func TestOneTimeInboxConcurrentWorkers(t *testing.T) {
 		t.Fatal("event claimed by multiple workers")
 	}
 	var observations int
-	if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_billing_observations WHERE source_event_id IN (SELECT id FROM donor_stripe_events WHERE stripe_event_id=ANY($1::text[]))", f.events).Scan(&observations); err != nil || observations != 0 {
+	if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_billing_observations WHERE source_event_id IN (SELECT id FROM donor_stripe_events WHERE stripe_event_id=ANY($1::text[]))", f.events).Scan(&observations); err != nil ||
+		observations != 0 {
 		t.Fatalf("one-time gift entered recurring history: %d %v", observations, err)
 	}
 	p, err := queries.New(f.db).Projection(ctx, f.donorID)
@@ -395,13 +501,24 @@ func eventRetryState(t *testing.T, f *workerFixture, id string) (attempts int, f
 	}
 	return attempts, failure, time.Duration(seconds * float64(time.Second))
 }
+
 func TestTransientGatewayFailureBacksOffThenSucceeds(t *testing.T) {
 	f := newWorkerFixture(t, "ONE_TIME")
 	checkout := f.checkout(t)
 	ctx := context.Background()
 	payment := "pi_" + f.donorID.String()
 	f.charge(t, payment, time.Now())
-	f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+	f.receive(
+		t,
+		"payment_intent.succeeded",
+		map[string]any{
+			"id":              payment,
+			"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
+			"status":          "succeeded",
+			"currency":        "usd",
+			"amount_received": 3000,
+		},
+	)
 	f.process(t)
 	refundID := "re_" + f.donorID.String()
 	event := f.receive(t, "refund.updated", map[string]any{"id": refundID, "payment_intent": payment, "status": "succeeded"})
@@ -416,7 +533,10 @@ func TestTransientGatewayFailureBacksOffThenSucceeds(t *testing.T) {
 		}
 		assertEventProcessed(t, f, event, false)
 	}
-	f.gateway.refunds[refundID] = paymentObject(t, map[string]any{"id": refundID, "payment_intent": payment, "amount": 1000, "currency": "usd", "status": "succeeded"})
+	f.gateway.refunds[refundID] = paymentObject(
+		t,
+		map[string]any{"id": refundID, "payment_intent": payment, "amount": 1000, "currency": "usd", "status": "succeeded"},
+	)
 	f.retryNow(t)
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
@@ -425,20 +545,34 @@ func TestTransientGatewayFailureBacksOffThenSucceeds(t *testing.T) {
 		t.Fatal("retried refund not applied", p.NetMinor, err)
 	}
 }
+
 func TestRefundBeforeGiftIsRetriedAfterGiftExists(t *testing.T) {
 	f := newWorkerFixture(t, "ONE_TIME")
 	checkout := f.checkout(t)
 	ctx := context.Background()
 	payment := "pi_" + f.donorID.String()
 	refundID := "re_" + f.donorID.String()
-	f.gateway.refunds[refundID] = paymentObject(t, map[string]any{"id": refundID, "payment_intent": payment, "amount": 3000, "currency": "usd", "status": "succeeded"})
+	f.gateway.refunds[refundID] = paymentObject(
+		t,
+		map[string]any{"id": refundID, "payment_intent": payment, "amount": 3000, "currency": "usd", "status": "succeeded"},
+	)
 	refund := f.receive(t, "refund.created", map[string]any{"id": refundID, "payment_intent": payment, "status": "succeeded"})
 	f.process(t)
 	if attempts, failure, delay := eventRetryState(t, f, refund); attempts != 1 || failure != "MissingRecord" || delay <= 0 {
 		t.Fatalf("early refund: attempts=%d failure=%s delay=%s", attempts, failure, delay)
 	}
 	f.charge(t, payment, time.Now())
-	gift := f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+	gift := f.receive(
+		t,
+		"payment_intent.succeeded",
+		map[string]any{
+			"id":              payment,
+			"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
+			"status":          "succeeded",
+			"currency":        "usd",
+			"amount_received": 3000,
+		},
+	)
 	f.process(t)
 	assertEventProcessed(t, f, gift, true)
 	assertEventProcessed(t, f, refund, false)
@@ -458,7 +592,17 @@ func TestOneTimeGiftIsPaidWhenItsChargeSucceeded(t *testing.T) {
 	payment := "pi_" + f.donorID.String()
 	charged := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
 	f.charge(t, payment, charged)
-	event := f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+	event := f.receive(
+		t,
+		"payment_intent.succeeded",
+		map[string]any{
+			"id":              payment,
+			"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
+			"status":          "succeeded",
+			"currency":        "usd",
+			"amount_received": 3000,
+		},
+	)
 	// The event is created after the Founding Donor cutoff, but the charge succeeded before it.
 	if _, err := f.db.Exec(ctx, "UPDATE donor_stripe_events SET occurred_at=$2 WHERE stripe_event_id=$1", event, recognition.FoundingCutoff.Add(24*time.Hour)); err != nil {
 		t.Fatal(err)
@@ -466,7 +610,8 @@ func TestOneTimeGiftIsPaidWhenItsChargeSucceeded(t *testing.T) {
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
 	var paid time.Time
-	if err := f.db.QueryRow(ctx, "SELECT paid_at FROM donor_gifts WHERE stripe_object_id=$1", payment).Scan(&paid); err != nil || !paid.Equal(charged) {
+	if err := f.db.QueryRow(ctx, "SELECT paid_at FROM donor_gifts WHERE stripe_object_id=$1", payment).Scan(&paid); err != nil ||
+		!paid.Equal(charged) {
 		t.Fatal("gift not paid at its charge time", paid, err)
 	}
 	p, err := queries.New(f.db).Projection(ctx, f.donorID)
@@ -486,11 +631,28 @@ func TestOneTimeGiftRequiresSucceededCharge(t *testing.T) {
 			f := newWorkerFixture(t, "ONE_TIME")
 			checkout := f.checkout(t)
 			payment := "pi_" + f.donorID.String()
-			charge := map[string]any{"id": "ch_" + payment, "payment_intent": payment, "status": "succeeded", "paid": true, "livemode": false, "created": time.Now().Unix()}
+			charge := map[string]any{
+				"id":             "ch_" + payment,
+				"payment_intent": payment,
+				"status":         "succeeded",
+				"paid":           true,
+				"livemode":       false,
+				"created":        time.Now().Unix(),
+			}
 			intent := map[string]any{"id": payment, "status": "succeeded", "livemode": false, "latest_charge": charge}
 			edit(intent, charge)
 			f.gateway.intents[payment] = paymentObject(t, intent)
-			event := f.receive(t, "payment_intent.succeeded", map[string]any{"id": payment, "metadata": map[string]any{"dad_checkout_id": checkout.CheckoutID}, "status": "succeeded", "currency": "usd", "amount_received": 3000})
+			event := f.receive(
+				t,
+				"payment_intent.succeeded",
+				map[string]any{
+					"id":              payment,
+					"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
+					"status":          "succeeded",
+					"currency":        "usd",
+					"amount_received": 3000,
+				},
+			)
 			f.process(t)
 			if attempts, failure, _ := eventRetryState(t, f, event); attempts != 1 || failure != "InvalidFacts" {
 				t.Fatalf("attempts=%d failure=%s", attempts, failure)

@@ -72,11 +72,14 @@ VALUES($1,$2,$3,$4,'{"gift_id":"g"}',now()-interval '2 minutes',CASE WHEN $5 THE
 		t.Fatal(err)
 	}
 	var saved map[string]string
-	if err = json.Unmarshal([]byte(raw), &saved); err != nil || saved["gift_id"] != "g" || saved["resend_source"] != source.String() || saved["resend_actor"] != support.String() || resends != 1 {
+	if err = json.Unmarshal([]byte(raw), &saved); err != nil || saved["gift_id"] != "g" || saved["resend_source"] != source.String() ||
+		saved["resend_actor"] != support.String() ||
+		resends != 1 {
 		t.Fatal("resend context", raw, resends, err)
 	}
 	var audited int
-	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='message.resend_requested' AND target=$2 AND details->>'source_id'=$3", support, view["id"], source.String()).Scan(&audited); err != nil || audited != 1 {
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='message.resend_requested' AND target=$2 AND details->>'source_id'=$3", support, view["id"], source.String()).Scan(&audited); err != nil ||
+		audited != 1 {
 		t.Fatal("resend not audited", audited, err)
 	}
 }
@@ -96,7 +99,9 @@ func TestStaffClaimRequestQueuesLoginEmail(t *testing.T) {
 		t.Fatal(err)
 	}
 	var queued, audited int
-	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM donor_login_emails WHERE donor_id=$1 AND created_at>$3),(SELECT count(*) FROM donor_staff_audit WHERE actor_id=$2 AND action='message.claim_requested' AND target=$4)", id, support, time.Now().Add(-time.Minute), id.String()).Scan(&queued, &audited); err != nil || queued != 1 || audited != 1 {
+	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM donor_login_emails WHERE donor_id=$1 AND created_at>$3),(SELECT count(*) FROM donor_staff_audit WHERE actor_id=$2 AND action='message.claim_requested' AND target=$4)", id, support, time.Now().Add(-time.Minute), id.String()).Scan(&queued, &audited); err != nil ||
+		queued != 1 ||
+		audited != 1 {
 		t.Fatal("claim request", queued, audited, err)
 	}
 }
@@ -212,7 +217,19 @@ func TestPendingActionIsScopedAndIndependentOfHistoryPages(t *testing.T) {
 		if kind == "CANCEL" {
 			amount, period = nil, base.AddDate(0, 1, 0)
 		}
-		_, err := pool.Exec(ctx, "INSERT INTO donor_staff_actions(id,actor_id,donor_id,kind,target_id,amount_minor,period_end,reason,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,'Donor requested change',$8,$9)", id, owner, donor, kind, target, amount, period, status, at)
+		_, err := pool.Exec(
+			ctx,
+			"INSERT INTO donor_staff_actions(id,actor_id,donor_id,kind,target_id,amount_minor,period_end,reason,status,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,'Donor requested change',$8,$9)",
+			id,
+			owner,
+			donor,
+			kind,
+			target,
+			amount,
+			period,
+			status,
+			at,
+		)
 		if err != nil {
 			t.Fatal(err)
 		}

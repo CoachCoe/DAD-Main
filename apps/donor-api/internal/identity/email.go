@@ -44,6 +44,7 @@ func contains(ranges [][2]rune, r rune) bool {
 	i := sort.Search(len(ranges), func(i int) bool { return ranges[i][1] >= r })
 	return i < len(ranges) && ranges[i][0] <= r
 }
+
 func ascii(value string) bool {
 	for _, r := range value {
 		if r > 127 {
@@ -175,6 +176,7 @@ func nameprep(label string) (string, error) {
 	}
 	return string(result), nil
 }
+
 func compose(a, b rune) (rune, bool) {
 	if a >= 0x1100 && a < 0x1113 && b >= 0x1161 && b < 0x1176 {
 		return 0xac00 + (a-0x1100)*588 + (b-0x1161)*28, true

@@ -48,7 +48,11 @@ func TestStaffSessionCookieStaysOnTheStaffHost(t *testing.T) {
 	} {
 		stub := &passkeyStub{}
 		server := NewServer("", Services{Origin: "https://dad.example.org", StaffOrigin: tc.origin, Staff: stub})
-		r := httptest.NewRequest("POST", "/donor/staff/sign-in", strings.NewReader(`{"ceremony":"`+strings.Repeat("c", 43)+`","credential":{"id":"passkey"}}`))
+		r := httptest.NewRequest(
+			"POST",
+			"/donor/staff/sign-in",
+			strings.NewReader(`{"ceremony":"`+strings.Repeat("c", 43)+`","credential":{"id":"passkey"}}`),
+		)
 		r.Header.Set("Origin", tc.origin)
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, r)
@@ -57,7 +61,8 @@ func TestStaffSessionCookieStaysOnTheStaffHost(t *testing.T) {
 			t.Fatalf("%s: got %d %s, credential %q", tc.origin, response.Code, response.Body, stub.credential)
 		}
 		cookie := cookies[0]
-		if cookie.Name != tc.name || cookie.Domain != "" || cookie.Path != "/" || !cookie.HttpOnly || cookie.Secure != tc.secure || cookie.SameSite != http.SameSiteStrictMode {
+		if cookie.Name != tc.name || cookie.Domain != "" || cookie.Path != "/" || !cookie.HttpOnly || cookie.Secure != tc.secure ||
+			cookie.SameSite != http.SameSiteStrictMode {
 			t.Fatalf("%s: unsafe staff cookie %+v", tc.origin, cookie)
 		}
 		r = httptest.NewRequest("POST", "/donor/staff/sign-out", nil)
@@ -83,7 +88,8 @@ func TestStaffInvitationsLinkToTheStaffHost(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "__Host-dad_staff_session", Value: "staff-session"})
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, r)
-		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"invitation_url":"`+staff+`/staff/activate#token=private-`) {
+		if response.Code != http.StatusOK ||
+			!strings.Contains(response.Body.String(), `"invitation_url":"`+staff+`/staff/activate#token=private-`) {
 			t.Fatalf("%s: got %d %s", path, response.Code, response.Body)
 		}
 	}

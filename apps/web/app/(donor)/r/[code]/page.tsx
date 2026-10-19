@@ -11,7 +11,9 @@ import ReferralLanding, { type Referrer } from "./ReferralLanding";
 const lookUp = cache(async (code: string): Promise<Referrer> => {
   try {
     const response = await fetch(`${donorApiBase()}/donor/referrals/${encodeURIComponent(code)}`, {
-      headers: { accept: "application/json" }, next: { revalidate: 60 }, signal: AbortSignal.timeout(3_000),
+      headers: { accept: "application/json" },
+      next: { revalidate: 60 },
+      signal: AbortSignal.timeout(3_000),
     });
     if (response.status === 404) return { state: "unavailable" };
     if (!response.ok) return { state: "unknown" };
@@ -32,7 +34,11 @@ export async function generateMetadata({ params }: PageProps<"/r/[code]">): Prom
 
 // Route params arrive still percent-encoded; every consumer encodes again, so decode once here.
 function decoded(code: string) {
-  try { return decodeURIComponent(code); } catch { return code; }
+  try {
+    return decodeURIComponent(code);
+  } catch {
+    return code;
+  }
 }
 
 export default async function ReferralPage({ params, searchParams }: PageProps<"/r/[code]">) {

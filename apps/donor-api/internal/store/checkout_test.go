@@ -20,6 +20,7 @@ type checkoutCall struct {
 	params []byte
 	key    string
 }
+
 type checkoutGateway struct {
 	mu     sync.Mutex
 	calls  []checkoutCall
@@ -34,7 +35,8 @@ func (g *checkoutGateway) CreateCheckout(ctx context.Context, params []byte, key
 	g.calls = append(g.calls, checkoutCall{append([]byte(nil), params...), key})
 	// A separate connection must see the immutable request before the network call.
 	var exists bool
-	if err := g.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM donor_stripe_checkouts WHERE id::text=$1)", key[len("dad-checkout-"):]).Scan(&exists); err != nil || !exists {
+	if err := g.pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM donor_stripe_checkouts WHERE id::text=$1)", key[len("dad-checkout-"):]).Scan(&exists); err != nil ||
+		!exists {
 		return payments.RemoteCheckout{}, errors.New("uncommitted checkout")
 	}
 	if g.fail {
@@ -47,6 +49,7 @@ func (g *checkoutGateway) CreateCheckout(ctx context.Context, params []byte, key
 	live := false
 	return payments.RemoteCheckout{ID: "cs_test_" + key, URL: "https://checkout.stripe.com/c/" + key, Livemode: &live}, nil
 }
+
 func checkoutFixture(t *testing.T) (CheckoutService, payments.CheckoutRequest, pgtype.UUID, *checkoutGateway) {
 	t.Helper()
 	pool := database(t)
@@ -65,8 +68,18 @@ func checkoutFixture(t *testing.T) (CheckoutService, payments.CheckoutRequest, p
 		}
 	})
 	gateway := &checkoutGateway{pool: pool}
-	return CheckoutService{DB: as(t, dbroles.API), Gateway: gateway, Origin: "http://localhost:3000"}, payments.CheckoutRequest{RequestID: testID(t), Email: email, Amount: 3000, Frequency: "MONTHLY"}, id, gateway
+	return CheckoutService{
+		DB:      as(t, dbroles.API),
+		Gateway: gateway,
+		Origin:  "http://localhost:3000",
+	}, payments.CheckoutRequest{
+		RequestID: testID(t),
+		Email:     email,
+		Amount:    3000,
+		Frequency: "MONTHLY",
+	}, id, gateway
 }
+
 func TestCheckoutRetriesAndReservations(t *testing.T) {
 	service, request, _, gateway := checkoutFixture(t)
 	ctx := context.Background()
@@ -79,18 +92,22 @@ func TestCheckoutRetriesAndReservations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(gateway.calls) != 2 || !bytes.Equal(gateway.calls[0].params, gateway.calls[1].params) || gateway.calls[0].key != gateway.calls[1].key {
+	if len(gateway.calls) != 2 || !bytes.Equal(gateway.calls[0].params, gateway.calls[1].params) ||
+		gateway.calls[0].key != gateway.calls[1].key {
 		t.Fatal("retry parameters or key changed")
 	}
 	var params map[string]any
 	if err = json.Unmarshal(gateway.calls[0].params, &params); err != nil {
 		t.Fatal(err)
 	}
-	if params["customer"] != nil || params["customer_email"] != request.Email || params["mode"] != "subscription" || params["payment_method_types"] != nil || params["allowed_payment_method_types"].([]any)[0] != "card" {
+	if params["customer"] != nil || params["customer_email"] != request.Email || params["mode"] != "subscription" ||
+		params["payment_method_types"] != nil ||
+		params["allowed_payment_method_types"].([]any)[0] != "card" {
 		t.Fatalf("wrong guest parameters: %v", params)
 	}
 	// Stripe accepts an expiry 30 minutes to 24 hours ahead; a shorter one frees the reservation sooner.
-	if expires := time.Unix(int64(params["expires_at"].(float64)), 0); expires.Before(time.Now().Add(55*time.Minute)) || expires.After(time.Now().Add(65*time.Minute)) {
+	if expires := time.Unix(int64(params["expires_at"].(float64)), 0); expires.Before(time.Now().Add(55*time.Minute)) ||
+		expires.After(time.Now().Add(65*time.Minute)) {
 		t.Fatalf("checkout expires at %v, want about an hour from now", expires)
 	}
 	repeated, err := service.BeginCheckout(ctx, request)
@@ -112,6 +129,7 @@ func TestCheckoutRetriesAndReservations(t *testing.T) {
 		t.Fatalf("one time blocked by reservation: %v", err)
 	}
 }
+
 func TestCheckoutConcurrentMonthlyReservation(t *testing.T) {
 	service, request, _, gateway := checkoutFixture(t)
 	ctx := context.Background()
@@ -141,6 +159,7 @@ func TestCheckoutConcurrentMonthlyReservation(t *testing.T) {
 		t.Fatal("concurrent request escaped monthly reservation")
 	}
 }
+
 func TestCheckoutUncertainWindowAndDisabledDonor(t *testing.T) {
 	service, request, id, gateway := checkoutFixture(t)
 	pool := database(t)
@@ -167,6 +186,7 @@ func TestCheckoutUncertainWindowAndDisabledDonor(t *testing.T) {
 		t.Fatal("disabled donor checked out")
 	}
 }
+
 func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 	service, request, id, gateway := checkoutFixture(t)
 	pool := database(t)
@@ -222,6 +242,7 @@ func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 		t.Fatal("self referral accepted")
 	}
 }
+
 func TestUnexpectedProviderCheckoutIsNotAcknowledged(t *testing.T) {
 	service, request, _, gateway := checkoutFixture(t)
 	pool := database(t)

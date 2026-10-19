@@ -3,8 +3,7 @@
 Hard-won rules for working in the Go backend. Read this before changing code
 here. These are constraints the codebase enforces (often via tests that fail
 loudly) or that cost real rediscovery time when ignored. Keep it short and
-true; add a rule when a mistake would otherwise be repeated, and link the
-fuller write-up in `docs/solutions/` when one exists.
+true; add a rule when a mistake would otherwise be repeated.
 
 ## Database and migrations
 
@@ -58,24 +57,24 @@ fuller write-up in `docs/solutions/` when one exists.
   (`internal/payments/webhook.go`) keeps only the fields the worker verifies.
   Webhooks cannot be expanded, so a `payment_intent.succeeded` payload carries
   `latest_charge` as a bare id, never the expanded object — you cannot "trust
-  the payload" for charge facts that live on the expanded charge. See
-  `docs/solutions/`.
+  the payload" for charge facts that live on the expanded charge.
 - **Preserve the fetch-outside-lock discipline.** The Stripe worker fetches
   provider state *before* taking the donor lock; re-fetch on conflict happens
   under the lock. Do not move a provider round trip inside the lock — a test
   (`TestEventWorkerReadsProcessorOutsideDonorLock`) enforces this.
-- **Every Stripe call spends from its process's rate budget**
-  (`internal/payments/ratebudget.go`, named buckets worker/staff/reconcile).
-  Route new calls and every list page through the appropriate bucket. The
-  sandbox default is 25 req/s per account; replicas and SDK retries require
-  deployment-wide coordination beyond these process-local limits.
+- **Every Stripe call spends from the account's request budget**
+  (`internal/payments/ratebudget.go`, buckets worker/checkout/staff/reconcile).
+  Route new calls and every list page through the appropriate bucket. The API
+  and Stripe worker share it through PostgreSQL (`store.StripeBudget`), so
+  replicas cannot exceed it together; the daily reconcile job keeps its own
+  process-local slice. SDK retries are not budgeted.
 
 ## Workflow / process
 
 - **Plan first; isolate work in a git worktree + branch; never merge/rebase/
   fast-forward `dev` or `main` from inside a feature worktree.** The owner
   merges after review.
-- **Verify before claiming done:** `gofmt -l` (empty), `go vet ./...`,
+- **Verify before claiming done:** `make format-go` (wraps past 140 columns), `go vet ./...`,
   `go build ./...`, and `go test -race` on the affected packages against a
   synthetic DB. State explicitly what you could not run and why.
 - **Correctness-first on money paths.** This is a 501(c)(3) donation platform.

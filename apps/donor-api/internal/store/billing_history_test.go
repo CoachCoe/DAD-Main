@@ -50,9 +50,13 @@ func TestBillingHistoryPreservesFailuresRecoveryAndReplay(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.process(t)
-			rows, err := f.db.Query(ctx, `SELECT o.status,o.amount_minor,o.currency,o.billing_reason,o.occurred_at,o.event_created_at,o.recorded_at,p.status
+			rows, err := f.db.Query(
+				ctx,
+				`SELECT o.status,o.amount_minor,o.currency,o.billing_reason,o.occurred_at,o.event_created_at,o.recorded_at,p.status
 				FROM donor_billing_observations o JOIN donor_billing_periods p ON p.id=o.period_id
-				WHERE p.donor_id=$1 ORDER BY o.occurred_at`, f.donorID)
+				WHERE p.donor_id=$1 ORDER BY o.occurred_at`,
+				f.donorID,
+			)
 			if err != nil {
 				t.Fatal(err)
 			}

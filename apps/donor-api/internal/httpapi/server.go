@@ -20,6 +20,7 @@ import (
 type ContentSource interface {
 	PublicContent(context.Context) (store.PublicContent, error)
 }
+
 type WebhookReceiver interface {
 	Receive(context.Context, []byte, string) error
 }

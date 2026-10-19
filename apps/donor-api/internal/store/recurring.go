@@ -21,19 +21,23 @@ type RecurringService struct {
 	Gateway payments.SubscriptionGateway
 	Origin  string
 }
+
 type CancellationRequest struct {
 	RequestID, AttemptID pgtype.UUID
 	PeriodEnd            time.Time
 }
+
 type PauseRequest struct {
 	RequestID, AttemptID pgtype.UUID
 	Months               int32
 	StartsAt, ResumesAt  time.Time
 }
+
 type ResumptionRequest struct {
 	RequestID, PauseID pgtype.UUID
 	NextRenewal        time.Time
 }
+
 type AmountRequest struct {
 	RequestID, AttemptID pgtype.UUID
 	Amount, Previous     int64
@@ -49,6 +53,7 @@ type RecurringDetails struct {
 	State        string        `json:"state,omitempty"`
 	Subscription *Subscription `json:"subscription"`
 }
+
 type Subscription struct {
 	AmountMinor int64        `json:"amount_minor"`
 	Currency    string       `json:"currency"`
@@ -65,6 +70,7 @@ type PauseWindow struct {
 	StartsAt  time.Time `json:"starts_at"`
 	ResumesAt time.Time `json:"resumes_at"`
 }
+
 type PauseView struct {
 	Confirmed bool      `json:"confirmed"`
 	Months    int32     `json:"months"`
@@ -72,9 +78,11 @@ type PauseView struct {
 	ResumesAt time.Time `json:"resumes_at"`
 	StartsAt  time.Time `json:"starts_at"`
 }
+
 type PauseResult struct {
 	Pause PauseView `json:"pause"`
 }
+
 type AmountChange struct {
 	AmountMinor   int64     `json:"amount_minor"`
 	Confirmed     bool      `json:"confirmed"`
@@ -82,6 +90,7 @@ type AmountChange struct {
 	PreviousMinor int64     `json:"previous_minor"`
 	RequestID     string    `json:"request_id"`
 }
+
 type Resumption struct {
 	Confirmed   bool      `json:"confirmed"`
 	NextRenewal time.Time `json:"next_renewal"`
@@ -96,6 +105,7 @@ func ownedAttempt(ctx context.Context, q *queries.Queries, donor, id pgtype.UUID
 	}
 	return row, err
 }
+
 func nextAmount(ctx context.Context, q *queries.Queries, draft queries.DonorCheckout) (int64, error) {
 	amount, err := q.LatestConfirmedAmount(ctx, draft.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -103,7 +113,14 @@ func nextAmount(ctx context.Context, q *queries.Queries, draft queries.DonorChec
 	}
 	return amount, err
 }
-func subscriptionView(ctx context.Context, q *queries.Queries, attempt queries.DonorStripeCheckout, row queries.DonorSubscription, now time.Time) (RecurringDetails, error) {
+
+func subscriptionView(
+	ctx context.Context,
+	q *queries.Queries,
+	attempt queries.DonorStripeCheckout,
+	row queries.DonorSubscription,
+	now time.Time,
+) (RecurringDetails, error) {
 	draft, err := q.CheckoutDraft(ctx, attempt.CheckoutID)
 	if err != nil {
 		return RecurringDetails{}, err
@@ -125,7 +142,11 @@ func subscriptionView(ctx context.Context, q *queries.Queries, attempt queries.D
 // syncedSubscription returns the donor's latest monthly attempt and its
 // subscription as last synced from the processor, which is nil until the
 // attempt has a subscription and that has been synced.
-func syncedSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (queries.DonorStripeCheckout, *queries.DonorSubscription, error) {
+func syncedSubscription(
+	ctx context.Context,
+	q *queries.Queries,
+	donor pgtype.UUID,
+) (queries.DonorStripeCheckout, *queries.DonorSubscription, error) {
 	attempt, err := q.LatestMonthlyAttemptSnapshot(ctx, donor)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !attempt.StripeSubscriptionID.Valid) {
 		return attempt, nil, nil
@@ -192,7 +213,12 @@ func (s RecurringService) refresh(ctx context.Context, owner ownerResolver, dono
 		if _, err = refreshProjection(ctx, tx, d.ID, now); err != nil {
 			return nil, err
 		}
-		return &subscriptionSnapshot{attempt: attempt.ID, id: attempt.StripeSubscriptionID.String, observed: row.ObservedAt, remote: remote}, nil
+		return &subscriptionSnapshot{
+			attempt:  attempt.ID,
+			id:       attempt.StripeSubscriptionID.String,
+			observed: row.ObservedAt,
+			remote:   remote,
+		}, nil
 	})
 }
 
@@ -221,8 +247,24 @@ type subscriptionLease struct {
 
 // Even an identical retry must wait: otherwise it can release the lease while
 // the original request is still in flight. Crash recovery waits for expiry.
-func leaseSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UUID, attempt queries.DonorStripeCheckout, command pgtype.UUID, now time.Time) (*subscriptionLease, error) {
-	n, err := q.AcquireSubscriptionLease(ctx, queries.AcquireSubscriptionLeaseParams{AttemptID: attempt.ID, DonorID: donor, CommandID: command, ExpiresAt: timestamp(now.Add(leaseTerm)), Now: timestamp(now)})
+func leaseSubscription(
+	ctx context.Context,
+	q *queries.Queries,
+	donor pgtype.UUID,
+	attempt queries.DonorStripeCheckout,
+	command pgtype.UUID,
+	now time.Time,
+) (*subscriptionLease, error) {
+	n, err := q.AcquireSubscriptionLease(
+		ctx,
+		queries.AcquireSubscriptionLeaseParams{
+			AttemptID: attempt.ID,
+			DonorID:   donor,
+			CommandID: command,
+			ExpiresAt: timestamp(now.Add(leaseTerm)),
+			Now:       timestamp(now),
+		},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -231,6 +273,7 @@ func leaseSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UUI
 	}
 	return &subscriptionLease{attempt: attempt.ID, command: command, subscription: attempt.StripeSubscriptionID.String}, nil
 }
+
 func releaseLease(ctx context.Context, q *queries.Queries, attempt, command pgtype.UUID) error {
 	return q.ReleaseSubscriptionLease(ctx, queries.ReleaseSubscriptionLeaseParams{AttemptID: attempt, CommandID: command})
 }
@@ -298,7 +341,14 @@ const (
 
 // read reconciles the locked attempt's subscription with the processor's
 // current state and checks it suits use.
-func (s RecurringService) read(ctx context.Context, tx pgx.Tx, attempt queries.DonorStripeCheckout, now time.Time, use subscriptionUse, snapshot *subscriptionSnapshot) (queries.DonorSubscription, payments.Object, error) {
+func (s RecurringService) read(
+	ctx context.Context,
+	tx pgx.Tx,
+	attempt queries.DonorStripeCheckout,
+	now time.Time,
+	use subscriptionUse,
+	snapshot *subscriptionSnapshot,
+) (queries.DonorSubscription, payments.Object, error) {
 	q := queries.New(tx)
 	remote, err := currentSubscription(ctx, q, newSubFetcher(s.Gateway), attempt, snapshot)
 	if err != nil {
@@ -327,6 +377,7 @@ func (s RecurringService) Details(ctx context.Context, token string) (RecurringD
 		return storedDetails(ctx, q, d.ID, now)
 	})
 }
+
 func (s RecurringService) Cancel(ctx context.Context, token string, r CancellationRequest) (RecurringDetails, error) {
 	if !ValidRequestID(r.RequestID) || r.PeriodEnd.IsZero() {
 		return RecurringDetails{}, payments.ErrFacts
@@ -340,7 +391,12 @@ func (s RecurringService) Cancel(ctx context.Context, token string, r Cancellati
 
 // cancel schedules the cancellation for owner's donor, who may be acting
 // themselves or through staff.
-func (s RecurringService) cancel(ctx context.Context, owner ownerResolver, snapshot *subscriptionSnapshot, r CancellationRequest) (RecurringDetails, error) {
+func (s RecurringService) cancel(
+	ctx context.Context,
+	owner ownerResolver,
+	snapshot *subscriptionSnapshot,
+	r CancellationRequest,
+) (RecurringDetails, error) {
 	prepare := func(tx pgx.Tx, d queries.Donor, now time.Time) (*RecurringDetails, *subscriptionLease, error) {
 		q := queries.New(tx)
 		attempt, err := ownedAttempt(ctx, q, d.ID, r.AttemptID)
@@ -349,8 +405,23 @@ func (s RecurringService) cancel(ctx context.Context, owner ownerResolver, snaps
 		}
 		action, err := q.CancellationByID(ctx, r.RequestID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			action = queries.DonorCancellation{ID: r.RequestID, DonorID: d.ID, AttemptID: attempt.ID, ConfirmedPeriodEnd: timestamp(r.PeriodEnd), CreatedAt: timestamp(now)}
-			err = q.InsertCancellation(ctx, queries.InsertCancellationParams{ID: action.ID, DonorID: action.DonorID, AttemptID: action.AttemptID, ConfirmedPeriodEnd: action.ConfirmedPeriodEnd, CreatedAt: action.CreatedAt})
+			action = queries.DonorCancellation{
+				ID:                 r.RequestID,
+				DonorID:            d.ID,
+				AttemptID:          attempt.ID,
+				ConfirmedPeriodEnd: timestamp(r.PeriodEnd),
+				CreatedAt:          timestamp(now),
+			}
+			err = q.InsertCancellation(
+				ctx,
+				queries.InsertCancellationParams{
+					ID:                 action.ID,
+					DonorID:            action.DonorID,
+					AttemptID:          action.AttemptID,
+					ConfirmedPeriodEnd: action.ConfirmedPeriodEnd,
+					CreatedAt:          action.CreatedAt,
+				},
+			)
 		} else if err == nil && (action.DonorID != d.ID || action.AttemptID != attempt.ID || !action.ConfirmedPeriodEnd.Time.Equal(r.PeriodEnd)) {
 			err = ErrSubscriptionConflict
 		}
@@ -365,7 +436,8 @@ func (s RecurringService) cancel(ctx context.Context, owner ownerResolver, snaps
 			view, err := completeCancellation(ctx, tx, d.ID, attempt, action, row, now)
 			return &view, nil, err
 		}
-		if !row.PeriodEnd.Time.Equal(r.PeriodEnd) || !now.Before(r.PeriodEnd) || now.Sub(action.CreatedAt.Time) >= commandRetryWindow || !renews(row.Status) {
+		if !row.PeriodEnd.Time.Equal(r.PeriodEnd) || !now.Before(r.PeriodEnd) || now.Sub(action.CreatedAt.Time) >= commandRetryWindow ||
+			!renews(row.Status) {
 			return nil, nil, ErrSubscriptionConflict
 		}
 		lease, err := leaseSubscription(ctx, q, d.ID, attempt, action.ID, now)
@@ -402,7 +474,15 @@ func renews(status string) bool {
 	return status == "active" || status == "past_due" || status == "unpaid"
 }
 
-func completeCancellation(ctx context.Context, tx pgx.Tx, donor pgtype.UUID, attempt queries.DonorStripeCheckout, action queries.DonorCancellation, row queries.DonorSubscription, now time.Time) (RecurringDetails, error) {
+func completeCancellation(
+	ctx context.Context,
+	tx pgx.Tx,
+	donor pgtype.UUID,
+	attempt queries.DonorStripeCheckout,
+	action queries.DonorCancellation,
+	row queries.DonorSubscription,
+	now time.Time,
+) (RecurringDetails, error) {
 	q := queries.New(tx)
 	if !action.CompletedAt.Valid {
 		if err := q.CompleteCancellation(ctx, queries.CompleteCancellationParams{ID: action.ID, CompletedAt: timestamp(now)}); err != nil {
@@ -417,6 +497,7 @@ func completeCancellation(ctx context.Context, tx pgx.Tx, donor pgtype.UUID, att
 	}
 	return subscriptionView(ctx, q, attempt, row, now)
 }
+
 func effectiveResume(ctx context.Context, q *queries.Queries, pause queries.DonorPause) (time.Time, error) {
 	resume, err := q.ResumptionForPause(ctx, pause.ID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -427,6 +508,7 @@ func effectiveResume(ctx context.Context, q *queries.Queries, pause queries.Dono
 	}
 	return pause.ResumesAt.Time, nil
 }
+
 func renewalAfter(boundary time.Time, months int32, anchor time.Time) (time.Time, error) {
 	boundary, anchor = boundary.UTC(), anchor.UTC()
 	if months < 1 || months > 3 {
@@ -441,16 +523,36 @@ func renewalAfter(boundary time.Time, months int32, anchor time.Time) (time.Time
 	day = min(anchor.Day(), time.Date(next.Year(), next.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day())
 	return time.Date(next.Year(), next.Month(), day, anchor.Hour(), anchor.Minute(), anchor.Second(), 0, time.UTC), nil
 }
+
 func pauseView(ctx context.Context, q *queries.Queries, p queries.DonorPause) (PauseView, error) {
 	until, err := effectiveResume(ctx, q, p)
 	if err != nil {
 		return PauseView{}, err
 	}
-	return PauseView{RequestID: p.ID.String(), Months: p.Months, StartsAt: p.StartsAt.Time, ResumesAt: until, Confirmed: p.ConfirmedAt.Valid}, nil
+	return PauseView{
+		RequestID: p.ID.String(),
+		Months:    p.Months,
+		StartsAt:  p.StartsAt.Time,
+		ResumesAt: until,
+		Confirmed: p.ConfirmedAt.Valid,
+	}, nil
 }
+
 func amountView(c queries.DonorAmountChange) *AmountChange {
-	return &AmountChange{RequestID: c.ID.String(), AmountMinor: c.AmountMinor, PreviousMinor: c.PreviousMinor, EffectiveAt: c.EffectiveAt.Time, Confirmed: c.ConfirmedAt.Valid}
+	return &AmountChange{
+		RequestID:     c.ID.String(),
+		AmountMinor:   c.AmountMinor,
+		PreviousMinor: c.PreviousMinor,
+		EffectiveAt:   c.EffectiveAt.Time,
+		Confirmed:     c.ConfirmedAt.Valid,
+	}
 }
+
 func resumptionView(c queries.DonorResumption) Resumption {
-	return Resumption{RequestID: c.ID.String(), PauseID: c.PauseID.String(), NextRenewal: c.NextRenewal.Time, Confirmed: c.ConfirmedAt.Valid}
+	return Resumption{
+		RequestID:   c.ID.String(),
+		PauseID:     c.PauseID.String(),
+		NextRenewal: c.NextRenewal.Time,
+		Confirmed:   c.ConfirmedAt.Valid,
+	}
 }

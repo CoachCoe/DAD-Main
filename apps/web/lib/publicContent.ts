@@ -11,9 +11,10 @@ export async function loadPublicContent(): Promise<Schema<"PublicContent"> | nul
   await connection();
   try {
     const response = await fetch(`${donorApiBase()}/donor/public/content`, {
-      next: { revalidate: 60 }, signal: AbortSignal.timeout(3000),
+      next: { revalidate: 60 },
+      signal: AbortSignal.timeout(3000),
     });
-    return response.ok ? await response.json() as Schema<"PublicContent"> : null;
+    return response.ok ? ((await response.json()) as Schema<"PublicContent">) : null;
   } catch {
     return null;
   }

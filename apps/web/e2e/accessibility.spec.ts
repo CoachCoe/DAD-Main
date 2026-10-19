@@ -2,12 +2,26 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { staffURL } from "./staff";
 
-for (const path of ["/", "/donate", "/donate/thanks", "/donate/thanks?session_id=cs_test&amount_minor=3000&frequency=MONTHLY", "/initiatives", "/ledger", "/how-it-works", "/about", "/legal", "/partners", "/account/sign-in", "/staff/sign-in"]) {
+for (const path of [
+  "/",
+  "/donate",
+  "/donate/thanks",
+  "/donate/thanks?session_id=cs_test&amount_minor=3000&frequency=MONTHLY",
+  "/initiatives",
+  "/ledger",
+  "/how-it-works",
+  "/about",
+  "/legal",
+  "/partners",
+  "/account/sign-in",
+  "/staff/sign-in",
+]) {
   test(`accessible public surface: ${path}`, async ({ page }) => {
     const runtimeErrors: string[] = [];
     page.on("pageerror", (error) => runtimeErrors.push(error.message));
     page.on("console", (message) => {
-      if (message.type() === "error" && /hydrat|server rendered HTML/i.test(message.text())) runtimeErrors.push(message.text());
+      if (message.type() === "error" && /hydrat|server rendered HTML/i.test(message.text()))
+        runtimeErrors.push(message.text());
     });
     const response = await page.goto(path.startsWith("/staff") ? staffURL(path) : path);
     expect(response?.status()).toBe(200);

@@ -23,6 +23,7 @@ func (s *emailChangeStub) Request(_ context.Context, session, email string) erro
 	}
 	return s.err
 }
+
 func (s *emailChangeStub) Confirm(context.Context, string) (string, error) {
 	s.calls++
 	return "NEW", s.err
@@ -49,7 +50,15 @@ func TestEmailChangeHTTPOriginValidationAndSafeErrors(t *testing.T) {
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, req)
 		if response.Code != tc.status || strings.Contains(response.Body.String(), "private") {
-			t.Errorf("%s %s from %s: got %d %s, want %d without private detail", tc.path, tc.body, tc.origin, response.Code, response.Body, tc.status)
+			t.Errorf(
+				"%s %s from %s: got %d %s, want %d without private detail",
+				tc.path,
+				tc.body,
+				tc.origin,
+				response.Code,
+				response.Body,
+				tc.status,
+			)
 		}
 		if (tc.status == 403 || tc.status == 422) && stub.calls != 0 {
 			t.Errorf("%s %s: rejected request reached the service", tc.path, tc.body)

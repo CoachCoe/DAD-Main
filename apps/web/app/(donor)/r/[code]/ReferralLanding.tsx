@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
@@ -12,12 +12,19 @@ type Capture = ResponseBody<"/donor/referrals/{code}", "post">;
 
 const failures = {
   offline: "We couldn’t confirm your referral because you appear to be offline. Check your connection, then retry.",
-  rateLimited: "We couldn’t confirm your referral: this connection has opened too many referral links. Wait a minute, then retry.",
+  rateLimited:
+    "We couldn’t confirm your referral: this connection has opened too many referral links. Wait a minute, then retry.",
   other: "We couldn’t confirm your referral. Please retry in a moment.",
 };
 
-export default function ReferralLanding({ code, kind, referrer = { state: "unknown" } }: {
-  code: string; kind: "LINK" | "IRL"; referrer?: Referrer;
+export default function ReferralLanding({
+  code,
+  kind,
+  referrer = { state: "unknown" },
+}: {
+  code: string;
+  kind: "LINK" | "IRL";
+  referrer?: Referrer;
 }) {
   const [result, setResult] = useState<Capture | null>(null);
   const [error, setError] = useState("");
@@ -27,15 +34,23 @@ export default function ReferralLanding({ code, kind, referrer = { state: "unkno
   // biome-ignore lint/correctness/useExhaustiveDependencies: retry is the retry trigger, deliberately unread
   useEffect(() => {
     const controller = new AbortController();
-    setResult(null); setError("");
+    setResult(null);
+    setError("");
     // The capture sets the attribution cookie, so it must come from the visitor's browser.
     capture.current = api<Capture>(`/donor/referrals/${encodeURIComponent(code)}`, {
-      method: "POST", body: JSON.stringify({ kind } satisfies RequestBody<"/donor/referrals/{code}", "post">), signal: controller.signal,
-    }).then((value) => { if (!controller.signal.aborted) setResult(value); })
+      method: "POST",
+      body: JSON.stringify({ kind } satisfies RequestBody<"/donor/referrals/{code}", "post">),
+      signal: controller.signal,
+    })
+      .then((value) => {
+        if (!controller.signal.aborted) setResult(value);
+      })
       .catch((cause) => {
         if (controller.signal.aborted) return;
         const failure = classifyFailure(cause);
-        setError(failure === "offline" ? failures.offline : failure === "rateLimited" ? failures.rateLimited : failures.other);
+        setError(
+          failure === "offline" ? failures.offline : failure === "rateLimited" ? failures.rateLimited : failures.other,
+        );
       });
     return () => controller.abort();
   }, [code, kind, retry]);
@@ -52,31 +67,51 @@ export default function ReferralLanding({ code, kind, referrer = { state: "unkno
   const name = referrer.state === "found" ? referrer.name : null;
   const unavailable = referrer.state === "unavailable" || (referrer.state === "unknown" && result?.captured === false);
 
-  if (unavailable) return <Page eyebrow="Invitation" title="This referral link is no longer available">
-    <p className="lead">The person who shared it may have replaced it with a new link. You can still give without a referral.</p>
-    <Link className="button full" href="/donate">Continue without a referral</Link>
-    <About />
-  </Page>;
+  if (unavailable)
+    return (
+      <Page eyebrow="Invitation" title="This referral link is no longer available">
+        <p className="lead">
+          The person who shared it may have replaced it with a new link. You can still give without a referral.
+        </p>
+        <Link className="button full" href="/donate">
+          Continue without a referral
+        </Link>
+        <About />
+      </Page>
+    );
 
-  return <Page eyebrow="You’re invited" title={name ? `${name} invited you to DAD` : "Join the beginning"}>
-    <p className="lead">Join a growing circle of people giving together. DAD launches in April 2027.</p>
-    <div className="callout highlight">
-      <GiftFraming minor={3000} />
-      <p>Monthly giving is the default. One-time gifts are welcome too.</p>
-    </div>
-    <Announcer status={leaving ? "Saving your referral…" : ""} alert={error} />
-    {error ? <div className="actions">
-      <button type="button" className="button" onClick={() => setRetry((value) => value + 1)}>Retry referral</button>
-      <Link className="secondary" href="/donate">Continue to giving anyway</Link>
-    </div> : <Link className="button full" href="/donate" onClick={give} aria-disabled={leaving || undefined}>
-      {leaving ? "Saving your referral…" : "Continue to giving"}</Link>}
-    <About />
-  </Page>;
+  return (
+    <Page eyebrow="You’re invited" title={name ? `${name} invited you to DAD` : "Join the beginning"}>
+      <p className="lead">Join a growing circle of people giving together. DAD launches in April 2027.</p>
+      <div className="callout highlight">
+        <GiftFraming minor={3000} />
+        <p>Monthly giving is the default. One-time gifts are welcome too.</p>
+      </div>
+      <Announcer status={leaving ? "Saving your referral…" : ""} alert={error} />
+      {error ? (
+        <div className="actions">
+          <button type="button" className="button" onClick={() => setRetry((value) => value + 1)}>
+            Retry referral
+          </button>
+          <Link className="secondary" href="/donate">
+            Continue to giving anyway
+          </Link>
+        </div>
+      ) : (
+        <Link className="button full" href="/donate" onClick={give} aria-disabled={leaving || undefined}>
+          {leaving ? "Saving your referral…" : "Continue to giving"}
+        </Link>
+      )}
+      <About />
+    </Page>
+  );
 }
 
 function About() {
-  return <>
-    <p>A first gift before launch earns a permanent Founding Donor badge.</p>
-    <p className="note">This is a sandbox preview. No real donation is collected or live badge awarded.</p>
-  </>;
+  return (
+    <>
+      <p>A first gift before launch earns a permanent Founding Donor badge.</p>
+      <p className="note">This is a sandbox preview. No real donation is collected or live badge awarded.</p>
+    </>
+  );
 }

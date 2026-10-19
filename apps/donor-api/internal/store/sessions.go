@@ -81,7 +81,13 @@ func issueSession(ctx context.Context, q *queries.Queries, donor pgtype.UUID, cl
 	if err != nil {
 		return Tokens{}, err
 	}
-	session := queries.InsertSessionParams{ID: id, DonorID: donor, TokenHash: HashToken(access), ExpiresAt: timestamp(now.Add(browserLifetime)), Client: "BROWSER"}
+	session := queries.InsertSessionParams{
+		ID:        id,
+		DonorID:   donor,
+		TokenHash: HashToken(access),
+		ExpiresAt: timestamp(now.Add(browserLifetime)),
+		Client:    "BROWSER",
+	}
 	tokens := Tokens{Access: access, AccessTTL: browserLifetime}
 	if client.App {
 		family, err := randomToken(32)
@@ -179,7 +185,15 @@ func (s AccountService) Refresh(ctx context.Context, token string) (Tokens, erro
 
 // rotate issues session new tokens in family, extending its refresh lifetime
 // up to refreshLimit after sign-in.
-func rotate(ctx context.Context, q *queries.Queries, session queries.DonorSession, family string, previous pgtype.Text, refreshedAt pgtype.Timestamptz, now time.Time) (Tokens, error) {
+func rotate(
+	ctx context.Context,
+	q *queries.Queries,
+	session queries.DonorSession,
+	family string,
+	previous pgtype.Text,
+	refreshedAt pgtype.Timestamptz,
+	now time.Time,
+) (Tokens, error) {
 	access, err := randomToken(32)
 	if err != nil {
 		return Tokens{}, err
@@ -270,7 +284,12 @@ func (s DonorService) SignOutEverywhere(ctx context.Context, token string) error
 
 // sessionWrite is donorWrite for commands on the donor's sessions, which need
 // to know which session is the caller's.
-func sessionWrite[T any](ctx context.Context, db *pgxpool.Pool, token string, fn func(*queries.Queries, signedIn, time.Time) (T, error)) (T, error) {
+func sessionWrite[T any](
+	ctx context.Context,
+	db *pgxpool.Pool,
+	token string,
+	fn func(*queries.Queries, signedIn, time.Time) (T, error),
+) (T, error) {
 	var user signedIn
 	owner := func(ctx context.Context, tx pgx.Tx) (queries.Donor, error) {
 		var err error

@@ -34,7 +34,11 @@ var (
 )
 
 func TestRunRejectsInvalidInvocationBeforeTheDatabase(t *testing.T) {
-	env := map[string]string{"DONOR_REKEY_DATABASE_URL": "postgresql://unreachable.invalid/donor", "DONOR_EMAIL_ENCRYPTION_KEY": oldKey, "DONOR_CONTENT_ENCRYPTION_KEY": oldKey}
+	env := map[string]string{
+		"DONOR_REKEY_DATABASE_URL":     "postgresql://unreachable.invalid/donor",
+		"DONOR_EMAIL_ENCRYPTION_KEY":   oldKey,
+		"DONOR_CONTENT_ENCRYPTION_KEY": oldKey,
+	}
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -182,7 +186,16 @@ func seed(t *testing.T, pool *pgxpool.Pool, keys credentials.Keyring, logins int
 
 func tokens(t *testing.T, pool *pgxpool.Pool, column store.EncryptedColumn) map[pgtype.UUID][]byte {
 	t.Helper()
-	rows, err := pool.Query(context.Background(), "SELECT id,"+pgx.Identifier{column.Column}.Sanitize()+" FROM "+pgx.Identifier{column.Table}.Sanitize()+" WHERE "+pgx.Identifier{column.Column}.Sanitize()+" IS NOT NULL")
+	rows, err := pool.Query(
+		context.Background(),
+		"SELECT id,"+pgx.Identifier{
+			column.Column,
+		}.Sanitize()+" FROM "+pgx.Identifier{
+			column.Table,
+		}.Sanitize()+" WHERE "+pgx.Identifier{
+			column.Column,
+		}.Sanitize()+" IS NOT NULL",
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +231,12 @@ func (f fixture) verify(t *testing.T, pool *pgxpool.Pool, keys credentials.Keyri
 
 // env runs rekey as its role on the database dsn names.
 func env(t *testing.T, dsn, emailKeys, contentKeys string) func(string) string {
-	values := map[string]string{dbroles.Rekey.Variable(): dbrolestest.As(t, dsn, dbroles.Rekey), dbroles.AllowOwnerVariable: "true", "DONOR_EMAIL_ENCRYPTION_KEY": emailKeys, "DONOR_CONTENT_ENCRYPTION_KEY": contentKeys}
+	values := map[string]string{
+		dbroles.Rekey.Variable():       dbrolestest.As(t, dsn, dbroles.Rekey),
+		dbroles.AllowOwnerVariable:     "true",
+		"DONOR_EMAIL_ENCRYPTION_KEY":   emailKeys,
+		"DONOR_CONTENT_ENCRYPTION_KEY": contentKeys,
+	}
 	return func(name string) string { return values[name] }
 }
 
@@ -294,7 +312,8 @@ func TestRekeyMovesEveryTokenToTheNewKey(t *testing.T) {
 	}
 
 	f.verify(t, pool, keyring(t, oldKey), store.ContentKeyColumns)
-	if usage, err = rekey(ctx, env(t, dsn, newKey, newKey+","+oldKey), "--key", "content", "--batch", "1"); err != nil || usage["donor_content_sources"].Reencrypted != 2 {
+	if usage, err = rekey(ctx, env(t, dsn, newKey, newKey+","+oldKey), "--key", "content", "--batch", "1"); err != nil ||
+		usage["donor_content_sources"].Reencrypted != 2 {
 		t.Fatalf("content rekey: %+v, %v", usage, err)
 	}
 	f.verify(t, pool, keyring(t, newKey), store.ContentKeyColumns)
@@ -315,7 +334,8 @@ func TestRekeyRefusesTokensNoConfiguredKeyDecrypts(t *testing.T) {
 	before := tokens(t, pool, store.EmailKeyColumns[0])
 	for _, args := range [][]string{{"--key", "email", "--dry-run"}, {"--key", "email"}} {
 		usage, err := rekey(ctx, env(t, dsn, newKey+","+oldKey, oldKey), args...)
-		if err == nil || !strings.Contains(err.Error(), "donor_email_changes "+stray.String()) || strings.Contains(err.Error(), "secret proof") {
+		if err == nil || !strings.Contains(err.Error(), "donor_email_changes "+stray.String()) ||
+			strings.Contains(err.Error(), "secret proof") {
 			t.Fatalf("%v: got %v, want a refusal naming the row and not its plaintext", args, err)
 		}
 		if got := usage["donor_email_changes"]; got.Undecryptable != 1 || got.Retired != 1 || got.Reencrypted != 0 {

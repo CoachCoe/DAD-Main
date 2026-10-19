@@ -32,6 +32,7 @@ func donorServiceFixture(t *testing.T) (DonorService, string, pgtype.UUID) {
 	}
 	return DonorService{DB: api, Origin: "https://donor.example.org"}, tokens.Access, id
 }
+
 func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	s, token, id := donorServiceFixture(t)
 	pool := database(t)
@@ -67,10 +68,14 @@ func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	var count int
 	var version int
 	var consent, source string
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_preference_events WHERE donor_id=$1", id).Scan(&count); err != nil || count != 1 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_preference_events WHERE donor_id=$1", id).Scan(&count); err != nil ||
+		count != 1 {
 		t.Fatal("duplicate/missing consent event", err)
 	}
-	if err := pool.QueryRow(ctx, "SELECT version,consent_version,source FROM donor_preference_events WHERE donor_id=$1", id).Scan(&version, &consent, &source); err != nil || version != 1 || consent != consentVersion || source != "account" {
+	if err := pool.QueryRow(ctx, "SELECT version,consent_version,source FROM donor_preference_events WHERE donor_id=$1", id).Scan(&version, &consent, &source); err != nil ||
+		version != 1 ||
+		consent != consentVersion ||
+		source != "account" {
 		t.Fatal("audit mismatch", err)
 	}
 	if err = s.SignOutEverywhere(ctx, token); err != nil {
@@ -80,6 +85,7 @@ func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 		t.Fatal("revoked session accepted", err)
 	}
 }
+
 func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 	first, token, id := donorServiceFixture(t)
 	pool := database(t)
@@ -131,7 +137,13 @@ func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 	if err != nil || retained.Token != touch.Token {
 		t.Fatal("rotation invalidated captured touch", err)
 	}
-	renewed, err := first.CaptureReferral(ctx, strings.TrimPrefix(*rotated.Link, first.Origin+"/r/"), "IRL", touch.Token, now.Add(31*24*time.Hour))
+	renewed, err := first.CaptureReferral(
+		ctx,
+		strings.TrimPrefix(*rotated.Link, first.Origin+"/r/"),
+		"IRL",
+		touch.Token,
+		now.Add(31*24*time.Hour),
+	)
 	if err != nil || renewed.Token == touch.Token || renewed.Token == "" {
 		t.Fatal("expired token repurposed", err)
 	}
@@ -146,6 +158,7 @@ func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 		t.Fatal("disabled donor name disclosed", err)
 	}
 }
+
 func TestConcurrentSharingKeepsOnePermanentCode(t *testing.T) {
 	s, token, _ := donorServiceFixture(t)
 	results := make(chan Sharing, 2)

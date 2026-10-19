@@ -25,8 +25,12 @@ function olderBrowser() {
     getClientExtensionResults = () => ({});
   }
   const credentials = {
-    create: vi.fn(async (_options: CredentialCreationOptions) => new PublicKeyCredential(new AuthenticatorAttestationResponse())),
-    get: vi.fn(async (_options: CredentialRequestOptions) => new PublicKeyCredential(new AuthenticatorAssertionResponse())),
+    create: vi.fn(
+      async (_options: CredentialCreationOptions) => new PublicKeyCredential(new AuthenticatorAttestationResponse()),
+    ),
+    get: vi.fn(
+      async (_options: CredentialRequestOptions) => new PublicKeyCredential(new AuthenticatorAssertionResponse()),
+    ),
   };
   vi.stubGlobal("PublicKeyCredential", PublicKeyCredential);
   vi.stubGlobal("AuthenticatorAttestationResponse", AuthenticatorAttestationResponse);
@@ -43,15 +47,24 @@ afterEach(() => {
 it("converts creation options and the new passkey without the browser's JSON helpers", async () => {
   const credentials = olderBrowser();
   const created = await createPasskey({
-    challenge: "-_8", rp: { id: "staff.example.org", name: "DAD staff" }, user: { id: "AAE", name: "a@example.org", displayName: "A" },
-    pubKeyCredParams: [{ type: "public-key", alg: -7 }], excludeCredentials: [{ type: "public-key", id: "Bw" }],
+    challenge: "-_8",
+    rp: { id: "staff.example.org", name: "DAD staff" },
+    user: { id: "AAE", name: "a@example.org", displayName: "A" },
+    pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+    excludeCredentials: [{ type: "public-key", id: "Bw" }],
   });
   const publicKey = credentials.create.mock.calls[0][0].publicKey as PublicKeyCredentialCreationOptions;
   expect(new Uint8Array(publicKey.challenge as ArrayBuffer)).toEqual(new Uint8Array([251, 255]));
   expect(new Uint8Array(publicKey.user.id as ArrayBuffer)).toEqual(new Uint8Array([0, 1]));
   expect(new Uint8Array(publicKey.excludeCredentials?.[0].id as ArrayBuffer)).toEqual(new Uint8Array([7]));
-  expect(created).toEqual({ id: "AQI", rawId: "AQI", type: "public-key", authenticatorAttachment: "platform", clientExtensionResults: {},
-    response: { clientDataJSON: "AQ", attestationObject: "-_8", transports: ["internal"] } });
+  expect(created).toEqual({
+    id: "AQI",
+    rawId: "AQI",
+    type: "public-key",
+    authenticatorAttachment: "platform",
+    clientExtensionResults: {},
+    response: { clientDataJSON: "AQ", attestationObject: "-_8", transports: ["internal"] },
+  });
 });
 
 it("signs a request without the browser's JSON helpers", async () => {
@@ -60,7 +73,9 @@ it("signs a request without the browser's JSON helpers", async () => {
   const publicKey = credentials.get.mock.calls[0][0].publicKey as PublicKeyCredentialRequestOptions;
   expect(new Uint8Array(publicKey.challenge as ArrayBuffer)).toEqual(new Uint8Array([1, 2, 3]));
   expect(publicKey.userVerification).toBe("required");
-  expect(assertion).toMatchObject({ response: { clientDataJSON: "Ag", authenticatorData: "Aw", signature: "BA", userHandle: "BQY" } });
+  expect(assertion).toMatchObject({
+    response: { clientDataJSON: "Ag", authenticatorData: "Aw", signature: "BA", userHandle: "BQY" },
+  });
 });
 
 it("names WebAuthn rejections and leaves other failures alone", () => {

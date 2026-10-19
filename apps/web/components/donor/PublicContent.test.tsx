@@ -1,25 +1,48 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import LedgerPage from "@/app/(donor)/ledger/page";
-import InitiativesPage from "@/app/(donor)/initiatives/page";
 import InitiativePage from "@/app/(donor)/initiatives/[slug]/page";
+import InitiativesPage from "@/app/(donor)/initiatives/page";
+import LedgerPage from "@/app/(donor)/ledger/page";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", async (original) => ({
-  ...await original<typeof import("next/navigation")>(),
+  ...(await original<typeof import("next/navigation")>()),
   useRouter: () => ({ refresh }),
-  notFound: () => { throw new Error("NEXT_NOT_FOUND"); },
+  notFound: () => {
+    throw new Error("NEXT_NOT_FOUND");
+  },
 }));
 
 // Rendering outside a request: there is no request scope for connection() to wait on.
 vi.mock("next/server", () => ({ connection: async () => undefined }));
 
-const initiative = { slug: "water", title: "Clean water", summary: "Wells with a partner.", partner: "Partner Org", planned_start: "2027-05-01" };
-const published = { state: "published", ledger_as_of: "2026-09-01", cadence: "monthly", initiatives: [initiative],
-  ledger: [{ id: "snapshot:0", metric: "Collected", value: 3000, unit: "USD_CENTS", illustrative: false },
-    { id: "snapshot:1", metric: "Example reach", value: 100, unit: "PEOPLE", illustrative: true }] };
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); refresh.mockReset(); });
-const respond = (body: unknown, status = 200) => vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(body), { status })));
+const initiative = {
+  slug: "water",
+  title: "Clean water",
+  summary: "Wells with a partner.",
+  partner: "Partner Org",
+  planned_start: "2027-05-01",
+};
+const published = {
+  state: "published",
+  ledger_as_of: "2026-09-01",
+  cadence: "monthly",
+  initiatives: [initiative],
+  ledger: [
+    { id: "snapshot:0", metric: "Collected", value: 3000, unit: "USD_CENTS", illustrative: false },
+    { id: "snapshot:1", metric: "Example reach", value: 100, unit: "PEOPLE", illustrative: true },
+  ],
+};
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  refresh.mockReset();
+});
+const respond = (body: unknown, status = 200) =>
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify(body), { status })),
+  );
 
 it("labels illustrative figures alongside real figures and their as-of date", async () => {
   respond(published);
@@ -33,8 +56,13 @@ it("labels illustrative figures alongside real figures and their as-of date", as
 });
 
 it("names a count of one in the singular", async () => {
-  respond({ ...published, ledger: [{ id: "snapshot:0", metric: "Partners onboarded", value: 1, unit: "PARTNERS", illustrative: false },
-    { id: "snapshot:1", metric: "People reached", value: 1, unit: "PEOPLE", illustrative: false }] });
+  respond({
+    ...published,
+    ledger: [
+      { id: "snapshot:0", metric: "Partners onboarded", value: 1, unit: "PARTNERS", illustrative: false },
+      { id: "snapshot:1", metric: "People reached", value: 1, unit: "PEOPLE", illustrative: false },
+    ],
+  });
   render(await LedgerPage());
   expect(screen.getByText("1 partner")).toBeInTheDocument();
   expect(screen.getByText("1 person")).toBeInTheDocument();
@@ -80,5 +108,7 @@ it("renders a published initiative and treats an unknown slug as not found", asy
   render(await InitiativePage({ params: Promise.resolve({ slug: "water" }), searchParams: Promise.resolve({}) }));
   expect(screen.getByRole("heading", { level: 1, name: "Clean water" })).toBeVisible();
   expect(screen.getByText(/not designated to this initiative/)).toBeVisible();
-  await expect(InitiativePage({ params: Promise.resolve({ slug: "missing" }), searchParams: Promise.resolve({}) })).rejects.toThrow("NEXT_NOT_FOUND");
+  await expect(
+    InitiativePage({ params: Promise.resolve({ slug: "missing" }), searchParams: Promise.resolve({}) }),
+  ).rejects.toThrow("NEXT_NOT_FOUND");
 });

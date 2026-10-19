@@ -22,7 +22,8 @@ func restoreContent(t *testing.T, pool *pgxpool.Pool, actor pgtype.UUID) {
 	t.Helper()
 	ctx := context.Background()
 	var previous pgtype.UUID
-	if err := pool.QueryRow(ctx, "SELECT publication_id FROM donor_content_head WHERE id='r1'").Scan(&previous); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if err := pool.QueryRow(ctx, "SELECT publication_id FROM donor_content_head WHERE id='r1'").Scan(&previous); err != nil &&
+		!errors.Is(err, pgx.ErrNoRows) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -55,11 +56,15 @@ func TestSourceUploadsRequireEncryptionKeyButPublishingDoesNot(t *testing.T) {
 	if err := s.AuthorizeSourceUpload(ctx, token); !errors.Is(err, ErrSourceStorageUnconfigured) {
 		t.Fatal("upload authorized without an encryption key", err)
 	}
-	if _, err := s.StoreSource(ctx, token, "source.txt", []byte("Private signed source record")); !errors.Is(err, ErrSourceStorageUnconfigured) {
+	if _, err := s.StoreSource(ctx, token, "source.txt", []byte("Private signed source record")); !errors.Is(
+		err,
+		ErrSourceStorageUnconfigured,
+	) {
 		t.Fatal("source stored without an encryption key", err)
 	}
 	var stored int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_content_sources WHERE actor_id=$1", actor).Scan(&stored); err != nil || stored != 0 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_content_sources WHERE actor_id=$1", actor).Scan(&stored); err != nil ||
+		stored != 0 {
 		t.Fatal("unencrypted source persisted", stored, err)
 	}
 	if err := s.Authorize(ctx, token); err != nil {
@@ -69,7 +74,15 @@ func TestSourceUploadsRequireEncryptionKeyButPublishingDoesNot(t *testing.T) {
 	if err := queries.New(pool).InsertContentSource(ctx, queries.InsertContentSourceParams{ID: source, ActorID: actor, Name: "approval.pdf", Sha256: strings.Repeat("0", 64), EncryptedData: []byte("ciphertext")}); err != nil {
 		t.Fatal(err)
 	}
-	r := PublicationRequest{AsOf: "2026-01-01", Cadence: "Monthly", InitiativesCSV: fmt.Sprintf("slug,title,summary,partner,planned_start,board_approval_source_id,approved_on\nfirst,First,Planned initiative,Partner,2027-04-22,%s,2026-01-01\n", source.String()), LedgerCSV: fmt.Sprintf("metric,value,unit,source_id,illustrative\nCollected,3000,USD_CENTS,%s,false\n", source.String())}
+	r := PublicationRequest{
+		AsOf:    "2026-01-01",
+		Cadence: "Monthly",
+		InitiativesCSV: fmt.Sprintf(
+			"slug,title,summary,partner,planned_start,board_approval_source_id,approved_on\nfirst,First,Planned initiative,Partner,2027-04-22,%s,2026-01-01\n",
+			source.String(),
+		),
+		LedgerCSV: fmt.Sprintf("metric,value,unit,source_id,illustrative\nCollected,3000,USD_CENTS,%s,false\n", source.String()),
+	}
 	if _, err := s.Publish(ctx, token, r); err != nil {
 		t.Fatal("publishing failed without the source key", err)
 	}
@@ -112,14 +125,23 @@ func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
 	}
 	id := source.ID
 	var ciphertext []byte
-	if err = pool.QueryRow(ctx, "SELECT encrypted_data FROM donor_content_sources WHERE id=$1", id).Scan(&ciphertext); err != nil || bytes.Contains(ciphertext, data) {
+	if err = pool.QueryRow(ctx, "SELECT encrypted_data FROM donor_content_sources WHERE id=$1", id).Scan(&ciphertext); err != nil ||
+		bytes.Contains(ciphertext, data) {
 		t.Fatal("source not encrypted", err)
 	}
 	document, err := s.ReadSource(ctx, token, id)
 	if err != nil || !bytes.Equal(document.Data, data) {
 		t.Fatal("source roundtrip failed", err)
 	}
-	r := PublicationRequest{AsOf: "2026-01-01", Cadence: "Monthly", InitiativesCSV: fmt.Sprintf("slug,title,summary,partner,planned_start,board_approval_source_id,approved_on\nfirst,First,Planned initiative,Partner,2027-04-22,%s,2026-01-01\n", id.String()), LedgerCSV: fmt.Sprintf("metric,value,unit,source_id,illustrative\nCollected,3000,USD_CENTS,%s,false\n", id.String())}
+	r := PublicationRequest{
+		AsOf:    "2026-01-01",
+		Cadence: "Monthly",
+		InitiativesCSV: fmt.Sprintf(
+			"slug,title,summary,partner,planned_start,board_approval_source_id,approved_on\nfirst,First,Planned initiative,Partner,2027-04-22,%s,2026-01-01\n",
+			id.String(),
+		),
+		LedgerCSV: fmt.Sprintf("metric,value,unit,source_id,illustrative\nCollected,3000,USD_CENTS,%s,false\n", id.String()),
+	}
 	if _, err = s.Publish(ctx, token, r); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +154,8 @@ func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
 		t.Fatal("unbacked figure published", err)
 	}
 	var after pgtype.UUID
-	if err = pool.QueryRow(ctx, "SELECT publication_id FROM donor_content_head WHERE id='r1'").Scan(&after); err != nil || after != published {
+	if err = pool.QueryRow(ctx, "SELECT publication_id FROM donor_content_head WHERE id='r1'").Scan(&after); err != nil ||
+		after != published {
 		t.Fatal("failed publication changed public snapshot", err)
 	}
 	if _, err = pool.Exec(ctx, "UPDATE donor_content_sources SET sha256=repeat('0',64) WHERE id=$1", id); err != nil {
@@ -171,7 +194,11 @@ func TestPublicationErrorsLocateEachProblem(t *testing.T) {
 		{"NUL byte", initiativesHeader + "first,First\x00,Planned,Partner,2027-04-22," + source.String() + ",2026-01-01\n", ledgerHeader + ledger, PublicationProblem{Sheet: "initiatives", Reason: "invalid_text"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := s.Publish(ctx, token, PublicationRequest{AsOf: "2026-01-01", Cadence: "Monthly", InitiativesCSV: c.initiatives, LedgerCSV: c.rows})
+			_, err := s.Publish(
+				ctx,
+				token,
+				PublicationRequest{AsOf: "2026-01-01", Cadence: "Monthly", InitiativesCSV: c.initiatives, LedgerCSV: c.rows},
+			)
 			if !errors.Is(err, ErrStaffInput) {
 				t.Fatalf("got %v, want an ErrStaffInput", err)
 			}

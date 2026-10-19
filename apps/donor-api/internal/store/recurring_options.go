@@ -39,6 +39,7 @@ type PauseOption struct {
 	ResumesAt time.Time `json:"resumes_at"`
 	StartsAt  time.Time `json:"starts_at"`
 }
+
 type PauseOptions struct {
 	Options        []PauseOption `json:"options"`
 	Pause          *PauseView    `json:"pause"`
@@ -192,7 +193,13 @@ func (s RecurringService) ResumeOptions(ctx context.Context, token string) (Resu
 		command, err := q.ResumptionForPause(ctx, pause.ID)
 		if err == nil {
 			saved := resumptionView(command)
-			return ResumeOptions{State: "saved", Confirmed: &saved.Confirmed, NextRenewal: &saved.NextRenewal, PauseID: saved.PauseID, RequestID: saved.RequestID}, nil
+			return ResumeOptions{
+				State:       "saved",
+				Confirmed:   &saved.Confirmed,
+				NextRenewal: &saved.NextRenewal,
+				PauseID:     saved.PauseID,
+				RequestID:   saved.RequestID,
+			}, nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return ResumeOptions{}, err
@@ -202,6 +209,11 @@ func (s RecurringService) ResumeOptions(ctx context.Context, token string) (Resu
 		if schedule.ExternalChange || !schedule.PeriodEnd.Time.Before(pause.ResumesAt.Time) || !now.Before(schedule.PeriodEnd.Time) {
 			return unavailable, nil
 		}
-		return ResumeOptions{State: "ready", PauseID: pause.ID.String(), NextRenewal: &schedule.PeriodEnd.Time, OriginalResume: &pause.ResumesAt.Time}, nil
+		return ResumeOptions{
+			State:          "ready",
+			PauseID:        pause.ID.String(),
+			NextRenewal:    &schedule.PeriodEnd.Time,
+			OriginalResume: &pause.ResumesAt.Time,
+		}, nil
 	})
 }

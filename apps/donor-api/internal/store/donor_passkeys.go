@@ -129,7 +129,13 @@ type donorCeremony struct {
 	SessionID pgtype.UUID `json:"session_id"`
 }
 
-func saveDonorCeremony(ctx context.Context, q *queries.Queries, kind string, donorID, sessionID pgtype.UUID, session *webauthn.SessionData) (string, error) {
+func saveDonorCeremony(
+	ctx context.Context,
+	q *queries.Queries,
+	kind string,
+	donorID, sessionID pgtype.UUID,
+	session *webauthn.SessionData,
+) (string, error) {
 	raw, err := json.Marshal(donorCeremony{SessionData: *session, SessionID: sessionID})
 	if err != nil {
 		return "", err
@@ -244,32 +250,31 @@ func (s *DonorPasskeyService) BeginRegister(ctx context.Context, token string) (
 	if err := s.sweepCeremonies(ctx); err != nil {
 		return Ceremony{}, err
 	}
-	var result Ceremony
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (Ceremony, error) {
 		q := queries.New(tx)
 		user, err := loadDonorUserByToken(ctx, q, token)
 		if err != nil {
-			return err
+			return Ceremony{}, err
 		}
 		creation, session, err := s.WebAuthn.BeginRegistration(user,
 			webauthn.WithExclusions(webauthn.Credentials(user.passkeys).CredentialDescriptors()))
 		if err != nil {
-			return err
+			return Ceremony{}, err
 		}
 		id, err := saveDonorCeremony(ctx, q, "REGISTER", user.donor.ID, user.session, session)
-		if err != nil {
-			return err
-		}
-		result = Ceremony{ID: id, Options: creation.Response}
-		return nil
+		return Ceremony{ID: id, Options: creation.Response}, err
 	})
-	return result, err
 }
 
 // FinishRegister validates and stores a new passkey for a signed-in donor and
 // queues the essential notice telling them so, returning every passkey the
 // donor now holds.
-func (s *DonorPasskeyService) FinishRegister(ctx context.Context, token, ceremony string, response []byte, name string) (PasskeyList, error) {
+func (s *DonorPasskeyService) FinishRegister(
+	ctx context.Context,
+	token, ceremony string,
+	response []byte,
+	name string,
+) (PasskeyList, error) {
 	if !ValidPasskeyName(name) {
 		return PasskeyList{}, ErrPasskeyDenied
 	}

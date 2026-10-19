@@ -75,7 +75,11 @@ func (a *api) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, status, detail, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]string{"message": "If this email matches a donor account, a sign-in link will arrive shortly."})
+	writeJSON(
+		w,
+		http.StatusAccepted,
+		map[string]string{"message": "If this email matches a donor account, a sign-in link will arrive shortly."},
+	)
 }
 
 // claim exchanges an emailed proof for a session, revoking the session the

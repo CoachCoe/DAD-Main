@@ -45,7 +45,10 @@ func recurringRead[R any](a *api, read func(RecurringSource, context.Context, st
 }
 
 // recurringCommand runs an idempotent donor command against their subscription.
-func recurringCommand[T requestBody, R any](a *api, run func(RecurringSource, context.Context, string, pgtype.UUID, T) (R, error)) sessionHandler {
+func recurringCommand[T requestBody, R any](
+	a *api,
+	run func(RecurringSource, context.Context, string, pgtype.UUID, T) (R, error),
+) sessionHandler {
 	return func(w http.ResponseWriter, r *http.Request, session string) {
 		key, ok := idempotencyKey(w, r)
 		if !ok {
@@ -55,7 +58,8 @@ func recurringCommand[T requestBody, R any](a *api, run func(RecurringSource, co
 		if !ok {
 			return
 		}
-		a.recurring(providerTimeout).serve(w, r, func(ctx context.Context) (any, error) { return run(a.Recurring, ctx, session, key, body) })
+		a.recurring(providerTimeout).
+			serve(w, r, func(ctx context.Context) (any, error) { return run(a.Recurring, ctx, session, key, body) })
 	}
 }
 
@@ -66,7 +70,13 @@ type cancelBody struct {
 
 func (b cancelBody) valid() bool { return b.ID.Valid && !b.End.IsZero() }
 
-func cancelRecurring(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b cancelBody) (store.RecurringDetails, error) {
+func cancelRecurring(
+	s RecurringSource,
+	ctx context.Context,
+	session string,
+	key pgtype.UUID,
+	b cancelBody,
+) (store.RecurringDetails, error) {
 	return s.Cancel(ctx, session, store.CancellationRequest{RequestID: key, AttemptID: b.ID, PeriodEnd: b.End.Truncate(time.Microsecond)})
 }
 
@@ -82,7 +92,17 @@ func (b pauseBody) valid() bool {
 }
 
 func pauseRecurring(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b pauseBody) (store.PauseResult, error) {
-	return s.Pause(ctx, session, store.PauseRequest{RequestID: key, AttemptID: b.ID, Months: b.Months, StartsAt: b.Start.Truncate(time.Microsecond), ResumesAt: b.End.Truncate(time.Microsecond)})
+	return s.Pause(
+		ctx,
+		session,
+		store.PauseRequest{
+			RequestID: key,
+			AttemptID: b.ID,
+			Months:    b.Months,
+			StartsAt:  b.Start.Truncate(time.Microsecond),
+			ResumesAt: b.End.Truncate(time.Microsecond),
+		},
+	)
 }
 
 type resumeBody struct {
@@ -108,11 +128,22 @@ func (b amountBody) valid() bool {
 }
 
 func changeAmount(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b amountBody) (store.AmountChange, error) {
-	return s.ChangeAmount(ctx, session, store.AmountRequest{RequestID: key, AttemptID: b.ID, Amount: b.Amount, Previous: b.Previous, EffectiveAt: b.Effective.Truncate(time.Microsecond)})
+	return s.ChangeAmount(
+		ctx,
+		session,
+		store.AmountRequest{
+			RequestID:   key,
+			AttemptID:   b.ID,
+			Amount:      b.Amount,
+			Previous:    b.Previous,
+			EffectiveAt: b.Effective.Truncate(time.Microsecond),
+		},
+	)
 }
 
 func (a *api) beginPaymentUpdate(w http.ResponseWriter, r *http.Request, session string) {
 	if key, ok := idempotencyKey(w, r); ok {
-		a.recurring(providerTimeout).serve(w, r, func(ctx context.Context) (any, error) { return a.Recurring.BeginPaymentUpdate(ctx, session, key) })
+		a.recurring(providerTimeout).
+			serve(w, r, func(ctx context.Context) (any, error) { return a.Recurring.BeginPaymentUpdate(ctx, session, key) })
 	}
 }

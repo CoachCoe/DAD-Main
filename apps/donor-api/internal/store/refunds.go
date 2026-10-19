@@ -13,11 +13,22 @@ import (
 // The caller holds the donor then gift lock, and current was read from the
 // processor after the gift's latest recorded refund state; webhook timestamps
 // cannot order competing refund states reliably.
-func recordRefund(ctx context.Context, q *queries.Queries, gift queries.DonorGift, current payments.Object, eventID, actionID pgtype.UUID, now time.Time) error {
+func recordRefund(
+	ctx context.Context,
+	q *queries.Queries,
+	gift queries.DonorGift,
+	current payments.Object,
+	eventID, actionID pgtype.UUID,
+	now time.Time,
+) error {
 	amount, err := current.Int("amount")
 	status := strings.ToUpper(current.Text("status"))
 	remoteID := current.Text("id")
-	if err != nil || !strings.HasPrefix(remoteID, "re_") || current.Text("payment_intent") != gift.StripePaymentIntentID.String || current.Text("currency") != "usd" || amount <= 0 || amount > gift.AmountMinor || eventID.Valid == actionID.Valid {
+	if err != nil || !strings.HasPrefix(remoteID, "re_") || current.Text("payment_intent") != gift.StripePaymentIntentID.String ||
+		current.Text("currency") != "usd" ||
+		amount <= 0 ||
+		amount > gift.AmountMinor ||
+		eventID.Valid == actionID.Valid {
 		return payments.ErrFacts
 	}
 	switch status {
@@ -57,5 +68,15 @@ func recordRefund(ctx context.Context, q *queries.Queries, gift queries.DonorGif
 	if err != nil {
 		return err
 	}
-	return q.InsertRefundObservation(ctx, queries.InsertRefundObservationParams{ID: observation, RefundID: refund.ID, SourceEventID: eventID, SourceActionID: actionID, Status: status, ObservedAt: timestamp(now)})
+	return q.InsertRefundObservation(
+		ctx,
+		queries.InsertRefundObservationParams{
+			ID:             observation,
+			RefundID:       refund.ID,
+			SourceEventID:  eventID,
+			SourceActionID: actionID,
+			Status:         status,
+			ObservedAt:     timestamp(now),
+		},
+	)
 }

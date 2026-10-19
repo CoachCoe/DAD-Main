@@ -1,8 +1,7 @@
 // Package buildinfo reports which build is running, so a deployed copy can
 // name its exact commit on the health endpoints. The reconciliation and QA
 // workflows pin work to a copy's reported commit and stop if it changes
-// mid-run (see docs/testing/two-bot-qa-loop-plan.md), and knowing the exact
-// deployed commit is ordinary operational hygiene regardless.
+// mid-run.
 package buildinfo
 
 import (
@@ -33,19 +32,4 @@ func Revision() string {
 		}
 	}
 	return "unknown"
-}
-
-// Modified reports whether the build was made from a dirty working tree, when
-// the toolchain recorded it. A deployed copy should never report true.
-func Modified() bool {
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return false
-	}
-	for _, setting := range info.Settings {
-		if setting.Key == "vcs.modified" {
-			return setting.Value == "true"
-		}
-	}
-	return false
 }

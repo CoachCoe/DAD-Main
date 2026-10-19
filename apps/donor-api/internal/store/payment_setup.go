@@ -117,7 +117,15 @@ func (s RecurringService) BeginPaymentUpdate(ctx context.Context, token string, 
 // stagePaymentUpdate returns the update to open: requestID's own, the
 // donor's unfinished one, or a new one. It settles an unfinished update the
 // processor has completed, returning its outcome instead.
-func (s RecurringService) stagePaymentUpdate(ctx context.Context, q *queries.Queries, d queries.Donor, requestID pgtype.UUID, prefetch paymentSetupPrefetch, site publicSite, now time.Time) (pgtype.UUID, *PaymentUpdate, error) {
+func (s RecurringService) stagePaymentUpdate(
+	ctx context.Context,
+	q *queries.Queries,
+	d queries.Donor,
+	requestID pgtype.UUID,
+	prefetch paymentSetupPrefetch,
+	site publicSite,
+	now time.Time,
+) (pgtype.UUID, *PaymentUpdate, error) {
 	row, err := q.PaymentUpdateByID(ctx, requestID)
 	if err == nil {
 		if row.DonorID != d.ID || terminalPaymentUpdate(row.Status) {
@@ -163,7 +171,15 @@ func (s RecurringService) stagePaymentUpdate(ctx context.Context, q *queries.Que
 
 // insertPaymentUpdate records a new card setup for the donor's live
 // subscription, with the hosted session parameters it will be opened with.
-func (s RecurringService) insertPaymentUpdate(ctx context.Context, q *queries.Queries, d queries.Donor, requestID pgtype.UUID, snapshot *subscriptionSnapshot, site publicSite, now time.Time) error {
+func (s RecurringService) insertPaymentUpdate(
+	ctx context.Context,
+	q *queries.Queries,
+	d queries.Donor,
+	requestID pgtype.UUID,
+	snapshot *subscriptionSnapshot,
+	site publicSite,
+	now time.Time,
+) error {
 	attempt, err := q.LatestMonthlyAttempt(ctx, d.ID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !attempt.StripeSubscriptionID.Valid) {
 		return ErrSubscriptionConflict
@@ -177,18 +193,42 @@ func (s RecurringService) insertPaymentUpdate(ctx context.Context, q *queries.Qu
 	}
 	metadata, err := remote.Object("metadata")
 	customer := remote.Text("customer")
-	if err != nil || metadata.Text("dad_checkout_id") != attempt.CheckoutID.String() || remote.Text("id") != attempt.StripeSubscriptionID.String || !remote.BoolIs("livemode", false) || !strings.HasPrefix(customer, "cus_") {
+	if err != nil || metadata.Text("dad_checkout_id") != attempt.CheckoutID.String() ||
+		remote.Text("id") != attempt.StripeSubscriptionID.String ||
+		!remote.BoolIs("livemode", false) ||
+		!strings.HasPrefix(customer, "cus_") {
 		return payments.ErrFacts
 	}
 	if !renews(remote.Text("status")) {
 		return ErrSubscriptionConflict
 	}
 	marker := map[string]string{"dad_payment_update_id": requestID.String()}
-	params, err := json.Marshal(map[string]any{"mode": "setup", "customer": customer, "allowed_payment_method_types": []string{"card"}, "metadata": marker, "setup_intent_data": map[string]any{"metadata": marker}, "success_url": site.paymentMethod(), "cancel_url": site.paymentMethod(), "expires_at": now.Add(time.Hour).Unix()})
+	params, err := json.Marshal(
+		map[string]any{
+			"mode":                         "setup",
+			"customer":                     customer,
+			"allowed_payment_method_types": []string{"card"},
+			"metadata":                     marker,
+			"setup_intent_data":            map[string]any{"metadata": marker},
+			"success_url":                  site.paymentMethod(),
+			"cancel_url":                   site.paymentMethod(),
+			"expires_at":                   now.Add(time.Hour).Unix(),
+		},
+	)
 	if err != nil {
 		return err
 	}
-	return q.InsertPaymentUpdate(ctx, queries.InsertPaymentUpdateParams{ID: requestID, DonorID: d.ID, AttemptID: attempt.ID, CustomerID: customer, RequestParams: params, CreatedAt: timestamp(now)})
+	return q.InsertPaymentUpdate(
+		ctx,
+		queries.InsertPaymentUpdateParams{
+			ID:            requestID,
+			DonorID:       d.ID,
+			AttemptID:     attempt.ID,
+			CustomerID:    customer,
+			RequestParams: params,
+			CreatedAt:     timestamp(now),
+		},
+	)
 }
 
 // openPaymentSession creates the update's hosted session, unless it already
@@ -238,7 +278,16 @@ func (s RecurringService) openPaymentSession(ctx context.Context, owner ownerRes
 		if row.HostedUrl.Valid {
 			return PaymentUpdate{URL: &row.HostedUrl.String}, nil
 		}
-		err = q.SavePaymentUpdate(ctx, queries.SavePaymentUpdateParams{ID: row.ID, StripeSessionID: text(remote.ID), Status: "OPEN", HostedUrl: text(remote.URL), CompletedAt: row.CompletedAt})
+		err = q.SavePaymentUpdate(
+			ctx,
+			queries.SavePaymentUpdateParams{
+				ID:              row.ID,
+				StripeSessionID: text(remote.ID),
+				Status:          "OPEN",
+				HostedUrl:       text(remote.URL),
+				CompletedAt:     row.CompletedAt,
+			},
+		)
 		if err != nil {
 			return PaymentUpdate{}, err
 		}

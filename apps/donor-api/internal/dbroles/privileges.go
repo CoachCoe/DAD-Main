@@ -23,10 +23,35 @@ const lock = "SELECT, UPDATE (id)"
 // TestCatalogMatchesTheDeclaration fails until it has one.
 var grants = map[string]map[Role]string{
 	// Every process verifies the migration history at startup.
-	"donor_schema_migrations": {API: "SELECT", StripeWorker: "SELECT", ProjectionWorker: "SELECT", LoginEmailWorker: "SELECT", EmailChangeWorker: "SELECT", MessageWorker: "SELECT", PushWorker: "SELECT", Monitor: "SELECT", StaffCLI: "SELECT", Rekey: "SELECT", ReconcileJob: "SELECT"},
-	"donors":                  {API: "SELECT, INSERT, UPDATE", StripeWorker: lock, ProjectionWorker: lock, LoginEmailWorker: lock, EmailChangeWorker: lock, MessageWorker: lock, PushWorker: lock},
+	"donor_schema_migrations": {
+		API:               "SELECT",
+		StripeWorker:      "SELECT",
+		ProjectionWorker:  "SELECT",
+		LoginEmailWorker:  "SELECT",
+		EmailChangeWorker: "SELECT",
+		MessageWorker:     "SELECT",
+		PushWorker:        "SELECT",
+		Monitor:           "SELECT",
+		StaffCLI:          "SELECT",
+		Rekey:             "SELECT",
+		ReconcileJob:      "SELECT",
+	},
+	"donors": {
+		API:               "SELECT, INSERT, UPDATE",
+		StripeWorker:      lock,
+		ProjectionWorker:  lock,
+		LoginEmailWorker:  lock,
+		EmailChangeWorker: lock,
+		MessageWorker:     lock,
+		PushWorker:        lock,
+	},
 
-	"donor_sessions":       {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT", ProjectionWorker: "SELECT", PushWorker: "SELECT, UPDATE"},
+	"donor_sessions": {
+		API:              "SELECT, INSERT, UPDATE",
+		StripeWorker:     "SELECT",
+		ProjectionWorker: "SELECT",
+		PushWorker:       "SELECT, UPDATE",
+	},
 	"donor_session_events": {API: "SELECT, INSERT"},
 	"donor_login_links":    {API: "SELECT, UPDATE", LoginEmailWorker: "INSERT"},
 	"donor_login_emails": {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", LoginEmailWorker: "SELECT, UPDATE",
@@ -37,15 +62,56 @@ var grants = map[string]map[Role]string{
 	"donor_preferences":       {API: "SELECT, INSERT, UPDATE", MessageWorker: "SELECT", PushWorker: "SELECT"},
 	"donor_preference_events": {API: "SELECT, INSERT"},
 
-	"donor_checkouts":              {API: "SELECT, INSERT", StripeWorker: "SELECT", ProjectionWorker: "SELECT", ReconcileJob: "SELECT"},
-	"donor_stripe_checkouts":       {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE", MessageWorker: "SELECT", PushWorker: "SELECT"},
-	"donor_stripe_events":          {API: "SELECT, INSERT", StripeWorker: "SELECT, UPDATE", Monitor: "SELECT (attempts, available_at, processed_at)", ReconcileJob: "SELECT"},
-	"donor_gifts":                  {API: lock, StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT", ReconcileJob: "SELECT"},
-	"donor_billing_periods":        {API: "SELECT", StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT", PushWorker: "SELECT", ReconcileJob: "SELECT"},
-	"donor_billing_observations":   {API: "SELECT", StripeWorker: "SELECT, INSERT", ReconcileJob: "SELECT"},
-	"donor_refunds":                {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT", ReconcileJob: "SELECT"},
-	"donor_refund_observations":    {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", ProjectionWorker: "SELECT", ReconcileJob: "SELECT"},
-	"donor_subscriptions":          {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT", MessageWorker: "SELECT", PushWorker: "SELECT", Monitor: "SELECT (observed_at, period_end, status)"},
+	"donor_checkouts": {API: "SELECT, INSERT", StripeWorker: "SELECT", ProjectionWorker: "SELECT", ReconcileJob: "SELECT"},
+	"donor_stripe_checkouts": {
+		API:           "SELECT, INSERT, UPDATE",
+		StripeWorker:  "SELECT, UPDATE",
+		MessageWorker: "SELECT",
+		PushWorker:    "SELECT",
+	},
+	"donor_stripe_events": {
+		API:          "SELECT, INSERT",
+		StripeWorker: "SELECT, UPDATE",
+		Monitor:      "SELECT (attempts, available_at, processed_at)",
+		ReconcileJob: "SELECT",
+	},
+	"donor_gifts": {
+		API:              lock,
+		StripeWorker:     "SELECT, INSERT, UPDATE",
+		ProjectionWorker: "SELECT",
+		MessageWorker:    "SELECT",
+		ReconcileJob:     "SELECT",
+	},
+	"donor_billing_periods": {
+		API:              "SELECT",
+		StripeWorker:     "SELECT, INSERT, UPDATE",
+		ProjectionWorker: "SELECT",
+		MessageWorker:    "SELECT",
+		PushWorker:       "SELECT",
+		ReconcileJob:     "SELECT",
+	},
+	"donor_billing_observations": {API: "SELECT", StripeWorker: "SELECT, INSERT", ReconcileJob: "SELECT"},
+	"donor_refunds": {
+		API:              "SELECT, INSERT, UPDATE",
+		StripeWorker:     "SELECT, INSERT, UPDATE",
+		ProjectionWorker: "SELECT",
+		MessageWorker:    "SELECT",
+		ReconcileJob:     "SELECT",
+	},
+	"donor_refund_observations": {
+		API:              "SELECT, INSERT",
+		StripeWorker:     "SELECT, INSERT",
+		ProjectionWorker: "SELECT",
+		ReconcileJob:     "SELECT",
+	},
+	"donor_subscriptions": {
+		API:              "SELECT, INSERT, UPDATE",
+		StripeWorker:     "SELECT, INSERT, UPDATE",
+		ProjectionWorker: "SELECT",
+		MessageWorker:    "SELECT",
+		PushWorker:       "SELECT",
+		Monitor:          "SELECT (observed_at, period_end, status)",
+	},
 	"donor_subscription_leases":    {API: "SELECT, INSERT, UPDATE, DELETE"},
 	"donor_recurring_reservations": {API: "SELECT, INSERT, DELETE", StripeWorker: "SELECT, DELETE"},
 	"donor_amount_changes":         {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE"},
@@ -53,15 +119,32 @@ var grants = map[string]map[Role]string{
 	"donor_resumptions":            {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT"},
 	"donor_cancellations":          {API: "SELECT, INSERT, UPDATE"},
 	"donor_payment_updates":        {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE"},
+	"donor_stripe_budgets":         {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE"},
 
-	"donor_metric_projections": {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT, INSERT, UPDATE",
-		MessageWorker: "SELECT", PushWorker: "SELECT", Monitor: "SELECT (next_refresh_at, refresh_error)"},
+	"donor_metric_projections": {
+		API:              "SELECT, INSERT, UPDATE",
+		StripeWorker:     "SELECT, INSERT, UPDATE",
+		ProjectionWorker: "SELECT, INSERT, UPDATE",
+		MessageWorker:    "SELECT",
+		PushWorker:       "SELECT",
+		Monitor:          "SELECT (next_refresh_at, refresh_error)",
+	},
 	"donor_referral_touches":     {API: "SELECT, INSERT, UPDATE (id)", ProjectionWorker: "SELECT, UPDATE (id), DELETE"},
 	"donor_referral_corrections": {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", ProjectionWorker: "SELECT, INSERT"},
-	"donor_messages": {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", ProjectionWorker: "SELECT, INSERT", MessageWorker: "SELECT, UPDATE",
-		Monitor: "SELECT (attempts, available_at, completed_at)"},
-	"donor_push_notifications": {API: "SELECT, INSERT", StripeWorker: "SELECT, INSERT", ProjectionWorker: "SELECT, INSERT", PushWorker: "SELECT, UPDATE",
-		Monitor: "SELECT (attempts, available_at, completed_at, expires_at)"},
+	"donor_messages": {
+		API:              "SELECT, INSERT",
+		StripeWorker:     "SELECT, INSERT",
+		ProjectionWorker: "SELECT, INSERT",
+		MessageWorker:    "SELECT, UPDATE",
+		Monitor:          "SELECT (attempts, available_at, completed_at)",
+	},
+	"donor_push_notifications": {
+		API:              "SELECT, INSERT",
+		StripeWorker:     "SELECT, INSERT",
+		ProjectionWorker: "SELECT, INSERT",
+		PushWorker:       "SELECT, UPDATE",
+		Monitor:          "SELECT (attempts, available_at, completed_at, expires_at)",
+	},
 
 	"donor_passkeys":   {API: "SELECT, INSERT, UPDATE, DELETE"},
 	"donor_ceremonies": {API: "SELECT, INSERT, DELETE"},
@@ -187,7 +270,10 @@ WHERE a.grantee<>r.relowner`)
 	}); err != nil {
 		return nil, nil, err
 	}
-	rows, err = db.Query(ctx, `SELECT n.nspname,`+grantee+`,a.privilege_type FROM pg_namespace n, aclexplode(n.nspacl) a WHERE `+appSchemas+` AND a.grantee<>n.nspowner`)
+	rows, err = db.Query(
+		ctx,
+		`SELECT n.nspname,`+grantee+`,a.privilege_type FROM pg_namespace n, aclexplode(n.nspacl) a WHERE `+appSchemas+` AND a.grantee<>n.nspowner`,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -268,7 +354,9 @@ func Drift(ctx context.Context, db querier) ([]string, error) {
 			statements = append(statements, "REVOKE CREATE ON SCHEMA "+relation(schema)+" FROM PUBLIC")
 		}
 		for _, role := range Roles {
-			statements = append(statements, align("SCHEMA "+relation(schema), role.Name, schemas[schema][role.Name], usage[schema][role.Name])...)
+			statements = append(
+				statements,
+				align("SCHEMA "+relation(schema), role.Name, schemas[schema][role.Name], usage[schema][role.Name])...)
 		}
 	}
 	return statements, nil
@@ -316,7 +404,8 @@ func Reconcile(ctx context.Context, tx pgx.Tx) error {
 func ensureRole(ctx context.Context, tx pgx.Tx, role Role) error {
 	for {
 		var elevated bool
-		err := tx.QueryRow(ctx, `SELECT rolcanlogin OR rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls FROM pg_roles WHERE rolname=$1`, role.Name).Scan(&elevated)
+		err := tx.QueryRow(ctx, `SELECT rolcanlogin OR rolsuper OR rolcreaterole OR rolcreatedb OR rolreplication OR rolbypassrls FROM pg_roles WHERE rolname=$1`, role.Name).
+			Scan(&elevated)
 		switch {
 		case err == nil && elevated:
 			return fmt.Errorf("database role %s must be a NOLOGIN role without other attributes", role.Name)

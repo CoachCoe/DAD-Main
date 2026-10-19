@@ -22,6 +22,7 @@ type RefundRecord struct {
 	Status     string `json:"status"`
 	ObservedAt string `json:"observed_at"`
 }
+
 type GiftRecord struct {
 	ID        string         `json:"id"`
 	Amount    int64          `json:"amount_minor"`
@@ -32,6 +33,7 @@ type GiftRecord struct {
 	Net       int64          `json:"net_minor"`
 	Refunds   []RefundRecord `json:"refunds"`
 }
+
 type Receipt struct {
 	Mode       string     `json:"mode"`
 	TaxReceipt bool       `json:"tax_receipt"`
@@ -39,6 +41,7 @@ type Receipt struct {
 	ID         string     `json:"receipt_id"`
 	Gift       GiftRecord `json:"gift"`
 }
+
 type AnnualSummary struct {
 	Mode       string       `json:"mode"`
 	TaxReceipt bool         `json:"tax_receipt"`
@@ -59,6 +62,7 @@ func iso(t time.Time) string {
 	}
 	return t.Format("2006-01-02T15:04:05.000000+00:00")
 }
+
 func readGiftRecord(ctx context.Context, q *queries.Queries, donor, gift pgtype.UUID, now time.Time) (GiftRecord, error) {
 	out := GiftRecord{Refunds: []RefundRecord{}}
 	row, err := q.ReceiptGift(ctx, queries.ReceiptGiftParams{ID: gift, DonorID: donor, PaidAt: timestamp(now)})
@@ -92,22 +96,32 @@ func giftRecord(row queries.DonorGift, refunds []queries.DonorRefund) (GiftRecor
 			}
 			out.Refunded += r.AmountMinor
 		}
-		out.Refunds = append(out.Refunds, RefundRecord{ID: r.ID.String(), Amount: r.AmountMinor, Status: r.Status, ObservedAt: iso(r.ObservedAt.Time)})
+		out.Refunds = append(
+			out.Refunds,
+			RefundRecord{ID: r.ID.String(), Amount: r.AmountMinor, Status: r.Status, ObservedAt: iso(r.ObservedAt.Time)},
+		)
 	}
 	out.Net = out.Amount - out.Refunded
 	return out, nil
 }
+
 func readReceipt(ctx context.Context, q *queries.Queries, donor, gift pgtype.UUID, now time.Time) (Receipt, error) {
 	record, err := readGiftRecord(ctx, q, donor, gift, now)
 	return Receipt{Mode: "test", AsOf: iso(now), ID: "DAD-TEST-" + gift.String(), Gift: record}, err
 }
+
 func readAnnualSummary(ctx context.Context, q *queries.Queries, donor pgtype.UUID, year int, now time.Time) (AnnualSummary, error) {
 	zone := recognition.NewYork
 	out := AnnualSummary{Mode: "test", Year: year, Timezone: zone.String(), AsOf: iso(now), Currency: "USD", Gifts: []GiftRecord{}}
 	if year < 2026 || year > now.In(zone).Year() {
 		return out, ErrReceipt
 	}
-	rangeParams := queries.AnnualGiftsParams{DonorID: donor, StartsAt: timestamp(time.Date(year, 1, 1, 0, 0, 0, 0, zone)), EndsAt: timestamp(time.Date(year+1, 1, 1, 0, 0, 0, 0, zone)), AsOf: timestamp(now)}
+	rangeParams := queries.AnnualGiftsParams{
+		DonorID:  donor,
+		StartsAt: timestamp(time.Date(year, 1, 1, 0, 0, 0, 0, zone)),
+		EndsAt:   timestamp(time.Date(year+1, 1, 1, 0, 0, 0, 0, zone)),
+		AsOf:     timestamp(now),
+	}
 	gifts, err := q.AnnualGifts(ctx, rangeParams)
 	if err != nil {
 		return out, err
@@ -135,6 +149,7 @@ func readAnnualSummary(ctx context.Context, q *queries.Queries, donor pgtype.UUI
 	}
 	return out, nil
 }
+
 func money(value int64) string {
 	dollars := strconv.FormatInt(value/100, 10)
 	for pos := len(dollars) - 3; pos > 0; pos -= 3 {
@@ -142,6 +157,7 @@ func money(value int64) string {
 	}
 	return fmt.Sprintf("$%s.%02d", dollars, value%100)
 }
+
 func renderReceipt(r Receipt) string {
 	g := r.Gift
 	frequency := "One-time"
@@ -152,6 +168,7 @@ func renderReceipt(r Receipt) string {
 		frequency + " test gift: " + money(g.Amount) + " USD\nCompleted: " + g.PaidAt + "\nSuccessful refunds: " + money(g.Refunded) + " USD\nNet test amount: " + money(g.Net) + " USD\nAs of: " + r.AsOf + "\n\n" +
 		"DAD launches in April 2027. Pre-launch giving earns permanent Founding Donor recognition; recognition in this sandbox is simulated.\n"
 }
+
 func renderSummary(s AnnualSummary) string {
 	rows := make([]string, 0, len(s.Gifts))
 	for _, g := range s.Gifts {
@@ -161,5 +178,14 @@ func renderSummary(s AnnualSummary) string {
 	if detail == "" {
 		detail = "No confirmed gifts in this year."
 	}
-	return fmt.Sprintf("DAD sandbox annual summary — %d\nTEST PAYMENTS — NOT A TAX RECEIPT. No real donations were collected.\n\nCalendar year uses %s. As of %s.\nRefund adjustments reflect the latest verified status for gifts in this year, including adjustments observed in a later year. This is not a tax deduction calculation.\n\n%s\n\nCollected: %s USD\nSuccessful refunds: %s USD\nNet: %s USD\n", s.Year, s.Timezone, s.AsOf, detail, money(s.Amount), money(s.Refunded), money(s.Net))
+	return fmt.Sprintf(
+		"DAD sandbox annual summary — %d\nTEST PAYMENTS — NOT A TAX RECEIPT. No real donations were collected.\n\nCalendar year uses %s. As of %s.\nRefund adjustments reflect the latest verified status for gifts in this year, including adjustments observed in a later year. This is not a tax deduction calculation.\n\n%s\n\nCollected: %s USD\nSuccessful refunds: %s USD\nNet: %s USD\n",
+		s.Year,
+		s.Timezone,
+		s.AsOf,
+		detail,
+		money(s.Amount),
+		money(s.Refunded),
+		money(s.Net),
+	)
 }

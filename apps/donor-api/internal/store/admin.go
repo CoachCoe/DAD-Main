@@ -21,27 +21,32 @@ type DonorSummary struct {
 	ID         pgtype.UUID `json:"id"`
 	PublicName pgtype.Text `json:"public_name"`
 }
+
 type DonorSearch struct {
 	Donors     []DonorSummary `json:"donors"`
 	NextOffset *int64         `json:"next_offset"`
 }
+
 type StaffStreak struct {
 	AtRisk     bool               `json:"at_risk"`
 	Best       int32              `json:"best"`
 	ComputedAt pgtype.Timestamptz `json:"computed_at"`
 	Current    pgtype.Int4        `json:"current"`
 }
+
 type ReferrerLink struct {
 	Email string      `json:"email"`
 	ID    pgtype.UUID `json:"id"`
 	Type  pgtype.Text `json:"type"`
 }
+
 type ReferredDonor struct {
 	Email    string      `json:"email"`
 	ID       pgtype.UUID `json:"id"`
 	NetMinor pgtype.Int8 `json:"net_minor"`
 	Type     pgtype.Text `json:"type"`
 }
+
 type DonorDetail struct {
 	AsOf                time.Time                   `json:"as_of"`
 	Claimed             bool                        `json:"claimed"`
@@ -67,6 +72,7 @@ type StaffSubscription struct {
 	Status      string     `json:"status"`
 	StopsAt     *time.Time `json:"stops_at"`
 }
+
 type AuditEvent struct {
 	Action  string             `json:"action"`
 	ActorID pgtype.UUID        `json:"actor_id"`
@@ -75,21 +81,26 @@ type AuditEvent struct {
 	ID      pgtype.UUID        `json:"id"`
 	Target  string             `json:"target"`
 }
+
 type AuditPage struct {
 	Events     []AuditEvent `json:"events"`
 	NextOffset *int64       `json:"next_offset"`
 }
+
 type MessagePage struct {
 	Messages   []queries.StaffMessagePageRow `json:"messages"`
 	NextOffset *int64                        `json:"next_offset"`
 }
+
 type ActionPage struct {
 	Actions    []queries.StaffActionPageRow `json:"actions"`
 	NextOffset *int64                       `json:"next_offset"`
 }
+
 type PendingAction struct {
 	Action *queries.StaffPendingActionRow `json:"action"`
 }
+
 type Enrolments struct {
 	Enrolments []any  `json:"enrolments"`
 	State      string `json:"state"`
@@ -109,7 +120,16 @@ func (s *StaffService) SearchDonors(ctx context.Context, token, term string, off
 		rows, next := page(rows, offset)
 		out := DonorSearch{Donors: make([]DonorSummary, 0, len(rows)), NextOffset: next}
 		for _, row := range rows {
-			out.Donors = append(out.Donors, DonorSummary{ID: row.ID, Email: row.Email, PublicName: row.PublicName, Claimed: row.ClaimedAt.Valid, Disabled: row.Disabled})
+			out.Donors = append(
+				out.Donors,
+				DonorSummary{
+					ID:         row.ID,
+					Email:      row.Email,
+					PublicName: row.PublicName,
+					Claimed:    row.ClaimedAt.Valid,
+					Disabled:   row.Disabled,
+				},
+			)
 		}
 		if err = auditStaff(ctx, q, actor.ID, "donor.search", "donors", map[string]any{"offset": offset, "result_count": len(rows)}, now); err != nil {
 			return DonorSearch{}, err
@@ -118,7 +138,12 @@ func (s *StaffService) SearchDonors(ctx context.Context, token, term string, off
 	})
 }
 
-func (s *StaffService) DonorDetail(ctx context.Context, token string, id pgtype.UUID, giftsOffset, referralsOffset int64) (DonorDetail, error) {
+func (s *StaffService) DonorDetail(
+	ctx context.Context,
+	token string,
+	id pgtype.UUID,
+	giftsOffset, referralsOffset int64,
+) (DonorDetail, error) {
 	if !pageOffsetValid(giftsOffset) || !pageOffsetValid(referralsOffset) {
 		return DonorDetail{}, ErrStaffInput
 	}
@@ -137,7 +162,12 @@ func (s *StaffService) DonorDetail(ctx context.Context, token string, id pgtype.
 			out.FoundingDonor = projection.FoundingAwardedAt.Valid
 			// A seeded projection has no facts yet; show it as updating rather than zero.
 			if projection.NetMinor.Valid {
-				out.Streak = &StaffStreak{Current: projection.CurrentStreak, Best: projection.BestStreak, AtRisk: projection.AtRisk, ComputedAt: projection.ComputedAt}
+				out.Streak = &StaffStreak{
+					Current:    projection.CurrentStreak,
+					Best:       projection.BestStreak,
+					AtRisk:     projection.AtRisk,
+					ComputedAt: projection.ComputedAt,
+				}
 			}
 			if projection.ReferrerID.Valid {
 				row, err := q.StaffDonorByID(ctx, projection.ReferrerID)
@@ -178,7 +208,13 @@ func storedSubscription(ctx context.Context, q *queries.Queries, donor pgtype.UU
 		return nil, err
 	}
 	sub := details.Subscription
-	return &StaffSubscription{AmountMinor: sub.AmountMinor, NextRenewal: sub.PeriodEnd, ObservedAt: *details.ObservedAt, Status: sub.Status, StopsAt: sub.StopsAt}, nil
+	return &StaffSubscription{
+		AmountMinor: sub.AmountMinor,
+		NextRenewal: sub.PeriodEnd,
+		ObservedAt:  *details.ObservedAt,
+		Status:      sub.Status,
+		StopsAt:     sub.StopsAt,
+	}, nil
 }
 
 func (s *StaffService) AuditEvents(ctx context.Context, token string, offset int64) (AuditPage, error) {
@@ -193,7 +229,17 @@ func (s *StaffService) AuditEvents(ctx context.Context, token string, offset int
 		rows, next := page(rows, offset)
 		out := AuditPage{Events: make([]AuditEvent, 0, len(rows)), NextOffset: next}
 		for _, row := range rows {
-			out.Events = append(out.Events, AuditEvent{ID: row.ID, ActorID: row.ActorID, Action: row.Action, Target: row.Target, At: row.CreatedAt, Details: json.RawMessage(row.Details)})
+			out.Events = append(
+				out.Events,
+				AuditEvent{
+					ID:      row.ID,
+					ActorID: row.ActorID,
+					Action:  row.Action,
+					Target:  row.Target,
+					At:      row.CreatedAt,
+					Details: json.RawMessage(row.Details),
+				},
+			)
 		}
 		return out, nil
 	})
@@ -244,7 +290,8 @@ func (s *StaffService) PendingAction(ctx context.Context, token string, donorID,
 		return PendingAction{}, ErrStaffInput
 	}
 	return staffRead(ctx, s, token, permission, func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (PendingAction, error) {
-		row, err := queries.New(tx).StaffPendingAction(ctx, queries.StaffPendingActionParams{DonorID: donorID, ActorID: actor.ID, TargetID: targetID, Kind: kind})
+		row, err := queries.New(tx).
+			StaffPendingAction(ctx, queries.StaffPendingActionParams{DonorID: donorID, ActorID: actor.ID, TargetID: targetID, Kind: kind})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return PendingAction{}, nil
 		}
