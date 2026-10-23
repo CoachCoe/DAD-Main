@@ -20,8 +20,12 @@ SELECT * FROM donor_referral_touches WHERE token_hash=$1 FOR UPDATE;
 -- name: ReferrerByCode :one
 SELECT * FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false;
 
--- name: InsertReferralTouch :exec
-INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES($1,$2,$3,$4,$5,$6);
+-- name: UpsertReferralTouch :exec
+-- Last-touch attribution: a visitor's most recent valid code wins (PRD R-4),
+-- so a new code overwrites the referrer, kind and window recorded for the
+-- token rather than preserving the earlier touch.
+INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT (token_hash) DO UPDATE SET referrer_id=EXCLUDED.referrer_id,kind=EXCLUDED.kind,touched_at=EXCLUDED.touched_at,expires_at=EXCLUDED.expires_at;
 
 -- name: CapturedReferrerName :one
 SELECT d.public_name FROM donors d JOIN donor_referral_touches t ON t.referrer_id=d.id

@@ -86,10 +86,10 @@ func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	}
 }
 
-func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
+func TestSharingRotationAppliesLastTouchAndExpiry(t *testing.T) {
 	first, token, id := donorServiceFixture(t)
 	pool := database(t)
-	second, other, _ := donorServiceFixture(t)
+	second, other, secondID := donorServiceFixture(t)
 	ctx := context.Background()
 	now := time.Now()
 	before, err := first.Sharing(ctx, token)
@@ -118,12 +118,12 @@ func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 		t.Fatal(touch, err)
 	}
 	later, err := first.CaptureReferral(ctx, strings.TrimPrefix(*b.Link, second.Origin+"/r/"), "IRL", touch.Token, now.Add(10*24*time.Hour))
-	if err != nil || later.Token != touch.Token || *later.PublicName != "First" {
-		t.Fatal("first touch replaced", later, err)
+	if err != nil || later.Token != touch.Token || *later.PublicName != "Second" {
+		t.Fatal("last touch not applied", later, err)
 	}
 	saved, err := queries.New(pool).ReferralTouchByToken(ctx, HashToken(touch.Token))
-	if err != nil || saved.Kind != "LINK" || !saved.ExpiresAt.Time.Equal(now.Add(30*24*time.Hour).Truncate(time.Microsecond)) {
-		t.Fatal("attribution type/expiry changed", err)
+	if err != nil || saved.Kind != "IRL" || !saved.ExpiresAt.Time.Equal(now.Add(10*24*time.Hour+30*24*time.Hour).Truncate(time.Microsecond)) {
+		t.Fatal("last-touch attribution type/expiry not updated", err)
 	}
 	rotated, err := first.SaveSharing(ctx, token, "First", true)
 	if err != nil || *rotated.Link == *a.Link {
@@ -142,7 +142,7 @@ func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 		strings.TrimPrefix(*rotated.Link, first.Origin+"/r/"),
 		"IRL",
 		touch.Token,
-		now.Add(31*24*time.Hour),
+		now.Add(41*24*time.Hour),
 	)
 	if err != nil || renewed.Token == touch.Token || renewed.Token == "" {
 		t.Fatal("expired token repurposed", err)
@@ -152,6 +152,11 @@ func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 	}
 	if _, err = first.Sharing(ctx, token); !errors.Is(err, ErrDenied) {
 		t.Fatal("disabled donor can share", err)
+	}
+	// The token now points at Second via last-touch; a disabled referrer's name
+	// must not be disclosed on a subsequent capture.
+	if _, err = pool.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", secondID); err != nil {
+		t.Fatal(err)
 	}
 	existing, err := first.CaptureReferral(ctx, code, "LINK", touch.Token, now)
 	if err != nil || existing.PublicName != nil {
