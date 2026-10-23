@@ -66,7 +66,46 @@ func TestRecoveryMessagesSuppressObsoleteAndRecoveredReminders(t *testing.T) {
 	result := f.checkout(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	due := now.Add(-8 * 24 * time.Hour)
+	// Failure two days ago: the day-0 reminder is due now, the day-5 reminder
+	// of the 7-day grace is still three days out.
+	due := now.Add(-2 * 24 * time.Hour)
+	event := f.receive(t, "invoice.payment_failed", invoice(result.CheckoutID, "in_"+result.CheckoutID, due, false))
+	f.process(t)
+	assertEventProcessed(t, f, event, true)
+	transport := &recordingMail{}
+	w := notificationWorker(t, transport)
+	if worked, err := w.DeliverNext(ctx, now.Add(time.Second)); err != nil || !worked {
+		t.Fatal(worked, err)
+	}
+	if len(transport.messages) != 1 || !strings.Contains(transport.messages[0].Body, "streak is at risk") {
+		t.Fatal("wrong reminder delivery")
+	}
+	var reason string
+	if _, err := f.db.Exec(ctx, "UPDATE donor_billing_periods SET status='PAID' WHERE donor_id=$1", f.donorID); err != nil {
+		t.Fatal(err)
+	}
+	// The day-5 reminder becomes due only after recovery; it must be suppressed,
+	// not sent as a second warning.
+	if worked, err := w.DeliverNext(ctx, due.Add(5*24*time.Hour+time.Second)); err != nil || !worked {
+		t.Fatal(worked, err)
+	}
+	if len(transport.messages) != 1 {
+		t.Fatal("recovered gift received another warning")
+	}
+	if err := f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='5'", f.donorID).Scan(&reason); err != nil ||
+		reason != "payment_recovered" {
+		t.Fatal(reason, err)
+	}
+}
+
+func TestRecoveryReminderSupersededByLaterGraceDay(t *testing.T) {
+	f := newWorkerFixture(t, "MONTHLY")
+	result := f.checkout(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	// Failure six days ago: within the 7-day grace, both the day-0 and the day-5
+	// reminder are due, so the worker sends day 5 and supersedes day 0.
+	due := now.Add(-6 * 24 * time.Hour)
 	event := f.receive(t, "invoice.payment_failed", invoice(result.CheckoutID, "in_"+result.CheckoutID, due, false))
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
@@ -83,19 +122,6 @@ func TestRecoveryMessagesSuppressObsoleteAndRecoveredReminders(t *testing.T) {
 	var reason string
 	if err := f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='0'", f.donorID).Scan(&reason); err != nil ||
 		reason != "newer_reminder_due" {
-		t.Fatal(reason, err)
-	}
-	if _, err := f.db.Exec(ctx, "UPDATE donor_billing_periods SET status='PAID' WHERE donor_id=$1", f.donorID); err != nil {
-		t.Fatal(err)
-	}
-	if worked, err := w.DeliverNext(ctx, due.Add(13*24*time.Hour+time.Second)); err != nil || !worked {
-		t.Fatal(worked, err)
-	}
-	if len(transport.messages) != 1 {
-		t.Fatal("recovered gift received another warning")
-	}
-	if err := f.db.QueryRow(ctx, "SELECT suppressed_reason FROM donor_messages WHERE donor_id=$1 AND context->>'day'='13'", f.donorID).Scan(&reason); err != nil ||
-		reason != "payment_recovered" {
 		t.Fatal(reason, err)
 	}
 }

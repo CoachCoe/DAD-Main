@@ -84,7 +84,8 @@ func referralLapsed(ctx context.Context, q *queries.Queries, data payments.Objec
 
 // recoverySuppression stops a failed-payment reminder once the payment
 // recovers, the gift is cancelled, grace ends, or a later reminder is due.
-// Reminders go out on the failure day and days 7 and 13 of the 14-day grace.
+// Reminders go out on the failure day and day 5 of the 7-day grace (PRD §6.11
+// "Streak at risk (grace day 5)"); the lapse at day 7 is a separate trigger.
 func recoverySuppression(
 	ctx context.Context,
 	q *queries.Queries,
@@ -98,13 +99,11 @@ func recoverySuppression(
 	}
 	elapsed := now.Sub(period.DueAt.Time)
 	latest := int64(0)
-	if elapsed >= 13*24*time.Hour {
-		latest = 13
-	} else if elapsed >= 7*24*time.Hour {
-		latest = 7
+	if elapsed >= 5*24*time.Hour {
+		latest = 5
 	}
 	day, err := data.Int("day")
-	if err != nil || (day != 0 && day != 7 && day != 13) {
+	if err != nil || (day != 0 && day != 5) {
 		return "", payments.ErrFacts
 	}
 	if day < latest {

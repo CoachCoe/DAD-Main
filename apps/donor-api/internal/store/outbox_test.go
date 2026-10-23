@@ -79,7 +79,7 @@ func TestFinancialOutboxDeduplicationYearBoundaryAndRollback(t *testing.T) {
 	}
 	var count int
 	if err = tx.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 OR donor_id=$2", id, referrer).Scan(&count); err != nil ||
-		count != 7 {
+		count != 6 {
 		t.Fatalf("wrong outbox cardinality: %d %v", count, err)
 	}
 	var year int

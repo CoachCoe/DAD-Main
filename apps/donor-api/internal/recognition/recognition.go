@@ -16,7 +16,7 @@ var (
 	ErrIncomplete = errors.New("incomplete billing history")
 )
 
-const Grace = 14 * 24 * time.Hour
+const Grace = 7 * 24 * time.Hour
 
 // PauseFreezeEnd follows the billing anniversary, clamping month-end dates.
 func PauseFreezeEnd(start time.Time) time.Time {
@@ -28,8 +28,9 @@ func PauseFreezeEnd(start time.Time) time.Time {
 // NewYork is the zone of the Founding Donor cutoff and receipt tax years.
 var NewYork = mustLoadLocation("America/New_York")
 
-// FoundingCutoff is exclusive: a first gift must succeed before it.
-var FoundingCutoff = time.Date(2027, 4, 22, 0, 0, 0, 0, NewYork)
+// FoundingCutoff is exclusive: a first gift must succeed before it. Per the R1
+// PRD (Appendix A #1), Founding Donor status requires a gift before January 2027.
+var FoundingCutoff = time.Date(2027, 1, 1, 0, 0, 0, 0, NewYork)
 
 func mustLoadLocation(name string) *time.Location {
 	zone, err := time.LoadLocation(name)

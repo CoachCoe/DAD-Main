@@ -569,7 +569,7 @@ func TestEarlierPaymentCorrectsConversionAndPreservesFoundingAward(t *testing.T)
 	}
 	defer tx.Rollback(ctx)
 	h := newHistoryFixture(t, tx)
-	later := time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)
+	later := time.Date(2026, 12, 15, 0, 0, 0, 0, time.UTC)
 	earlier := later.AddDate(0, -1, 0)
 	window := later.AddDate(0, 1, 0)
 	h.gift(

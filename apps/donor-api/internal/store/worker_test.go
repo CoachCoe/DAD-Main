@@ -388,7 +388,7 @@ func TestInvoiceFailureRecoveryPreservesGrace(t *testing.T) {
 	f.process(t)
 	p, err := queries.New(f.db).Projection(ctx, f.donorID)
 	if err != nil || !p.CurrentStreak.Valid || p.CurrentStreak.Int32 != 1 || !p.AtRisk ||
-		!p.GraceEndsAt.Time.Equal(due.Add(14*24*time.Hour)) {
+		!p.GraceEndsAt.Time.Equal(due.Add(7*24*time.Hour)) {
 		t.Fatalf("grace lost: %+v %v", p, err)
 	}
 	f.receive(t, "invoice.payment_succeeded", invoice(checkout.CheckoutID, second, due, true))

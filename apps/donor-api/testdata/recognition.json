@@ -719,13 +719,13 @@
   {
     "name": "founding before New York cutoff",
     "operation": "founding",
-    "as_of": "2027-04-22T04:00:00Z",
+    "as_of": "2027-01-01T04:00:00Z",
     "gifts": [
       {
         "id": "g1",
         "donor_id": "ben",
         "amount_minor": 3000,
-        "paid_at": "2027-04-22T03:59:59.999999Z",
+        "paid_at": "2026-12-31T23:59:59.999999Z",
         "frequency": "ONE_TIME",
         "candidate": null,
         "period_id": "",
@@ -744,13 +744,13 @@
   {
     "name": "founding cutoff exclusive",
     "operation": "founding",
-    "as_of": "2027-04-22T04:00:00Z",
+    "as_of": "2027-01-01T05:00:00Z",
     "gifts": [
       {
         "id": "g1",
         "donor_id": "ben",
         "amount_minor": 3000,
-        "paid_at": "2027-04-22T04:00:00Z",
+        "paid_at": "2027-01-01T05:00:00Z",
         "frequency": "ONE_TIME",
         "candidate": null,
         "period_id": "",
@@ -839,7 +839,7 @@
   {
     "name": "failed renewal grace",
     "operation": "streak",
-    "as_of": "2027-02-14T23:59:59Z",
+    "as_of": "2027-02-07T23:59:59Z",
     "gifts": [
       {
         "id": "g1",
@@ -878,14 +878,14 @@
       "current": 1,
       "best": 1,
       "at_risk": true,
-      "grace_ends_at": "2027-02-15T00:00:00Z",
+      "grace_ends_at": "2027-02-08T00:00:00Z",
       "since": "2027-01-01T00:00:00Z"
     }
   },
   {
     "name": "grace expiration",
     "operation": "streak",
-    "as_of": "2027-02-15T00:00:00Z",
+    "as_of": "2027-02-08T00:00:00Z",
     "gifts": [
       {
         "id": "g1",
@@ -991,7 +991,7 @@
   {
     "name": "unobserved renewal incomplete after grace",
     "operation": "streak",
-    "as_of": "2027-02-15T00:00:00Z",
+    "as_of": "2027-02-08T00:00:00Z",
     "gifts": [
       {
         "id": "g1",
@@ -1063,7 +1063,7 @@
   {
     "name": "unobserved renewal retains count within grace",
     "operation": "streak",
-    "as_of": "2027-02-14T23:59:59Z",
+    "as_of": "2027-02-07T23:59:59Z",
     "gifts": [
       {
         "id": "g1",
@@ -1203,7 +1203,7 @@
         "id": "g2",
         "donor_id": "ben",
         "amount_minor": 3000,
-        "paid_at": "2027-02-09T00:00:00Z",
+        "paid_at": "2027-02-07T00:00:00Z",
         "frequency": "MONTHLY",
         "candidate": null,
         "period_id": "feb",

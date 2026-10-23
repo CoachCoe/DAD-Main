@@ -151,7 +151,7 @@ func TestFirstPaymentTimestampTiesUseStableObjectID(t *testing.T) {
 }
 
 func TestFoundingQualifiedAtUsesEarliestQualifyingGift(t *testing.T) {
-	early := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	early := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
 	gifts := []Gift{
 		{ID: "late", DonorID: "ben", Amount: 100, PaidAt: FoundingCutoff, Frequency: "ONE_TIME", Currency: "USD"},
 		{ID: "second", DonorID: "ben", Amount: 100, PaidAt: early.Add(time.Hour), Frequency: "ONE_TIME", Currency: "USD"},
