@@ -15,11 +15,10 @@ import (
 const anchorBackfillInterval = time.Hour
 
 // AnchorBackfill syncs subscriptions saved before their billing anchor was
-// stored, which offer no pause dates until synced and may otherwise wait a
-// month for an event about them. A pass starts once an interval and syncs
-// one subscription per call; one that fails is retried by the next pass, so
-// it cannot hold up the rest. Once every subscription has an anchor, a pass
-// is a single empty query.
+// stored, which may otherwise wait a month for an event about them. A pass
+// starts once an interval and syncs one subscription per call; one that fails
+// is retried by the next pass, so it cannot hold up the rest. Once every
+// subscription has an anchor, a pass is a single empty query.
 type AnchorBackfill struct {
 	DB      *pgxpool.Pool
 	Gateway payments.FinancialGateway

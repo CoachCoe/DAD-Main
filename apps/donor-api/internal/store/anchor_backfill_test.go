@@ -35,8 +35,9 @@ func TestAnchorBackfillSyncsSubscriptionsSavedWithoutOne(t *testing.T) {
 	if _, err := r.db.Exec(ctx, "UPDATE donor_subscriptions SET billing_anchor=NULL,observed_at=$2 WHERE attempt_id=$1", r.attempt, stale); err != nil {
 		t.Fatal(err)
 	}
-	if pause, err := r.service.PauseOptions(ctx, r.token); err != nil || pause.State != "unavailable" {
-		t.Fatal("pause dates offered without a billing anchor", pause, err)
+	var hasAnchor bool
+	if err := r.db.QueryRow(ctx, "SELECT billing_anchor IS NOT NULL FROM donor_subscriptions WHERE attempt_id=$1", r.attempt).Scan(&hasAnchor); err != nil || hasAnchor {
+		t.Fatal("billing anchor present before the backfill", hasAnchor, err)
 	}
 
 	backfill := &AnchorBackfill{DB: as(t, dbroles.StripeWorker), Gateway: r.sub}
@@ -48,9 +49,6 @@ func TestAnchorBackfillSyncsSubscriptionsSavedWithoutOne(t *testing.T) {
 	if err := r.db.QueryRow(ctx, "SELECT observed_at FROM donor_subscriptions WHERE attempt_id=$1 AND billing_anchor=$2", r.attempt, r.start).Scan(&observed); err != nil ||
 		!observed.After(stale) {
 		t.Fatal("backfill did not sync the billing anchor", observed, err)
-	}
-	if pause, err := r.service.PauseOptions(ctx, r.token); err != nil || pause.State != "ready" || len(pause.Options) != 3 {
-		t.Fatal("pause dates not offered after the backfill", pause, err)
 	}
 
 	reads := r.sub.retrievals

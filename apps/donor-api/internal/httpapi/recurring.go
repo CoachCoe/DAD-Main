@@ -15,12 +15,8 @@ import (
 type RecurringSource interface {
 	Details(context.Context, string) (store.RecurringDetails, error)
 	AmountOptions(context.Context, string) (store.AmountOptions, error)
-	PauseOptions(context.Context, string) (store.PauseOptions, error)
-	ResumeOptions(context.Context, string) (store.ResumeOptions, error)
 	PaymentMethodStatus(context.Context, string) (store.PaymentMethodStatus, error)
 	Cancel(context.Context, string, store.CancellationRequest) (store.RecurringDetails, error)
-	Pause(context.Context, string, store.PauseRequest) (store.PauseResult, error)
-	Resume(context.Context, string, store.ResumptionRequest) (store.Resumption, error)
 	ChangeAmount(context.Context, string, store.AmountRequest) (store.AmountChange, error)
 	BeginPaymentUpdate(context.Context, string, pgtype.UUID) (store.PaymentUpdate, error)
 }
@@ -78,42 +74,6 @@ func cancelRecurring(
 	b cancelBody,
 ) (store.RecurringDetails, error) {
 	return s.Cancel(ctx, session, store.CancellationRequest{RequestID: key, AttemptID: b.ID, PeriodEnd: b.End.Truncate(time.Microsecond)})
-}
-
-type pauseBody struct {
-	ID     pgtype.UUID `json:"subscription_id"`
-	Months int32       `json:"months"`
-	Start  time.Time   `json:"starts_at"`
-	End    time.Time   `json:"resumes_at"`
-}
-
-func (b pauseBody) valid() bool {
-	return b.ID.Valid && b.Months >= 1 && b.Months <= 3 && !b.Start.IsZero() && !b.End.IsZero()
-}
-
-func pauseRecurring(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b pauseBody) (store.PauseResult, error) {
-	return s.Pause(
-		ctx,
-		session,
-		store.PauseRequest{
-			RequestID: key,
-			AttemptID: b.ID,
-			Months:    b.Months,
-			StartsAt:  b.Start.Truncate(time.Microsecond),
-			ResumesAt: b.End.Truncate(time.Microsecond),
-		},
-	)
-}
-
-type resumeBody struct {
-	ID   pgtype.UUID `json:"pause_id"`
-	Next time.Time   `json:"next_renewal"`
-}
-
-func (b resumeBody) valid() bool { return b.ID.Valid && !b.Next.IsZero() }
-
-func resumeRecurring(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b resumeBody) (store.Resumption, error) {
-	return s.Resume(ctx, session, store.ResumptionRequest{RequestID: key, PauseID: b.ID, NextRenewal: b.Next.Truncate(time.Microsecond)})
 }
 
 type amountBody struct {

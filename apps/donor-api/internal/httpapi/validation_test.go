@@ -41,8 +41,6 @@ func TestHandlersValidateInputBeforeCallingServices(t *testing.T) {
 		{"POST", "/donor/me/recurring/cancel", `{"subscription_id":"` + testID + `","period_end":"2026-11-01T00:00:00Z"}`, true, 503},
 		{"POST", "/donor/me/recurring/cancel", `{"subscription_id":"` + testID + `","period_end":"2026-11-01T00:00:00Z"}`, false, 422},
 		{"POST", "/donor/me/recurring/cancel", `{"subscription_id":"` + testID + `"}`, true, 422},
-		{"POST", "/donor/me/recurring/pause", `{"subscription_id":"` + testID + `","months":4,"starts_at":"2026-11-01T00:00:00Z","resumes_at":"2027-03-01T00:00:00Z"}`, true, 422},
-		{"POST", "/donor/me/recurring/resume", `{"pause_id":"` + testID + `"}`, true, 422},
 		{"POST", "/donor/me/recurring/amount", `{"subscription_id":"` + testID + `","amount_minor":99,"previous_minor":3000,"effective_at":"2026-11-01T00:00:00Z"}`, true, 422},
 		{"POST", "/donor/me/payment-method/setup", "", true, 503},
 		{"POST", "/donor/me/payment-method/setup", "", false, 422},

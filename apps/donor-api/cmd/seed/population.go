@@ -43,8 +43,7 @@ const (
 	renewalFailure       = 0.05
 	cancelHazard         = 0.015 // per renewal, cancelled by the donor at period end
 	scheduledCancelShare = 0.02  // of live subscriptions, ending at the current period's end
-	pauseShare           = 0.04
-	unreportedShare      = 0.15 // of renewals due in the last 14 days
+	unreportedShare      = 0.15  // of renewals due in the last 14 days
 	refundShare          = 0.015
 	influenceAlpha       = 1.16 // Pareto shape: a few sharers refer hundreds
 	influenceCeiling     = 3000
@@ -116,7 +115,6 @@ type checkout struct {
 	periods      []*period
 	gifts        []*gift
 	sub          *subscription
-	pause        *pause
 	cancellation *cancellation
 }
 
@@ -162,13 +160,6 @@ type subscription struct {
 	stopsAt   time.Time // zero when renewals continue
 	anchor    time.Time
 	observed  time.Time
-}
-
-type pause struct {
-	id                 pgtype.UUID
-	months             int
-	starts, resumes    time.Time
-	created, confirmed time.Time
 }
 
 type cancellation struct {
@@ -308,16 +299,12 @@ func (g *generator) addGift(c *checkout, gift *gift) {
 
 // monthly bills renewals on the subscription's anniversary until now, with
 // failures recovered within or after grace, unrecovered failures, donor
-// cancellations, pauses, and renewals the processor has not reported yet.
+// cancellations, and renewals the processor has not reported yet.
 func (g *generator) monthly(c *checkout) {
 	d := c.donor
 	c.session, c.subscription = g.stripeID("cs_test_"), g.stripeID("sub_")
 	anchor := c.createdAt.Add(g.seconds(5 * time.Minute))
 	c.sub = &subscription{id: g.uuid(), status: "active", anchor: anchor}
-	pauseAt := -1
-	if g.r.Float64() < pauseShare {
-		pauseAt = 2 + g.r.IntN(12)
-	}
 	var lastEnds time.Time
 	run := 0
 	for k := 0; ; k++ {
@@ -325,21 +312,7 @@ func (g *generator) monthly(c *checkout) {
 		if due.After(g.now) {
 			break
 		}
-		if k == pauseAt {
-			months := 1 + g.r.IntN(3)
-			created := due.Add(-g.seconds(10 * day))
-			c.pause = &pause{
-				id:        g.uuid(),
-				months:    months,
-				starts:    due,
-				resumes:   addMonths(anchor, k+months),
-				created:   created,
-				confirmed: created.Add(time.Minute),
-			}
-			k += months - 1
-			continue
-		}
-		continuous := due.Equal(lastEnds) || (c.pause != nil && lastEnds.Equal(c.pause.starts) && due.Equal(c.pause.resumes))
+		continuous := due.Equal(lastEnds)
 		if continuous && g.r.Float64() < cancelHazard {
 			created := due.Add(-g.seconds(20 * day))
 			c.cancellation = &cancellation{id: g.uuid(), periodEnd: due, created: created, completed: created.Add(time.Minute)}
@@ -426,15 +399,9 @@ func (g *generator) monthly(c *checkout) {
 		c.sub.periodEnd = c.sub.stopsAt
 	}
 	next := lastEnds
-	if c.pause != nil && lastEnds.Equal(c.pause.starts) {
-		next = c.pause.resumes
-	}
 	stopped := !c.sub.stopsAt.IsZero() && !c.sub.stopsAt.After(g.now) && c.sub.stopsAt.Equal(next)
-	paused := c.pause != nil && !g.now.Before(c.pause.starts) && g.now.Before(c.pause.resumes) && c.pause.starts.Equal(lastEnds)
 	if stopped {
 		run, d.atRisk = 0, false
-	} else if paused {
-		d.atRisk = false
 	}
 	d.streak = run
 }

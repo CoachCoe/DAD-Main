@@ -34,9 +34,8 @@ export default function HowItWorks() {
       <h2>Streaks and recognition</h2>
       <p>
         Successful monthly gifts build your streak; one-time gifts contribute money but do not. A failed renewal has 14
-        days to recover before your active streak resets. Pausing for up to three months freezes your streak; it
-        continues when monthly giving resumes. Cancellation ends it at the first skipped renewal. Your historical best
-        stays recorded.
+        days to recover before your active streak resets. Cancellation ends it at the first skipped renewal. Your
+        historical best stays recorded.
       </p>
       <p>DAD launches on 22 April 2027. A first gift completed before launch earns a permanent Founding Donor badge.</p>
       <h2>Clear records, honest limits</h2>

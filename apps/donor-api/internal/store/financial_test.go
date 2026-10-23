@@ -169,7 +169,7 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	}
 }
 
-func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
+func TestProjectionKeepsContinuityAndHistoricalBest(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
@@ -180,7 +180,7 @@ func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
 	q := queries.New(tx)
 	donor, checkout, attempt := testID(t), testID(t), testID(t)
 	jan := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-	feb, apr, jun := jan.AddDate(0, 1, 0), jan.AddDate(0, 3, 0), jan.AddDate(0, 5, 0)
+	feb, mar, apr := jan.AddDate(0, 1, 0), jan.AddDate(0, 2, 0), jan.AddDate(0, 3, 0)
 	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", donor, donor.String()+"@example.org")
 	mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES($1,$2,3000,'MONTHLY')", checkout, donor)
 	mustExec(
@@ -198,26 +198,16 @@ func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
 		testID(t),
 		attempt,
 		donor,
-		jun,
 		apr,
-	)
-	mustExec(
-		t,
-		tx,
-		"INSERT INTO donor_pauses(id,donor_id,attempt_id,months,starts_at,resumes_at,confirmed_at) VALUES($1,$2,$3,2,$4,$5,$4)",
-		testID(t),
-		donor,
-		attempt,
-		feb,
-		apr,
+		mar,
 	)
 	var refundedGift pgtype.UUID
-	for i, due := range []time.Time{jan, apr, apr.AddDate(0, 1, 0)} {
+	for i, due := range []time.Time{jan, feb, mar} {
 		period, gift := testID(t), testID(t)
 		mustExec(
 			t,
 			tx,
-			"INSERT INTO donor_billing_periods(id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status) VALUES($1,$2,$3,$4,'sub_paused',$5,$6,'PAID')",
+			"INSERT INTO donor_billing_periods(id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status) VALUES($1,$2,$3,$4,'sub_fixture',$5,$6,'PAID')",
 			period,
 			donor,
 			checkout,
@@ -240,7 +230,7 @@ func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
 			refundedGift = gift
 		}
 	}
-	observed := jun.Add(-time.Hour)
+	observed := apr.Add(-time.Hour)
 	refund := testID(t)
 	mustExec(
 		t,
@@ -253,11 +243,11 @@ func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
 	)
 	got, err := projectFacts(ctx, q, donor, observed)
 	if err != nil || !got.CurrentStreak.Valid || got.CurrentStreak.Int32 != 1 || got.BestStreak != 3 {
-		t.Fatal("projection lost the attained best across a pause", got, err)
+		t.Fatal("projection lost the attained best after a mid-streak refund", got, err)
 	}
-	mustExec(t, tx, "UPDATE donor_subscriptions SET stops_at=$2 WHERE donor_id=$1", donor, jun)
-	got, err = projectFacts(ctx, q, donor, jun)
+	mustExec(t, tx, "UPDATE donor_subscriptions SET stops_at=$2 WHERE donor_id=$1", donor, apr)
+	got, err = projectFacts(ctx, q, donor, apr)
 	if err != nil || !got.CurrentStreak.Valid || got.CurrentStreak.Int32 != 0 || got.BestStreak != 3 {
-		t.Fatal("later cancellation changed the historical pause", got, err)
+		t.Fatal("later cancellation changed the historical best", got, err)
 	}
 }

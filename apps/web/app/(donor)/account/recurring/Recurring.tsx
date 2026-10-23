@@ -15,9 +15,8 @@ type Subscription = Schema<"Subscription">;
 
 const cancellable = (status: string) => ["active", "past_due", "unpaid"].includes(status);
 const settingUp = (status: string) => ["incomplete", "trialing"].includes(status);
-// A pause through DAD keeps the subscription active with collection paused;
 // Stripe's own `paused` status follows a trial that ended without a card.
-const paused = (subscription: Subscription) => subscription.pause !== null || subscription.status === "paused";
+const paused = (subscription: Subscription) => subscription.status === "paused";
 const preparingCopy = "We’re confirming your new monthly gift with Stripe. This usually takes a few seconds.";
 const date = (instant: string) => <time dateTime={instant}>{formatDate(instant)}</time>;
 const endingCopy = (stops: string) =>
@@ -31,16 +30,7 @@ function Status({ subscription }: { subscription: Subscription }) {
         charged.
       </p>
     );
-  const { pause } = subscription;
-  if (pause && Date.parse(pause.starts_at) > Date.now()) {
-    return (
-      <p>
-        Your monthly gift pauses from {date(pause.starts_at)}. Giving resumes {date(pause.resumes_at)}.
-      </p>
-    );
-  }
-  if (paused(subscription))
-    return <p>Your monthly gift is paused.{pause && <> Giving resumes {date(pause.resumes_at)}.</>}</p>;
+  if (paused(subscription)) return <p>Your monthly gift is paused.</p>;
   if (settingUp(subscription.status)) return <p>Your monthly gift is still being set up. Refresh in a moment.</p>;
   return <p>Next renewal: {date(subscription.period_end)}.</p>;
 }
@@ -145,15 +135,7 @@ export default function RecurringGiving() {
               )}
               <nav aria-label="Manage monthly giving" className="links">
                 <Link href="/account/payment-method">Update payment method</Link>
-                {changeable && (
-                  <>
-                    <Link href="/account/pause">Pause monthly giving</Link>
-                    <Link href="/account/amount">Change monthly amount</Link>
-                  </>
-                )}
-                {!subscription.stops_at && subscription.pause && (
-                  <Link href="/account/resume">Resume at next renewal</Link>
-                )}
+                {changeable && <Link href="/account/amount">Change monthly amount</Link>}
               </nav>
               {!subscription.stops_at &&
                 cancellable(subscription.status) &&

@@ -167,34 +167,6 @@ func (q *Queries) ConfirmAmountChange(ctx context.Context, arg ConfirmAmountChan
 	return err
 }
 
-const confirmPause = `-- name: ConfirmPause :exec
-UPDATE donor_pauses SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1
-`
-
-type ConfirmPauseParams struct {
-	ID          pgtype.UUID        `json:"id"`
-	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
-}
-
-func (q *Queries) ConfirmPause(ctx context.Context, arg ConfirmPauseParams) error {
-	_, err := q.db.Exec(ctx, confirmPause, arg.ID, arg.ConfirmedAt)
-	return err
-}
-
-const confirmResumption = `-- name: ConfirmResumption :exec
-UPDATE donor_resumptions SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1
-`
-
-type ConfirmResumptionParams struct {
-	ID          pgtype.UUID        `json:"id"`
-	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
-}
-
-func (q *Queries) ConfirmResumption(ctx context.Context, arg ConfirmResumptionParams) error {
-	_, err := q.db.Exec(ctx, confirmResumption, arg.ID, arg.ConfirmedAt)
-	return err
-}
-
 const enrichGift = `-- name: EnrichGift :exec
 UPDATE donor_gifts SET stripe_payment_intent_id=$2,period_id=$3 WHERE id=$1
 `
@@ -509,26 +481,6 @@ func (q *Queries) LatestAmountChange(ctx context.Context, checkoutID pgtype.UUID
 	return i, err
 }
 
-const latestPause = `-- name: LatestPause :one
-SELECT donor_id, attempt_id, months, starts_at, resumes_at, confirmed_at, id, created_at FROM donor_pauses WHERE attempt_id=$1 ORDER BY created_at DESC LIMIT 1
-`
-
-func (q *Queries) LatestPause(ctx context.Context, attemptID pgtype.UUID) (DonorPause, error) {
-	row := q.db.QueryRow(ctx, latestPause, attemptID)
-	var i DonorPause
-	err := row.Scan(
-		&i.DonorID,
-		&i.AttemptID,
-		&i.Months,
-		&i.StartsAt,
-		&i.ResumesAt,
-		&i.ConfirmedAt,
-		&i.ID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const markPeriodPaid = `-- name: MarkPeriodPaid :exec
 UPDATE donor_billing_periods SET status='PAID' WHERE id=$1
 `
@@ -687,24 +639,6 @@ DELETE FROM donor_recurring_reservations WHERE attempt_id=$1
 func (q *Queries) ReleaseReservation(ctx context.Context, attemptID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, releaseReservation, attemptID)
 	return err
-}
-
-const resumptionForPause = `-- name: ResumptionForPause :one
-SELECT donor_id, pause_id, next_renewal, confirmed_at, id, created_at FROM donor_resumptions WHERE pause_id=$1
-`
-
-func (q *Queries) ResumptionForPause(ctx context.Context, pauseID pgtype.UUID) (DonorResumption, error) {
-	row := q.db.QueryRow(ctx, resumptionForPause, pauseID)
-	var i DonorResumption
-	err := row.Scan(
-		&i.DonorID,
-		&i.PauseID,
-		&i.NextRenewal,
-		&i.ConfirmedAt,
-		&i.ID,
-		&i.CreatedAt,
-	)
-	return i, err
 }
 
 const retryStripeEvent = `-- name: RetryStripeEvent :execrows

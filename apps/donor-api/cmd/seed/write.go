@@ -191,13 +191,6 @@ func (p *population) tables() []table {
 				}
 			}
 		}},
-		{"donor_pauses", "id donor_id attempt_id months starts_at resumes_at confirmed_at created_at", func(emit func(...any)) {
-			for c := range p.checkouts {
-				if x := c.pause; x != nil {
-					emit(x.id, c.donor.id, c.attempt, int32(x.months), x.starts, x.resumes, x.confirmed, x.created)
-				}
-			}
-		}},
 		{
 			"donor_stripe_events",
 			"id stripe_event_id event_type occurred_at data processed_at attempts available_at created_at",

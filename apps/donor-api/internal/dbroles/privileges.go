@@ -115,8 +115,6 @@ var grants = map[string]map[Role]string{
 	"donor_subscription_leases":    {API: "SELECT, INSERT, UPDATE, DELETE"},
 	"donor_recurring_reservations": {API: "SELECT, INSERT, DELETE", StripeWorker: "SELECT, DELETE"},
 	"donor_amount_changes":         {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE"},
-	"donor_pauses":                 {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT"},
-	"donor_resumptions":            {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT"},
 	"donor_cancellations":          {API: "SELECT, INSERT, UPDATE"},
 	"donor_payment_updates":        {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, UPDATE"},
 	"donor_stripe_budgets":         {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT, INSERT, UPDATE"},

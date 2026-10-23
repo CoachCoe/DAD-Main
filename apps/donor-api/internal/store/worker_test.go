@@ -127,8 +127,6 @@ func newWorkerFixture(t *testing.T, frequency string) *workerFixture {
 			"DELETE FROM donor_login_emails WHERE donor_id=$1",
 			"DELETE FROM donor_subscription_leases WHERE donor_id=$1",
 			"DELETE FROM donor_subscriptions WHERE donor_id=$1",
-			"DELETE FROM donor_resumptions WHERE donor_id=$1",
-			"DELETE FROM donor_pauses WHERE donor_id=$1",
 			"DELETE FROM donor_amount_changes WHERE donor_id=$1",
 			"DELETE FROM donor_payment_updates WHERE donor_id=$1",
 		} {

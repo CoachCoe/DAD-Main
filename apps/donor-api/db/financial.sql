@@ -16,12 +16,6 @@ FROM donor_refund_observations o JOIN donor_refunds r ON r.id=o.refund_id
 JOIN donor_gifts g ON g.id=r.gift_id
 WHERE g.donor_id=$1 AND o.observed_at <= $2 ORDER BY o.observed_at, o.id;
 
--- name: PauseWindows :many
-SELECT p.starts_at, p.resumes_at, s.stops_at, r.next_renewal
-FROM donor_pauses p JOIN donor_subscriptions s ON s.attempt_id=p.attempt_id
-LEFT JOIN donor_resumptions r ON r.pause_id=p.id AND r.confirmed_at IS NOT NULL
-WHERE p.donor_id=$1 AND p.confirmed_at IS NOT NULL;
-
 -- name: StoppedPeriods :many
 SELECT stops_at FROM donor_subscriptions WHERE donor_id=$1 AND stops_at IS NOT NULL;
 

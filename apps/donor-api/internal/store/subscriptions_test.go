@@ -169,9 +169,6 @@ func TestInvalidSubscriptionRollsBackBindingAndProjection(t *testing.T) {
 			subscriptionItem(r)["price"].(map[string]any)["unit_amount"] = 9000
 		},
 		"cancel midmonth": func(r map[string]any) { r["cancel_at"] = time.Now().Unix() },
-		"pause without authorization": func(r map[string]any) {
-			r["pause_collection"] = map[string]any{"behavior": "void", "resumes_at": time.Now().Add(90 * 24 * time.Hour).Unix()}
-		},
 	}
 	for name, edit := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -197,55 +194,27 @@ func TestInvalidSubscriptionRollsBackBindingAndProjection(t *testing.T) {
 	}
 }
 
-func TestReconcileAuthorizedAmountPauseAndResumption(t *testing.T) {
+func TestReconcileAuthorizedAmount(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	result := f.checkout(t)
 	ctx := context.Background()
 	start := time.Now().UTC().Truncate(time.Second).Add(-24 * time.Hour)
 	end := start.Add(30 * 24 * time.Hour)
-	var attempt pgtype.UUID
-	if err := f.db.QueryRow(ctx, "SELECT id FROM donor_stripe_checkouts WHERE checkout_id=$1", result.CheckoutID).Scan(&attempt); err != nil {
-		t.Fatal(err)
-	}
-	change, pause, resume := testID(t), testID(t), testID(t)
+	change := testID(t)
 	if _, err := f.db.Exec(ctx, `INSERT INTO donor_amount_changes(id,donor_id,checkout_id,previous_minor,amount_minor,effective_at,item_id,product_id) VALUES($1,$2,$3,3000,9000,$4,'si_fixture','prod_fixture')`, change, f.donorID, result.CheckoutID, end); err != nil {
-		t.Fatal(err)
-	}
-	until := end.Add(60 * 24 * time.Hour)
-	if _, err := f.db.Exec(ctx, `INSERT INTO donor_pauses(id,donor_id,attempt_id,months,starts_at,resumes_at) VALUES($1,$2,$3,2,$4,$5)`, pause, f.donorID, attempt, end, until); err != nil {
 		t.Fatal(err)
 	}
 	remote := subscription(result.CheckoutID, start)
 	subscriptionItem(remote)["price"].(map[string]any)["unit_amount"] = 9000
-	remote["pause_collection"] = map[string]any{"behavior": "void", "resumes_at": until.Unix()}
 	f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, remote)
 	event := f.receive(t, "customer.subscription.updated", remote)
 	f.process(t)
 	assertEventProcessed(t, f, event, true)
 	var confirmed bool
-	for _, table := range []string{"donor_amount_changes", "donor_pauses"} {
-		if err := f.db.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM "+table+" WHERE donor_id=$1", f.donorID).Scan(&confirmed); err != nil ||
-			!confirmed {
-			t.Fatal("authorization not confirmed", table, err)
-		}
-	}
-	if _, err := f.db.Exec(ctx, `INSERT INTO donor_resumptions(id,donor_id,pause_id,next_renewal) VALUES($1,$2,$3,$4)`, resume, f.donorID, pause, end); err != nil {
-		t.Fatal(err)
-	}
-	remote["pause_collection"] = map[string]any{"behavior": "void", "resumes_at": end.Unix()}
-	f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, remote)
-	event = f.receive(t, "customer.subscription.updated", remote)
-	f.process(t)
-	assertEventProcessed(t, f, event, true)
-	if err := f.db.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM donor_resumptions WHERE id=$1", resume).Scan(&confirmed); err != nil ||
+	if err := f.db.QueryRow(ctx, "SELECT confirmed_at IS NOT NULL FROM donor_amount_changes WHERE donor_id=$1", f.donorID).Scan(&confirmed); err != nil ||
 		!confirmed {
-		t.Fatal("resumption not confirmed", err)
+		t.Fatal("authorization not confirmed", err)
 	}
-	remote["pause_collection"] = nil
-	f.gateway.subscriptions["sub_"+result.CheckoutID] = paymentObject(t, remote)
-	event = f.receive(t, "customer.subscription.updated", remote)
-	f.process(t)
-	assertEventProcessed(t, f, event, false)
 }
 
 func TestInvoiceConfirmsPendingAmountWithoutRepricingPriorPeriod(t *testing.T) {

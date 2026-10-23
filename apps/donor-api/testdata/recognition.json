@@ -53,7 +53,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "alice": {
         "link_count": 1,
@@ -106,7 +105,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "alice": {
         "link_count": 0,
@@ -152,7 +150,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "alice": {
         "link_count": 1,
@@ -198,7 +195,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "alice": {
         "link_count": 1,
@@ -244,7 +240,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "alice": {
         "link_count": 1,
@@ -290,7 +285,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "alice": {
         "link_count": 1,
@@ -336,7 +330,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "alice": {
         "link_count": 1,
@@ -396,7 +389,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "alice": {
         "link_count": 1,
@@ -443,7 +435,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {}
   },
   {
@@ -472,7 +463,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {}
   },
   {
@@ -501,7 +491,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {}
   },
   {
@@ -544,7 +533,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "g1": 3000
     }
@@ -589,7 +577,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "error": "invalid"
   },
   {
@@ -627,7 +614,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "error": "invalid"
   },
   {
@@ -665,7 +651,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "error": "invalid"
   },
   {
@@ -711,7 +696,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "g1": 2000
     }
@@ -738,7 +722,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": true
   },
   {
@@ -763,7 +746,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": false
   },
   {
@@ -777,7 +759,6 @@
     "previous_best": 0,
     "previously_awarded": true,
     "stops": [],
-    "pauses": [],
     "expected": true
   },
   {
@@ -827,7 +808,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "current": 2,
       "best": 2,
@@ -873,7 +853,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "current": 1,
       "best": 1,
@@ -919,7 +898,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "current": 0,
       "best": 1,
@@ -954,7 +932,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "current": 0,
       "best": 0,
@@ -985,7 +962,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "error": "incomplete"
   },
   {
@@ -1018,7 +994,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "error": "incomplete"
   },
   {
@@ -1051,7 +1026,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "current": 1,
       "best": 1,
@@ -1090,7 +1064,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "current": 1,
       "best": 1,
@@ -1131,233 +1104,9 @@
     "stops": [
       "2027-02-01T00:00:00Z"
     ],
-    "pauses": [],
     "expected": {
       "current": 0,
       "best": 1,
-      "at_risk": false,
-      "grace_ends_at": null,
-      "since": null
-    }
-  },
-  {
-    "name": "active pause boundary",
-    "operation": "streak",
-    "as_of": "2027-02-01T00:00:00Z",
-    "gifts": [
-      {
-        "id": "g1",
-        "donor_id": "ben",
-        "amount_minor": 3000,
-        "paid_at": "2027-01-01T00:00:00Z",
-        "frequency": "MONTHLY",
-        "candidate": null,
-        "period_id": "jan",
-        "currency": "USD"
-      }
-    ],
-    "refunds": [],
-    "periods": [
-      {
-        "id": "jan",
-        "donor_id": "ben",
-        "due_at": "2027-01-01T00:00:00Z",
-        "ends_at": "2027-02-01T00:00:00Z",
-        "status": "EXPECTED"
-      }
-    ],
-    "donor_id": "ben",
-    "previous_best": 0,
-    "previously_awarded": false,
-    "stops": [],
-    "pauses": [
-      {
-        "start": "2027-02-01T00:00:00Z",
-        "end": "2027-03-01T00:00:00Z"
-      }
-    ],
-    "expected": {
-      "current": 1,
-      "best": 1,
-      "at_risk": false,
-      "grace_ends_at": null,
-      "since": "2027-01-01T00:00:00Z"
-    }
-  },
-  {
-    "name": "resumption within freeze window continues streak",
-    "operation": "streak",
-    "as_of": "2027-02-16T00:00:00Z",
-    "gifts": [
-      {
-        "id": "g1",
-        "donor_id": "ben",
-        "amount_minor": 3000,
-        "paid_at": "2027-01-01T00:00:00Z",
-        "frequency": "MONTHLY",
-        "candidate": null,
-        "period_id": "jan",
-        "currency": "USD"
-      },
-      {
-        "id": "g2",
-        "donor_id": "ben",
-        "amount_minor": 3000,
-        "paid_at": "2027-02-07T00:00:00Z",
-        "frequency": "MONTHLY",
-        "candidate": null,
-        "period_id": "feb",
-        "currency": "USD"
-      }
-    ],
-    "refunds": [],
-    "periods": [
-      {
-        "id": "jan",
-        "donor_id": "ben",
-        "due_at": "2027-01-01T00:00:00Z",
-        "ends_at": "2027-02-01T00:00:00Z",
-        "status": "EXPECTED"
-      },
-      {
-        "id": "feb",
-        "donor_id": "ben",
-        "due_at": "2027-02-01T00:00:00Z",
-        "ends_at": "2027-03-01T00:00:00Z",
-        "status": "EXPECTED"
-      }
-    ],
-    "donor_id": "ben",
-    "previous_best": 0,
-    "previously_awarded": false,
-    "stops": [],
-    "pauses": [
-      {
-        "start": "2027-02-01T00:00:00Z",
-        "end": "2027-02-10T00:00:00Z"
-      }
-    ],
-    "expected": {
-      "current": 2,
-      "best": 2,
-      "at_risk": false,
-      "grace_ends_at": null,
-      "since": "2027-01-01T00:00:00Z"
-    }
-  },
-  {
-    "name": "pause within freeze window keeps streak before cap",
-    "operation": "streak",
-    "as_of": "2027-04-15T00:00:00Z",
-    "gifts": [
-      {
-        "id": "g1",
-        "donor_id": "ben",
-        "amount_minor": 3000,
-        "paid_at": "2027-01-01T00:00:00Z",
-        "frequency": "MONTHLY",
-        "candidate": null,
-        "period_id": "jan",
-        "currency": "USD"
-      }
-    ],
-    "refunds": [],
-    "periods": [
-      {
-        "id": "jan",
-        "donor_id": "ben",
-        "due_at": "2027-01-01T00:00:00Z",
-        "ends_at": "2027-02-01T00:00:00Z",
-        "status": "EXPECTED"
-      }
-    ],
-    "donor_id": "ben",
-    "previous_best": 0,
-    "previously_awarded": false,
-    "stops": [],
-    "pauses": [
-      {
-        "start": "2027-02-01T00:00:00Z",
-        "end": "2027-09-01T00:00:00Z"
-      }
-    ],
-    "expected": {
-      "current": 1,
-      "best": 1,
-      "at_risk": false,
-      "grace_ends_at": null,
-      "since": "2027-01-01T00:00:00Z"
-    }
-  },
-  {
-    "name": "pause beyond three months lapses after cap",
-    "operation": "streak",
-    "as_of": "2027-05-02T00:00:00Z",
-    "gifts": [
-      {
-        "id": "g1",
-        "donor_id": "ben",
-        "amount_minor": 3000,
-        "paid_at": "2027-01-01T00:00:00Z",
-        "frequency": "MONTHLY",
-        "candidate": null,
-        "period_id": "jan",
-        "currency": "USD"
-      }
-    ],
-    "refunds": [],
-    "periods": [
-      {
-        "id": "jan",
-        "donor_id": "ben",
-        "due_at": "2027-01-01T00:00:00Z",
-        "ends_at": "2027-02-01T00:00:00Z",
-        "status": "EXPECTED"
-      }
-    ],
-    "donor_id": "ben",
-    "previous_best": 0,
-    "previously_awarded": false,
-    "stops": [],
-    "pauses": [
-      {
-        "start": "2027-02-01T00:00:00Z",
-        "end": "2027-09-01T00:00:00Z"
-      }
-    ],
-    "error": "incomplete"
-  },
-  {
-    "name": "one-time gift unaffected by pause",
-    "operation": "streak",
-    "as_of": "2027-02-01T00:00:00Z",
-    "gifts": [
-      {
-        "id": "g1",
-        "donor_id": "ben",
-        "amount_minor": 3000,
-        "paid_at": "2027-01-01T00:00:00Z",
-        "frequency": "ONE_TIME",
-        "candidate": null,
-        "period_id": "",
-        "currency": "USD"
-      }
-    ],
-    "refunds": [],
-    "periods": [],
-    "donor_id": "ben",
-    "previous_best": 0,
-    "previously_awarded": false,
-    "stops": [],
-    "pauses": [
-      {
-        "start": "2027-01-15T00:00:00Z",
-        "end": "2027-03-01T00:00:00Z"
-      }
-    ],
-    "expected": {
-      "current": 0,
-      "best": 0,
       "at_risk": false,
       "grace_ends_at": null,
       "since": null
@@ -1402,7 +1151,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "current": 1,
       "best": 1,
@@ -1450,7 +1198,6 @@
     "previous_best": 4,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "current": 0,
       "best": 4,
@@ -1506,7 +1253,6 @@
     "previous_best": 0,
     "previously_awarded": false,
     "stops": [],
-    "pauses": [],
     "expected": {
       "current": 1,
       "best": 1,

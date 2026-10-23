@@ -102,18 +102,6 @@ SELECT * FROM donor_amount_changes WHERE checkout_id=$1 ORDER BY created_at DESC
 -- name: ConfirmAmountChange :exec
 UPDATE donor_amount_changes SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1;
 
--- name: LatestPause :one
-SELECT * FROM donor_pauses WHERE attempt_id=$1 ORDER BY created_at DESC LIMIT 1;
-
--- name: ResumptionForPause :one
-SELECT * FROM donor_resumptions WHERE pause_id=$1;
-
--- name: ConfirmPause :exec
-UPDATE donor_pauses SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1;
-
--- name: ConfirmResumption :exec
-UPDATE donor_resumptions SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1;
-
 -- name: SaveSubscription :one
 INSERT INTO donor_subscriptions (id,attempt_id,donor_id,status,period_end,stops_at,billing_anchor,external_change,observed_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)

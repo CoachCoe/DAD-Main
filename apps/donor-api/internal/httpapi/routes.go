@@ -72,12 +72,8 @@ func (a *api) routes() []route {
 
 		a.donorRead("GET /donor/me/recurring", recurringRead(a, RecurringSource.Details)),
 		a.donorRead("GET /donor/me/recurring/amount", recurringRead(a, RecurringSource.AmountOptions)),
-		a.donorRead("GET /donor/me/recurring/pause", recurringRead(a, RecurringSource.PauseOptions)),
-		a.donorRead("GET /donor/me/recurring/resume", recurringRead(a, RecurringSource.ResumeOptions)),
 		a.donorRead("GET /donor/me/payment-method", recurringRead(a, RecurringSource.PaymentMethodStatus)),
 		a.donorWrite("POST /donor/me/recurring/cancel", recurringCommand(a, cancelRecurring)),
-		a.donorWrite("POST /donor/me/recurring/pause", recurringCommand(a, pauseRecurring)),
-		a.donorWrite("POST /donor/me/recurring/resume", recurringCommand(a, resumeRecurring)),
 		a.donorWrite("POST /donor/me/recurring/amount", recurringCommand(a, changeAmount)),
 		a.donorWrite("POST /donor/me/payment-method/setup", a.beginPaymentUpdate),
 

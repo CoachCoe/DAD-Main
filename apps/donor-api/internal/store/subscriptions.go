@@ -115,7 +115,7 @@ func currentSubscription(
 }
 
 // The caller holds the donor lock. Use current processor state rather than an
-// event snapshot so delayed delivery cannot undo a newer cancellation or pause.
+// event snapshot so delayed delivery cannot undo a newer cancellation.
 func reconcileSubscription(
 	ctx context.Context,
 	q *queries.Queries,
@@ -133,9 +133,8 @@ func reconcileSubscription(
 }
 
 // reconcileRemoteSubscription saves the processor's view of the attempt's
-// subscription, confirming any amount change, pause or resumption it shows,
-// with everything donor views read from it. Only a single-item monthly USD
-// subscription is supported.
+// subscription, confirming any amount change it shows, with everything donor
+// views read from it. Only a single-item monthly USD subscription is supported.
 func reconcileRemoteSubscription(
 	ctx context.Context,
 	q *queries.Queries,
@@ -173,9 +172,6 @@ func reconcileRemoteSubscription(
 		}
 	}
 	if err = reconcileAmount(ctx, q, draft, item, price, end, now); err != nil {
-		return queries.DonorSubscription{}, err
-	}
-	if err = reconcilePause(ctx, q, attempt, remote, now); err != nil {
 		return queries.DonorSubscription{}, err
 	}
 	var stops pgtype.Timestamptz
@@ -290,54 +286,4 @@ func reconcileAmount(
 		return nil
 	}
 	return payments.ErrFacts
-}
-
-// reconcilePause confirms a pause or early resumption the processor shows,
-// and refuses a subscription collecting again during a confirmed pause.
-func reconcilePause(
-	ctx context.Context,
-	q *queries.Queries,
-	attempt queries.DonorStripeCheckout,
-	remote payments.Object,
-	now time.Time,
-) error {
-	pause, err := q.LatestPause(ctx, attempt.ID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return err
-	}
-	hasPause := err == nil
-	var resume queries.DonorResumption
-	hasResume := false
-	if hasPause {
-		resume, err = q.ResumptionForPause(ctx, pause.ID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		hasResume = err == nil
-	}
-	if !remote.Absent("pause_collection") {
-		collection, err := remote.Object("pause_collection")
-		if err != nil {
-			return err
-		}
-		resumes, err := collection.Int("resumes_at")
-		if err != nil || collection.Text("behavior") != "void" {
-			return payments.ErrFacts
-		}
-		if hasResume && resumes == resume.NextRenewal.Time.Unix() {
-			return q.ConfirmResumption(ctx, queries.ConfirmResumptionParams{ID: resume.ID, ConfirmedAt: timestamp(now)})
-		}
-		if !hasPause || resumes != pause.ResumesAt.Time.Unix() || (hasResume && resume.ConfirmedAt.Valid) {
-			return payments.ErrFacts
-		}
-		return q.ConfirmPause(ctx, queries.ConfirmPauseParams{ID: pause.ID, ConfirmedAt: timestamp(now)})
-	}
-	until := pause.ResumesAt.Time
-	if hasResume && resume.ConfirmedAt.Valid {
-		until = resume.NextRenewal.Time
-	}
-	if hasPause && pause.ConfirmedAt.Valid && now.Before(until) && !terminalSubscription(remote.Text("status")) {
-		return payments.ErrFacts
-	}
-	return nil
 }
