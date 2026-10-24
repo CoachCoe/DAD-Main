@@ -66,4 +66,4 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxAmountMinor }
+func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxGiftMinor }

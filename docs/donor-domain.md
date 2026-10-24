@@ -9,10 +9,10 @@ contract, not a claim that every capability is already shipped.
 
 ## Giving and identity
 
-Stripe processes USD donations through hosted checkout. Monthly giving is preselected:
-$30, $90, or $150, or a custom amount from $1 to $999,999.99 in whole cents. Daily copy says
-"about" and the monthly charge has equal visual weight. One-time presets use the same
-amounts without daily framing. DAD absorbs fees; there is no cover-fees prompt.
+Stripe processes USD donations through hosted checkout. Giving is monthly only,
+preselected: $30, $90, or $150, or a custom amount from $1 to $900/mo ($30/day)
+in whole cents. Daily copy says "about" and the monthly charge has equal visual
+weight. DAD absorbs fees; there is no cover-fees prompt.
 
 Giving requires an email, not an account. Matching is case-insensitive and does not
 remove dots or plus tags. Different addresses are separate identities until an explicit

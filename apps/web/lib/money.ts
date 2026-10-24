@@ -31,7 +31,7 @@ export function monthlyFraming(minor: number): { monthly: string; daily: string 
 }
 
 export const MIN_GIFT_MINOR = 100;
-export const MAX_GIFT_MINOR = 99_999_999;
+export const MAX_GIFT_MINOR = 90_000;
 
 /**
  * Parses a typed dollar amount into exact integer cents. Accepts what people naturally type

@@ -272,7 +272,7 @@
                     "format": "int64",
                     "description": "Integer USD cents.",
                     "minimum": 100,
-                    "maximum": 99999999
+                    "maximum": 90000
                   },
                   "frequency": {
                     "type": "string",
@@ -2188,7 +2188,7 @@
                     "type": "integer",
                     "format": "int64",
                     "minimum": 100,
-                    "maximum": 99999999
+                    "maximum": 90000
                   },
                   "previous_minor": {
                     "type": "integer",

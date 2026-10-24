@@ -689,6 +689,21 @@ func TestAmountChangeAppliesAtNextRenewal(t *testing.T) {
 	}
 }
 
+func TestAmountChangeRespectsTheGiftCeiling(t *testing.T) {
+	r := newRecurringFixture(t)
+	ctx := context.Background()
+	// A cent over the $900/mo ceiling is refused before any processor call.
+	over := AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 90001, Previous: 3000, EffectiveAt: r.end}
+	if _, err := r.service.ChangeAmount(ctx, r.token, over); !errors.Is(err, payments.ErrFacts) {
+		t.Fatal("amount above the ceiling accepted", err)
+	}
+	// Exactly the ceiling ($30/day) is allowed.
+	at := AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 90000, Previous: 3000, EffectiveAt: r.end}
+	if _, err := r.service.ChangeAmount(ctx, r.token, at); err != nil {
+		t.Fatal("ceiling amount rejected", err)
+	}
+}
+
 func TestStaffCancellationIsAuditedWithReasonAndOutcome(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)

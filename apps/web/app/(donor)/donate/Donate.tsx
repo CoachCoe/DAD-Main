@@ -72,7 +72,7 @@ export default function Donate() {
     if (minor === null)
       return rejectAmount("Enter a dollar amount with no more than two decimal places, like 30 or 30.50.");
     if (minor < MIN_GIFT_MINOR || minor > MAX_GIFT_MINOR)
-      return rejectAmount("Enter an amount between $1 and $999,999.99.");
+      return rejectAmount("Enter an amount between $1 and $900.");
     const payload = JSON.stringify({
       email,
       amount_minor: minor,

@@ -66,7 +66,7 @@ export default function Amount() {
         : minor === data.amount_minor
           ? "That is already your monthly amount. Choose a different one."
           : validAmount(minor) === null
-            ? "Choose a monthly amount between $1 and $999,999.99."
+            ? "Choose a monthly amount between $1 and $900."
             : "";
     if (problem || minor === null) {
       setError(problem);
