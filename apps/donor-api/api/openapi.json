@@ -3515,41 +3515,6 @@
         }
       }
     },
-    "/donor/staff/enrolments": {
-      "get": {
-        "operationId": "enrolments",
-        "summary": "Recipient enrolment queue (inactive until R2)",
-        "tags": [
-          "Staff donors"
-        ],
-        "security": [
-          {
-            "staffCookieAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Enrolments"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        }
-      }
-    },
     "/donor/staff/donors/{donor_id}/claim-email": {
       "post": {
         "operationId": "requestClaim",
@@ -6721,24 +6686,6 @@
         },
         "required": [
           "action"
-        ],
-        "additionalProperties": false
-      },
-      "Enrolments": {
-        "type": "object",
-        "properties": {
-          "enrolments": {
-            "type": "array",
-            "items": {},
-            "description": "Always empty until R2."
-          },
-          "state": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "enrolments",
-          "state"
         ],
         "additionalProperties": false
       },

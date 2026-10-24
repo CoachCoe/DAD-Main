@@ -95,7 +95,6 @@ func (a *api) routes() []route {
 		a.staffRead("GET /donor/staff/donors/{donor_id}/actions", a.donorActions),
 		a.staffRead("GET /donor/staff/donors/{donor_id}/actions/pending", a.pendingAction),
 		a.staffRead("GET /donor/staff/audit", a.auditEvents),
-		a.staffRead("GET /donor/staff/enrolments", a.enrolments),
 		a.staffWrite("POST /donor/staff/donors/{donor_id}/claim-email", a.requestClaim),
 		a.staffWrite("POST /donor/staff/messages/{message_id}/resend", a.resendMessage),
 

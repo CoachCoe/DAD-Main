@@ -101,11 +101,6 @@ type PendingAction struct {
 	Action *queries.StaffPendingActionRow `json:"action"`
 }
 
-type Enrolments struct {
-	Enrolments []any  `json:"enrolments"`
-	State      string `json:"state"`
-}
-
 func (s *StaffService) SearchDonors(ctx context.Context, token, term string, offset int64) (DonorSearch, error) {
 	if !pageOffsetValid(offset) || !plainText(term, false) || utf8.RuneCountInString(term) > 320 {
 		return DonorSearch{}, ErrStaffInput
@@ -300,11 +295,4 @@ func (s *StaffService) PendingAction(ctx context.Context, token string, donorID,
 		}
 		return PendingAction{Action: &row}, nil
 	})
-}
-
-func (s *StaffService) Enrolments(ctx context.Context, token string) (Enrolments, error) {
-	if _, err := requireStaff(ctx, queries.New(s.DB), token, "data.export", time.Now().UTC()); err != nil {
-		return Enrolments{}, err
-	}
-	return Enrolments{State: "not_active_until_r2", Enrolments: []any{}}, nil
 }

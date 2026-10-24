@@ -44,9 +44,6 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 		if err != nil || len(rows) == 0 || !slices.Equal(rows[0], strings.Fields(dataset.fields)) {
 			t.Fatalf("%s: invalid CSV %v", name, err)
 		}
-		if name == "enrolments" && len(rows) != 1 {
-			t.Fatal("inactive enrolment export has records")
-		}
 		if name == "referrals" && !slices.Contains(rows[0], "referral_kind") {
 			t.Fatal("referral type omitted")
 		}
@@ -79,7 +76,7 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 			}
 		}
 	}
-	if err := s.Export(ctx, admin, "enrolments", failedExportWriter{}); !errors.Is(err, io.ErrClosedPipe) {
+	if err := s.Export(ctx, admin, "audit", failedExportWriter{}); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatal("writer failure swallowed", err)
 	}
 	var incomplete int
