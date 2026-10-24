@@ -8,7 +8,7 @@ permissions:
   contents: read
 jobs:
   contract:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, dad, linux]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -22,7 +22,7 @@ jobs:
           path: ${{ runner.temp }}/foundation/
           if-no-files-found: error
   swift-compatibility:
-    runs-on: macos-26
+    runs-on: [self-hosted, dad, macos]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -38,7 +38,7 @@ jobs:
   publish:
     if: startsWith(github.ref, 'refs/tags/mobile-foundation-v')
     needs: [contract, swift-compatibility]
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, dad, linux]
     permissions:
       contents: write
     steps:

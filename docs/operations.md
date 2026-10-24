@@ -861,3 +861,70 @@ Rehearse the restored app in an isolated environment with the encryption keys in
 when the dump was taken ([retired keys](#backups-and-retired-keys)) and
 outbound Stripe/email disabled. Establish recovery-point and recovery-time objectives,
 backup scheduling, retention, alerting, and off-host recovery ownership before launch.
+
+## Continuous integration
+
+CI runs in GitHub Actions (`.github/workflows/`). The `ci.yml`, `atm.yml`, and
+`mobile-foundation.yml` jobs run on **self-hosted runners** so a private repo's
+test matrix does not consume GitHub-hosted Actions minutes; `cloudflare-ranges.yml`
+stays on GitHub-hosted (`ubuntu-24.04`) because it is a weekly schedule that must
+fire even when no self-hosted machine is online.
+
+### Runner labels
+
+Jobs target runner labels, not a specific machine:
+
+- `[self-hosted, dad, linux]` — the Go/web/ledger/deploy/browser matrix. A Linux
+  host, or a macOS host with Docker Desktop (the Postgres service containers and
+  the sqlc/deploy Docker steps need a working Docker daemon).
+- `[self-hosted, dad, macos]` — the `swift-compatibility` job only, which compiles
+  the generated Swift contract with Apple tooling and therefore needs macOS.
+
+One macOS host with Docker Desktop can carry **both** labels: register it with
+`dad`, `macos`, and `linux` and it serves every job. A separate Linux host can
+carry `dad` + `linux` for the non-Swift jobs.
+
+### Host prerequisites
+
+The runner host must provide the toolchains the jobs assume (the `setup-go` /
+`setup-node` steps still download pinned versions, but Docker and system tools
+must exist):
+
+- **Docker** running (service containers + `make check-images` / sqlc).
+- **git**, **bash**, **make**, and the usual build tools.
+- For the `macos` label: a recent **Xcode / Swift toolchain** for `swift test`.
+- The `deploy` job validates compose and builds images; it needs no live AWS
+  credentials for CI (it only runs `config -q` and `check-images`), but keep any
+  real secrets out of the runner's environment.
+
+### Registering a runner (operator)
+
+From the repository's **Settings → Actions → Runners → New self-hosted runner**,
+follow GitHub's generated commands (they include a machine-specific registration
+token that only the repo admin can mint). In outline:
+
+```sh
+# In a dedicated working directory on the runner host:
+mkdir actions-runner && cd actions-runner
+# Download + extract the runner package GitHub shows for your OS/arch, then:
+./config.sh --url https://github.com/CoachCoe/DAD-Main \
+  --token <REGISTRATION_TOKEN_FROM_GITHUB> \
+  --labels dad,linux,macos \
+  --name dad-ci-1
+# Run interactively:
+./run.sh
+# Or install as an always-on service:
+./svc.sh install && ./svc.sh start
+```
+
+Adjust `--labels` to what the host can serve (drop `macos` on a Linux host, drop
+`linux` on a host without Docker). The runner then polls GitHub and picks up any
+job whose `runs-on` labels it satisfies.
+
+### Security
+
+Self-hosted runners are enabled here because `CoachCoe/DAD-Main` is **private**.
+GitHub strongly advises against self-hosted runners on public repositories: a pull
+request from a fork would run untrusted code on the runner host. If this repo is
+ever made public, move CI back to GitHub-hosted runners (revert the `runs-on`
+labels) before doing so.
