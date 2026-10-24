@@ -231,6 +231,7 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/me/network":                                      store.NetworkSummary{},
 		"GET /events/{event_id}":                                     store.EventView{},
 		"GET /donor/me/events/{event_id}":                            store.EventView{},
+		"POST /donor/me/events/check-in":                             store.CheckInResult{},
 	}
 	requests := map[string]any{
 		"POST /donor/passkeys/sign-in":                               donorPasskeySignInBody{},
@@ -247,6 +248,7 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund": refundBody{},
 		"POST /donor/staff/donors/{donor_id}/cancellation":           staffCancelBody{},
 		"POST /donor/staff/content/publish":                          store.PublicationRequest{},
+		"POST /donor/me/events/check-in":                             checkInBody{},
 		"POST /donor/staff/events":                                   store.EventInput{},
 		"POST /donor/staff/events/{event_id}":                        store.EventInput{},
 	}

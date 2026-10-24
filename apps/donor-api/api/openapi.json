@@ -6400,6 +6400,140 @@
         }
       }
     },
+    "/donor/staff/events/{event_id}/check-in-token": {
+      "post": {
+        "operationId": "eventCheckInToken",
+        "summary": "Get an event's QR check-in token for the venue (E-8)",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "token"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/events/check-in": {
+      "post": {
+        "operationId": "checkInEvent",
+        "summary": "Check in at an event by scanning its QR token (E-8)",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "description": "The event's QR check-in token."
+                  }
+                },
+                "required": [
+                  "token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckInResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/donor/me/events/invite-only": {
       "get": {
         "operationId": "inviteOnlyEvents",
@@ -9957,6 +10091,27 @@
         },
         "required": [
           "status"
+        ],
+        "additionalProperties": false
+      },
+      "CheckInResult": {
+        "type": "object",
+        "description": "The outcome of a QR check-in (E-8).",
+        "properties": {
+          "event_id": {
+            "type": "string"
+          },
+          "checked_in": {
+            "type": "boolean"
+          },
+          "already_checked_in": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "event_id",
+          "checked_in",
+          "already_checked_in"
         ],
         "additionalProperties": false
       },

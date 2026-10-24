@@ -127,3 +127,22 @@ WHERE publish_state='PUBLISHED'
 ORDER BY starts_at ASC, id
 LIMIT 100;
 
+-- name: CheckInReservation :exec
+-- Stamps the donor's reservation as checked in (E-8). Only sets it when a
+-- reservation exists and is not already checked in; cancelled reservations do
+-- not qualify.
+UPDATE donor_event_reservations
+SET checked_in_at=$3, updated_at=$3
+WHERE event_id=$1 AND donor_id=$2 AND status<>'CANCELLED' AND checked_in_at IS NULL;
+
+-- name: DonorVolunteerStats :one
+-- "Events volunteered" and volunteer hours (EM-8): the count of a donor's
+-- checked-in events and the sum of their durations in minutes. A donor with no
+-- check-ins gets zeroes.
+SELECT
+  count(*)::bigint AS events,
+  coalesce(sum(EXTRACT(EPOCH FROM (e.ends_at - e.starts_at)) / 60), 0)::bigint AS minutes
+FROM donor_event_reservations r
+JOIN donor_events e ON e.id = r.event_id
+WHERE r.donor_id=$1 AND r.checked_in_at IS NOT NULL;
+

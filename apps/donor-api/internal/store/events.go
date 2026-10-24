@@ -2,8 +2,12 @@ package store
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -510,7 +514,15 @@ type ReservationResult struct {
 // ReservationService books, waitlists, and cancels event reservations under
 // the event row lock so capacity is enforced race-free, and promotes the
 // waitlist head synchronously on cancel (PRD §6.10 E-4, E-9).
-type ReservationService struct{ DB *pgxpool.Pool }
+// ReservationService books, waitlists, and cancels event reservations under
+// the event row lock so capacity is enforced race-free, and promotes the
+// waitlist head synchronously on cancel (PRD §6.10 E-4, E-9). CheckInSecret is
+// the HMAC key the QR check-in token is signed with (E-8); when empty, check-in
+// is disabled.
+type ReservationService struct {
+	DB            *pgxpool.Pool
+	CheckInSecret string
+}
 
 // Reserve books the signed-in donor a spot at an event, or waitlists them when
 // it is full (E-4). Reserving is refused once the event has started. A donor
@@ -647,5 +659,119 @@ func (s ReservationService) promoteWaitlistHead(ctx context.Context, q *queries.
 	return q.QueueEventPush(ctx, queries.QueueEventPushParams{
 		ID: pushID, DonorID: head.DonorID, Category: eventPromotedCategory, DedupKey: dedup,
 		Context: context, AvailableAt: timestamp(now), ExpiresAt: event.StartsAt,
+	})
+}
+
+// ErrCheckIn is returned when a check-in token is invalid, the event is outside
+// its check-in window, or the donor holds no reservation to check in.
+var ErrCheckIn = errors.New("check-in is not valid for this event right now")
+
+// ErrCheckInDisabled is returned when no check-in secret is configured.
+var ErrCheckInDisabled = errors.New("event check-in is not configured")
+
+// checkInToken is the opaque, event-scoped QR payload (E-8):
+// base64url(event_id) "." base64url(HMAC-SHA256(event_id, secret)). It is not
+// guessable or forgeable without the secret, and a screenshotted token still
+// only works during the event window (enforced on check-in), so sharing it
+// buys nothing. It carries no per-use state, so the same QR works for every
+// attendee.
+func checkInToken(eventID pgtype.UUID, secret string) string {
+	raw := eventID.Bytes[:]
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(raw)
+	return base64.RawURLEncoding.EncodeToString(raw) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// parseCheckInToken verifies a token and returns the event id it names.
+func parseCheckInToken(token, secret string) (pgtype.UUID, bool) {
+	var id pgtype.UUID
+	idPart, sigPart, ok := strings.Cut(token, ".")
+	if !ok {
+		return id, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(idPart)
+	if err != nil || len(raw) != 16 {
+		return id, false
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(sigPart)
+	if err != nil {
+		return id, false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(raw)
+	if !hmac.Equal(sig, mac.Sum(nil)) {
+		return id, false
+	}
+	copy(id.Bytes[:], raw)
+	id.Valid = true
+	return id, true
+}
+
+// CheckInToken returns the signed QR token for an event, for staff to render
+// the venue QR code (E-8). Admin-only.
+func (s EventService) CheckInToken(ctx context.Context, token string, eventID pgtype.UUID, secret string) (string, error) {
+	if secret == "" {
+		return "", ErrCheckInDisabled
+	}
+	return staffWrite(ctx, s.Staff, token, eventPermission,
+		func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (string, error) {
+			if _, err := queries.New(tx).EventByID(ctx, eventID); err != nil {
+				return "", err
+			}
+			return checkInToken(eventID, secret), nil
+		})
+}
+
+// CheckInResult is the outcome of a successful check-in.
+type CheckInResult struct {
+	EventID   string `json:"event_id"`
+	CheckedIn bool   `json:"checked_in"`
+	AlreadyIn bool   `json:"already_checked_in"`
+}
+
+// CheckIn records the signed-in donor's attendance from a scanned QR token
+// (E-8). It verifies the token, requires the event to be within its window
+// (starts_at..ends_at) and the donor to hold a non-cancelled reservation, then
+// stamps checked_in_at. A second scan is a no-op success.
+func (s ReservationService) CheckIn(ctx context.Context, sessionToken, qrToken string) (CheckInResult, error) {
+	if s.CheckInSecret == "" {
+		return CheckInResult{}, ErrCheckInDisabled
+	}
+	eventID, ok := parseCheckInToken(qrToken, s.CheckInSecret)
+	if !ok {
+		return CheckInResult{}, ErrCheckIn
+	}
+	return donorWrite(ctx, s.DB, donorOwner(sessionToken), func(tx pgx.Tx, d queries.Donor, now time.Time) (CheckInResult, error) {
+		q := queries.New(tx)
+		event, err := q.EventByID(ctx, eventID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CheckInResult{}, ErrCheckIn
+		}
+		if err != nil {
+			return CheckInResult{}, err
+		}
+		// Window check (E-8): only between start and end.
+		if now.Before(event.StartsAt.Time) || now.After(event.EndsAt.Time) {
+			return CheckInResult{}, ErrCheckIn
+		}
+		existing, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: eventID, DonorID: d.ID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return CheckInResult{}, ErrCheckIn
+		}
+		if err != nil {
+			return CheckInResult{}, err
+		}
+		if existing.Status == reservationCancelled {
+			return CheckInResult{}, ErrCheckIn
+		}
+		if existing.CheckedInAt.Valid {
+			return CheckInResult{EventID: eventID.String(), CheckedIn: true, AlreadyIn: true}, nil
+		}
+		if err = q.CheckInReservation(ctx, queries.CheckInReservationParams{
+			EventID: eventID, DonorID: d.ID, CheckedInAt: timestamp(now),
+		}); err != nil {
+			return CheckInResult{}, err
+		}
+		return CheckInResult{EventID: eventID.String(), CheckedIn: true}, nil
 	})
 }

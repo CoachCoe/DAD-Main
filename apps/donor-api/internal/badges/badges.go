@@ -44,10 +44,10 @@ var Catalog = []Badge{
 	{Code: "REF12", Title: "Brought 12 In", Live: true},
 	{Code: "TC", Title: "Team Captain", Perk: PerkTeamCaptain, Live: true},
 	{Code: "IRL", Title: "IRL", Live: true},
-	{Code: "V", Title: "Volunteer", Live: false},        // Phase 4: volunteer opt-in
-	{Code: "SU", Title: "Showed Up", Live: false},       // Phase 4: event check-in
-	{Code: "V3", Title: "Volunteer ×3", Live: false},    // Phase 4
-	{Code: "V10", Title: "Volunteer ×10", Live: false},  // Phase 4
+	{Code: "V", Title: "Volunteer", Live: true},         // Phase 4.5: volunteer opt-in
+	{Code: "SU", Title: "Showed Up", Live: true},        // Phase 4.5: event check-in
+	{Code: "V3", Title: "Volunteer ×3", Live: true},     // Phase 4.5
+	{Code: "V10", Title: "Volunteer ×10", Live: true},   // Phase 4.5
 	{Code: "INIT7", Title: "7 Initiatives", Live: true}, // A-4 distinct-initiative exposures
 	{Code: "CITY50", Title: "Top 50 City", Live: true},  // 3.3 rankings
 	{Code: "NAT2", Title: "Top 2%", Live: true},         // 3.3 rankings
@@ -111,6 +111,8 @@ type Signals struct {
 	DistinctInitiatives int64 // distinct initiatives funded/shown (A-4)
 	NationalTopPercent  *int  // national percentile rank (1 = top 1%); nil if unranked
 	CityRank            *int  // rank within their city; nil if unranked
+	VolunteerOptIn      bool  // opted in as a volunteer (E-1)
+	EventCheckins       int64 // events the donor has checked in to (E-8)
 }
 
 // milestoneDays maps the streak-day badges to their thresholds.
@@ -161,6 +163,19 @@ func Evaluate(s Signals) map[string]bool {
 	}
 	if s.CityRank != nil && *s.CityRank <= 50 {
 		earned["CITY50"] = true
+	}
+	// Volunteer badges (E-1/E-8): opting in earns Volunteer; each checked-in
+	// event counts toward Showed Up (1), Volunteer ×3 (3) and Volunteer ×10 (10).
+	if s.VolunteerOptIn {
+		earned["V"] = true
+	}
+	for _, r := range []struct {
+		code string
+		n    int64
+	}{{"SU", 1}, {"V3", 3}, {"V10", 10}} {
+		if s.EventCheckins >= r.n {
+			earned[r.code] = true
+		}
 	}
 	// Drop any code that is not a Live catalog badge (defensive — none of the
 	// above are inert, but this keeps Evaluate honest if the catalog changes).

@@ -74,6 +74,10 @@ func donorStatus(err error) (int, string) {
 		return http.StatusNotFound, "Record not found"
 	case errors.Is(err, store.ErrReservationClosed):
 		return http.StatusConflict, "This event has already started"
+	case errors.Is(err, store.ErrCheckIn):
+		return http.StatusUnprocessableEntity, "Check-in is not valid for this event right now"
+	case errors.Is(err, store.ErrCheckInDisabled):
+		return http.StatusServiceUnavailable, "Event check-in is not configured"
 	case errors.Is(err, pgx.ErrNoRows):
 		return http.StatusNotFound, "Record not found"
 	case errors.Is(err, store.ErrReceipt):

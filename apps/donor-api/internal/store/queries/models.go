@@ -116,13 +116,14 @@ type DonorEvent struct {
 }
 
 type DonorEventReservation struct {
-	ID         pgtype.UUID        `json:"id"`
-	EventID    pgtype.UUID        `json:"event_id"`
-	DonorID    pgtype.UUID        `json:"donor_id"`
-	Status     string             `json:"status"`
-	ReservedAt pgtype.Timestamptz `json:"reserved_at"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ID          pgtype.UUID        `json:"id"`
+	EventID     pgtype.UUID        `json:"event_id"`
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	Status      string             `json:"status"`
+	ReservedAt  pgtype.Timestamptz `json:"reserved_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	CheckedInAt pgtype.Timestamptz `json:"checked_in_at"`
 }
 
 type DonorGift struct {

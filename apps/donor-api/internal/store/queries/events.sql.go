@@ -46,6 +46,26 @@ func (q *Queries) AddEventGuest(ctx context.Context, arg AddEventGuestParams) er
 	return err
 }
 
+const checkInReservation = `-- name: CheckInReservation :exec
+UPDATE donor_event_reservations
+SET checked_in_at=$3, updated_at=$3
+WHERE event_id=$1 AND donor_id=$2 AND status<>'CANCELLED' AND checked_in_at IS NULL
+`
+
+type CheckInReservationParams struct {
+	EventID     pgtype.UUID        `json:"event_id"`
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	CheckedInAt pgtype.Timestamptz `json:"checked_in_at"`
+}
+
+// Stamps the donor's reservation as checked in (E-8). Only sets it when a
+// reservation exists and is not already checked in; cancelled reservations do
+// not qualify.
+func (q *Queries) CheckInReservation(ctx context.Context, arg CheckInReservationParams) error {
+	_, err := q.db.Exec(ctx, checkInReservation, arg.EventID, arg.DonorID, arg.CheckedInAt)
+	return err
+}
+
 const donorEarnedBadgeCodes = `-- name: DonorEarnedBadgeCodes :many
 SELECT code FROM donor_badges WHERE donor_id=$1 AND revoked_at IS NULL
 `
@@ -106,6 +126,30 @@ func (q *Queries) DonorReservationsForEvents(ctx context.Context, arg DonorReser
 		return nil, err
 	}
 	return items, nil
+}
+
+const donorVolunteerStats = `-- name: DonorVolunteerStats :one
+SELECT
+  count(*)::bigint AS events,
+  coalesce(sum(EXTRACT(EPOCH FROM (e.ends_at - e.starts_at)) / 60), 0)::bigint AS minutes
+FROM donor_event_reservations r
+JOIN donor_events e ON e.id = r.event_id
+WHERE r.donor_id=$1 AND r.checked_in_at IS NOT NULL
+`
+
+type DonorVolunteerStatsRow struct {
+	Events  int64 `json:"events"`
+	Minutes int64 `json:"minutes"`
+}
+
+// "Events volunteered" and volunteer hours (EM-8): the count of a donor's
+// checked-in events and the sum of their durations in minutes. A donor with no
+// check-ins gets zeroes.
+func (q *Queries) DonorVolunteerStats(ctx context.Context, donorID pgtype.UUID) (DonorVolunteerStatsRow, error) {
+	row := q.db.QueryRow(ctx, donorVolunteerStats, donorID)
+	var i DonorVolunteerStatsRow
+	err := row.Scan(&i.Events, &i.Minutes)
+	return i, err
 }
 
 const eventByID = `-- name: EventByID :one
@@ -333,7 +377,7 @@ func (q *Queries) RemoveEventGuest(ctx context.Context, arg RemoveEventGuestPara
 }
 
 const reservationFor = `-- name: ReservationFor :one
-SELECT id, event_id, donor_id, status, reserved_at, created_at, updated_at FROM donor_event_reservations WHERE event_id=$1 AND donor_id=$2
+SELECT id, event_id, donor_id, status, reserved_at, created_at, updated_at, checked_in_at FROM donor_event_reservations WHERE event_id=$1 AND donor_id=$2
 `
 
 type ReservationForParams struct {
@@ -352,6 +396,7 @@ func (q *Queries) ReservationFor(ctx context.Context, arg ReservationForParams) 
 		&i.ReservedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CheckedInAt,
 	)
 	return i, err
 }
@@ -651,7 +696,7 @@ func (q *Queries) UpsertReservation(ctx context.Context, arg UpsertReservationPa
 }
 
 const waitlistHead = `-- name: WaitlistHead :one
-SELECT id, event_id, donor_id, status, reserved_at, created_at, updated_at FROM donor_event_reservations
+SELECT id, event_id, donor_id, status, reserved_at, created_at, updated_at, checked_in_at FROM donor_event_reservations
 WHERE event_id=$1 AND status='WAITLISTED'
 ORDER BY reserved_at ASC, id ASC
 LIMIT 1
@@ -670,6 +715,7 @@ func (q *Queries) WaitlistHead(ctx context.Context, eventID pgtype.UUID) (DonorE
 		&i.ReservedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CheckedInAt,
 	)
 	return i, err
 }

@@ -78,6 +78,18 @@ func signalsFor(ctx context.Context, q *queries.Queries, donorID pgtype.UUID, no
 		s.NationalTopPercent = &pct
 		s.CityRank = rank.CityRank
 	}
+	// Volunteer signals (Phase 4.5): the opt-in from preferences lights the
+	// Volunteer badge; checked-in events drive Showed Up / Volunteer ×N.
+	pref, err := readPreferences(ctx, q, donorID)
+	if err != nil {
+		return s, err
+	}
+	s.VolunteerOptIn = pref.Volunteer
+	vol, err := q.DonorVolunteerStats(ctx, donorID)
+	if err != nil {
+		return s, err
+	}
+	s.EventCheckins = vol.Events
 	return s, nil
 }
 

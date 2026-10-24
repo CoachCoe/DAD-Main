@@ -18,6 +18,7 @@ type EventSource interface {
 	Publish(context.Context, string, pgtype.UUID) error
 	AddGuest(context.Context, string, pgtype.UUID, pgtype.UUID) error
 	RemoveGuest(context.Context, string, pgtype.UUID, pgtype.UUID) error
+	CheckInToken(context.Context, string, pgtype.UUID, string) (string, error)
 }
 
 // EventReadSource is the donor-facing read of published events (E-2/E-3/E-5).
@@ -28,10 +29,12 @@ type EventReadSource interface {
 	DetailForDonor(context.Context, string, pgtype.UUID) (store.EventView, error)
 }
 
-// ReservationSource books, waitlists, and cancels event reservations (E-4/E-9).
+// ReservationSource books, waitlists, and cancels event reservations (E-4/E-9),
+// and records QR check-ins (E-8).
 type ReservationSource interface {
 	Reserve(context.Context, string, pgtype.UUID) (store.ReservationResult, error)
 	Cancel(context.Context, string, pgtype.UUID) (store.ReservationResult, error)
+	CheckIn(context.Context, string, string) (store.CheckInResult, error)
 }
 
 func (a *api) eventsAdmin() service {
@@ -197,5 +200,39 @@ func (a *api) cancelEvent(w http.ResponseWriter, r *http.Request, session string
 	svc := service{a.Reservations != nil, donorUnavailable, writeTimeout, donorStatus}
 	svc.serve(w, r, func(ctx context.Context) (any, error) {
 		return a.Reservations.Cancel(ctx, session, id)
+	})
+}
+
+// checkInBody is the QR token the app scanned at the venue.
+type checkInBody struct {
+	Token string `json:"token"`
+}
+
+// checkInEvent records the signed-in donor's attendance from a scanned QR token
+// (E-8). The token names the event and is HMAC-verified server-side.
+func (a *api) checkInEvent(w http.ResponseWriter, r *http.Request, session string) {
+	var body checkInBody
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	svc := service{a.Reservations != nil, donorUnavailable, writeTimeout, donorStatus}
+	svc.serve(w, r, func(ctx context.Context) (any, error) {
+		return a.Reservations.CheckIn(ctx, session, body.Token)
+	})
+}
+
+// eventCheckInToken returns an event's signed QR token for staff to render the
+// venue QR code (E-8). Admin-only.
+func (a *api) eventCheckInToken(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "event_id")
+	if !ok {
+		return
+	}
+	a.eventsAdmin().serve(w, r, func(ctx context.Context) (any, error) {
+		token, err := a.Events.CheckInToken(ctx, session, id, a.EventCheckInSecret)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"token": token}, nil
 	})
 }

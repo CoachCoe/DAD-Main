@@ -344,3 +344,96 @@ func TestInviteOnlyGating(t *testing.T) {
 		t.Fatalf("removed guest still saw %d events: %v", len(after), err)
 	}
 }
+
+// TestEventCheckIn covers E-8: a valid QR token during the event window checks
+// in a reserved donor and lights up the volunteer badges; a forged token, a
+// closed window, and a missing reservation are each refused; a second scan is a
+// no-op success.
+func TestEventCheckIn(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	const secret = "test-checkin-secret"
+	res := ReservationService{DB: pool, CheckInSecret: secret}
+
+	// An event happening right now (started an hour ago, ends in an hour).
+	in := eventInput("beach-cleanup", "San Francisco", "94103", "VOLUNTEER", -1*time.Hour)
+	in.EndsAt = time.Now().UTC().Add(1 * time.Hour).Format(time.RFC3339)
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	token := checkInToken(eventID, secret)
+
+	donorID, donorTok := signedInDonor(t, pool)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM donor_badges WHERE donor_id=$1", donorID) })
+
+	// No reservation yet -> refused.
+	if _, err := res.CheckIn(ctx, donorTok, token); !errors.Is(err, ErrCheckIn) {
+		t.Fatalf("check-in without reservation accepted: %v", err)
+	}
+	// Seed a reservation directly: the donor reserved before the event started
+	// (Reserve itself is correctly closed once an event has begun, E-9).
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO donor_event_reservations (id, event_id, donor_id, status, reserved_at, created_at, updated_at) VALUES (gen_random_uuid(),$1,$2,'RESERVED',now(),now(),now())",
+		eventID, donorID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// A forged token is refused.
+	if _, err := res.CheckIn(ctx, donorTok, token+"x"); !errors.Is(err, ErrCheckIn) {
+		t.Fatalf("forged token accepted: %v", err)
+	}
+	// Valid check-in.
+	r, err := res.CheckIn(ctx, donorTok, token)
+	if err != nil || !r.CheckedIn || r.AlreadyIn {
+		t.Fatalf("check-in: %+v %v", r, err)
+	}
+	// Second scan is an idempotent no-op success.
+	r, err = res.CheckIn(ctx, donorTok, token)
+	if err != nil || !r.CheckedIn || !r.AlreadyIn {
+		t.Fatalf("second check-in: %+v %v", r, err)
+	}
+
+	// Volunteer stats reflect the check-in (one event, 120 minutes).
+	var evCount, minutes int64
+	if err := pool.QueryRow(ctx,
+		"SELECT count(*), coalesce(sum(EXTRACT(EPOCH FROM (e.ends_at-e.starts_at))/60),0)::bigint FROM donor_event_reservations r JOIN donor_events e ON e.id=r.event_id WHERE r.donor_id=$1 AND r.checked_in_at IS NOT NULL",
+		donorID,
+	).Scan(&evCount, &minutes); err != nil || evCount != 1 || minutes != 120 {
+		t.Fatalf("volunteer stats: events=%d minutes=%d %v", evCount, minutes, err)
+	}
+
+	// A check-in token for a FUTURE event (outside its window) is refused.
+	future := eventInput("future", "San Francisco", "94103", "VOLUNTEER", 48*time.Hour)
+	futureID, err := events.Create(ctx, adminToken, future)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, futureID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := res.Reserve(ctx, donorTok, futureID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := res.CheckIn(ctx, donorTok, checkInToken(futureID, secret)); !errors.Is(err, ErrCheckIn) {
+		t.Fatalf("check-in before window accepted: %v", err)
+	}
+}
+
+// TestCheckInDisabledWithoutSecret covers the unconfigured case.
+func TestCheckInDisabledWithoutSecret(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	res := ReservationService{DB: pool} // no secret
+	_, tok := signedInDonor(t, pool)
+	if _, err := res.CheckIn(ctx, tok, "anything"); !errors.Is(err, ErrCheckInDisabled) {
+		t.Fatalf("check-in without a configured secret: %v", err)
+	}
+}
