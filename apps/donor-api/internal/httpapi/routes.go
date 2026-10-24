@@ -63,6 +63,7 @@ func (a *api) routes() []route {
 		a.appWrite("POST /donor/me/push-device", a.registerPushDevice),
 		a.appWrite("POST /donor/me/push-device/unregister", a.unregisterPushDevice),
 		a.donorRead("GET /donor/me/conversions", a.conversions),
+		a.donorRead("GET /donor/me/today-initiative", a.todayInitiative),
 		a.donorRead("GET /donor/me/sharing", a.sharing),
 		a.donorWrite("POST /donor/me/sharing", a.saveSharing),
 		a.donorRead("GET /donor/me/referral-code.svg", a.referralCode),
@@ -118,6 +119,16 @@ func (a *api) routes() []route {
 		a.staffWrite("POST /donor/staff/content/sources", a.uploadSource),
 		a.staffRead("GET /donor/staff/content/sources/{source_id}", a.downloadSource),
 		a.staffWrite("POST /donor/staff/content/publish", a.publish),
+
+		a.staffWrite("POST /donor/staff/initiatives", a.createInitiative),
+		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}", a.updateInitiative),
+		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/publish", a.publishInitiative),
+		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/metrics/{position}", a.setInitiativeMetric),
+		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/metrics/{position}/publish", a.publishInitiativeMetric),
+		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/metrics/{position}/delete", a.deleteInitiativeMetric),
+		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/spend", a.setInitiativeSpend),
+		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/spend/delete", a.deleteInitiativeSpend),
+		a.public("GET /initiatives/{initiative_id}/spend", a.initiativeSpend),
 	}
 }
 

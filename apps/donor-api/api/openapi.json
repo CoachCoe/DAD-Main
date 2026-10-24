@@ -7,7 +7,7 @@
       "name": "MIT",
       "identifier": "MIT"
     },
-    "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=…` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh and the push-device routes admit nothing else; giving, referral capture, partner signup, and every staff route are web-only.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"…\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `…+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
+    "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=\u2026` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh and the push-device routes admit nothing else; giving, referral capture, partner signup, and every staff route are web-only.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"\u2026\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `\u2026+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
   },
   "servers": [
     {
@@ -558,7 +558,7 @@
       "post": {
         "operationId": "ingestAnalytics",
         "summary": "Record analytics events",
-        "description": "Ingests a batch of §9 analytics events from any platform into the shared append-only stream. Authenticated-or-anonymous: a valid donor session attributes the events, otherwise they are recorded anonymously (events before sign-in are expected). The platform source is the native client's `X-DAD-Platform` header, or WEB for a browser. The whole batch is rejected (422) if any event has an unknown name or an invalid property payload. Batch size is capped at 100.",
+        "description": "Ingests a batch of \u00a79 analytics events from any platform into the shared append-only stream. Authenticated-or-anonymous: a valid donor session attributes the events, otherwise they are recorded anonymously (events before sign-in are expected). The platform source is the native client's `X-DAD-Platform` header, or WEB for a browser. The whole batch is rejected (422) if any event has an unknown name or an invalid property payload. Batch size is capped at 100.",
         "tags": [
           "Public"
         ],
@@ -584,7 +584,7 @@
                       "properties": {
                         "name": {
                           "type": "string",
-                          "description": "A §9 taxonomy event name.",
+                          "description": "A \u00a79 taxonomy event name.",
                           "enum": [
                             "app_opened",
                             "role_selected",
@@ -770,7 +770,7 @@
       "post": {
         "operationId": "login",
         "summary": "Email a sign-in link",
-        "description": "503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address exists. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim.",
+        "description": "503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address exists. The link (`/account/claim#token=\u2026`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim.",
         "tags": [
           "Account"
         ],
@@ -5343,6 +5343,647 @@
           }
         }
       }
+    },
+    "/donor/staff/initiatives": {
+      "post": {
+        "operationId": "createInitiative",
+        "summary": "Create a draft initiative",
+        "tags": [
+          "Initiatives"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiativeInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/initiatives/{initiative_id}": {
+      "post": {
+        "operationId": "updateInitiative",
+        "summary": "Update a draft initiative",
+        "tags": [
+          "Initiatives"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "initiative_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiativeInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/initiatives/{initiative_id}/publish": {
+      "post": {
+        "operationId": "publishInitiative",
+        "summary": "Publish an initiative",
+        "tags": [
+          "Initiatives"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "initiative_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/initiatives/{initiative_id}/metrics/{position}": {
+      "post": {
+        "operationId": "setInitiativeMetric",
+        "summary": "Upsert a headline metric",
+        "tags": [
+          "Initiatives"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "initiative_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          },
+          {
+            "name": "position",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5
+            },
+            "description": "Headline-metric slot 0-5."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetricInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/initiatives/{initiative_id}/metrics/{position}/publish": {
+      "post": {
+        "operationId": "publishInitiativeMetric",
+        "summary": "Publish a verified metric",
+        "tags": [
+          "Initiatives"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "initiative_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          },
+          {
+            "name": "position",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5
+            },
+            "description": "Headline-metric slot 0-5."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/initiatives/{initiative_id}/metrics/{position}/delete": {
+      "post": {
+        "operationId": "deleteInitiativeMetric",
+        "summary": "Delete a headline metric",
+        "tags": [
+          "Initiatives"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "initiative_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          },
+          {
+            "name": "position",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 5
+            },
+            "description": "Headline-metric slot 0-5."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/initiatives/{initiative_id}/spend": {
+      "post": {
+        "operationId": "setInitiativeSpend",
+        "summary": "Set a spend category total",
+        "tags": [
+          "Initiatives"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "initiative_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpendInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/initiatives/{initiative_id}/spend/delete": {
+      "post": {
+        "operationId": "deleteInitiativeSpend",
+        "summary": "Delete a spend category",
+        "tags": [
+          "Initiatives"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "initiative_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteSpendRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/initiatives/{initiative_id}/spend": {
+      "get": {
+        "operationId": "initiativeSpend",
+        "summary": "Published initiative spend by category",
+        "tags": [
+          "Initiatives"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "initiative_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InitiativeSpend"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/today-initiative": {
+      "get": {
+        "operationId": "todayInitiative",
+        "summary": "The donor's initiative of the day",
+        "tags": [
+          "Initiatives"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodayInitiative"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6107,7 +6748,7 @@
           },
           "label": {
             "type": "string",
-            "description": "A name the donor can recognize, safe to display as plain text: the device name the app reported, otherwise “iOS device”, “Android device”, or “Mobile device”; every browser is “Web browser”."
+            "description": "A name the donor can recognize, safe to display as plain text: the device name the app reported, otherwise \u201ciOS device\u201d, \u201cAndroid device\u201d, or \u201cMobile device\u201d; every browser is \u201cWeb browser\u201d."
           },
           "created_at": {
             "type": "string",
@@ -7813,6 +8454,247 @@
         "required": [
           "ceremony",
           "options"
+        ],
+        "additionalProperties": false
+      },
+      "InitiativeInput": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "location": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "counties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "started_on": {
+            "type": "string",
+            "format": "date"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "COMPLETE"
+            ]
+          },
+          "committed_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "partner_signup_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "title",
+          "summary",
+          "type",
+          "location",
+          "region",
+          "counties",
+          "started_on",
+          "status",
+          "committed_minor",
+          "partner_signup_id"
+        ],
+        "additionalProperties": false
+      },
+      "MetricInput": {
+        "type": "object",
+        "properties": {
+          "position": {
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "USD_CENTS",
+              "PEOPLE",
+              "INITIATIVES",
+              "PARTNERS"
+            ]
+          },
+          "verification_note": {
+            "type": "string"
+          },
+          "verified_on": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "label",
+          "value",
+          "unit",
+          "verification_note",
+          "verified_on"
+        ],
+        "additionalProperties": false
+      },
+      "SpendInput": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "category",
+          "amount_minor"
+        ],
+        "additionalProperties": false
+      },
+      "DeleteSpendRequest": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "category"
+        ],
+        "additionalProperties": false
+      },
+      "SpendCategory": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "amount_minor": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "category",
+          "amount_minor"
+        ],
+        "additionalProperties": false
+      },
+      "InitiativeSpend": {
+        "type": "object",
+        "properties": {
+          "initiative_id": {
+            "type": "string"
+          },
+          "total_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpendCategory"
+            }
+          }
+        },
+        "required": [
+          "initiative_id",
+          "total_minor",
+          "categories"
+        ],
+        "additionalProperties": false
+      },
+      "TodayMetric": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "USD_CENTS",
+              "PEOPLE",
+              "INITIATIVES",
+              "PARTNERS"
+            ]
+          },
+          "verified_on": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "value",
+          "unit",
+          "verified_on"
+        ],
+        "additionalProperties": false
+      },
+      "TodayInitiative": {
+        "type": "object",
+        "properties": {
+          "initiative_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "region": {
+            "type": "string"
+          },
+          "metrics": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodayMetric"
+            }
+          },
+          "distinct_shown": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "initiative_id",
+          "slug",
+          "title",
+          "summary",
+          "region",
+          "metrics",
+          "distinct_shown"
         ],
         "additionalProperties": false
       }

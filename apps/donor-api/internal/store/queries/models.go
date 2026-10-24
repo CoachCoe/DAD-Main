@@ -111,6 +111,39 @@ type DonorGift struct {
 	ReferralKind          pgtype.Text        `json:"referral_kind"`
 }
 
+type DonorInitiative struct {
+	ID              pgtype.UUID        `json:"id"`
+	Slug            string             `json:"slug"`
+	Title           string             `json:"title"`
+	Summary         string             `json:"summary"`
+	Type            string             `json:"type"`
+	Location        string             `json:"location"`
+	Region          string             `json:"region"`
+	Counties        []string           `json:"counties"`
+	StartedOn       pgtype.Date        `json:"started_on"`
+	Status          string             `json:"status"`
+	CommittedMinor  int64              `json:"committed_minor"`
+	PartnerSignupID pgtype.UUID        `json:"partner_signup_id"`
+	PublishState    string             `json:"publish_state"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DonorInitiativeMetric struct {
+	ID               pgtype.UUID        `json:"id"`
+	InitiativeID     pgtype.UUID        `json:"initiative_id"`
+	Position         int32              `json:"position"`
+	Label            string             `json:"label"`
+	Value            int64              `json:"value"`
+	Unit             string             `json:"unit"`
+	VerificationNote string             `json:"verification_note"`
+	VerifiedOn       pgtype.Date        `json:"verified_on"`
+	PublishState     string             `json:"publish_state"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DonorLoginEmail struct {
 	DonorID        pgtype.UUID        `json:"donor_id"`
 	EncryptedToken []byte             `json:"encrypted_token"`
