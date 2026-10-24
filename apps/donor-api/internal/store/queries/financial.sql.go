@@ -174,45 +174,6 @@ func (q *Queries) MissingReferredProjection(ctx context.Context, referrerID pgty
 	return column_1, err
 }
 
-const pauseWindows = `-- name: PauseWindows :many
-SELECT p.starts_at, p.resumes_at, s.stops_at, r.next_renewal
-FROM donor_pauses p JOIN donor_subscriptions s ON s.attempt_id=p.attempt_id
-LEFT JOIN donor_resumptions r ON r.pause_id=p.id AND r.confirmed_at IS NOT NULL
-WHERE p.donor_id=$1 AND p.confirmed_at IS NOT NULL
-`
-
-type PauseWindowsRow struct {
-	StartsAt    pgtype.Timestamptz `json:"starts_at"`
-	ResumesAt   pgtype.Timestamptz `json:"resumes_at"`
-	StopsAt     pgtype.Timestamptz `json:"stops_at"`
-	NextRenewal pgtype.Timestamptz `json:"next_renewal"`
-}
-
-func (q *Queries) PauseWindows(ctx context.Context, donorID pgtype.UUID) ([]PauseWindowsRow, error) {
-	rows, err := q.db.Query(ctx, pauseWindows, donorID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []PauseWindowsRow{}
-	for rows.Next() {
-		var i PauseWindowsRow
-		if err := rows.Scan(
-			&i.StartsAt,
-			&i.ResumesAt,
-			&i.StopsAt,
-			&i.NextRenewal,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const periodHistory = `-- name: PeriodHistory :many
 SELECT donor_id, checkout_id, stripe_invoice_id, stripe_subscription_id, due_at, ends_at, status, id, created_at FROM donor_billing_periods WHERE donor_id=$1
 `

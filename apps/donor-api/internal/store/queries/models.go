@@ -196,17 +196,6 @@ type DonorPasskey struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
-type DonorPause struct {
-	DonorID     pgtype.UUID        `json:"donor_id"`
-	AttemptID   pgtype.UUID        `json:"attempt_id"`
-	Months      int32              `json:"months"`
-	StartsAt    pgtype.Timestamptz `json:"starts_at"`
-	ResumesAt   pgtype.Timestamptz `json:"resumes_at"`
-	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
-	ID          pgtype.UUID        `json:"id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
 type DonorPaymentUpdate struct {
 	DonorID         pgtype.UUID        `json:"donor_id"`
 	AttemptID       pgtype.UUID        `json:"attempt_id"`
@@ -267,15 +256,6 @@ type DonorRefund struct {
 	ObservedAt     pgtype.Timestamptz `json:"observed_at"`
 	ID             pgtype.UUID        `json:"id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
-type DonorResumption struct {
-	DonorID     pgtype.UUID        `json:"donor_id"`
-	PauseID     pgtype.UUID        `json:"pause_id"`
-	NextRenewal pgtype.Timestamptz `json:"next_renewal"`
-	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
-	ID          pgtype.UUID        `json:"id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type DonorSession struct {

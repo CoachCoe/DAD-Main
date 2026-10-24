@@ -9,7 +9,6 @@ const subscription = {
   currency: "USD",
   status: "active",
   period_end: "2026-11-01T12:00:00Z",
-  pause: null,
   stops_at: null,
 };
 const response = (value: unknown) => ({ ok: true, json: async () => value });
@@ -37,7 +36,6 @@ it("requires explicit confirmation and sends the displayed billing boundary", as
       `Renewals cancelled. Your last monthly gift period ends ${formatDate(subscription.period_end)}; no further gifts will be charged.`,
     ),
   );
-  expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "My monthly giving" })).toHaveFocus());
   expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({
     subscription_id: "owned-id",
@@ -90,46 +88,6 @@ it("distinguishes unconfirmed checkout from having no monthly gift", async () =>
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
 });
 
-it("says when a confirmed pause begins while the current period runs", async () => {
-  const pause = { starts_at: "2099-11-01T12:00:00Z", resumes_at: "2100-01-01T12:00:00Z" };
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue(response({ state: "ready", subscription: { ...subscription, pause } })),
-  );
-  render(<RecurringPage />);
-  expect(
-    await screen.findByText(
-      paragraph(
-        `Your monthly gift pauses from ${formatDate(pause.starts_at)}. Giving resumes ${formatDate(pause.resumes_at)}.`,
-      ),
-    ),
-  ).toBeVisible();
-  expect(screen.getByRole("link", { name: "Resume at next renewal" })).toHaveAttribute("href", "/account/resume");
-  expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
-});
-
-it("shows a pause in effect and offers to resume it instead of another pause", async () => {
-  const resumes = "2027-01-01T12:00:00Z";
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue(
-      response({
-        state: "ready",
-        subscription: { ...subscription, pause: { starts_at: "2020-11-01T12:00:00Z", resumes_at: resumes } },
-      }),
-    ),
-  );
-  render(<RecurringPage />);
-  expect(
-    await screen.findByText(paragraph(`Your monthly gift is paused. Giving resumes ${formatDate(resumes)}.`)),
-  ).toBeVisible();
-  expect(screen.getByRole("link", { name: "Resume at next renewal" })).toHaveAttribute("href", "/account/resume");
-  expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("link", { name: "Change monthly amount" })).not.toBeInTheDocument();
-  expect(screen.queryByText(/not ready|being set up|Next renewal/)).not.toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Cancel monthly giving" })).toBeEnabled();
-});
-
 it("describes a subscription Stripe paused without offering changes", async () => {
   vi.stubGlobal(
     "fetch",
@@ -138,9 +96,7 @@ it("describes a subscription Stripe paused without offering changes", async () =
   render(<RecurringPage />);
   expect(await screen.findByText("Your monthly gift is paused.")).toBeVisible();
   expect(screen.getByRole("link", { name: "Update payment method" })).toBeVisible();
-  for (const name of ["Pause monthly giving", "Change monthly amount", "Resume at next renewal"]) {
-    expect(screen.queryByRole("link", { name })).not.toBeInTheDocument();
-  }
+  expect(screen.queryByRole("link", { name: "Change monthly amount" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
   expect(screen.queryByText(/being set up/)).not.toBeInTheDocument();
 });
@@ -153,7 +109,7 @@ it("says a gift still being set up is being set up", async () => {
   render(<RecurringPage />);
   expect(await screen.findByText("Your monthly gift is still being set up. Refresh in a moment.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Refresh billing details" })).toBeVisible();
-  expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Change monthly amount" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
 });
 
@@ -172,7 +128,6 @@ it("offers only a payment method update for an ending gift", async () => {
     ),
   ).toBeVisible();
   expect(screen.getByRole("link", { name: "Update payment method" })).toBeVisible();
-  expect(screen.queryByRole("link", { name: "Pause monthly giving" })).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Change monthly amount" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
 });
@@ -193,7 +148,6 @@ it("dates billing details by their last Stripe sync and offers changes from them
   expect(synced).toHaveTextContent(`Billing details last updated from Stripe ${formatDateTime(observed)}.`);
   expect(synced).toHaveClass("note");
   expect(screen.getByText(paragraph(`Next renewal: ${formatDate(subscription.period_end)}.`))).toBeVisible();
-  expect(screen.getByRole("link", { name: "Pause monthly giving" })).toBeVisible();
   expect(screen.getByRole("link", { name: "Change monthly amount" })).toBeVisible();
   expect(synced.querySelector("time")).toHaveAttribute("dateTime", observed);
   expect(screen.queryByRole("note")).not.toBeInTheDocument();

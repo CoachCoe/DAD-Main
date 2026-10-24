@@ -18,7 +18,6 @@ type AdminSource interface {
 	DonorMessages(context.Context, string, pgtype.UUID, int64) (store.MessagePage, error)
 	DonorActions(context.Context, string, pgtype.UUID, int64) (store.ActionPage, error)
 	PendingAction(context.Context, string, pgtype.UUID, pgtype.UUID, string) (store.PendingAction, error)
-	Enrolments(context.Context, string) (store.Enrolments, error)
 	RequestClaim(context.Context, string, pgtype.UUID) error
 	ResendMessage(context.Context, string, pgtype.UUID, pgtype.UUID) (store.QueuedMessage, error)
 }
@@ -112,10 +111,6 @@ func (a *api) auditEvents(w http.ResponseWriter, r *http.Request, session string
 		return
 	}
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.AuditEvents(ctx, session, offset) })
-}
-
-func (a *api) enrolments(w http.ResponseWriter, r *http.Request, session string) {
-	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.Enrolments(ctx, session) })
 }
 
 func (a *api) requestClaim(w http.ResponseWriter, r *http.Request, session string) {

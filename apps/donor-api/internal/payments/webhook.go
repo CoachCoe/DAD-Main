@@ -80,8 +80,7 @@ func verifyEvent(body []byte, signature, secret string) (*VerifiedEvent, error) 
 		return nil, ErrInvalidEvent
 	}
 	switch string(event.Type) {
-	case "payment_intent.succeeded",
-		"invoice.payment_succeeded",
+	case "invoice.payment_succeeded",
 		"invoice.payment_failed",
 		"refund.created",
 		"refund.updated",

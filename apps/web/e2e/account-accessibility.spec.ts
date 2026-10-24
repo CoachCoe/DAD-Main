@@ -176,24 +176,13 @@ const subscription = {
   currency: "USD",
   status: "active",
   period_end: "2026-11-01T14:00:00Z",
-  pause: null,
   stops_at: null,
 };
 const recurring = {
   active: {
     subscription,
     text: /^Next renewal: Nov 1, 2026\.$/,
-    links: ["Update payment method", "Pause monthly giving", "Change monthly amount"],
-  },
-  paused: {
-    subscription: { ...subscription, pause: { starts_at: "2020-11-01T14:00:00Z", resumes_at: "2027-01-01T14:00:00Z" } },
-    text: /^Your monthly gift is paused\. Giving resumes Jan 1, 2027\.$/,
-    links: ["Update payment method", "Resume at next renewal"],
-  },
-  "scheduled-pause": {
-    subscription: { ...subscription, pause: { starts_at: "2099-11-01T14:00:00Z", resumes_at: "2100-01-01T14:00:00Z" } },
-    text: /^Your monthly gift pauses from Nov 1, 2099\. Giving resumes Jan 1, 2100\.$/,
-    links: ["Update payment method", "Resume at next renewal"],
+    links: ["Update payment method", "Change monthly amount"],
   },
   ending: {
     subscription: { ...subscription, stops_at: subscription.period_end },

@@ -233,21 +233,23 @@ func checkoutParams(site publicSite, email string, draft queries.InsertCheckoutP
 		metadata["dad_referrer_id"] = draft.ReferrerID.String()
 		metadata["dad_referral_kind"] = draft.ReferralKind.String
 	}
-	monthly := request.Frequency == "MONTHLY"
-	mode, name := "payment", "DAD one-time gift"
-	if monthly {
-		mode, name = "subscription", "DAD monthly giving"
+	price := map[string]any{
+		"currency":     "usd",
+		"unit_amount":  request.Amount,
+		"product_data": map[string]string{"name": "DAD monthly giving"},
+		"recurring":    map[string]string{"interval": "month"},
 	}
-	price := map[string]any{"currency": "usd", "unit_amount": request.Amount, "product_data": map[string]string{"name": name}}
-	params := map[string]any{"mode": mode, "customer_email": email, "client_reference_id": checkoutID.String(), "metadata": metadata,
-		"line_items": []any{map[string]any{"price_data": price, "quantity": 1}}, "allowed_payment_method_types": []string{"card"},
-		"success_url": site.checkoutReturn(request.Amount, request.Frequency), "cancel_url": site.donate(),
-		"expires_at": draft.CreatedAt.Time.Add(checkoutLifetime).Unix()}
-	if monthly {
-		price["recurring"] = map[string]string{"interval": "month"}
-		params["subscription_data"] = map[string]any{"metadata": metadata}
-	} else {
-		params["payment_intent_data"] = map[string]any{"metadata": metadata}
+	params := map[string]any{
+		"mode":                         "subscription",
+		"customer_email":               email,
+		"client_reference_id":          checkoutID.String(),
+		"metadata":                     metadata,
+		"line_items":                   []any{map[string]any{"price_data": price, "quantity": 1}},
+		"allowed_payment_method_types": []string{"card"},
+		"success_url":                  site.checkoutReturn(request.Amount, request.Frequency),
+		"cancel_url":                   site.donate(),
+		"expires_at":                   draft.CreatedAt.Time.Add(checkoutLifetime).Unix(),
+		"subscription_data":            map[string]any{"metadata": metadata},
 	}
 	return json.Marshal(params)
 }

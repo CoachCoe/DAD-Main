@@ -5,19 +5,17 @@ import { Announcer } from "@/components/donor/Announcer";
 import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
 import { api, failureMessage, type RequestBody, type Schema } from "@/lib/api";
-import { formatDollars, MAX_GIFT_MINOR, MIN_GIFT_MINOR, monthlyFraming, parseDollars } from "@/lib/money";
+import { MAX_GIFT_MINOR, MIN_GIFT_MINOR, monthlyFraming, parseDollars } from "@/lib/money";
 
 const presets = [3000, 9000, 15000];
 // Remembers this tab's last choice so cancelling Stripe checkout returns to it.
 const CHOICE_KEY = "dad.donate.choice";
-type Choice = { amount: string; monthly: boolean; email: string };
+type Choice = { amount: string; email: string };
 
 function remembered(): Choice | null {
   try {
     const value = JSON.parse(sessionStorage.getItem(CHOICE_KEY) ?? "null");
-    return typeof value?.amount === "string" && typeof value.monthly === "boolean" && typeof value.email === "string"
-      ? value
-      : null;
+    return typeof value?.amount === "string" && typeof value.email === "string" ? value : null;
   } catch {
     return null;
   }
@@ -26,7 +24,6 @@ function remembered(): Choice | null {
 export default function Donate() {
   const [email, setEmail] = useState("");
   const [amount, setAmount] = useState("30");
-  const [monthly, setMonthly] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [amountInvalid, setAmountInvalid] = useState(false);
@@ -39,7 +36,6 @@ export default function Donate() {
     const choice = remembered();
     if (choice) {
       setAmount(choice.amount);
-      setMonthly(choice.monthly);
       setEmail(choice.email);
     }
     // Returning with Back from Stripe can restore this page from the back/forward cache
@@ -71,16 +67,15 @@ export default function Donate() {
     const minor = parseDollars(amount);
     if (minor === null)
       return rejectAmount("Enter a dollar amount with no more than two decimal places, like 30 or 30.50.");
-    if (minor < MIN_GIFT_MINOR || minor > MAX_GIFT_MINOR)
-      return rejectAmount("Enter an amount between $1 and $999,999.99.");
+    if (minor < MIN_GIFT_MINOR || minor > MAX_GIFT_MINOR) return rejectAmount("Enter an amount between $1 and $900.");
     const payload = JSON.stringify({
       email,
       amount_minor: minor,
-      frequency: monthly ? "MONTHLY" : "ONE_TIME",
+      frequency: "MONTHLY",
     } satisfies RequestBody<"/donor/checkouts", "post">);
     if (attempt.current?.payload !== payload) attempt.current = { payload, key: crypto.randomUUID() };
     try {
-      sessionStorage.setItem(CHOICE_KEY, JSON.stringify({ amount, monthly, email } satisfies Choice));
+      sessionStorage.setItem(CHOICE_KEY, JSON.stringify({ amount, email } satisfies Choice));
     } catch {}
     setBusy(true);
     let destination: URL;
@@ -118,19 +113,6 @@ export default function Donate() {
       </p>
       <form onSubmit={submit} autoComplete="off">
         <fieldset disabled={busy}>
-          <legend>How often</legend>
-          <div className="segmented">
-            <label>
-              <input type="radio" name="frequency" checked={monthly} onChange={() => edit(() => setMonthly(true))} />
-              Monthly
-            </label>
-            <label>
-              <input type="radio" name="frequency" checked={!monthly} onChange={() => edit(() => setMonthly(false))} />
-              One time
-            </label>
-          </div>
-        </fieldset>
-        <fieldset disabled={busy}>
           <legend>Choose an amount</legend>
           <div className="presets">
             {presets.map((minor) => {
@@ -143,19 +125,13 @@ export default function Donate() {
                   aria-pressed={parseDollars(amount) === minor}
                   onClick={() => edit(() => setAmount(value))}
                 >
-                  {monthly ? (
-                    <>
-                      <span>{perMonth}</span> · <span>{daily}</span>
-                    </>
-                  ) : (
-                    `${formatDollars(minor)} once`
-                  )}
+                  <span>{perMonth}</span> · <span>{daily}</span>
                 </button>
               );
             })}
           </div>
           <label>
-            {monthly ? "Monthly amount (USD)" : "One-time amount (USD)"}
+            Monthly amount (USD)
             <input
               ref={amountInput}
               inputMode="decimal"
@@ -168,7 +144,7 @@ export default function Donate() {
           </label>
           {chosen && (
             <p id="donate-amount">
-              You’ll give <GiftFraming minor={chosen} monthly={monthly} />
+              You’ll give <GiftFraming minor={chosen} monthly />
             </p>
           )}
         </fieldset>

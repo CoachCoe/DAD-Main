@@ -85,7 +85,7 @@ export default function ReferralLanding({
       <p className="lead">Join a growing circle of people giving together. DAD launches in April 2027.</p>
       <div className="callout highlight">
         <GiftFraming minor={3000} />
-        <p>Monthly giving is the default. One-time gifts are welcome too.</p>
+        <p>Monthly giving, about a dollar a day.</p>
       </div>
       <Announcer status={leaving ? "Saving your referral…" : ""} alert={error} />
       {error ? (

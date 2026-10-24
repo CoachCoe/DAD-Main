@@ -12,13 +12,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// Monthly amounts are whole cents from $1 to $999,999.99.
+// Monthly gift amounts are whole cents from $1 to the $900/mo ceiling
+// ($30/day), PRD §14.3.
 const (
 	minAmountMinor = 100
-	maxAmountMinor = 99_999_999
+	maxGiftMinor   = 90_000
 )
 
-func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxAmountMinor }
+func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxGiftMinor }
 
 // ChangeAmount sets a new monthly amount from the next renewal, without
 // proration. r.Previous must still be the amount that renewal would charge.

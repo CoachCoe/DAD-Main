@@ -51,7 +51,8 @@ func TestCheckoutRejectsInvalidRequestsBeforeTheProcessor(t *testing.T) {
 		{"unknown frequency", `{"email":"donor@example.org","amount_minor":3000,"frequency":"WEEKLY"}`, nil, 422},
 		{"unknown field", `{"email":"donor@example.org","amount_minor":3000,"unexpected":"secret"}`, nil, 422},
 		{"trailing value", valid + ` {}`, nil, 422},
-		{"amount over maximum", `{"email":"donor@example.org","amount_minor":999999999}`, nil, 422},
+		{"amount over ceiling by a cent", `{"email":"donor@example.org","amount_minor":90001}`, nil, 422},
+		{"amount at $31 a day", `{"email":"donor@example.org","amount_minor":93000}`, nil, 422},
 		{"amount under minimum", `{"email":"donor@example.org","amount_minor":99}`, nil, 422},
 		{"missing key", valid, map[string]string{"Idempotency-Key": ""}, 422},
 		{"version 1 key", valid, map[string]string{"Idempotency-Key": "8f4f52bb-99f6-190e-8313-5156cc4f8b45"}, 422},
@@ -86,6 +87,16 @@ func TestGuestCheckoutCarriesReferralAndDefaultsToMonthly(t *testing.T) {
 	}
 	if response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Referrer-Policy") != "no-referrer" {
 		t.Fatalf("checkout response headers: %v", response.Header())
+	}
+}
+
+func TestCheckoutAcceptsTheGiftCeiling(t *testing.T) {
+	stub := &checkoutStub{}
+	r := checkoutRequest(`{"email":"donor@example.org","amount_minor":90000}`)
+	response := httptest.NewRecorder()
+	NewServer("", Services{Checkout: stub}).Handler.ServeHTTP(response, r)
+	if response.Code != 201 || stub.request.Amount != 90000 {
+		t.Fatalf("got %d amount %d, want 201 at the $900/mo ceiling", response.Code, stub.request.Amount)
 	}
 }
 

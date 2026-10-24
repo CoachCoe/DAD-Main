@@ -149,33 +149,6 @@ func (q *Queries) InsertCancellation(ctx context.Context, arg InsertCancellation
 	return err
 }
 
-const insertPause = `-- name: InsertPause :exec
-INSERT INTO donor_pauses(id,donor_id,attempt_id,months,starts_at,resumes_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7)
-`
-
-type InsertPauseParams struct {
-	ID        pgtype.UUID        `json:"id"`
-	DonorID   pgtype.UUID        `json:"donor_id"`
-	AttemptID pgtype.UUID        `json:"attempt_id"`
-	Months    int32              `json:"months"`
-	StartsAt  pgtype.Timestamptz `json:"starts_at"`
-	ResumesAt pgtype.Timestamptz `json:"resumes_at"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) InsertPause(ctx context.Context, arg InsertPauseParams) error {
-	_, err := q.db.Exec(ctx, insertPause,
-		arg.ID,
-		arg.DonorID,
-		arg.AttemptID,
-		arg.Months,
-		arg.StartsAt,
-		arg.ResumesAt,
-		arg.CreatedAt,
-	)
-	return err
-}
-
 const insertPaymentUpdate = `-- name: InsertPaymentUpdate :exec
 INSERT INTO donor_payment_updates(id,donor_id,attempt_id,customer_id,request_params,status,created_at)
 VALUES($1,$2,$3,$4,$5,'PENDING',$6)
@@ -197,29 +170,6 @@ func (q *Queries) InsertPaymentUpdate(ctx context.Context, arg InsertPaymentUpda
 		arg.AttemptID,
 		arg.CustomerID,
 		arg.RequestParams,
-		arg.CreatedAt,
-	)
-	return err
-}
-
-const insertResumption = `-- name: InsertResumption :exec
-INSERT INTO donor_resumptions(id,donor_id,pause_id,next_renewal,created_at) VALUES($1,$2,$3,$4,$5)
-`
-
-type InsertResumptionParams struct {
-	ID          pgtype.UUID        `json:"id"`
-	DonorID     pgtype.UUID        `json:"donor_id"`
-	PauseID     pgtype.UUID        `json:"pause_id"`
-	NextRenewal pgtype.Timestamptz `json:"next_renewal"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) InsertResumption(ctx context.Context, arg InsertResumptionParams) error {
-	_, err := q.db.Exec(ctx, insertResumption,
-		arg.ID,
-		arg.DonorID,
-		arg.PauseID,
-		arg.NextRenewal,
 		arg.CreatedAt,
 	)
 	return err
@@ -331,26 +281,6 @@ func (q *Queries) OwnedMonthlyAttempt(ctx context.Context, arg OwnedMonthlyAttem
 	return i, err
 }
 
-const pauseByID = `-- name: PauseByID :one
-SELECT donor_id, attempt_id, months, starts_at, resumes_at, confirmed_at, id, created_at FROM donor_pauses WHERE id=$1
-`
-
-func (q *Queries) PauseByID(ctx context.Context, id pgtype.UUID) (DonorPause, error) {
-	row := q.db.QueryRow(ctx, pauseByID, id)
-	var i DonorPause
-	err := row.Scan(
-		&i.DonorID,
-		&i.AttemptID,
-		&i.Months,
-		&i.StartsAt,
-		&i.ResumesAt,
-		&i.ConfirmedAt,
-		&i.ID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const releaseSubscriptionLease = `-- name: ReleaseSubscriptionLease :exec
 DELETE FROM donor_subscription_leases WHERE attempt_id=$1 AND command_id=$2
 `
@@ -363,24 +293,6 @@ type ReleaseSubscriptionLeaseParams struct {
 func (q *Queries) ReleaseSubscriptionLease(ctx context.Context, arg ReleaseSubscriptionLeaseParams) error {
 	_, err := q.db.Exec(ctx, releaseSubscriptionLease, arg.AttemptID, arg.CommandID)
 	return err
-}
-
-const resumptionByID = `-- name: ResumptionByID :one
-SELECT donor_id, pause_id, next_renewal, confirmed_at, id, created_at FROM donor_resumptions WHERE id=$1
-`
-
-func (q *Queries) ResumptionByID(ctx context.Context, id pgtype.UUID) (DonorResumption, error) {
-	row := q.db.QueryRow(ctx, resumptionByID, id)
-	var i DonorResumption
-	err := row.Scan(
-		&i.DonorID,
-		&i.PauseID,
-		&i.NextRenewal,
-		&i.ConfirmedAt,
-		&i.ID,
-		&i.CreatedAt,
-	)
-	return i, err
 }
 
 const subscriptionObservedAt = `-- name: SubscriptionObservedAt :one

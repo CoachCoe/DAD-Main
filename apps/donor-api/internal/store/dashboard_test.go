@@ -154,7 +154,7 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 		mustExec(
 			t,
 			tx,
-			"INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'ONE_TIME',$3,'LINK',$4)",
+			"INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'MONTHLY',$3,'LINK',$4)",
 			id,
 			id,
 			owner,
@@ -164,7 +164,7 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 	mustExec(
 		t,
 		tx,
-		"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$2,$3,3000,'USD','ONE_TIME',$4,$5,'LINK')",
+		"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$2,$3,3000,'USD','MONTHLY',$4,$5,'LINK')",
 		testID(t),
 		giver,
 		"pi_"+giver.String(),

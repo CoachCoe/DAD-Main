@@ -27,17 +27,6 @@ type CancellationRequest struct {
 	PeriodEnd            time.Time
 }
 
-type PauseRequest struct {
-	RequestID, AttemptID pgtype.UUID
-	Months               int32
-	StartsAt, ResumesAt  time.Time
-}
-
-type ResumptionRequest struct {
-	RequestID, PauseID pgtype.UUID
-	NextRenewal        time.Time
-}
-
 type AmountRequest struct {
 	RequestID, AttemptID pgtype.UUID
 	Amount, Previous     int64
@@ -55,32 +44,12 @@ type RecurringDetails struct {
 }
 
 type Subscription struct {
-	AmountMinor int64        `json:"amount_minor"`
-	Currency    string       `json:"currency"`
-	ID          string       `json:"id"`
-	PeriodEnd   time.Time    `json:"period_end"`
-	Pause       *PauseWindow `json:"pause"`
-	Status      string       `json:"status"`
-	StopsAt     *time.Time   `json:"stops_at"`
-}
-
-// PauseWindow is a confirmed pause: renewals from StartsAt are skipped until
-// giving resumes at ResumesAt.
-type PauseWindow struct {
-	StartsAt  time.Time `json:"starts_at"`
-	ResumesAt time.Time `json:"resumes_at"`
-}
-
-type PauseView struct {
-	Confirmed bool      `json:"confirmed"`
-	Months    int32     `json:"months"`
-	RequestID string    `json:"request_id"`
-	ResumesAt time.Time `json:"resumes_at"`
-	StartsAt  time.Time `json:"starts_at"`
-}
-
-type PauseResult struct {
-	Pause PauseView `json:"pause"`
+	AmountMinor int64      `json:"amount_minor"`
+	Currency    string     `json:"currency"`
+	ID          string     `json:"id"`
+	PeriodEnd   time.Time  `json:"period_end"`
+	Status      string     `json:"status"`
+	StopsAt     *time.Time `json:"stops_at"`
 }
 
 type AmountChange struct {
@@ -89,13 +58,6 @@ type AmountChange struct {
 	EffectiveAt   time.Time `json:"effective_at"`
 	PreviousMinor int64     `json:"previous_minor"`
 	RequestID     string    `json:"request_id"`
-}
-
-type Resumption struct {
-	Confirmed   bool      `json:"confirmed"`
-	NextRenewal time.Time `json:"next_renewal"`
-	PauseID     string    `json:"pause_id"`
-	RequestID   string    `json:"request_id"`
 }
 
 func ownedAttempt(ctx context.Context, q *queries.Queries, donor, id pgtype.UUID) (queries.DonorStripeCheckout, error) {
@@ -132,9 +94,6 @@ func subscriptionView(
 	sub := &Subscription{ID: attempt.ID.String(), AmountMinor: amount, Currency: "USD", Status: row.Status, PeriodEnd: row.PeriodEnd.Time}
 	if row.StopsAt.Valid {
 		sub.StopsAt = &row.StopsAt.Time
-	}
-	if sub.Pause, err = confirmedPause(ctx, q, attempt.ID, now); err != nil {
-		return RecurringDetails{}, err
 	}
 	return RecurringDetails{Mode: "test", ObservedAt: &row.ObservedAt.Time, State: "ready", Subscription: sub}, nil
 }
@@ -332,11 +291,10 @@ type subscriptionUse int
 
 const (
 	viewOnly subscriptionUse = iota
-	// forAmount requires no schedule, pending update or pause, which a new
-	// amount could conflict with.
+	// forAmount requires no schedule or pending update, and refuses a
+	// subscription Stripe reports as pause-collecting, which a new amount
+	// could conflict with.
 	forAmount
-	// forPause requires no schedule or pending update.
-	forPause
 )
 
 // read reconciles the locked attempt's subscription with the processor's
@@ -498,46 +456,6 @@ func completeCancellation(
 	return subscriptionView(ctx, q, attempt, row, now)
 }
 
-func effectiveResume(ctx context.Context, q *queries.Queries, pause queries.DonorPause) (time.Time, error) {
-	resume, err := q.ResumptionForPause(ctx, pause.ID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return time.Time{}, err
-	}
-	if err == nil && resume.ConfirmedAt.Valid {
-		return resume.NextRenewal.Time, nil
-	}
-	return pause.ResumesAt.Time, nil
-}
-
-func renewalAfter(boundary time.Time, months int32, anchor time.Time) (time.Time, error) {
-	boundary, anchor = boundary.UTC(), anchor.UTC()
-	if months < 1 || months > 3 {
-		return time.Time{}, payments.ErrFacts
-	}
-	day := min(anchor.Day(), time.Date(boundary.Year(), boundary.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day())
-	expected := time.Date(boundary.Year(), boundary.Month(), day, anchor.Hour(), anchor.Minute(), anchor.Second(), 0, time.UTC)
-	if !boundary.Equal(expected) {
-		return time.Time{}, payments.ErrFacts
-	}
-	next := time.Date(boundary.Year(), boundary.Month()+time.Month(months), 1, 0, 0, 0, 0, time.UTC)
-	day = min(anchor.Day(), time.Date(next.Year(), next.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day())
-	return time.Date(next.Year(), next.Month(), day, anchor.Hour(), anchor.Minute(), anchor.Second(), 0, time.UTC), nil
-}
-
-func pauseView(ctx context.Context, q *queries.Queries, p queries.DonorPause) (PauseView, error) {
-	until, err := effectiveResume(ctx, q, p)
-	if err != nil {
-		return PauseView{}, err
-	}
-	return PauseView{
-		RequestID: p.ID.String(),
-		Months:    p.Months,
-		StartsAt:  p.StartsAt.Time,
-		ResumesAt: until,
-		Confirmed: p.ConfirmedAt.Valid,
-	}, nil
-}
-
 func amountView(c queries.DonorAmountChange) *AmountChange {
 	return &AmountChange{
 		RequestID:     c.ID.String(),
@@ -545,14 +463,5 @@ func amountView(c queries.DonorAmountChange) *AmountChange {
 		PreviousMinor: c.PreviousMinor,
 		EffectiveAt:   c.EffectiveAt.Time,
 		Confirmed:     c.ConfirmedAt.Valid,
-	}
-}
-
-func resumptionView(c queries.DonorResumption) Resumption {
-	return Resumption{
-		RequestID:   c.ID.String(),
-		PauseID:     c.PauseID.String(),
-		NextRenewal: c.NextRenewal.Time,
-		Confirmed:   c.ConfirmedAt.Valid,
 	}
 }

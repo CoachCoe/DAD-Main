@@ -32,19 +32,16 @@ const (
 // code, and sharing influence is heavy-tailed.
 const (
 	abandonedShare       = 0.08 // started checkout, never paid
-	oneTimeShare         = 0.22
 	referredShare        = 0.45 // arrived through a referral touch
 	lateTouchShare       = 0.03 // of referred: the window had lapsed by checkout
 	irlShare             = 0.35
 	claimShare           = 0.60 // givers who claim an account
 	sharerShare          = 0.40 // claimed donors who choose a public name
 	preferenceShare      = 0.30 // claimed donors who saved notification choices
-	extraGiftShare       = 0.06 // monthly donors with an additional one-time gift
 	renewalFailure       = 0.05
 	cancelHazard         = 0.015 // per renewal, cancelled by the donor at period end
 	scheduledCancelShare = 0.02  // of live subscriptions, ending at the current period's end
-	pauseShare           = 0.04
-	unreportedShare      = 0.15 // of renewals due in the last 14 days
+	unreportedShare      = 0.15  // of renewals due in the last 14 days
 	refundShare          = 0.015
 	influenceAlpha       = 1.16 // Pareto shape: a few sharers refer hundreds
 	influenceCeiling     = 3000
@@ -53,7 +50,6 @@ const (
 // Gift amounts in cents by weight: the $30, $90 and $150 presets, round
 // custom amounts, and 0 for any other whole-dollar amount.
 var monthlyAmounts = weighted[int64]{{3000, 60}, {1000, 12}, {5000, 12}, {10000, 8}, {9000, 3}, {15000, 2}, {0, 3}}
-var oneTimeAmounts = weighted[int64]{{3000, 30}, {5000, 20}, {10000, 20}, {1000, 10}, {15000, 5}, {9000, 5}, {0, 10}}
 
 var names = []string{"Ada", "Amara", "Ben", "Carmen", "Chen", "Dara", "Eli", "Fatima", "Gabe", "Hana", "Ines", "Jamal",
 	"Kai", "Lena", "Mateo", "Mira", "Nadia", "Omar", "Priya", "Quinn", "Rosa", "Sam", "Tariq", "Uma", "Vera", "Wes",
@@ -116,7 +112,6 @@ type checkout struct {
 	periods      []*period
 	gifts        []*gift
 	sub          *subscription
-	pause        *pause
 	cancellation *cancellation
 }
 
@@ -162,13 +157,6 @@ type subscription struct {
 	stopsAt   time.Time // zero when renewals continue
 	anchor    time.Time
 	observed  time.Time
-}
-
-type pause struct {
-	id                 pgtype.UUID
-	months             int
-	starts, resumes    time.Time
-	created, confirmed time.Time
 }
 
 type cancellation struct {
@@ -249,25 +237,9 @@ func (g *generator) join(d *donor, sharers *sharerPool) {
 	case x < abandonedShare:
 		c.amount, c.frequency, c.status = g.amount(monthlyAmounts), "MONTHLY", "EXPIRED"
 		return
-	case x < abandonedShare+oneTimeShare:
-		c.amount, c.frequency, c.status = g.amount(oneTimeAmounts), "ONE_TIME", "COMPLETE"
-		g.oneTime(c, d.createdAt.Add(g.seconds(10*time.Minute)))
 	default:
 		c.amount, c.frequency, c.status = g.amount(monthlyAmounts), "MONTHLY", "COMPLETE"
 		g.monthly(c)
-		if g.r.Float64() < extraGiftShare {
-			extra := &checkout{
-				id:        g.uuid(),
-				attempt:   g.uuid(),
-				donor:     d,
-				amount:    g.amount(oneTimeAmounts),
-				frequency: "ONE_TIME",
-				status:    "COMPLETE",
-			}
-			extra.createdAt = d.createdAt.Add(g.seconds(g.now.Sub(d.createdAt) - 15*time.Minute))
-			d.checkouts = append(d.checkouts, extra)
-			g.oneTime(extra, extra.createdAt.Add(g.seconds(10*time.Minute)))
-		}
 	}
 	first := c.gifts[0].paidAt
 	if g.r.Float64() < claimShare {
@@ -293,12 +265,6 @@ func (g *generator) join(d *donor, sharers *sharerPool) {
 	}
 }
 
-func (g *generator) oneTime(c *checkout, paid time.Time) {
-	c.session = g.stripeID("cs_test_")
-	pi := g.stripeID("pi_")
-	g.addGift(c, &gift{id: g.uuid(), object: pi, paymentIntent: pi, amount: c.amount, frequency: "ONE_TIME", paidAt: paid})
-}
-
 func (g *generator) addGift(c *checkout, gift *gift) {
 	if c.referrer != nil && gift.paidAt.Before(c.expiresAt) {
 		gift.referrer, gift.kind = c.referrer, c.kind
@@ -308,16 +274,12 @@ func (g *generator) addGift(c *checkout, gift *gift) {
 
 // monthly bills renewals on the subscription's anniversary until now, with
 // failures recovered within or after grace, unrecovered failures, donor
-// cancellations, pauses, and renewals the processor has not reported yet.
+// cancellations, and renewals the processor has not reported yet.
 func (g *generator) monthly(c *checkout) {
 	d := c.donor
 	c.session, c.subscription = g.stripeID("cs_test_"), g.stripeID("sub_")
 	anchor := c.createdAt.Add(g.seconds(5 * time.Minute))
 	c.sub = &subscription{id: g.uuid(), status: "active", anchor: anchor}
-	pauseAt := -1
-	if g.r.Float64() < pauseShare {
-		pauseAt = 2 + g.r.IntN(12)
-	}
 	var lastEnds time.Time
 	run := 0
 	for k := 0; ; k++ {
@@ -325,21 +287,7 @@ func (g *generator) monthly(c *checkout) {
 		if due.After(g.now) {
 			break
 		}
-		if k == pauseAt {
-			months := 1 + g.r.IntN(3)
-			created := due.Add(-g.seconds(10 * day))
-			c.pause = &pause{
-				id:        g.uuid(),
-				months:    months,
-				starts:    due,
-				resumes:   addMonths(anchor, k+months),
-				created:   created,
-				confirmed: created.Add(time.Minute),
-			}
-			k += months - 1
-			continue
-		}
-		continuous := due.Equal(lastEnds) || (c.pause != nil && lastEnds.Equal(c.pause.starts) && due.Equal(c.pause.resumes))
+		continuous := due.Equal(lastEnds)
 		if continuous && g.r.Float64() < cancelHazard {
 			created := due.Add(-g.seconds(20 * day))
 			c.cancellation = &cancellation{id: g.uuid(), periodEnd: due, created: created, completed: created.Add(time.Minute)}
@@ -426,15 +374,9 @@ func (g *generator) monthly(c *checkout) {
 		c.sub.periodEnd = c.sub.stopsAt
 	}
 	next := lastEnds
-	if c.pause != nil && lastEnds.Equal(c.pause.starts) {
-		next = c.pause.resumes
-	}
 	stopped := !c.sub.stopsAt.IsZero() && !c.sub.stopsAt.After(g.now) && c.sub.stopsAt.Equal(next)
-	paused := c.pause != nil && !g.now.Before(c.pause.starts) && g.now.Before(c.pause.resumes) && c.pause.starts.Equal(lastEnds)
 	if stopped {
 		run, d.atRisk = 0, false
-	} else if paused {
-		d.atRisk = false
 	}
 	d.streak = run
 }

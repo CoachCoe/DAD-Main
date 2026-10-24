@@ -156,7 +156,6 @@ func TestSubscriptionMutationsNeverProrate(t *testing.T) {
 	ctx := context.Background()
 	for _, err := range []error{
 		gateway.ScheduleCancellation(ctx, "sub_fixture", 1800000000, "key"),
-		gateway.PauseCollection(ctx, "sub_fixture", 1900000000, "key"),
 		gateway.ChangeMonthlyAmount(ctx, "sub_fixture", "si_fixture", "prod_fixture", 9000, "key"),
 	} {
 		if err != nil {
@@ -165,7 +164,6 @@ func TestSubscriptionMutationsNeverProrate(t *testing.T) {
 	}
 	want := []map[string]string{
 		{"cancel_at": "1800000000", "proration_behavior": "none"},
-		{"pause_collection[behavior]": "void", "pause_collection[resumes_at]": "1900000000", "proration_behavior": "none"},
 		{
 			"items[0][id]":                              "si_fixture",
 			"items[0][quantity]":                        "1",

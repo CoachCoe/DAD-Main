@@ -14,6 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// maxRefundMinor bounds a staff refund. It is deliberately wider than the
+// donor gift ceiling (maxGiftMinor): a refund may settle a historical gift
+// recorded before the ceiling applied.
+const maxRefundMinor = 99_999_999
+
 type StaffFinanceService struct {
 	Staff   *StaffService
 	Gateway payments.StaffFinanceGateway
@@ -134,7 +139,7 @@ func (s StaffFinanceService) stage(ctx context.Context, token, kind string, r St
 	var period pgtype.Timestamptz
 	if kind == "REFUND" {
 		permission = "gift.refund"
-		if r.Amount < 1 || r.Amount > maxAmountMinor {
+		if r.Amount < 1 || r.Amount > maxRefundMinor {
 			return ErrStaffInput
 		}
 		amount = pgtype.Int8{Int64: r.Amount, Valid: true}

@@ -16,20 +16,14 @@ var (
 	ErrIncomplete = errors.New("incomplete billing history")
 )
 
-const Grace = 14 * 24 * time.Hour
-
-// PauseFreezeEnd follows the billing anniversary, clamping month-end dates.
-func PauseFreezeEnd(start time.Time) time.Time {
-	start = utc(start)
-	first := time.Date(start.Year(), start.Month()+3, 1, start.Hour(), start.Minute(), start.Second(), start.Nanosecond(), time.UTC)
-	return first.AddDate(0, 0, min(start.Day(), first.AddDate(0, 1, -1).Day())-1)
-}
+const Grace = 7 * 24 * time.Hour
 
 // NewYork is the zone of the Founding Donor cutoff and receipt tax years.
 var NewYork = mustLoadLocation("America/New_York")
 
-// FoundingCutoff is exclusive: a first gift must succeed before it.
-var FoundingCutoff = time.Date(2027, 4, 22, 0, 0, 0, 0, NewYork)
+// FoundingCutoff is exclusive: a first gift must succeed before it. Per the R1
+// PRD (Appendix A #1), Founding Donor status requires a gift before January 2027.
+var FoundingCutoff = time.Date(2027, 1, 1, 0, 0, 0, 0, NewYork)
 
 func mustLoadLocation(name string) *time.Location {
 	zone, err := time.LoadLocation(name)
@@ -88,11 +82,6 @@ type Streak struct {
 	AtRisk      bool       `json:"at_risk"`
 	GraceEndsAt *time.Time `json:"grace_ends_at"`
 	Since       *time.Time `json:"since"`
-}
-
-type Pause struct {
-	Start time.Time `json:"start"`
-	End   time.Time `json:"end"`
 }
 
 func utc(t time.Time) time.Time { return t.Round(0).UTC() }
@@ -233,7 +222,6 @@ func GivingStreak(
 	asOf time.Time,
 	previousBest int64,
 	stops []time.Time,
-	pauses []Pause,
 ) (Streak, error) {
 	if previousBest < 0 {
 		return Streak{}, ErrInvalid
@@ -254,7 +242,7 @@ func GivingStreak(
 	if err != nil {
 		return Streak{}, err
 	}
-	stopped, pauses, err := renewalBoundaries(stops, pauses)
+	stopped, err := renewalBoundaries(stops)
 	if err != nil {
 		return Streak{}, err
 	}
@@ -268,13 +256,12 @@ func GivingStreak(
 		return Streak{Best: previousBest}, nil
 	}
 	last := elapsed[len(elapsed)-1]
-	next, ended, freezeEnd := renewalAfter(last.EndsAt, stopped, pauses)
+	next, ended := renewalAfter(last.EndsAt, stopped)
 	renewalDue := !next.After(asOf)
-	frozen := !freezeEnd.IsZero() && asOf.Before(freezeEnd)
-	if renewalDue && !ended && !frozen && !asOf.Before(next.Add(Grace)) {
+	if renewalDue && !ended && !asOf.Before(next.Add(Grace)) {
 		return Streak{}, ErrIncomplete
 	}
-	result := countStreak(elapsed, paid, net, asOf, stopped, pauses)
+	result := countStreak(elapsed, paid, net, asOf, stopped)
 	result.Best = max(previousBest, result.Best)
 	if renewalDue && ended {
 		result.Current = 0
@@ -340,51 +327,21 @@ func periodPayments(gifts []Gift, net map[string]int64, periods []Period, donorI
 	return result, nil
 }
 
-func renewalBoundaries(stops []time.Time, input []Pause) (map[time.Time]bool, []Pause, error) {
+func renewalBoundaries(stops []time.Time) (map[time.Time]bool, error) {
 	stopped := map[time.Time]bool{}
 	for _, t := range stops {
 		if t.IsZero() {
-			return nil, nil, ErrInvalid
+			return nil, ErrInvalid
 		}
 		stopped[utc(t)] = true
 	}
-	pauses := slices.Clone(input)
-	for i, p := range pauses {
-		if p.Start.IsZero() || p.End.IsZero() || p.End.Before(p.Start) {
-			return nil, nil, ErrInvalid
-		}
-		pauses[i] = Pause{Start: utc(p.Start), End: utc(p.End)}
-	}
-	slices.SortFunc(pauses, func(a, b Pause) int { return a.Start.Compare(b.Start) })
-	return stopped, pauses, nil
+	return stopped, nil
 }
 
-// renewalAfter bridges skipped renewals even after the pause has ended.
-func renewalAfter(due time.Time, stopped map[time.Time]bool, pauses []Pause) (next time.Time, ended bool, freezeEnd time.Time) {
-	next = due
-	for _, p := range pauses {
-		if !p.Start.Equal(next) || p.End.Equal(p.Start) {
-			continue
-		}
-		if stopped[next] {
-			return next, true, time.Time{}
-		}
-		cap := PauseFreezeEnd(p.Start)
-		var stop time.Time
-		for at := range stopped {
-			if !at.Before(p.Start) && !at.After(p.End) && (stop.IsZero() || at.Before(stop)) {
-				stop = at
-			}
-		}
-		if !stop.IsZero() && !stop.After(cap) {
-			return stop, true, time.Time{}
-		}
-		if p.End.After(cap) {
-			return next, false, cap
-		}
-		next = p.End
-	}
-	return next, stopped[next], time.Time{}
+// renewalAfter reports the next renewal boundary after due and whether a
+// cancellation ended renewals at it.
+func renewalAfter(due time.Time, stopped map[time.Time]bool) (next time.Time, ended bool) {
+	return due, stopped[due]
 }
 
 func countStreak(
@@ -393,12 +350,11 @@ func countStreak(
 	net map[string]int64,
 	asOf time.Time,
 	stopped map[time.Time]bool,
-	pauses []Pause,
 ) Streak {
 	result := Streak{}
 	var last, lastPaid time.Time
 	for _, p := range elapsed {
-		next, ended, _ := renewalAfter(last, stopped, pauses)
+		next, ended := renewalAfter(last, stopped)
 		if ended || (!last.Equal(p.DueAt) && !next.Equal(p.DueAt)) {
 			result.Current = 0
 			result.Since = nil

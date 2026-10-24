@@ -17,9 +17,9 @@ export default function HowItWorks() {
       </p>
       <h2>Giving</h2>
       <p>
-        Choose recurring or one-time giving on the web, without creating an account first. Recurring giving suggests
-        about a dollar a day, billed as $30/month, and $90, $150, or an amount you choose work too: the monthly amount
-        is what your card is charged. One-time gifts are welcome too.
+        Give monthly on the web, without creating an account first. Giving suggests about a dollar a day, billed as
+        $30/month, and $90, $150, or an amount you choose up to $900/month work too: the monthly amount is what your
+        card is charged.
       </p>
       <h2>Your circle</h2>
       <p>
@@ -33,10 +33,8 @@ export default function HowItWorks() {
       </p>
       <h2>Streaks and recognition</h2>
       <p>
-        Successful monthly gifts build your streak; one-time gifts contribute money but do not. A failed renewal has 14
-        days to recover before your active streak resets. Pausing for up to three months freezes your streak; it
-        continues when monthly giving resumes. Cancellation ends it at the first skipped renewal. Your historical best
-        stays recorded.
+        Successful monthly gifts build your streak. A failed renewal has 7 days to recover before your active streak
+        resets. Cancellation ends it at the first skipped renewal. Your historical best stays recorded.
       </p>
       <p>DAD launches on 22 April 2027. A first gift completed before launch earns a permanent Founding Donor badge.</p>
       <h2>Clear records, honest limits</h2>

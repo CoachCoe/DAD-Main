@@ -7,9 +7,7 @@ export default function DonorHome() {
         <div className="heroCopy">
           <span className="eyebrow">Dynamic Aid Delivery · Donor preview</span>
           <h1>Start small. Invite someone. Grow your circle’s impact.</h1>
-          <p>
-            Join with about a dollar a day · $30/month. Recurring giving is the default, and one-time gifts are welcome.
-          </p>
+          <p>Join with about a dollar a day · $30/month. Monthly giving, no account needed to start.</p>
           <p>DAD launches on 22 April 2027. Give before launch to earn a permanent Founding Donor badge.</p>
           <div className="actions">
             <Link className="button" href="/donate">

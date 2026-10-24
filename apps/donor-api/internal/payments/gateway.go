@@ -29,7 +29,6 @@ type SubscriptionGateway interface {
 	PaymentMethodGateway
 	CheckoutGateway
 	ScheduleCancellation(context.Context, string, int64, string) error
-	PauseCollection(context.Context, string, int64, string) error
 	ChangeMonthlyAmount(context.Context, string, string, string, int64, string) error
 }
 
@@ -159,7 +158,7 @@ func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key stri
 	return result, nil
 }
 
-// Recurring changes never prorate: a new amount, pause, or cancellation takes
+// Recurring changes never prorate: a new amount or cancellation takes
 // effect at a renewal boundary.
 func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, params *stripe.SubscriptionUpdateParams, key string) error {
 	params.ProrationBehavior = stripe.String("none")
@@ -175,20 +174,6 @@ func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, param
 
 func (g *StripeGateway) ScheduleCancellation(ctx context.Context, id string, end int64, key string) error {
 	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{CancelAt: stripe.Int64(end)}, key)
-}
-
-func (g *StripeGateway) PauseCollection(ctx context.Context, id string, resumes int64, key string) error {
-	return g.mutateSubscription(
-		ctx,
-		id,
-		&stripe.SubscriptionUpdateParams{
-			PauseCollection: &stripe.SubscriptionUpdatePauseCollectionParams{
-				Behavior:  stripe.String("void"),
-				ResumesAt: stripe.Int64(resumes),
-			},
-		},
-		key,
-	)
 }
 
 func (g *StripeGateway) ChangeMonthlyAmount(ctx context.Context, id, item, product string, amount int64, key string) error {

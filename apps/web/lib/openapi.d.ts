@@ -638,54 +638,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/me/recurring/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Pause offer: 1, 2, or 3 skipped renewals with exact dates
-         * @description Served from the subscription as last synced from Stripe by verified webhooks and recurring commands; it never calls Stripe. The matching POST checks current Stripe state and answers 409 when the offer no longer matches it. 409 here when the stored billing dates are inconsistent.
-         */
-        get: operations["pauseOptions"];
-        put?: never;
-        /**
-         * Pause renewals
-         * @description Idempotent. Echo the values the matching GET returned; 409 when they no longer match current billing. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.
-         */
-        post: operations["pauseRecurring"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/donor/me/recurring/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Resume offer
-         * @description Served from the subscription as last synced from Stripe by verified webhooks and recurring commands; it never calls Stripe. The matching POST checks current Stripe state and answers 409 when the offer no longer matches it.
-         */
-        get: operations["resumeOptions"];
-        put?: never;
-        /**
-         * Resume a pause early
-         * @description Idempotent. Echo the values the matching GET returned; 409 when they no longer match current billing. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.
-         */
-        post: operations["resumeRecurring"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/donor/me/payment-method": {
         parameters: {
             query?: never;
@@ -1029,23 +981,6 @@ export interface paths {
         };
         /** Audit trail */
         get: operations["auditEvents"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/donor/staff/enrolments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Recipient enrolment queue (inactive until R2) */
-        get: operations["enrolments"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1491,7 +1426,7 @@ export interface components {
             total_minor: number;
         };
         StreakSummary: {
-            /** @description A renewal failed and is inside its 14-day grace period. */
+            /** @description A renewal failed and is inside its 7-day grace period. */
             at_risk: boolean;
             /** Format: int32 */
             current: number;
@@ -1744,20 +1679,11 @@ export interface components {
              * @description Subscription attempt ID used by recurring commands.
              */
             id: string;
-            /** @description The confirmed pause, or null when none is in effect or scheduled. */
-            pause: components["schemas"]["PauseWindow"] | null;
             /** Format: date-time */
             period_end: string;
             status: string;
             /** Format: date-time */
             stops_at: string | null;
-        };
-        /** @description Renewals from starts_at are skipped until giving resumes at resumes_at. */
-        PauseWindow: {
-            /** Format: date-time */
-            resumes_at: string;
-            /** Format: date-time */
-            starts_at: string;
         };
         RecurringDetails: {
             /**
@@ -1808,61 +1734,6 @@ export interface components {
             /** Format: uuid */
             subscription_id: string;
         };
-        PauseOption: {
-            /** Format: int32 */
-            months: number;
-            /** Format: date-time */
-            resumes_at: string;
-            /** Format: date-time */
-            starts_at: string;
-        };
-        PauseView: {
-            confirmed: boolean;
-            /** Format: int32 */
-            months: number;
-            /** Format: uuid */
-            request_id: string;
-            /** Format: date-time */
-            resumes_at: string;
-            /** Format: date-time */
-            starts_at: string;
-        };
-        PauseOptions: {
-            options: components["schemas"]["PauseOption"][];
-            pause: components["schemas"]["PauseView"] | null;
-            state: string;
-            /** Format: uuid */
-            subscription_id?: string;
-        };
-        ResumeOptions: {
-            /** @constant */
-            state: "unavailable";
-        } | {
-            /** Format: date-time */
-            next_renewal: string;
-            /** Format: date-time */
-            original_resume: string;
-            /** Format: uuid */
-            pause_id: string;
-            /**
-             * @description An offer to resume at the next renewal.
-             * @constant
-             */
-            state: "ready";
-        } | {
-            confirmed: boolean;
-            /** Format: date-time */
-            next_renewal: string;
-            /** Format: uuid */
-            pause_id: string;
-            /** Format: uuid */
-            request_id: string;
-            /**
-             * @description A resumption already requested.
-             * @constant
-             */
-            state: "saved";
-        };
         PaymentMethodStatus: {
             /** Format: date-time */
             completed_at: string | null;
@@ -1873,18 +1744,6 @@ export interface components {
             mode: "test";
             /** @enum {string} */
             status: "NONE" | "PENDING" | "OPEN" | "APPLIED" | "EXPIRED" | "CANCELLED";
-        };
-        PauseResult: {
-            pause: components["schemas"]["PauseView"];
-        };
-        Resumption: {
-            confirmed: boolean;
-            /** Format: date-time */
-            next_renewal: string;
-            /** Format: uuid */
-            pause_id: string;
-            /** Format: uuid */
-            request_id: string;
         };
         PaymentUpdate: {
             /**
@@ -2106,11 +1965,6 @@ export interface components {
         };
         PendingAction: {
             action: components["schemas"]["StaffAction"] | null;
-        };
-        Enrolments: {
-            /** @description Always empty until R2. */
-            enrolments: unknown[];
-            state: string;
         };
         QueuedMessage: {
             /** Format: uuid */
@@ -2503,7 +2357,7 @@ export interface operations {
                      * @description Defaults to MONTHLY when omitted; null is invalid.
                      * @enum {string}
                      */
-                    frequency?: "MONTHLY" | "ONE_TIME";
+                    frequency?: "MONTHLY";
                 };
             };
         };
@@ -3467,135 +3321,6 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
-    pauseOptions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PauseOptions"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            409: components["responses"]["Conflict"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    pauseRecurring: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** Format: uuid */
-                    subscription_id: string;
-                    /** Format: int32 */
-                    months: number;
-                    /** Format: date-time */
-                    starts_at: string;
-                    /** Format: date-time */
-                    resumes_at: string;
-                };
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PauseResult"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            415: components["responses"]["UnsupportedMediaType"];
-            422: components["responses"]["Unprocessable"];
-            429: components["responses"]["TooManyRequests"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    resumeOptions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ResumeOptions"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    resumeRecurring: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** Format: uuid */
-                    pause_id: string;
-                    /** Format: date-time */
-                    next_renewal: string;
-                };
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Resumption"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            415: components["responses"]["UnsupportedMediaType"];
-            422: components["responses"]["Unprocessable"];
-            429: components["responses"]["TooManyRequests"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
     paymentMethod: {
         parameters: {
             query?: never;
@@ -4212,29 +3937,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["Unprocessable"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    enrolments: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Enrolments"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
             503: components["responses"]["Unavailable"];
         };
     };

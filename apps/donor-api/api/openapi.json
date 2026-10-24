@@ -272,14 +272,13 @@
                     "format": "int64",
                     "description": "Integer USD cents.",
                     "minimum": 100,
-                    "maximum": 99999999
+                    "maximum": 90000
                   },
                   "frequency": {
                     "type": "string",
                     "description": "Defaults to MONTHLY when omitted; null is invalid.",
                     "enum": [
-                      "MONTHLY",
-                      "ONE_TIME"
+                      "MONTHLY"
                     ]
                   }
                 },
@@ -2189,7 +2188,7 @@
                     "type": "integer",
                     "format": "int64",
                     "minimum": 100,
-                    "maximum": 99999999
+                    "maximum": 90000
                   },
                   "previous_minor": {
                     "type": "integer",
@@ -2220,267 +2219,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AmountChange"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "413": {
-            "$ref": "#/components/responses/PayloadTooLarge"
-          },
-          "415": {
-            "$ref": "#/components/responses/UnsupportedMediaType"
-          },
-          "422": {
-            "$ref": "#/components/responses/Unprocessable"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        }
-      }
-    },
-    "/donor/me/recurring/pause": {
-      "get": {
-        "operationId": "pauseOptions",
-        "summary": "Pause offer: 1, 2, or 3 skipped renewals with exact dates",
-        "description": "Served from the subscription as last synced from Stripe by verified webhooks and recurring commands; it never calls Stripe. The matching POST checks current Stripe state and answers 409 when the offer no longer matches it. 409 here when the stored billing dates are inconsistent.",
-        "tags": [
-          "Recurring"
-        ],
-        "security": [
-          {
-            "cookieAuth": []
-          },
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PauseOptions"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        }
-      },
-      "post": {
-        "operationId": "pauseRecurring",
-        "summary": "Pause renewals",
-        "description": "Idempotent. Echo the values the matching GET returned; 409 when they no longer match current billing. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
-        "tags": [
-          "Recurring"
-        ],
-        "security": [
-          {
-            "cookieAuth": []
-          },
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-rate-limit": "account",
-        "x-clients": [
-          "browser",
-          "native"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "subscription_id": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "months": {
-                    "type": "integer",
-                    "format": "int32",
-                    "minimum": 1,
-                    "maximum": 3
-                  },
-                  "starts_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  },
-                  "resumes_at": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                },
-                "required": [
-                  "subscription_id",
-                  "months",
-                  "starts_at",
-                  "resumes_at"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PauseResult"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "413": {
-            "$ref": "#/components/responses/PayloadTooLarge"
-          },
-          "415": {
-            "$ref": "#/components/responses/UnsupportedMediaType"
-          },
-          "422": {
-            "$ref": "#/components/responses/Unprocessable"
-          },
-          "429": {
-            "$ref": "#/components/responses/TooManyRequests"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        }
-      }
-    },
-    "/donor/me/recurring/resume": {
-      "get": {
-        "operationId": "resumeOptions",
-        "summary": "Resume offer",
-        "description": "Served from the subscription as last synced from Stripe by verified webhooks and recurring commands; it never calls Stripe. The matching POST checks current Stripe state and answers 409 when the offer no longer matches it.",
-        "tags": [
-          "Recurring"
-        ],
-        "security": [
-          {
-            "cookieAuth": []
-          },
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResumeOptions"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        }
-      },
-      "post": {
-        "operationId": "resumeRecurring",
-        "summary": "Resume a pause early",
-        "description": "Idempotent. Echo the values the matching GET returned; 409 when they no longer match current billing. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
-        "tags": [
-          "Recurring"
-        ],
-        "security": [
-          {
-            "cookieAuth": []
-          },
-          {
-            "bearerAuth": []
-          }
-        ],
-        "x-rate-limit": "account",
-        "x-clients": [
-          "browser",
-          "native"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/IdempotencyKey"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "pause_id": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "next_renewal": {
-                    "type": "string",
-                    "format": "date-time"
-                  }
-                },
-                "required": [
-                  "pause_id",
-                  "next_renewal"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Resumption"
                 }
               }
             }
@@ -3770,41 +3508,6 @@
           },
           "422": {
             "$ref": "#/components/responses/Unprocessable"
-          },
-          "503": {
-            "$ref": "#/components/responses/Unavailable"
-          }
-        }
-      }
-    },
-    "/donor/staff/enrolments": {
-      "get": {
-        "operationId": "enrolments",
-        "summary": "Recipient enrolment queue (inactive until R2)",
-        "tags": [
-          "Staff donors"
-        ],
-        "security": [
-          {
-            "staffCookieAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Enrolments"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -5447,7 +5150,7 @@
         "properties": {
           "at_risk": {
             "type": "boolean",
-            "description": "A renewal failed and is inside its 14-day grace period."
+            "description": "A renewal failed and is inside its 7-day grace period."
           },
           "current": {
             "type": "integer",
@@ -6080,17 +5783,6 @@
             "description": "Subscription attempt ID used by recurring commands.",
             "format": "uuid"
           },
-          "pause": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PauseWindow"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The confirmed pause, or null when none is in effect or scheduled."
-          },
           "period_end": {
             "type": "string",
             "format": "date-time"
@@ -6110,29 +5802,9 @@
           "amount_minor",
           "currency",
           "id",
-          "pause",
           "period_end",
           "status",
           "stops_at"
-        ],
-        "additionalProperties": false
-      },
-      "PauseWindow": {
-        "type": "object",
-        "description": "Renewals from starts_at are skipped until giving resumes at resumes_at.",
-        "properties": {
-          "resumes_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "starts_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "resumes_at",
-          "starts_at"
         ],
         "additionalProperties": false
       },
@@ -6266,176 +5938,6 @@
           }
         ]
       },
-      "PauseOption": {
-        "type": "object",
-        "properties": {
-          "months": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 1,
-            "maximum": 3
-          },
-          "resumes_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "starts_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "months",
-          "resumes_at",
-          "starts_at"
-        ],
-        "additionalProperties": false
-      },
-      "PauseView": {
-        "type": "object",
-        "properties": {
-          "confirmed": {
-            "type": "boolean"
-          },
-          "months": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "request_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "resumes_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "starts_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "confirmed",
-          "months",
-          "request_id",
-          "resumes_at",
-          "starts_at"
-        ],
-        "additionalProperties": false
-      },
-      "PauseOptions": {
-        "type": "object",
-        "properties": {
-          "options": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PauseOption"
-            }
-          },
-          "pause": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PauseView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "state": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "options",
-          "pause",
-          "state"
-        ],
-        "additionalProperties": false
-      },
-      "ResumeOptions": {
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "state": {
-                "type": "string",
-                "const": "unavailable"
-              }
-            },
-            "required": [
-              "state"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "next_renewal": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "original_resume": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "pause_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "state": {
-                "type": "string",
-                "const": "ready",
-                "description": "An offer to resume at the next renewal."
-              }
-            },
-            "required": [
-              "next_renewal",
-              "original_resume",
-              "pause_id",
-              "state"
-            ],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "confirmed": {
-                "type": "boolean"
-              },
-              "next_renewal": {
-                "type": "string",
-                "format": "date-time"
-              },
-              "pause_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "request_id": {
-                "type": "string",
-                "format": "uuid"
-              },
-              "state": {
-                "type": "string",
-                "const": "saved",
-                "description": "A resumption already requested."
-              }
-            },
-            "required": [
-              "confirmed",
-              "next_renewal",
-              "pause_id",
-              "request_id",
-              "state"
-            ],
-            "additionalProperties": false
-          }
-        ]
-      },
       "PaymentMethodStatus": {
         "type": "object",
         "properties": {
@@ -6469,45 +5971,6 @@
           "completed_at",
           "mode",
           "status"
-        ],
-        "additionalProperties": false
-      },
-      "PauseResult": {
-        "type": "object",
-        "properties": {
-          "pause": {
-            "$ref": "#/components/schemas/PauseView"
-          }
-        },
-        "required": [
-          "pause"
-        ],
-        "additionalProperties": false
-      },
-      "Resumption": {
-        "type": "object",
-        "properties": {
-          "confirmed": {
-            "type": "boolean"
-          },
-          "next_renewal": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "pause_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "request_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "confirmed",
-          "next_renewal",
-          "pause_id",
-          "request_id"
         ],
         "additionalProperties": false
       },
@@ -7223,24 +6686,6 @@
         },
         "required": [
           "action"
-        ],
-        "additionalProperties": false
-      },
-      "Enrolments": {
-        "type": "object",
-        "properties": {
-          "enrolments": {
-            "type": "array",
-            "items": {},
-            "description": "Always empty until R2."
-          },
-          "state": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "enrolments",
-          "state"
         ],
         "additionalProperties": false
       },

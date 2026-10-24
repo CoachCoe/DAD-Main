@@ -40,7 +40,7 @@ func TestReferrerRefreshCannotOverwriteConcurrentContribution(t *testing.T) {
 			mustExec(
 				t,
 				pool,
-				"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'USD','ONE_TIME',$3,'LINK',$4)",
+				"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'USD','MONTHLY',$3,'LINK',$4)",
 				checkout,
 				child,
 				parent,
@@ -49,7 +49,7 @@ func TestReferrerRefreshCannotOverwriteConcurrentContribution(t *testing.T) {
 			mustExec(
 				t,
 				pool,
-				"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,'LINK')",
+				"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','MONTHLY',$5,$6,'LINK')",
 				testID(t),
 				child,
 				checkout,
@@ -281,7 +281,7 @@ func TestConcurrentReferralDeltaConverges(t *testing.T) {
 			}
 		}
 	})
-	// Seed referrer + referred donors. Each sibling has a ONE_TIME gift
+	// Seed referrer + referred donors. Each sibling has a gift
 	// referred via LINK to referrerID.
 	tx, err := pool.Begin(ctx)
 	if err != nil {
@@ -296,7 +296,7 @@ func TestConcurrentReferralDeltaConverges(t *testing.T) {
 		mustExec(
 			t,
 			tx,
-			"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'USD','ONE_TIME',$3,'LINK',$4)",
+			"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'USD','MONTHLY',$3,'LINK',$4)",
 			checkout,
 			id,
 			referrerID,
@@ -306,7 +306,7 @@ func TestConcurrentReferralDeltaConverges(t *testing.T) {
 		mustExec(
 			t,
 			tx,
-			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,'LINK')",
+			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','MONTHLY',$5,$6,'LINK')",
 			testID(t),
 			id,
 			checkout,

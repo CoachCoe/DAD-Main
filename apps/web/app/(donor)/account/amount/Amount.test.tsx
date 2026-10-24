@@ -100,5 +100,5 @@ it("explains an unchanged amount separately from one out of range", async () => 
   expect(screen.getByRole("alert")).toHaveTextContent("already your monthly amount");
   fireEvent.change(screen.getByLabelText("Monthly amount in USD"), { target: { value: "0.50" } });
   fireEvent.click(screen.getByRole("button", { name: "Review amount change" }));
-  expect(screen.getByRole("alert")).toHaveTextContent("between $1 and $999,999.99");
+  expect(screen.getByRole("alert")).toHaveTextContent("between $1 and $900");
 });

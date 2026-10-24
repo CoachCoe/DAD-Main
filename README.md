@@ -12,7 +12,7 @@ Optional [Wallet signing](docs/wallet.md), [analytics definitions](docs/analytic
 and [shared design values](docs/design-system.md) have separate setup and acceptance boundaries.
 
 R1 is a donor product. It does not deliver aid, assess recipients, run AI services, or
-publish blockchain transactions. The enrolment export is an inactive R2 stub.
+publish blockchain transactions.
 
 ## Local setup
 

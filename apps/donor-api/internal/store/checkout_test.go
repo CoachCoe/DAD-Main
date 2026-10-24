@@ -124,10 +124,6 @@ func TestCheckoutRetriesAndReservations(t *testing.T) {
 	if _, err = service.BeginCheckout(ctx, changed); !errors.Is(err, payments.ErrCheckoutConflict) {
 		t.Fatal("second recurring checkout allowed")
 	}
-	changed.Frequency = "ONE_TIME"
-	if _, err = service.BeginCheckout(ctx, changed); err != nil {
-		t.Fatalf("one time blocked by reservation: %v", err)
-	}
 }
 
 func TestCheckoutConcurrentMonthlyReservation(t *testing.T) {
@@ -181,7 +177,6 @@ func TestCheckoutUncertainWindowAndDisabledDonor(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.RequestID = testID(t)
-	request.Frequency = "ONE_TIME"
 	if _, err := service.BeginCheckout(ctx, request); !errors.Is(err, ErrDenied) {
 		t.Fatal("disabled donor checked out")
 	}
@@ -230,8 +225,12 @@ func TestCheckoutAttributionSnapshotAndSelfReferral(t *testing.T) {
 	if _, err := pool.Exec(ctx, "UPDATE donor_referral_touches SET referrer_id=$2,expires_at=$3 WHERE id=$1", touch, id, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	// Release the prior monthly reservation so a fresh checkout can proceed; the
+	// point of this call is that a self-referring touch is not attributed.
+	if _, err := pool.Exec(ctx, "DELETE FROM donor_recurring_reservations WHERE donor_id=$1", id); err != nil {
+		t.Fatal(err)
+	}
 	request.RequestID = testID(t)
-	request.Frequency = "ONE_TIME"
 	if _, err := service.BeginCheckout(ctx, request); err != nil {
 		t.Fatal(err)
 	}

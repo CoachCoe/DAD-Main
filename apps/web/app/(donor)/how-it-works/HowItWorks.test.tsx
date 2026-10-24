@@ -10,9 +10,9 @@ it("explains the donor release, monthly billing, direct referral credit, and lau
     "$30/month, and $90, $150, or an amount you choose",
   );
   expect(screen.getByText(/only people you personally refer/)).toHaveTextContent("less successful refunds");
-  expect(screen.getByText(/Successful monthly gifts build your streak/)).toHaveTextContent("14 days to recover");
+  expect(screen.getByText(/Successful monthly gifts build your streak/)).toHaveTextContent("7 days to recover");
   expect(screen.getByText(/Successful monthly gifts build your streak/)).toHaveTextContent(
-    "Pausing for up to three months freezes your streak",
+    "Cancellation ends it at the first skipped renewal",
   );
   expect(screen.getByText(/does not enrol recipients/)).toHaveTextContent("Aid programs begin at launch");
   expect(screen.getByText(/does not enrol recipients/)).toHaveTextContent("donor app arrives for iOS and Android");

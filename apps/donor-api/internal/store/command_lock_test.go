@@ -70,9 +70,6 @@ func TestRecurringCommandsCallProcessorOutsideDonorLock(t *testing.T) {
 	api := as(t, dbroles.API)
 	_, finance := staffFixture(t, pool, "FINANCE")
 	ctx := context.Background()
-	pause := func(r *recurringFixture) PauseRequest {
-		return PauseRequest{RequestID: testID(t), AttemptID: r.attempt, Months: 1, StartsAt: r.end, ResumesAt: r.end.AddDate(0, 1, 0)}
-	}
 	for _, c := range []struct {
 		name    string
 		prepare func(*recurringFixture) pgtype.UUID
@@ -80,20 +77,6 @@ func TestRecurringCommandsCallProcessorOutsideDonorLock(t *testing.T) {
 	}{
 		{"cancel", nil, func(r *recurringFixture, _ pgtype.UUID) error {
 			_, err := r.service.Cancel(ctx, r.token, CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end})
-			return err
-		}},
-		{"pause", nil, func(r *recurringFixture, _ pgtype.UUID) error {
-			_, err := r.service.Pause(ctx, r.token, pause(r))
-			return err
-		}},
-		{"resume", func(r *recurringFixture) pgtype.UUID {
-			request := pause(r)
-			if _, err := r.service.Pause(ctx, r.token, request); err != nil {
-				t.Fatal(err)
-			}
-			return request.RequestID
-		}, func(r *recurringFixture, paused pgtype.UUID) error {
-			_, err := r.service.Resume(ctx, r.token, ResumptionRequest{RequestID: testID(t), PauseID: paused, NextRenewal: r.end})
 			return err
 		}},
 		{"amount", nil, func(r *recurringFixture, _ pgtype.UUID) error {
@@ -140,42 +123,38 @@ func TestOutstandingProcessorRequestBlocksOtherSubscriptionCommands(t *testing.T
 	r := newRecurringFixture(t)
 	ctx := context.Background()
 	pool := r.db
-	pause := PauseRequest{RequestID: testID(t), AttemptID: r.attempt, Months: 1, StartsAt: r.end, ResumesAt: r.end.AddDate(0, 1, 0)}
 	amount := AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}
 	cancel := CancellationRequest{RequestID: testID(t), AttemptID: r.attempt, PeriodEnd: r.end}
 	err := whileStalled(t, r.sub.stall(t), func() error {
-		_, err := r.service.Pause(ctx, r.token, pause)
+		_, err := r.service.ChangeAmount(ctx, r.token, amount)
 		return err
 	}, func() {
-		if _, err := r.service.Pause(ctx, r.token, pause); !errors.Is(err, ErrSubscriptionConflict) {
+		if _, err := r.service.ChangeAmount(ctx, r.token, amount); !errors.Is(err, ErrSubscriptionConflict) {
 			t.Error("duplicate request raced its outstanding processor call", err)
 		}
 		var holder pgtype.UUID
 		if err := pool.QueryRow(ctx, "SELECT command_id FROM donor_subscription_leases WHERE attempt_id=$1", r.attempt).Scan(&holder); err != nil ||
-			holder != pause.RequestID {
+			holder != amount.RequestID {
 			t.Error("duplicate request released the active lease", holder, err)
 		}
-		if _, err := r.service.ChangeAmount(ctx, r.token, amount); !errors.Is(err, ErrSubscriptionConflict) {
-			t.Error("amount change raced an outstanding pause", err)
-		}
 		if _, err := r.service.Cancel(ctx, r.token, cancel); !errors.Is(err, ErrSubscriptionConflict) {
-			t.Error("cancellation raced an outstanding pause", err)
+			t.Error("cancellation raced an outstanding amount change", err)
 		}
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(r.sub.keys) != 1 || r.sub.keys[0] != "dad-pause-"+pause.RequestID.String() {
+	if len(r.sub.keys) != 1 || r.sub.keys[0] != "dad-amount-"+amount.RequestID.String() {
 		t.Fatalf("processor mutations: %v", r.sub.keys)
 	}
 	var rejected int
-	if err = pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM donor_amount_changes WHERE id=$1)+(SELECT count(*) FROM donor_cancellations WHERE id=$2)", amount.RequestID, cancel.RequestID).Scan(&rejected); err != nil ||
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_cancellations WHERE id=$1", cancel.RequestID).Scan(&rejected); err != nil ||
 		rejected != 0 {
 		t.Fatal("rejected commands were persisted", rejected, err)
 	}
 	cancel.RequestID = testID(t)
 	if _, err = r.service.Cancel(ctx, r.token, cancel); err != nil {
-		t.Fatal("completed pause kept its lease", err)
+		t.Fatal("completed amount change kept its lease", err)
 	}
 	if len(r.sub.keys) != 2 {
 		t.Fatalf("processor mutations: %v", r.sub.keys)
@@ -186,9 +165,9 @@ func TestRetryAfterCrashAppliesProcessorResultOnce(t *testing.T) {
 	r := newRecurringFixture(t)
 	ctx := context.Background()
 	pool := r.db
-	request := PauseRequest{RequestID: testID(t), AttemptID: r.attempt, Months: 1, StartsAt: r.end, ResumesAt: r.end.AddDate(0, 1, 0)}
+	request := AmountRequest{RequestID: testID(t), AttemptID: r.attempt, Amount: 9000, Previous: 3000, EffectiveAt: r.end}
 	r.sub.loseAcknowledgement = true
-	if _, err := r.service.Pause(ctx, r.token, request); !errors.Is(err, payments.ErrProcessorUnavailable) {
+	if _, err := r.service.ChangeAmount(ctx, r.token, request); !errors.Is(err, payments.ErrProcessorUnavailable) {
 		t.Fatal("expected an unacknowledged mutation", err)
 	}
 	// A crash after the processor call leaves the command's lease behind too.
@@ -198,26 +177,26 @@ func TestRetryAfterCrashAppliesProcessorResultOnce(t *testing.T) {
 	confirmedAt := func() *time.Time {
 		t.Helper()
 		var at *time.Time
-		if err := pool.QueryRow(ctx, "SELECT confirmed_at FROM donor_pauses WHERE id=$1", request.RequestID).Scan(&at); err != nil {
+		if err := pool.QueryRow(ctx, "SELECT confirmed_at FROM donor_amount_changes WHERE id=$1", request.RequestID).Scan(&at); err != nil {
 			t.Fatal(err)
 		}
 		return at
 	}
 	if confirmedAt() != nil {
-		t.Fatal("unacknowledged pause recorded as confirmed")
+		t.Fatal("unacknowledged amount change recorded as confirmed")
 	}
-	result, err := r.service.Pause(ctx, r.token, request)
-	if err != nil || !result.Pause.Confirmed {
-		t.Fatal("retry did not complete the pause", result, err)
+	result, err := r.service.ChangeAmount(ctx, r.token, request)
+	if err != nil || !result.Confirmed {
+		t.Fatal("retry did not complete the amount change", result, err)
 	}
 	first := confirmedAt()
-	if _, err = r.service.Pause(ctx, r.token, request); err != nil {
+	if _, err = r.service.ChangeAmount(ctx, r.token, request); err != nil {
 		t.Fatal(err)
 	}
 	if again := confirmedAt(); first == nil || !again.Equal(*first) {
-		t.Fatal("pause result applied more than once", first, again)
+		t.Fatal("amount result applied more than once", first, again)
 	}
-	if len(r.sub.keys) != 1 || r.sub.keys[0] != "dad-pause-"+request.RequestID.String() {
+	if len(r.sub.keys) != 1 || r.sub.keys[0] != "dad-amount-"+request.RequestID.String() {
 		t.Fatalf("processor mutations: %v", r.sub.keys)
 	}
 	var leases int
@@ -286,46 +265,18 @@ func TestEventWorkerReadsProcessorOutsideDonorLock(t *testing.T) {
 		}
 		assertEventProcessed(t, r.workerFixture, event, true)
 	})
-	t.Run("payment", func(t *testing.T) {
-		f := newWorkerFixture(t, "ONE_TIME")
-		checkout := f.checkout(t)
-		payment := "pi_" + f.donorID.String()
-		f.charge(t, payment, time.Now())
-		event := f.receive(
-			t,
-			"payment_intent.succeeded",
-			map[string]any{
-				"id":              payment,
-				"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
-				"status":          "succeeded",
-				"currency":        "usd",
-				"amount_received": 3000,
-			},
-		)
-		process(t, f, nil)
-		assertEventProcessed(t, f, event, true)
-	})
 	for _, recordedMeanwhile := range []bool{false, true} {
 		name := "refund"
 		if recordedMeanwhile {
 			name = "refund recorded meanwhile"
 		}
 		t.Run(name, func(t *testing.T) {
-			f := newWorkerFixture(t, "ONE_TIME")
+			f := newWorkerFixture(t, "MONTHLY")
 			checkout := f.checkout(t)
-			payment := "pi_" + f.donorID.String()
-			f.charge(t, payment, time.Now())
-			f.receive(
-				t,
-				"payment_intent.succeeded",
-				map[string]any{
-					"id":              payment,
-					"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
-					"status":          "succeeded",
-					"currency":        "usd",
-					"amount_received": 3000,
-				},
-			)
+			invoiceID := "in_" + f.donorID.String()
+			payment := "pi_" + invoiceID
+			start := time.Now().UTC().Truncate(time.Second).Add(-2 * 24 * time.Hour)
+			f.receive(t, "invoice.payment_succeeded", invoice(checkout.CheckoutID, invoiceID, start, true))
 			f.process(t)
 			refund := "re_" + f.donorID.String()
 			f.gateway.refunds[refund] = paymentObject(

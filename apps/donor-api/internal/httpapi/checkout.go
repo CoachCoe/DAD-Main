@@ -34,7 +34,7 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	frequency, ok := optional(body.Frequency, "MONTHLY")
-	if !ok || (frequency != "MONTHLY" && frequency != "ONE_TIME") || body.Email == nil || body.Amount == nil ||
+	if !ok || frequency != "MONTHLY" || body.Email == nil || body.Amount == nil ||
 		utf8.RuneCountInString(*body.Email) > maxEmailRunes || !validAmount(*body.Amount) {
 		invalidFields(w, r)
 		return
@@ -66,4 +66,4 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxAmountMinor }
+func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxGiftMinor }

@@ -77,31 +77,6 @@ func (q *Queries) DonorGiftsPage(ctx context.Context, arg DonorGiftsPageParams) 
 	return items, nil
 }
 
-const insertReferralTouch = `-- name: InsertReferralTouch :exec
-INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES($1,$2,$3,$4,$5,$6)
-`
-
-type InsertReferralTouchParams struct {
-	ID         pgtype.UUID        `json:"id"`
-	TokenHash  string             `json:"token_hash"`
-	ReferrerID pgtype.UUID        `json:"referrer_id"`
-	Kind       string             `json:"kind"`
-	TouchedAt  pgtype.Timestamptz `json:"touched_at"`
-	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
-}
-
-func (q *Queries) InsertReferralTouch(ctx context.Context, arg InsertReferralTouchParams) error {
-	_, err := q.db.Exec(ctx, insertReferralTouch,
-		arg.ID,
-		arg.TokenHash,
-		arg.ReferrerID,
-		arg.Kind,
-		arg.TouchedAt,
-		arg.ExpiresAt,
-	)
-	return err
-}
-
 const purgeReferralTouches = `-- name: PurgeReferralTouches :many
 WITH deleted AS (
  DELETE FROM donor_referral_touches WHERE id=ANY(ARRAY(
@@ -288,4 +263,33 @@ func (q *Queries) SaveSharing(ctx context.Context, arg SaveSharingParams) (Donor
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const upsertReferralTouch = `-- name: UpsertReferralTouch :exec
+INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT (token_hash) DO UPDATE SET referrer_id=EXCLUDED.referrer_id,kind=EXCLUDED.kind,touched_at=EXCLUDED.touched_at,expires_at=EXCLUDED.expires_at
+`
+
+type UpsertReferralTouchParams struct {
+	ID         pgtype.UUID        `json:"id"`
+	TokenHash  string             `json:"token_hash"`
+	ReferrerID pgtype.UUID        `json:"referrer_id"`
+	Kind       string             `json:"kind"`
+	TouchedAt  pgtype.Timestamptz `json:"touched_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+}
+
+// Last-touch attribution: a visitor's most recent valid code wins (PRD R-4),
+// so a new code overwrites the referrer, kind and window recorded for the
+// token rather than preserving the earlier touch.
+func (q *Queries) UpsertReferralTouch(ctx context.Context, arg UpsertReferralTouchParams) error {
+	_, err := q.db.Exec(ctx, upsertReferralTouch,
+		arg.ID,
+		arg.TokenHash,
+		arg.ReferrerID,
+		arg.Kind,
+		arg.TouchedAt,
+		arg.ExpiresAt,
+	)
+	return err
 }

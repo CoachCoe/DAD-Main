@@ -30,15 +30,13 @@ func TestGenerateIsDeterministic(t *testing.T) {
 
 func TestPopulationHasALaunchShape(t *testing.T) {
 	pop := generate(50000, 0, 1, asOf)
-	var oneTime, abandoned, monthly, monthly30, referred, sharers, referrers, heavy, periods, failed int
+	var abandoned, monthly, monthly30, referred, sharers, referrers, heavy, periods, failed int
 	var mostReferrals int64
-	var longest, atRisk, paused, cancelled, pastDue, refunds int
+	var longest, atRisk, cancelled, pastDue, refunds int
 	for _, d := range pop.donors {
 		switch first := d.checkouts[0]; {
 		case first.status == "EXPIRED":
 			abandoned++
-		case first.frequency == "ONE_TIME":
-			oneTime++
 		default:
 			monthly++
 			if first.amount == 3000 {
@@ -74,9 +72,6 @@ func TestPopulationHasALaunchShape(t *testing.T) {
 					refunds++
 				}
 			}
-			if c.pause != nil {
-				paused++
-			}
 			if c.sub != nil && c.sub.status == "canceled" {
 				cancelled++
 			} else if c.sub != nil && c.sub.status == "past_due" {
@@ -86,8 +81,7 @@ func TestPopulationHasALaunchShape(t *testing.T) {
 	}
 	share := func(n int) float64 { return float64(n) / float64(len(pop.donors)) }
 	for name, check := range map[string]struct{ got, want, tolerance float64 }{
-		"monthly":      {share(monthly), 1 - abandonedShare - oneTimeShare, 0.02},
-		"one-time":     {share(oneTime), oneTimeShare, 0.02},
+		"monthly":      {share(monthly), 1 - abandonedShare, 0.02},
 		"abandoned":    {share(abandoned), abandonedShare, 0.01},
 		"$30 monthly":  {float64(monthly30) / float64(monthly), 0.60, 0.02},
 		"referred":     {share(referred), 0.40, 0.08},
@@ -101,12 +95,11 @@ func TestPopulationHasALaunchShape(t *testing.T) {
 	if share(referrers) > 0.2 || heavy == 0 || mostReferrals < 200 {
 		t.Errorf("referrals are not heavy-tailed: %d referrers, %d with 100+, most %d", referrers, heavy, mostReferrals)
 	}
-	if longest < 20 || atRisk == 0 || paused == 0 || cancelled == 0 || pastDue == 0 || refunds == 0 {
+	if longest < 20 || atRisk == 0 || cancelled == 0 || pastDue == 0 || refunds == 0 {
 		t.Errorf(
-			"missing recognition edge cases: longest streak %d, %d at risk, %d paused, %d cancelled, %d past due, %d refunds",
+			"missing recognition edge cases: longest streak %d, %d at risk, %d cancelled, %d past due, %d refunds",
 			longest,
 			atRisk,
-			paused,
 			cancelled,
 			pastDue,
 			refunds,
@@ -174,10 +167,6 @@ func TestFactsKeepTheSchemaAndDomainRules(t *testing.T) {
 			}
 			if s := c.sub; s != nil && s.status == "canceled" && s.stopsAt.IsZero() {
 				t.Fatalf("cancelled subscription for donor %d keeps renewing", d.index)
-			}
-			if p := c.pause; p != nil &&
-				(p.months < 1 || p.months > 3 || p.resumes.Sub(p.starts) < time.Duration(p.months)*28*day || p.resumes.Sub(p.starts) > time.Duration(p.months)*31*day) {
-				t.Fatalf("pause for donor %d skips the wrong renewals", d.index)
 			}
 		}
 		if monthly > 1 || d.streak < 0 {

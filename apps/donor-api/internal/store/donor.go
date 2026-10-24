@@ -22,7 +22,7 @@ import (
 // which preference events record.
 const consentVersion = "r2-notifications-v1"
 
-// referralWindow is how long the first valid referral touch holds.
+// referralWindow is how long a recorded referral touch holds before it expires.
 const referralWindow = 30 * 24 * time.Hour
 
 // pageSize is the length of every offset-paged list. Queries fetch one extra
@@ -225,10 +225,10 @@ func (s DonorService) ReferrerName(ctx context.Context, code string) (string, er
 	return referrer.PublicName.String, nil
 }
 
-// CaptureReferral records a visit through referral code, unless visitor
-// already carries an unexpired capture: the first valid touch wins for its
-// whole window. It returns the visitor token to keep, which is empty for an
-// unknown code, with the captured referrer's public name.
+// CaptureReferral records a visit through a referral code. A later valid code
+// overwrites an earlier capture for the same visitor: the most recent touch
+// wins (last-touch, PRD R-4). It returns the visitor token to keep, which is
+// empty for an unknown code, with the captured referrer's public name.
 func (s DonorService) CaptureReferral(ctx context.Context, code, kind, visitor string, now time.Time) (ReferralCapture, error) {
 	if kind != "LINK" && kind != "IRL" {
 		return ReferralCapture{}, payments.ErrFacts
@@ -248,36 +248,57 @@ func (s DonorService) CaptureReferral(ctx context.Context, code, kind, visitor s
 }
 
 func captureTouch(ctx context.Context, q *queries.Queries, code, kind, visitor string, now time.Time) (string, error) {
-	if visitor != "" {
-		touch, err := q.ReferralTouchByToken(ctx, HashToken(visitor))
-		if err == nil && touch.ExpiresAt.Time.After(now) {
-			return visitor, nil
-		}
+	// Resolve a well-formed code to its referrer. A malformed or unknown code is
+	// not a new touch: fall back to the visitor's existing unexpired touch.
+	var referrer queries.Donor
+	if referralCode.MatchString(code) {
+		found, err := q.ReferrerByCode(ctx, text(code))
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return "", err
 		}
+		if err == nil {
+			referrer = found
+		}
 	}
-	if !referralCode.MatchString(code) {
+	if referrer.ID == (pgtype.UUID{}) {
+		if visitor != "" {
+			touch, terr := q.ReferralTouchByToken(ctx, HashToken(visitor))
+			if terr == nil && touch.ExpiresAt.Time.After(now) {
+				return visitor, nil
+			}
+			if terr != nil && !errors.Is(terr, pgx.ErrNoRows) {
+				return "", terr
+			}
+		}
 		return "", nil
 	}
-	referrer, err := q.ReferrerByCode(ctx, text(code))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
+	// A new valid code wins (last-touch, PRD R-4). Reuse the visitor's token
+	// only while its touch is still unexpired; an expired or unknown token gets
+	// a fresh identity rather than being resurrected.
+	token := ""
+	if visitor != "" {
+		touch, terr := q.ReferralTouchByToken(ctx, HashToken(visitor))
+		if terr != nil && !errors.Is(terr, pgx.ErrNoRows) {
+			return "", terr
+		}
+		if terr == nil && touch.ExpiresAt.Time.After(now) {
+			token = visitor
+		}
 	}
-	if err != nil {
-		return "", err
-	}
-	token, err := randomToken(32)
-	if err != nil {
-		return "", err
+	if token == "" {
+		minted, err := randomToken(32)
+		if err != nil {
+			return "", err
+		}
+		token = minted
 	}
 	id, err := NewID()
 	if err != nil {
 		return "", err
 	}
-	return token, q.InsertReferralTouch(
+	return token, q.UpsertReferralTouch(
 		ctx,
-		queries.InsertReferralTouchParams{
+		queries.UpsertReferralTouchParams{
 			ID:         id,
 			TokenHash:  HashToken(token),
 			ReferrerID: referrer.ID,
