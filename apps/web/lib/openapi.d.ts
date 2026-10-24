@@ -1604,6 +1604,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/me/network": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The donor's referral network (N-1..N-3) */
+        get: operations["donorNetwork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/badges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The donor's badge wall */
+        get: operations["donorBadges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/donors/{donor_id}/badges/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grant a badge (super-admin) */
+        post: operations["grantBadge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/donors/{donor_id}/badges/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke a badge (super-admin) */
+        post: operations["revokeBadge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1726,6 +1794,8 @@ export interface components {
             current: number;
             /** Format: date-time */
             grace_ends_at: string | null;
+            /** @description Day-based streak card (PRD S-2/S-3); absent when there is no streak. */
+            ladder?: components["schemas"]["StreakLadder"] | null;
         };
         /** @description A null `referrals` or `streak` means the figure is not currently known; never show it as zero. */
         DonorDashboard: {
@@ -1749,6 +1819,10 @@ export interface components {
             /** @constant */
             state: "ready";
             streak: components["schemas"]["StreakSummary"] | null;
+            /** @description The donor's own ranking (S-4), or null when unranked. */
+            rank: components["schemas"]["Ranking"] | null;
+            /** @description The donor's active-network headline (I-2), or null when they have no active referrals. */
+            network: components["schemas"]["NetworkCard"] | null;
         };
         Profile: {
             /** Format: email */
@@ -1772,6 +1846,10 @@ export interface components {
             push_streak_at_risk: boolean;
             /** @description App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on. */
             push_streak_milestone: boolean;
+            /** @description When true the donor is excluded from national/city rankings and from everyone's ranking denominator. Default off (ranked). */
+            rankings_opted_out: boolean;
+            /** @description When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). Default off. */
+            network_visible: boolean;
             /**
              * Format: int32
              * @description Optimistic concurrency version; send it back when saving preferences.
@@ -2485,6 +2563,83 @@ export interface components {
             metrics: components["schemas"]["TodayMetric"][];
             /** Format: int64 */
             distinct_shown: number;
+        };
+        StreakLadder: {
+            /** Format: int64 */
+            days: number;
+            /** Format: int64 */
+            last_milestone: number;
+            /** Format: int64 */
+            next_milestone: number | null;
+            /** Format: int64 */
+            days_to_next: number | null;
+            bar: boolean[];
+        };
+        BadgeView: {
+            code: string;
+            title: string;
+            perk: string;
+            earned: boolean;
+            /** Format: date-time */
+            earned_at?: string | null;
+        };
+        BadgeList: {
+            badges: components["schemas"]["BadgeView"][];
+        };
+        BadgeCodeRequest: {
+            code: string;
+        };
+        Ranking: {
+            /** @description Top-percentile bucket; 1 = top 1%. */
+            national_percentile: number;
+            city: string | null;
+            city_rank: number | null;
+            /** Format: date-time */
+            computed_at: string;
+        };
+        /** @description Dashboard headline for the donor's referral network (I-2). */
+        NetworkCard: {
+            /**
+             * Format: int64
+             * @description Number of still-active donors the donor brought in.
+             */
+            active_count: number;
+            /**
+             * Format: int64
+             * @description Combined annualized giving of those active donors (monthly pledge x 12), in minor units.
+             */
+            annualized_minor: number;
+            currency: string;
+        };
+        /** @description The next referral tier the donor has not yet reached (N-2). */
+        NetworkMilestone: {
+            label: string;
+            /** Format: int64 */
+            target: number;
+            /** Format: int64 */
+            remaining: number;
+        };
+        /** @description One opted-in person the donor brought in (N-3). */
+        NetworkInvitee: {
+            /** @description First name + last initial, as the invitee chose to display it. */
+            name: string;
+            /** @description Whether the invitee is still giving. */
+            active: boolean;
+        };
+        /** @description The donor's referral-network view (N-1..N-3). */
+        NetworkSummary: {
+            /** Format: int64 */
+            active_count: number;
+            /** Format: int64 */
+            annualized_minor: number;
+            /** @description Null once every referral tier is reached. */
+            next_milestone: components["schemas"]["NetworkMilestone"] | null;
+            invitees: components["schemas"]["NetworkInvitee"][];
+            /**
+             * Format: int64
+             * @description Active referrals who did not opt in to being named; counted but not listed.
+             */
+            anonymous_active: number;
         };
     };
     responses: {
@@ -3416,6 +3571,8 @@ export interface operations {
                     push_referral_converted: boolean;
                     push_streak_at_risk: boolean;
                     push_streak_milestone: boolean;
+                    rankings_opted_out?: boolean;
+                    network_visible?: boolean;
                 };
             };
         };
@@ -5477,6 +5634,118 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    donorNetwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    donorBadges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BadgeList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    grantBadge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BadgeCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    revokeBadge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BadgeCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
     };
