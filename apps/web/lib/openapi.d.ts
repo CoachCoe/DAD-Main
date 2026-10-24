@@ -1688,6 +1688,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/staff/events/{event_id}/guests/{donor_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a donor to an event's guest list (E-5) */
+        post: operations["addEventGuest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/guests/{donor_id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a donor from an event's guest list (E-5) */
+        post: operations["removeEventGuest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/events/invite-only": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Invite-only events the donor can see (E-5) */
+        get: operations["inviteOnlyEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A donor's view of one event, enforcing the E-5 gate */
+        get: operations["donorEventDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/me/events/{event_id}/reserve": {
         parameters: {
             query?: never;
@@ -2787,6 +2855,8 @@ export interface components {
             spots_left: number | null;
             /** @description The signed-in donor's own status for this event; null on an anonymous read or no active reservation. */
             reservation_status: ("RESERVED" | "WAITLISTED") | null;
+            /** @description "Invitation earned at ..." for an INVITE_ONLY event unlocked by a badge perk (E-5); null otherwise. */
+            invitation_note: string | null;
         };
         /** @description The outcome of a reserve or cancel (E-4). */
         ReservationResult: {
@@ -2810,6 +2880,11 @@ export interface components {
             ends_at?: string;
             /** Format: int32 */
             capacity?: number;
+            /**
+             * @description Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event.
+             * @enum {string}
+             */
+            qualifying_perk?: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
         };
     };
     responses: {
@@ -5945,6 +6020,110 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    addEventGuest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    removeEventGuest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    inviteOnlyEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        events: components["schemas"]["EventView"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    donorEventDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };

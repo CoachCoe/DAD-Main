@@ -251,3 +251,96 @@ func TestReservationClosedAfterStart(t *testing.T) {
 		t.Fatalf("reserve after start accepted: %v", err)
 	}
 }
+
+// TestInviteOnlyGating covers E-5: an INVITE_ONLY event is visible only to a
+// donor who holds the qualifying badge perk or is on the admin guest list; it
+// never appears in the open near-city list or the anonymous detail; a
+// perk-unlocked view carries the "Invitation earned at ..." note.
+func TestInviteOnlyGating(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	reader := EventReader{DB: pool}
+
+	// A Founding Donor Dinner: INVITE_ONLY, gated on the FOUNDING_EVENTS perk.
+	in := eventInput("founding-dinner", "San Francisco", "94103", "INVITE_ONLY", 72*time.Hour)
+	in.QualifyingPerk = "FOUNDING_EVENTS"
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A perk-qualified event must not require a city match, so set up a donor
+	// with the Founding Donor badge ("F" carries FOUNDING_EVENTS).
+	founder, founderTok := signedInDonor(t, pool)
+	if _, err := pool.Exec(ctx, "UPDATE donors SET city=$2, zip=$3 WHERE id=$1", founder, "San Francisco", "94103"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO donor_badges (donor_id, code, source, earned_at) VALUES ($1,'F','AUTO',now())", founder); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM donor_badges WHERE donor_id=$1", founder) })
+
+	// A plain donor (no badge, not a guest).
+	plain, plainTok := signedInDonor(t, pool)
+	if _, err := pool.Exec(ctx, "UPDATE donors SET city=$2, zip=$3 WHERE id=$1", plain, "San Francisco", "94103"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The open near-city list never contains the invite-only event, for either.
+	for _, tok := range []string{founderTok, plainTok} {
+		near, err := reader.NearDonor(ctx, tok)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range near {
+			if v.ID == eventID.String() {
+				t.Fatalf("invite-only event leaked into the open near-city list")
+			}
+		}
+	}
+	// The anonymous detail reads as not found.
+	if _, err := reader.Detail(ctx, eventID); !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("invite-only detail visible anonymously: %v", err)
+	}
+
+	// The founder sees it via the perk, with the invitation note.
+	fList, err := reader.InviteOnlyEvents(ctx, founderTok)
+	if err != nil || len(fList) != 1 || fList[0].ID != eventID.String() || fList[0].InvitationNote == nil {
+		t.Fatalf("founder invite-only list: %+v %v", fList, err)
+	}
+	// The plain donor sees nothing.
+	pList, err := reader.InviteOnlyEvents(ctx, plainTok)
+	if err != nil || len(pList) != 0 {
+		t.Fatalf("plain donor saw %d invite-only events: %v", len(pList), err)
+	}
+	// The plain donor's gated detail is not found.
+	if _, err := reader.DetailForDonor(ctx, plainTok, eventID); !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("plain donor saw invite-only detail: %v", err)
+	}
+
+	// Add the plain donor to the guest list -> they can now see it (no note,
+	// since it is a guest-list grant, not a perk).
+	if err := events.AddGuest(ctx, adminToken, eventID, plain); err != nil {
+		t.Fatal(err)
+	}
+	gList, err := reader.InviteOnlyEvents(ctx, plainTok)
+	if err != nil || len(gList) != 1 || gList[0].ID != eventID.String() || gList[0].InvitationNote != nil {
+		t.Fatalf("guest invite-only list: %+v %v", gList, err)
+	}
+
+	// Removing the guest revokes visibility again.
+	if err := events.RemoveGuest(ctx, adminToken, eventID, plain); err != nil {
+		t.Fatal(err)
+	}
+	after, err := reader.InviteOnlyEvents(ctx, plainTok)
+	if err != nil || len(after) != 0 {
+		t.Fatalf("removed guest still saw %d events: %v", len(after), err)
+	}
+}

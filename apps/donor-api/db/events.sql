@@ -1,12 +1,12 @@
 -- name: InsertEvent :exec
 INSERT INTO donor_events
-  (id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, created_at, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13);
+  (id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, qualifying_perk, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$14);
 
 -- name: UpdateEvent :exec
 UPDATE donor_events
 SET title=$2, type=$3, description=$4, venue=$5, address=$6, city=$7, zip=$8,
-    starts_at=$9, ends_at=$10, capacity=$11, updated_at=$12
+    starts_at=$9, ends_at=$10, capacity=$11, qualifying_perk=$12, updated_at=$13
 WHERE id=$1;
 
 -- name: PublishEvent :exec
@@ -100,4 +100,30 @@ UPDATE donor_event_reservations SET status='RESERVED', updated_at=$2 WHERE id=$1
 INSERT INTO donor_push_notifications (id, donor_id, category, dedup_key, context, available_at, expires_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7)
 ON CONFLICT (dedup_key) DO NOTHING;
+
+-- name: AddEventGuest :exec
+INSERT INTO donor_event_guests (id, event_id, donor_id, created_at)
+VALUES ($1,$2,$3,$4)
+ON CONFLICT (event_id, donor_id) DO NOTHING;
+
+-- name: RemoveEventGuest :exec
+DELETE FROM donor_event_guests WHERE event_id=$1 AND donor_id=$2;
+
+-- name: IsEventGuest :one
+SELECT EXISTS(SELECT 1 FROM donor_event_guests WHERE event_id=$1 AND donor_id=$2);
+
+-- name: DonorEarnedBadgeCodes :many
+-- The donor's earned, non-revoked badge codes — the perk side of the E-5 gate.
+SELECT code FROM donor_badges WHERE donor_id=$1 AND revoked_at IS NULL;
+
+-- name: UpcomingInviteOnlyEvents :many
+-- Published, upcoming INVITE_ONLY events, soonest first. The caller applies the
+-- E-5 gate (perk held OR on the guest list) per event; this returns the
+-- candidate set so the gate is a cheap in-memory check over a small list.
+SELECT * FROM donor_events
+WHERE publish_state='PUBLISHED'
+  AND type='INVITE_ONLY'
+  AND starts_at > sqlc.arg(now)::timestamptz
+ORDER BY starts_at ASC, id
+LIMIT 100;
 

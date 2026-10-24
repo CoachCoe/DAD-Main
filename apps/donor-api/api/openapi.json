@@ -6273,6 +6273,229 @@
         }
       }
     },
+    "/donor/staff/events/{event_id}/guests/{donor_id}": {
+      "post": {
+        "operationId": "addEventGuest",
+        "summary": "Add a donor to an event's guest list (E-5)",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/events/{event_id}/guests/{donor_id}/remove": {
+      "post": {
+        "operationId": "removeEventGuest",
+        "summary": "Remove a donor from an event's guest list (E-5)",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/events/invite-only": {
+      "get": {
+        "operationId": "inviteOnlyEvents",
+        "summary": "Invite-only events the donor can see (E-5)",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EventView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "events"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/events/{event_id}": {
+      "get": {
+        "operationId": "donorEventDetail",
+        "summary": "A donor's view of one event, enforcing the E-5 gate",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventView"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/donor/me/events/{event_id}/reserve": {
       "post": {
         "operationId": "reserveEvent",
@@ -9688,6 +9911,17 @@
               }
             ],
             "description": "The signed-in donor's own status for this event; null on an anonymous read or no active reservation."
+          },
+          "invitation_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "\"Invitation earned at ...\" for an INVITE_ONLY event unlocked by a badge perk (E-5); null otherwise."
           }
         },
         "required": [
@@ -9703,7 +9937,8 @@
           "ends_at",
           "capacity",
           "spots_left",
-          "reservation_status"
+          "reservation_status",
+          "invitation_note"
         ],
         "additionalProperties": false
       },
@@ -9769,6 +10004,16 @@
           "capacity": {
             "type": "integer",
             "format": "int32"
+          },
+          "qualifying_perk": {
+            "type": "string",
+            "enum": [
+              "",
+              "FOUNDING_EVENTS",
+              "MILESTONE_EVENTS",
+              "TEAM_CAPTAIN"
+            ],
+            "description": "Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event."
           }
         },
         "additionalProperties": false

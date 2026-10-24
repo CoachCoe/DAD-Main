@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dad/donor-api/internal/badges"
 	"dad/donor-api/internal/geo"
 	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/store/queries"
@@ -42,6 +43,9 @@ type EventInput struct {
 	StartsAt    string `json:"starts_at"`
 	EndsAt      string `json:"ends_at"`
 	Capacity    int32  `json:"capacity"`
+	// QualifyingPerk gates an INVITE_ONLY event (E-5): the badge perk that
+	// unlocks it (e.g. "FOUNDING_EVENTS"), or empty for guest-list-only.
+	QualifyingPerk string `json:"qualifying_perk"`
 }
 
 // validate checks an event input, returning ErrStaffInput on any problem. The
@@ -89,13 +93,27 @@ func (in EventInput) validate(now time.Time) (queries.InsertEventParams, error) 
 	if !ends.After(starts) {
 		return params, ErrStaffInput
 	}
+	// qualifying_perk, when set, must be a known badge perk and only makes
+	// sense on an INVITE_ONLY event.
+	if in.QualifyingPerk != "" {
+		if !knownPerks[in.QualifyingPerk] || in.Type != "INVITE_ONLY" {
+			return params, ErrStaffInput
+		}
+	}
 	params = queries.InsertEventParams{
 		Slug: in.Slug, Title: in.Title, Type: in.Type, Description: in.Description,
 		Venue: in.Venue, Address: in.Address, City: in.City, Zip: in.Zip,
 		StartsAt: timestamp(starts.UTC()), EndsAt: timestamp(ends.UTC()),
-		Capacity: in.Capacity, CreatedAt: timestamp(now),
+		Capacity: in.Capacity, QualifyingPerk: in.QualifyingPerk, CreatedAt: timestamp(now),
 	}
 	return params, nil
+}
+
+// knownPerks is the set of badge perks an invite-only event may require (E-5).
+var knownPerks = map[string]bool{
+	string(badges.PerkFoundingEvents):  true,
+	string(badges.PerkMilestoneEvents): true,
+	string(badges.PerkTeamCaptain):     true,
 }
 
 // Create inserts a new DRAFT event and returns its id.
@@ -135,7 +153,7 @@ func (s EventService) Update(ctx context.Context, token string, id pgtype.UUID, 
 				ID: id, Title: params.Title, Type: params.Type, Description: params.Description,
 				Venue: params.Venue, Address: params.Address, City: params.City, Zip: params.Zip,
 				StartsAt: params.StartsAt, EndsAt: params.EndsAt, Capacity: params.Capacity,
-				UpdatedAt: timestamp(now),
+				QualifyingPerk: params.QualifyingPerk, UpdatedAt: timestamp(now),
 			}); err != nil {
 				return struct{}{}, err
 			}
@@ -156,6 +174,43 @@ func (s EventService) Publish(ctx context.Context, token string, id pgtype.UUID)
 				return struct{}{}, err
 			}
 			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.published", id.String(), nil, now)
+		})
+	return err
+}
+
+// AddGuest puts a donor on an INVITE_ONLY event's admin guest list (E-5), so
+// they can see and reserve it regardless of badges. Idempotent.
+func (s EventService) AddGuest(ctx context.Context, token string, eventID, donorID pgtype.UUID) error {
+	_, err := staffWrite(ctx, s.Staff, token, eventPermission,
+		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
+			q := queries.New(tx)
+			if _, err := q.EventByID(ctx, eventID); err != nil {
+				return struct{}{}, err
+			}
+			id, err := NewID()
+			if err != nil {
+				return struct{}{}, err
+			}
+			if err = q.AddEventGuest(ctx, queries.AddEventGuestParams{
+				ID: id, EventID: eventID, DonorID: donorID, CreatedAt: timestamp(now),
+			}); err != nil {
+				return struct{}{}, err
+			}
+			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.guest_added", eventID.String(), map[string]string{"donor_id": donorID.String()}, now)
+		})
+	return err
+}
+
+// RemoveGuest removes a donor from an event's guest list. Their existing
+// reservation, if any, is left intact.
+func (s EventService) RemoveGuest(ctx context.Context, token string, eventID, donorID pgtype.UUID) error {
+	_, err := staffWrite(ctx, s.Staff, token, eventPermission,
+		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
+			q := queries.New(tx)
+			if err := q.RemoveEventGuest(ctx, queries.RemoveEventGuestParams{EventID: eventID, DonorID: donorID}); err != nil {
+				return struct{}{}, err
+			}
+			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.guest_removed", eventID.String(), map[string]string{"donor_id": donorID.String()}, now)
 		})
 	return err
 }
@@ -188,6 +243,9 @@ type EventView struct {
 	Capacity          int32     `json:"capacity"`
 	SpotsLeft         *int32    `json:"spots_left"`
 	ReservationStatus *string   `json:"reservation_status"`
+	// InvitationNote is "Invitation earned at ..." for an INVITE_ONLY event the
+	// donor can see via a badge perk (E-5); nil otherwise.
+	InvitationNote *string `json:"invitation_note"`
 }
 
 func eventView(e queries.DonorEvent) EventView {
@@ -267,7 +325,9 @@ func (r EventReader) NearDonor(ctx context.Context, token string) ([]EventView, 
 }
 
 // Detail returns one published event by id for the detail page (E-3). A draft
-// or unknown id is ErrEventNotFound.
+// or unknown id is ErrEventNotFound. INVITE_ONLY events are never exposed on
+// this anonymous path — they are only visible through DetailForDonor to a donor
+// who passes the E-5 gate — so an INVITE_ONLY id reads as not found here.
 func (r EventReader) Detail(ctx context.Context, id pgtype.UUID) (EventView, error) {
 	q := queries.New(r.DB)
 	e, err := q.EventByID(ctx, id)
@@ -277,18 +337,148 @@ func (r EventReader) Detail(ctx context.Context, id pgtype.UUID) (EventView, err
 	if err != nil {
 		return EventView{}, err
 	}
-	if e.PublishState != "PUBLISHED" {
+	if e.PublishState != "PUBLISHED" || e.Type == "INVITE_ONLY" {
 		return EventView{}, ErrEventNotFound
 	}
+	return r.withSpotsLeft(ctx, q, e)
+}
+
+// withSpotsLeft builds an EventView and fills SpotsLeft for a capped event.
+func (r EventReader) withSpotsLeft(ctx context.Context, q *queries.Queries, e queries.DonorEvent) (EventView, error) {
 	v := eventView(e)
 	if e.Capacity > 0 {
-		reserved, err := q.ReservedCount(ctx, id)
+		reserved, err := q.ReservedCount(ctx, e.ID)
 		if err != nil {
 			return EventView{}, err
 		}
 		v.SpotsLeft = spotsLeft(e.Capacity, reserved)
 	}
 	return v, nil
+}
+
+// invitationNote is the "Invitation earned at ..." label for an INVITE_ONLY
+// event unlocked by a badge perk (E-5).
+func invitationNote(perk string) *string {
+	title := "an invitation"
+	switch perk {
+	case string(badges.PerkFoundingEvents):
+		title = "the Founding Donor badge"
+	case string(badges.PerkMilestoneEvents):
+		title = "a giving-milestone badge"
+	case string(badges.PerkTeamCaptain):
+		title = "the Team Captain badge"
+	}
+	note := "Invitation earned at " + title
+	return &note
+}
+
+// canSeeInviteOnly reports whether a donor passes the E-5 gate for an
+// INVITE_ONLY event: they hold a badge carrying its qualifying perk, OR they
+// are on the admin guest list. Returns the reason (perk/guest) for the note.
+func canSeeInviteOnly(ctx context.Context, q *queries.Queries, donor pgtype.UUID, e queries.DonorEvent) (bool, bool, error) {
+	// Perk side.
+	byPerk := false
+	if e.QualifyingPerk != "" {
+		codes, err := q.DonorEarnedBadgeCodes(ctx, donor)
+		if err != nil {
+			return false, false, err
+		}
+		earned := make(map[string]bool, len(codes))
+		for _, c := range codes {
+			earned[c] = true
+		}
+		byPerk = badges.HoldsPerk(earned, badges.Perk(e.QualifyingPerk))
+	}
+	if byPerk {
+		return true, true, nil
+	}
+	// Guest-list side.
+	guest, err := q.IsEventGuest(ctx, queries.IsEventGuestParams{EventID: e.ID, DonorID: donor})
+	if err != nil {
+		return false, false, err
+	}
+	return guest, false, nil
+}
+
+// InviteOnlyEvents lists the published, upcoming INVITE_ONLY events the
+// signed-in donor can see (E-5): those unlocked by a badge perk they hold or on
+// which they are an admin guest, soonest first. Perk-unlocked events carry the
+// "Invitation earned at ..." note.
+func (r EventReader) InviteOnlyEvents(ctx context.Context, token string) ([]EventView, error) {
+	return donorRead(ctx, r.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) ([]EventView, error) {
+		rows, err := q.UpcomingInviteOnlyEvents(ctx, timestamp(now))
+		if err != nil {
+			return nil, err
+		}
+		out := make([]EventView, 0)
+		for _, e := range rows {
+			ok, byPerk, err := canSeeInviteOnly(ctx, q, d.ID, e)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				continue
+			}
+			v, err := r.withSpotsLeft(ctx, q, e)
+			if err != nil {
+				return nil, err
+			}
+			if byPerk {
+				v.InvitationNote = invitationNote(e.QualifyingPerk)
+			}
+			if res, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: e.ID, DonorID: d.ID}); err == nil && res.Status != reservationCancelled {
+				s := res.Status
+				v.ReservationStatus = &s
+			} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return nil, err
+			}
+			out = append(out, v)
+		}
+		return out, nil
+	})
+}
+
+// DetailForDonor returns one published event for the signed-in donor, applying
+// the E-5 gate for INVITE_ONLY events: a donor who cannot see it gets
+// ErrEventNotFound, so the event's existence is not leaked.
+func (r EventReader) DetailForDonor(ctx context.Context, token string, id pgtype.UUID) (EventView, error) {
+	return donorRead(ctx, r.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (EventView, error) {
+		e, err := q.EventByID(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return EventView{}, ErrEventNotFound
+		}
+		if err != nil {
+			return EventView{}, err
+		}
+		if e.PublishState != "PUBLISHED" {
+			return EventView{}, ErrEventNotFound
+		}
+		byPerk := false
+		if e.Type == "INVITE_ONLY" {
+			ok, perkGrant, err := canSeeInviteOnly(ctx, q, d.ID, e)
+			if err != nil {
+				return EventView{}, err
+			}
+			if !ok {
+				return EventView{}, ErrEventNotFound
+			}
+			byPerk = perkGrant
+		}
+		v, err := r.withSpotsLeft(ctx, q, e)
+		if err != nil {
+			return EventView{}, err
+		}
+		if byPerk {
+			v.InvitationNote = invitationNote(e.QualifyingPerk)
+		}
+		if res, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: id, DonorID: d.ID}); err == nil && res.Status != reservationCancelled {
+			s := res.Status
+			v.ReservationStatus = &s
+		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return EventView{}, err
+		}
+		return v, nil
+	})
 }
 
 // Reservation statuses (also the DB check constraint).
@@ -340,6 +530,17 @@ func (s ReservationService) Reserve(ctx context.Context, token string, eventID p
 		}
 		if !now.Before(event.StartsAt.Time) {
 			return ReservationResult{}, ErrReservationClosed
+		}
+		// An INVITE_ONLY event can only be reserved by a donor who passes the
+		// E-5 gate; otherwise it reads as not found, like the detail path.
+		if event.Type == "INVITE_ONLY" {
+			ok, _, err := canSeeInviteOnly(ctx, q, d.ID, event)
+			if err != nil {
+				return ReservationResult{}, err
+			}
+			if !ok {
+				return ReservationResult{}, ErrEventNotFound
+			}
 		}
 		// An existing active reservation is returned unchanged (idempotent).
 		existing, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: eventID, DonorID: d.ID})

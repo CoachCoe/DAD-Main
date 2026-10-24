@@ -230,6 +230,7 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/me/today-initiative":                             store.TodayInitiative{},
 		"GET /donor/me/network":                                      store.NetworkSummary{},
 		"GET /events/{event_id}":                                     store.EventView{},
+		"GET /donor/me/events/{event_id}":                            store.EventView{},
 	}
 	requests := map[string]any{
 		"POST /donor/passkeys/sign-in":                               donorPasskeySignInBody{},

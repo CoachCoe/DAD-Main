@@ -67,6 +67,35 @@ var byCode = func() map[string]Badge {
 // Lookup returns the catalog badge for a code.
 func Lookup(code string) (Badge, bool) { b, ok := byCode[code]; return b, ok }
 
+// CodesForPerk returns the badge codes that carry a given perk. Used by the
+// invite-only event gate (E-5): a donor "holds" the perk when they hold any of
+// these badges. Returns nil for PerkNone or an unknown perk.
+func CodesForPerk(perk Perk) []string {
+	if perk == PerkNone {
+		return nil
+	}
+	var codes []string
+	for _, b := range Catalog {
+		if b.Perk == perk {
+			codes = append(codes, b.Code)
+		}
+	}
+	return codes
+}
+
+// HoldsPerk reports whether any of the donor's earned badge codes carries perk.
+func HoldsPerk(earned map[string]bool, perk Perk) bool {
+	if perk == PerkNone {
+		return false
+	}
+	for _, code := range CodesForPerk(perk) {
+		if earned[code] {
+			return true
+		}
+	}
+	return false
+}
+
 // Signals is the donor's current earning state, assembled by the store from the
 // projection, the streak ladder, the initiative-exposure ledger and the ranking
 // rollup. A signal whose source phase has not shipped is simply zero/false, so

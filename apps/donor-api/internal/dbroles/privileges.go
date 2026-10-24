@@ -183,6 +183,7 @@ var grants = map[string]map[Role]string{
 	"donor_rankings":             {API: "SELECT", ProjectionWorker: "SELECT, INSERT, UPDATE, DELETE"},
 	"donor_events":               {API: "SELECT, INSERT, UPDATE"},
 	"donor_event_reservations":   {API: "SELECT, INSERT, UPDATE"},
+	"donor_event_guests":         {API: "SELECT, INSERT, DELETE"},
 }
 
 // privileges is a canonical set of grants: "SELECT" for a table privilege,

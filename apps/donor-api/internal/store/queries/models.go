@@ -96,22 +96,23 @@ type DonorEmailChange struct {
 }
 
 type DonorEvent struct {
-	ID           pgtype.UUID        `json:"id"`
-	Slug         string             `json:"slug"`
-	Title        string             `json:"title"`
-	Type         string             `json:"type"`
-	Description  string             `json:"description"`
-	Venue        string             `json:"venue"`
-	Address      string             `json:"address"`
-	City         string             `json:"city"`
-	Zip          string             `json:"zip"`
-	StartsAt     pgtype.Timestamptz `json:"starts_at"`
-	EndsAt       pgtype.Timestamptz `json:"ends_at"`
-	Capacity     int32              `json:"capacity"`
-	PublishState string             `json:"publish_state"`
-	PublishedAt  pgtype.Timestamptz `json:"published_at"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID             pgtype.UUID        `json:"id"`
+	Slug           string             `json:"slug"`
+	Title          string             `json:"title"`
+	Type           string             `json:"type"`
+	Description    string             `json:"description"`
+	Venue          string             `json:"venue"`
+	Address        string             `json:"address"`
+	City           string             `json:"city"`
+	Zip            string             `json:"zip"`
+	StartsAt       pgtype.Timestamptz `json:"starts_at"`
+	EndsAt         pgtype.Timestamptz `json:"ends_at"`
+	Capacity       int32              `json:"capacity"`
+	PublishState   string             `json:"publish_state"`
+	PublishedAt    pgtype.Timestamptz `json:"published_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	QualifyingPerk string             `json:"qualifying_perk"`
 }
 
 type DonorEventReservation struct {
