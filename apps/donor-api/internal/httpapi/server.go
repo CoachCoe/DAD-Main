@@ -60,6 +60,7 @@ type Services struct {
 	InitiativeRead  InitiativeReadSource
 	TodayInitiative TodayInitiativeSource
 	Badges          BadgeSource
+	Network         NetworkSource
 }
 
 type api struct {

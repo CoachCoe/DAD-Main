@@ -23,6 +23,7 @@ type DonorDashboard struct {
 	State         string           `json:"state"`
 	Streak        *StreakSummary   `json:"streak"`
 	Rank          *Ranking         `json:"rank"`
+	Network       *NetworkCard     `json:"network"`
 }
 
 type ReferralSummary struct {
@@ -41,6 +42,16 @@ type StreakSummary struct {
 	// Ladder is the day-based streak card (PRD S-2/S-3): days since the run
 	// began, the milestone ladder, days to the next milestone, and the 30-day bar.
 	Ladder *recognition.StreakLadder `json:"ladder,omitempty"`
+}
+
+// NetworkCard is the dashboard headline for the donor's referral network
+// (PRD I-2): the number of currently-active donors they brought in and that
+// network's combined annualized giving. The full invitee list and milestone
+// progress live on GET /donor/me/network.
+type NetworkCard struct {
+	ActiveCount     int64  `json:"active_count"`
+	AnnualizedMinor int64  `json:"annualized_minor"`
+	Currency        string `json:"currency"`
 }
 
 // MarshalJSON reports a dashboard still being prepared by its state alone.
@@ -107,6 +118,14 @@ func dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time
 		return DonorDashboard{}, err
 	}
 	result.Rank = rank
+	// Network headline (I-2): active-network count + annualized giving.
+	net, err := q.NetworkTotals(ctx, id)
+	if err != nil {
+		return DonorDashboard{}, err
+	}
+	if net.ActiveCount > 0 {
+		result.Network = &NetworkCard{ActiveCount: net.ActiveCount, AnnualizedMinor: net.AnnualizedMinor, Currency: "USD"}
+	}
 	return result, nil
 }
 

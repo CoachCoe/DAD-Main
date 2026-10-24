@@ -31,8 +31,9 @@ SELECT * FROM donor_metric_projections WHERE donor_id=$1 FOR NO KEY UPDATE;
 INSERT INTO donor_metric_projections
 (id,donor_id,referrer_id,referral_kind,first_gift_id,net_minor,founding_awarded_at,
  best_streak,current_streak,at_risk,grace_ends_at,computed_at,next_refresh_at,rules_version,
- referred_link_count,referred_irl_count,referred_link_minor,referred_irl_minor,streak_since)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+ referred_link_count,referred_irl_count,referred_link_minor,referred_irl_minor,streak_since,
+ current_monthly_minor,active)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 ON CONFLICT (donor_id) DO UPDATE SET
 referrer_id=EXCLUDED.referrer_id,referral_kind=EXCLUDED.referral_kind,first_gift_id=EXCLUDED.first_gift_id,
 net_minor=EXCLUDED.net_minor,founding_awarded_at=EXCLUDED.founding_awarded_at,
@@ -41,7 +42,7 @@ grace_ends_at=EXCLUDED.grace_ends_at,computed_at=EXCLUDED.computed_at,next_refre
 rules_version=EXCLUDED.rules_version,refresh_failures=0,refresh_error=NULL,
 referred_link_count=EXCLUDED.referred_link_count,referred_irl_count=EXCLUDED.referred_irl_count,
 referred_link_minor=EXCLUDED.referred_link_minor,referred_irl_minor=EXCLUDED.referred_irl_minor,
-streak_since=EXCLUDED.streak_since;
+streak_since=EXCLUDED.streak_since,current_monthly_minor=EXCLUDED.current_monthly_minor,active=EXCLUDED.active;
 
 -- name: ReferralTotalsFromReferred :one
 -- Reconcile under LockProjection so concurrent deltas cannot be overwritten.

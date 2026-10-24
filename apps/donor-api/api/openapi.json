@@ -1736,6 +1736,12 @@
                   },
                   "push_streak_milestone": {
                     "type": "boolean"
+                  },
+                  "rankings_opted_out": {
+                    "type": "boolean"
+                  },
+                  "network_visible": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -5985,6 +5991,41 @@
         }
       }
     },
+    "/donor/me/network": {
+      "get": {
+        "operationId": "donorNetwork",
+        "summary": "The donor's referral network (N-1..N-3)",
+        "tags": [
+          "Network"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/donor/me/badges": {
       "get": {
         "operationId": "donorBadges",
@@ -6736,6 +6777,17 @@
                   }
                 ],
                 "description": "The donor's own ranking (S-4), or null when unranked."
+              },
+              "network": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkCard"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The donor's active-network headline (I-2), or null when they have no active referrals."
               }
             },
             "required": [
@@ -6745,7 +6797,8 @@
               "referrals",
               "state",
               "streak",
-              "rank"
+              "rank",
+              "network"
             ],
             "additionalProperties": false
           }
@@ -6815,6 +6868,14 @@
             "type": "boolean",
             "description": "App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on."
           },
+          "rankings_opted_out": {
+            "type": "boolean",
+            "description": "When true the donor is excluded from national/city rankings and from everyone's ranking denominator. Default off (ranked)."
+          },
+          "network_visible": {
+            "type": "boolean",
+            "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). Default off."
+          },
           "version": {
             "type": "integer",
             "format": "int32",
@@ -6837,6 +6898,8 @@
           "push_referral_converted",
           "push_streak_at_risk",
           "push_streak_milestone",
+          "rankings_opted_out",
+          "network_visible",
           "version",
           "consent_version"
         ],
@@ -9030,6 +9093,117 @@
           "city",
           "city_rank",
           "computed_at"
+        ],
+        "additionalProperties": false
+      },
+      "NetworkCard": {
+        "type": "object",
+        "description": "Dashboard headline for the donor's referral network (I-2).",
+        "properties": {
+          "active_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of still-active donors the donor brought in."
+          },
+          "annualized_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Combined annualized giving of those active donors (monthly pledge x 12), in minor units."
+          },
+          "currency": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "active_count",
+          "annualized_minor",
+          "currency"
+        ],
+        "additionalProperties": false
+      },
+      "NetworkMilestone": {
+        "type": "object",
+        "description": "The next referral tier the donor has not yet reached (N-2).",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "target": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "remaining": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "label",
+          "target",
+          "remaining"
+        ],
+        "additionalProperties": false
+      },
+      "NetworkInvitee": {
+        "type": "object",
+        "description": "One opted-in person the donor brought in (N-3).",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "First name + last initial, as the invitee chose to display it."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the invitee is still giving."
+          }
+        },
+        "required": [
+          "name",
+          "active"
+        ],
+        "additionalProperties": false
+      },
+      "NetworkSummary": {
+        "type": "object",
+        "description": "The donor's referral-network view (N-1..N-3).",
+        "properties": {
+          "active_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "annualized_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_milestone": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NetworkMilestone"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null once every referral tier is reached."
+          },
+          "invitees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInvitee"
+            }
+          },
+          "anonymous_active": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Active referrals who did not opt in to being named; counted but not listed."
+          }
+        },
+        "required": [
+          "active_count",
+          "annualized_minor",
+          "next_milestone",
+          "invitees",
+          "anonymous_active"
         ],
         "additionalProperties": false
       }

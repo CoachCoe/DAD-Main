@@ -229,6 +229,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKeys: contentKeys}
 		services.Initiatives = store.InitiativeService{Staff: staff}
 		services.Badges = store.BadgeService{DB: pool, Staff: staff}
+		services.Network = store.NetworkService{DB: pool}
 	}
 	return services, pool.Close, nil
 }
