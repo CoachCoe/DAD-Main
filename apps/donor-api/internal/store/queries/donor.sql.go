@@ -11,6 +11,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const anonymizeDonor = `-- name: AnonymizeDonor :exec
+UPDATE donors SET
+	email = 'deleted-' || id::text || '@deleted.invalid',
+	public_name = NULL,
+	referral_code = NULL,
+	zip = NULL,
+	city = NULL,
+	timezone = NULL,
+	phone = NULL,
+	company_code = NULL,
+	disabled = true
+WHERE id = $1
+`
+
+// Scrub personal data from the donor row in place, keeping the id the financial
+// ledger references. email is NOT NULL UNIQUE so it becomes a unique non-routable
+// placeholder rather than null; every other personal field is cleared and the
+// account is disabled so it can no longer be used.
+func (q *Queries) AnonymizeDonor(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, anonymizeDonor, id)
+	return err
+}
+
 const bindDonorCompanyCode = `-- name: BindDonorCompanyCode :exec
 UPDATE donors SET company_code=$2 WHERE id=$1 AND company_code IS NULL
 `
@@ -66,6 +89,24 @@ func (q *Queries) CompanyTouchByToken(ctx context.Context, tokenHash string) (Co
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const deleteDonorOIDCIdentities = `-- name: DeleteDonorOIDCIdentities :exec
+DELETE FROM donor_oidc_identities WHERE donor_id=$1
+`
+
+func (q *Queries) DeleteDonorOIDCIdentities(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDonorOIDCIdentities, donorID)
+	return err
+}
+
+const deleteDonorPreferences = `-- name: DeleteDonorPreferences :exec
+DELETE FROM donor_preferences WHERE donor_id=$1
+`
+
+func (q *Queries) DeleteDonorPreferences(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDonorPreferences, donorID)
+	return err
 }
 
 const deletePhoneCode = `-- name: DeletePhoneCode :exec
@@ -286,6 +327,21 @@ func (q *Queries) PurgeReferralTouches(ctx context.Context, arg PurgeReferralTou
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordDonorDeletion = `-- name: RecordDonorDeletion :exec
+INSERT INTO donor_deletions (donor_id, deleted_at) VALUES ($1, $2)
+ON CONFLICT (donor_id) DO NOTHING
+`
+
+type RecordDonorDeletionParams struct {
+	DonorID   pgtype.UUID        `json:"donor_id"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+func (q *Queries) RecordDonorDeletion(ctx context.Context, arg RecordDonorDeletionParams) error {
+	_, err := q.db.Exec(ctx, recordDonorDeletion, arg.DonorID, arg.DeletedAt)
+	return err
 }
 
 const recordPhoneCodeAttempt = `-- name: RecordPhoneCodeAttempt :exec

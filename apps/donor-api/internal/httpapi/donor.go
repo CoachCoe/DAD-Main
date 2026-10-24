@@ -25,6 +25,7 @@ type DashboardSource interface {
 type DonorSource interface {
 	Profile(context.Context, string) (store.Profile, error)
 	SaveProfile(context.Context, string, store.ProfileUpdate) (store.Profile, error)
+	DeleteAccount(context.Context, string) error
 	SavePreferences(context.Context, string, store.Preferences) (store.Profile, error)
 	Sessions(context.Context, string) (store.Sessions, error)
 	SignOutSession(context.Context, string, pgtype.UUID) (store.Sessions, error)
@@ -109,6 +110,18 @@ func (a *api) saveProfile(w http.ResponseWriter, r *http.Request, session string
 		update.Phone = *body.Phone
 	}
 	a.donor().serve(w, r, func(ctx context.Context) (any, error) { return a.Donor.SaveProfile(ctx, session, update) })
+}
+
+// deleteAccount erases the donor's personal data and signs them out. The donor
+// session cookie is cleared since the deletion revokes every session.
+func (a *api) deleteAccount(w http.ResponseWriter, r *http.Request, session string) {
+	a.donor().serve(w, r, func(ctx context.Context) (any, error) {
+		if err := a.Donor.DeleteAccount(ctx, session); err != nil {
+			return nil, err
+		}
+		a.setCookie(w, donorCookie, "", -1, http.SameSiteLaxMode)
+		return map[string]bool{"deleted": true}, nil
+	})
 }
 
 func (a *api) savePreferences(w http.ResponseWriter, r *http.Request, session string) {

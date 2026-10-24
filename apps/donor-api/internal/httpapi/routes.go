@@ -54,6 +54,7 @@ func (a *api) routes() []route {
 		a.donorRead("GET /donor/me/dashboard", a.dashboard),
 		a.donorRead("GET /donor/me/profile", a.profile),
 		a.donorWrite("POST /donor/me/profile", a.saveProfile),
+		a.donorWrite("POST /donor/me/delete", a.deleteAccount),
 		a.donorRead("GET /donor/me/sessions", a.sessions),
 		a.donorWrite("POST /donor/me/sessions/{session_id}/revoke", a.signOutSession),
 		a.donorWrite("POST /donor/me/sessions/revoke-others", a.signOutOthers),

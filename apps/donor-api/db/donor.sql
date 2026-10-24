@@ -117,3 +117,31 @@ UPDATE donors SET company_code=$2 WHERE id=$1 AND company_code IS NULL;
 
 -- name: PurgeCompanyTouches :exec
 DELETE FROM donor_company_touches WHERE expires_at<=$1;
+
+
+-- name: AnonymizeDonor :exec
+-- Scrub personal data from the donor row in place, keeping the id the financial
+-- ledger references. email is NOT NULL UNIQUE so it becomes a unique non-routable
+-- placeholder rather than null; every other personal field is cleared and the
+-- account is disabled so it can no longer be used.
+UPDATE donors SET
+	email = 'deleted-' || id::text || '@deleted.invalid',
+	public_name = NULL,
+	referral_code = NULL,
+	zip = NULL,
+	city = NULL,
+	timezone = NULL,
+	phone = NULL,
+	company_code = NULL,
+	disabled = true
+WHERE id = $1;
+
+-- name: DeleteDonorOIDCIdentities :exec
+DELETE FROM donor_oidc_identities WHERE donor_id=$1;
+
+-- name: DeleteDonorPreferences :exec
+DELETE FROM donor_preferences WHERE donor_id=$1;
+
+-- name: RecordDonorDeletion :exec
+INSERT INTO donor_deletions (donor_id, deleted_at) VALUES ($1, $2)
+ON CONFLICT (donor_id) DO NOTHING;

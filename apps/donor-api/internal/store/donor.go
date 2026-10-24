@@ -231,6 +231,45 @@ func (s DonorService) SaveProfile(ctx context.Context, token string, in ProfileU
 	})
 }
 
+// DeleteAccount erases the signed-in donor's personal data (PRD §6.12). It
+// anonymises the donor row and removes personal satellites — passkeys, OIDC
+// identities, preferences, login links, email-change tokens, and all sessions
+// (which also clears push tokens) — while retaining the financial ledger
+// (gifts, checkouts, billing periods, refunds), which is required for legal and
+// tax records and carries no personal data of its own. The erasure is recorded
+// in donor_deletions, a durable audit that outlives the scrub. The donor is
+// signed out everywhere as part of the deletion, so no session survives it.
+func (s DonorService) DeleteAccount(ctx context.Context, token string) error {
+	_, err := donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (struct{}, error) {
+		q := queries.New(tx)
+		if err := q.RecordDonorDeletion(ctx, queries.RecordDonorDeletionParams{DonorID: d.ID, DeletedAt: timestamp(now)}); err != nil {
+			return struct{}{}, err
+		}
+		if _, err := q.DeleteAllDonorPasskeys(ctx, d.ID); err != nil {
+			return struct{}{}, err
+		}
+		if err := q.DeleteDonorOIDCIdentities(ctx, d.ID); err != nil {
+			return struct{}{}, err
+		}
+		if err := q.DeleteDonorPreferences(ctx, d.ID); err != nil {
+			return struct{}{}, err
+		}
+		if err := q.CancelEmailChanges(ctx, d.ID); err != nil {
+			return struct{}{}, err
+		}
+		if err := q.ConsumeDonorLinks(ctx, queries.ConsumeDonorLinksParams{DonorID: d.ID, ConsumedAt: timestamp(now)}); err != nil {
+			return struct{}{}, err
+		}
+		if err := q.RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: d.ID, RevokedAt: timestamp(now)}); err != nil {
+			return struct{}{}, err
+		}
+		// Scrub the donor row last, so a failure above leaves the account intact
+		// and retryable rather than half-erased.
+		return struct{}{}, q.AnonymizeDonor(ctx, d.ID)
+	})
+	return err
+}
+
 // sharing offers referral links only once the donor has chosen a public name.
 func sharing(d queries.Donor, site publicSite) Sharing {
 	out := Sharing{PublicName: textPointer(d.PublicName)}
