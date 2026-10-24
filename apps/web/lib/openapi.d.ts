@@ -117,6 +117,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/company/{code}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a company-code visit
+         * @description Web only. Records a pre-signup visit through an employer's company code on the HttpOnly `dad_company` cookie (30 days, last touch wins) so the attribution survives the app install gap; it binds to the account at first gift. The code is normalised to upper case. The response never reveals whether the code resolves to a partner.
+         */
+        post: operations["captureCompany"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analytics/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record analytics events
+         * @description Ingests a batch of §9 analytics events from any platform into the shared append-only stream. Authenticated-or-anonymous: a valid donor session attributes the events, otherwise they are recorded anonymously (events before sign-in are expected). The platform source is the native client's `X-DAD-Platform` header, or WEB for a browser. The whole batch is rejected (422) if any event has an unknown name or an invalid property payload. Batch size is capped at 100.
+         */
+        post: operations["ingestAnalytics"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/public/partner-signup": {
         parameters: {
             query?: never;
@@ -358,7 +398,31 @@ export interface paths {
         /** Profile and notification preferences */
         get: operations["profile"];
         put?: never;
-        post?: never;
+        /**
+         * Save identity profile fields
+         * @description Replaces the donor's self-service identity fields. `timezone` is derived from `zip` (US ZIP to IANA zone) and is never accepted from the client; `account_role` is immutable and cannot be set here. A field sent empty clears its stored value; a blank `zip` clears the derived `timezone` with it. 422 for an invalid ZIP, phone, or city.
+         */
+        post: operations["saveProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete this donor account
+         * @description Erases the donor's personal data and signs them out everywhere. Personal fields and personal records (passkeys, social sign-in links, notification preferences, sessions and push registrations) are removed; the gift and billing ledger is retained for legal and tax records and carries no personal data. The deletion is irreversible. A browser's session cookie is cleared in the response.
+         */
+        post: operations["deleteAccount"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1213,6 +1277,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/phone/sign-in/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a phone sign-in code
+         * @description Sends a one-time SMS code to a donor's phone. The response is always `{"sent": true}` and never reveals whether the phone has an account. 503 with this method unavailable when the deployment has no SMS provider configured.
+         */
+        post: operations["beginPhoneSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/phone/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish a phone sign-in
+         * @description Verifies the SMS code and signs the donor in. 401 covers a wrong, expired, or over-tried code and a phone with no account alike, so none reveals whether an account exists. 503 when no SMS provider is configured.
+         */
+        post: operations["finishPhoneSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/oidc/{provider}/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in with Apple or Google
+         * @description Verifies a provider id_token and signs in the donor it belongs to. The identity is matched by a prior link, else by the token's verified email against an existing account (which records the link). 401 covers an unverifiable token and a verified identity with no matching account alike; account creation happens in the giving flow, not here. 503 when the provider is not configured.
+         */
+        post: operations["oidcSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/passkeys/sign-in": {
         parameters: {
             query?: never;
@@ -1460,6 +1584,16 @@ export interface components {
             /** Format: email */
             email: string;
             public_name: string | null;
+            /**
+             * @description The principal's role, fixed at account creation and immutable.
+             * @enum {string}
+             */
+            account_role: "DONOR" | "PARTNER";
+            zip: string | null;
+            city: string | null;
+            /** @description IANA zone derived from the ZIP; drives day-level streak state in the donor's own day. */
+            timezone: string | null;
+            phone: string | null;
             referral_emails: boolean;
             marketing_emails: boolean;
             /** @description App notification when someone the donor invited makes their first gift. Starts on: the device's notification permission is the opt-in. */
@@ -2121,6 +2255,20 @@ export interface components {
         };
     };
     responses: {
+        /** @description Signed in. */
+        SignedIn: {
+            headers: {
+                /** @description Browser requests only. */
+                "Set-Cookie"?: string;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    /** @constant */
+                    signed_in: true;
+                } | components["schemas"]["NativeSession"];
+            };
+        };
         /** @description The request could not be verified. */
         BadRequest: {
             headers: {
@@ -2444,6 +2592,93 @@ export interface operations {
             };
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    captureCompany: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Company code; any other form is 404. */
+                code: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, unknown>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description False when the visit did not start or keep a company-code window. */
+                        captured: boolean;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    ingestAnalytics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    events: {
+                        /**
+                         * @description A §9 taxonomy event name.
+                         * @enum {string}
+                         */
+                        name: "app_opened" | "role_selected" | "signup_started" | "signup_completed" | "attribution_captured" | "gift_started" | "gift_completed" | "gift_failed" | "gift_recovered" | "gift_lapsed" | "amount_changed" | "gift_cancelled" | "account_deleted" | "invite_shared" | "irl_code_shown" | "referral_converted" | "badge_earned" | "milestone_reached" | "rankings_toggled" | "volunteer_opted_in" | "event_viewed" | "event_reserved" | "event_waitlisted" | "event_checked_in" | "team_created" | "team_joined" | "partner_signup_submitted" | "partner_approved" | "partner_report_exported" | "push_opened";
+                        /**
+                         * Format: date-time
+                         * @description Client event time (RFC 3339). Rejected if missing or implausibly in the future.
+                         */
+                        occurred_at: string;
+                        /** @description Typed payload for the events that carry one: attribution_captured requires {source: link|IRL|company}, invite_shared requires {channel}, push_opened requires {type}. All other events take no properties. */
+                        properties?: {
+                            [key: string]: string;
+                        };
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description The batch was accepted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Number of events stored. */
+                        accepted: number;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
@@ -2856,6 +3091,75 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    saveProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description US ZIP (`12345` or `12345-6789`). Empty clears the ZIP and derived timezone. */
+                    zip?: string;
+                    /** @description Display city. Empty clears it. */
+                    city?: string;
+                    /** @description E.164 phone, e.g. `+14155550123`. Empty clears it. */
+                    phone?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account was deleted. */
+            200: {
+                headers: {
+                    /** @description Browser requests only: clears the session cookie. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        deleted: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -4367,6 +4671,111 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    beginPhoneSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description E.164 phone, e.g. +14155550123. */
+                    phone: string;
+                };
+            };
+        };
+        responses: {
+            /** @description A code was requested (sent only if the phone matches an account). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        sent: true;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    finishPhoneSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    phone: string;
+                    /** @description The 6-digit code from the SMS. */
+                    code: string;
+                    /** @description Native requests only, optional. Ignored for browser requests. */
+                    device_name?: string;
+                    /**
+                     * @description Native requests only, optional. Ignored for browser requests.
+                     * @enum {string}
+                     */
+                    platform?: "IOS" | "ANDROID";
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["SignedIn"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    oidcSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: "apple" | "google";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The provider's id_token (JWT) from the native or web sign-in SDK. */
+                    id_token: string;
+                    /** @description Native requests only, optional. Ignored for browser requests. */
+                    device_name?: string;
+                    /**
+                     * @description Native requests only, optional. Ignored for browser requests.
+                     * @enum {string}
+                     */
+                    platform?: "IOS" | "ANDROID";
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["SignedIn"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
