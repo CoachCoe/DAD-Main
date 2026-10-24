@@ -76,21 +76,38 @@ type Preferences struct {
 	PushStreakMilestone   bool  `json:"push_streak_milestone"`
 	RankingsOptedOut      bool  `json:"rankings_opted_out"`
 	NetworkVisible        bool  `json:"network_visible"`
+	// Volunteer opt-in (PRD E-1): turning this on puts the donor in the
+	// volunteer pool and turns on event alerts. VolunteerInterests is the set
+	// of event interests they picked; empty when they have chosen none.
+	Volunteer          bool     `json:"volunteer"`
+	VolunteerInterests []string `json:"volunteer_interests"`
 }
 
-// defaultPreferences apply until a donor first saves a choice.
-var defaultPreferences = Preferences{PushReferralConverted: true, PushStreakAtRisk: true, PushStreakMilestone: true}
+// defaultPreferences apply until a donor first saves a choice. It is a function
+// (not a shared var) so each caller gets its own empty interests slice rather
+// than aliasing one, and so the slice marshals as [] not null.
+func defaultPreferences() Preferences {
+	return Preferences{
+		PushReferralConverted: true, PushStreakAtRisk: true, PushStreakMilestone: true,
+		VolunteerInterests: []string{},
+	}
+}
 
 // readPreferences returns the donor's current choices.
 func readPreferences(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (Preferences, error) {
 	pref, err := q.DonorPreference(ctx, donor)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return defaultPreferences, nil
+		return defaultPreferences(), nil
+	}
+	interests := pref.VolunteerInterests
+	if interests == nil {
+		interests = []string{}
 	}
 	return Preferences{
 		Version: pref.Version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
 		PushReferralConverted: pref.PushReferralConverted, PushStreakAtRisk: pref.PushStreakAtRisk, PushStreakMilestone: pref.PushStreakMilestone,
 		RankingsOptedOut: pref.RankingsOptedOut, NetworkVisible: pref.NetworkVisible,
+		Volunteer: pref.Volunteer, VolunteerInterests: interests,
 	}, err
 }
 
@@ -147,10 +164,15 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, pref Pr
 			return Profile{}, err
 		}
 		version := current.Version + 1
+		interests := pref.VolunteerInterests
+		if interests == nil {
+			interests = []string{}
+		}
 		if err = q.SavePreference(ctx, queries.SavePreferenceParams{
 			ID: id, DonorID: d.ID, Version: version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
 			PushReferralConverted: pref.PushReferralConverted, PushStreakAtRisk: pref.PushStreakAtRisk, PushStreakMilestone: pref.PushStreakMilestone,
 			RankingsOptedOut: pref.RankingsOptedOut, NetworkVisible: pref.NetworkVisible,
+			Volunteer: pref.Volunteer, VolunteerInterests: interests,
 		}); err != nil {
 			return Profile{}, err
 		}
@@ -163,6 +185,7 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, pref Pr
 			PushReferralConverted: pgtype.Bool{Bool: pref.PushReferralConverted, Valid: true}, PushStreakAtRisk: pgtype.Bool{Bool: pref.PushStreakAtRisk, Valid: true},
 			PushStreakMilestone: pgtype.Bool{Bool: pref.PushStreakMilestone, Valid: true}, ConsentVersion: consentVersion,
 			RankingsOptedOut: pgtype.Bool{Bool: pref.RankingsOptedOut, Valid: true}, NetworkVisible: pgtype.Bool{Bool: pref.NetworkVisible, Valid: true},
+			Volunteer: pgtype.Bool{Bool: pref.Volunteer, Valid: true}, VolunteerInterests: interests,
 		}); err != nil {
 			return Profile{}, err
 		}

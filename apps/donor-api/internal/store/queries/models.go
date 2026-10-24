@@ -280,6 +280,8 @@ type DonorPreference struct {
 	PushStreakMilestone   bool               `json:"push_streak_milestone"`
 	RankingsOptedOut      bool               `json:"rankings_opted_out"`
 	NetworkVisible        bool               `json:"network_visible"`
+	Volunteer             bool               `json:"volunteer"`
+	VolunteerInterests    []string           `json:"volunteer_interests"`
 }
 
 type DonorPushNotification struct {

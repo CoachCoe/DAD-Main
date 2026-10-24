@@ -1742,6 +1742,15 @@
                   },
                   "network_visible": {
                     "type": "boolean"
+                  },
+                  "volunteer": {
+                    "type": "boolean"
+                  },
+                  "volunteer_interests": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
                   }
                 },
                 "required": [
@@ -6876,6 +6885,17 @@
             "type": "boolean",
             "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). Default off."
           },
+          "volunteer": {
+            "type": "boolean",
+            "description": "When true the donor is in the volunteer pool and receives event alerts (E-1). Default off."
+          },
+          "volunteer_interests": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Event interests the donor picked when opting in as a volunteer (E-1); empty when none chosen."
+          },
           "version": {
             "type": "integer",
             "format": "int32",
@@ -6900,6 +6920,8 @@
           "push_streak_milestone",
           "rankings_opted_out",
           "network_visible",
+          "volunteer",
+          "volunteer_interests",
           "version",
           "consent_version"
         ],

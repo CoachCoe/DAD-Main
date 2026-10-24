@@ -266,3 +266,42 @@ func TestSaveProfileDerivesTimezoneAndValidates(t *testing.T) {
 		}
 	}
 }
+
+// TestVolunteerPreferenceRoundTrip covers E-1: the volunteer opt-in and the
+// chosen interests are stored on the versioned preference record, mirrored to
+// the consent-event table, and read back; the default is off with an empty
+// (non-null) interests set.
+func TestVolunteerPreferenceRoundTrip(t *testing.T) {
+	s, token, id := donorServiceFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+
+	profile, err := s.Profile(ctx, token)
+	if err != nil || profile.Volunteer || profile.VolunteerInterests == nil || len(profile.VolunteerInterests) != 0 {
+		t.Fatalf("default volunteer prefs: %+v %v", profile.Preferences, err)
+	}
+
+	saved, err := s.SavePreferences(ctx, token, Preferences{
+		Version: 0, PushReferralConverted: true,
+		Volunteer: true, VolunteerInterests: []string{"food-bank", "mentoring"},
+	})
+	if err != nil || saved.Version != 1 || !saved.Volunteer ||
+		len(saved.VolunteerInterests) != 2 || saved.VolunteerInterests[0] != "food-bank" || saved.VolunteerInterests[1] != "mentoring" {
+		t.Fatalf("saved volunteer prefs: %+v %v", saved.Preferences, err)
+	}
+
+	// The consent-event mirror records the change.
+	var vol bool
+	var interests []string
+	if err = pool.QueryRow(ctx,
+		"SELECT volunteer,volunteer_interests FROM donor_preference_events WHERE donor_id=$1 AND version=1", id,
+	).Scan(&vol, &interests); err != nil || !vol || len(interests) != 2 {
+		t.Fatalf("consent event mirror: %v %v %v", vol, interests, err)
+	}
+
+	// Turning volunteer back off clears the pool membership but the record keeps versioning.
+	off, err := s.SavePreferences(ctx, token, Preferences{Version: 1, PushReferralConverted: true})
+	if err != nil || off.Version != 2 || off.Volunteer || len(off.VolunteerInterests) != 0 {
+		t.Fatalf("opt back out: %+v %v", off.Preferences, err)
+	}
+}
