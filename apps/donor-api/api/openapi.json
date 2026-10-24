@@ -1736,6 +1736,12 @@
                   },
                   "push_streak_milestone": {
                     "type": "boolean"
+                  },
+                  "rankings_opted_out": {
+                    "type": "boolean"
+                  },
+                  "network_visible": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
@@ -5984,6 +5990,222 @@
           }
         }
       }
+    },
+    "/donor/me/network": {
+      "get": {
+        "operationId": "donorNetwork",
+        "summary": "The donor's referral network (N-1..N-3)",
+        "tags": [
+          "Network"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/badges": {
+      "get": {
+        "operationId": "donorBadges",
+        "summary": "The donor's badge wall",
+        "tags": [
+          "Badges"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadgeList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}/badges/grant": {
+      "post": {
+        "operationId": "grantBadge",
+        "summary": "Grant a badge (super-admin)",
+        "tags": [
+          "Badges"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BadgeCodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}/badges/revoke": {
+      "post": {
+        "operationId": "revokeBadge",
+        "summary": "Revoke a badge (super-admin)",
+        "tags": [
+          "Badges"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BadgeCodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6460,6 +6682,17 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "ladder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StreakLadder"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Day-based streak card (PRD S-2/S-3); absent when there is no streak."
           }
         },
         "required": [
@@ -6533,6 +6766,28 @@
                     "type": "null"
                   }
                 ]
+              },
+              "rank": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Ranking"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The donor's own ranking (S-4), or null when unranked."
+              },
+              "network": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkCard"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The donor's active-network headline (I-2), or null when they have no active referrals."
               }
             },
             "required": [
@@ -6541,7 +6796,9 @@
               "mode",
               "referrals",
               "state",
-              "streak"
+              "streak",
+              "rank",
+              "network"
             ],
             "additionalProperties": false
           }
@@ -6611,6 +6868,14 @@
             "type": "boolean",
             "description": "App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on."
           },
+          "rankings_opted_out": {
+            "type": "boolean",
+            "description": "When true the donor is excluded from national/city rankings and from everyone's ranking denominator. Default off (ranked)."
+          },
+          "network_visible": {
+            "type": "boolean",
+            "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). Default off."
+          },
           "version": {
             "type": "integer",
             "format": "int32",
@@ -6633,6 +6898,8 @@
           "push_referral_converted",
           "push_streak_at_risk",
           "push_streak_milestone",
+          "rankings_opted_out",
+          "network_visible",
           "version",
           "consent_version"
         ],
@@ -8695,6 +8962,248 @@
           "region",
           "metrics",
           "distinct_shown"
+        ],
+        "additionalProperties": false
+      },
+      "StreakLadder": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_milestone": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_milestone": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "days_to_next": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "bar": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "days",
+          "last_milestone",
+          "next_milestone",
+          "days_to_next",
+          "bar"
+        ],
+        "additionalProperties": false
+      },
+      "BadgeView": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "perk": {
+            "type": "string"
+          },
+          "earned": {
+            "type": "boolean"
+          },
+          "earned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "perk",
+          "earned"
+        ],
+        "additionalProperties": false
+      },
+      "BadgeList": {
+        "type": "object",
+        "properties": {
+          "badges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BadgeView"
+            }
+          }
+        },
+        "required": [
+          "badges"
+        ],
+        "additionalProperties": false
+      },
+      "BadgeCodeRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "Ranking": {
+        "type": "object",
+        "properties": {
+          "national_percentile": {
+            "type": "integer",
+            "description": "Top-percentile bucket; 1 = top 1%."
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city_rank": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "national_percentile",
+          "city",
+          "city_rank",
+          "computed_at"
+        ],
+        "additionalProperties": false
+      },
+      "NetworkCard": {
+        "type": "object",
+        "description": "Dashboard headline for the donor's referral network (I-2).",
+        "properties": {
+          "active_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Number of still-active donors the donor brought in."
+          },
+          "annualized_minor": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Combined annualized giving of those active donors (monthly pledge x 12), in minor units."
+          },
+          "currency": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "active_count",
+          "annualized_minor",
+          "currency"
+        ],
+        "additionalProperties": false
+      },
+      "NetworkMilestone": {
+        "type": "object",
+        "description": "The next referral tier the donor has not yet reached (N-2).",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "target": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "remaining": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "label",
+          "target",
+          "remaining"
+        ],
+        "additionalProperties": false
+      },
+      "NetworkInvitee": {
+        "type": "object",
+        "description": "One opted-in person the donor brought in (N-3).",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "First name + last initial, as the invitee chose to display it."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the invitee is still giving."
+          }
+        },
+        "required": [
+          "name",
+          "active"
+        ],
+        "additionalProperties": false
+      },
+      "NetworkSummary": {
+        "type": "object",
+        "description": "The donor's referral-network view (N-1..N-3).",
+        "properties": {
+          "active_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "annualized_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_milestone": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NetworkMilestone"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null once every referral tier is reached."
+          },
+          "invitees": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInvitee"
+            }
+          },
+          "anonymous_active": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Active referrals who did not opt in to being named; counted but not listed."
+          }
+        },
+        "required": [
+          "active_count",
+          "annualized_minor",
+          "next_milestone",
+          "invitees",
+          "anonymous_active"
         ],
         "additionalProperties": false
       }

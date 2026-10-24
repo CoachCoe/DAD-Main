@@ -86,6 +86,24 @@ func loadHistory(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (
 	return result, nil
 }
 
+// latestMonthlyMinor is the amount of the most recent MONTHLY gift -- the
+// donor's current pledge -- which annualizes to their network contribution.
+// Returns 0 when there is no monthly gift.
+func latestMonthlyMinor(gifts []recognition.Gift) int64 {
+	var amount int64
+	var latest time.Time
+	for _, g := range gifts {
+		if g.Frequency != "MONTHLY" {
+			continue
+		}
+		if g.PaidAt.After(latest) {
+			latest = g.PaidAt
+			amount = g.Amount
+		}
+	}
+	return amount
+}
+
 // historicalBest replays refund observations made by asOf so a full refund
 // cannot erase a best streak the donor had already attained.
 func historicalBest(
@@ -300,6 +318,18 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		out.AtRisk = streak.AtRisk
 		if streak.GraceEndsAt != nil {
 			out.GraceEndsAt = timestamp(*streak.GraceEndsAt)
+		}
+		if streak.Since != nil {
+			out.StreakSince = timestamp(*streak.Since)
+		}
+		// N-1/I-2 network inputs: a donor counts toward a referrer's active
+		// network, at their current monthly pledge, exactly while their own
+		// streak is alive (a live run has a start and a positive length). A
+		// lapsed donor's run has reset to zero and drops out of the network
+		// total until they give again.
+		out.Active = streak.Since != nil && streak.Current > 0
+		if out.Active {
+			out.CurrentMonthlyMinor = latestMonthlyMinor(h.Gifts)
 		}
 	}
 	out.NextRefreshAt = nextRefresh(out, h, refundBoundaries, stops, now)

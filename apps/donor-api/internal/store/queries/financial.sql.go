@@ -124,7 +124,7 @@ func (q *Queries) InsertReferralCorrection(ctx context.Context, arg InsertReferr
 }
 
 const lockProjection = `-- name: LockProjection :one
-SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version, referred_link_count, referred_irl_count, referred_link_minor, referred_irl_minor FROM donor_metric_projections WHERE donor_id=$1 FOR NO KEY UPDATE
+SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version, referred_link_count, referred_irl_count, referred_link_minor, referred_irl_minor, streak_since, current_monthly_minor, active FROM donor_metric_projections WHERE donor_id=$1 FOR NO KEY UPDATE
 `
 
 // Referral deltas lock this row without taking its donor lock.
@@ -153,6 +153,9 @@ func (q *Queries) LockProjection(ctx context.Context, donorID pgtype.UUID) (Dono
 		&i.ReferredIrlCount,
 		&i.ReferredLinkMinor,
 		&i.ReferredIrlMinor,
+		&i.StreakSince,
+		&i.CurrentMonthlyMinor,
+		&i.Active,
 	)
 	return i, err
 }
@@ -209,7 +212,7 @@ func (q *Queries) PeriodHistory(ctx context.Context, donorID pgtype.UUID) ([]Don
 }
 
 const projection = `-- name: Projection :one
-SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version, referred_link_count, referred_irl_count, referred_link_minor, referred_irl_minor FROM donor_metric_projections WHERE donor_id=$1
+SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version, referred_link_count, referred_irl_count, referred_link_minor, referred_irl_minor, streak_since, current_monthly_minor, active FROM donor_metric_projections WHERE donor_id=$1
 `
 
 func (q *Queries) Projection(ctx context.Context, donorID pgtype.UUID) (DonorMetricProjection, error) {
@@ -237,6 +240,9 @@ func (q *Queries) Projection(ctx context.Context, donorID pgtype.UUID) (DonorMet
 		&i.ReferredIrlCount,
 		&i.ReferredLinkMinor,
 		&i.ReferredIrlMinor,
+		&i.StreakSince,
+		&i.CurrentMonthlyMinor,
+		&i.Active,
 	)
 	return i, err
 }
@@ -404,8 +410,9 @@ const saveProjection = `-- name: SaveProjection :exec
 INSERT INTO donor_metric_projections
 (id,donor_id,referrer_id,referral_kind,first_gift_id,net_minor,founding_awarded_at,
  best_streak,current_streak,at_risk,grace_ends_at,computed_at,next_refresh_at,rules_version,
- referred_link_count,referred_irl_count,referred_link_minor,referred_irl_minor)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+ referred_link_count,referred_irl_count,referred_link_minor,referred_irl_minor,streak_since,
+ current_monthly_minor,active)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
 ON CONFLICT (donor_id) DO UPDATE SET
 referrer_id=EXCLUDED.referrer_id,referral_kind=EXCLUDED.referral_kind,first_gift_id=EXCLUDED.first_gift_id,
 net_minor=EXCLUDED.net_minor,founding_awarded_at=EXCLUDED.founding_awarded_at,
@@ -413,28 +420,32 @@ best_streak=EXCLUDED.best_streak,current_streak=EXCLUDED.current_streak,at_risk=
 grace_ends_at=EXCLUDED.grace_ends_at,computed_at=EXCLUDED.computed_at,next_refresh_at=EXCLUDED.next_refresh_at,
 rules_version=EXCLUDED.rules_version,refresh_failures=0,refresh_error=NULL,
 referred_link_count=EXCLUDED.referred_link_count,referred_irl_count=EXCLUDED.referred_irl_count,
-referred_link_minor=EXCLUDED.referred_link_minor,referred_irl_minor=EXCLUDED.referred_irl_minor
+referred_link_minor=EXCLUDED.referred_link_minor,referred_irl_minor=EXCLUDED.referred_irl_minor,
+streak_since=EXCLUDED.streak_since,current_monthly_minor=EXCLUDED.current_monthly_minor,active=EXCLUDED.active
 `
 
 type SaveProjectionParams struct {
-	ID                pgtype.UUID        `json:"id"`
-	DonorID           pgtype.UUID        `json:"donor_id"`
-	ReferrerID        pgtype.UUID        `json:"referrer_id"`
-	ReferralKind      pgtype.Text        `json:"referral_kind"`
-	FirstGiftID       pgtype.Text        `json:"first_gift_id"`
-	NetMinor          pgtype.Int8        `json:"net_minor"`
-	FoundingAwardedAt pgtype.Timestamptz `json:"founding_awarded_at"`
-	BestStreak        int32              `json:"best_streak"`
-	CurrentStreak     pgtype.Int4        `json:"current_streak"`
-	AtRisk            bool               `json:"at_risk"`
-	GraceEndsAt       pgtype.Timestamptz `json:"grace_ends_at"`
-	ComputedAt        pgtype.Timestamptz `json:"computed_at"`
-	NextRefreshAt     pgtype.Timestamptz `json:"next_refresh_at"`
-	RulesVersion      int32              `json:"rules_version"`
-	ReferredLinkCount int64              `json:"referred_link_count"`
-	ReferredIrlCount  int64              `json:"referred_irl_count"`
-	ReferredLinkMinor int64              `json:"referred_link_minor"`
-	ReferredIrlMinor  int64              `json:"referred_irl_minor"`
+	ID                  pgtype.UUID        `json:"id"`
+	DonorID             pgtype.UUID        `json:"donor_id"`
+	ReferrerID          pgtype.UUID        `json:"referrer_id"`
+	ReferralKind        pgtype.Text        `json:"referral_kind"`
+	FirstGiftID         pgtype.Text        `json:"first_gift_id"`
+	NetMinor            pgtype.Int8        `json:"net_minor"`
+	FoundingAwardedAt   pgtype.Timestamptz `json:"founding_awarded_at"`
+	BestStreak          int32              `json:"best_streak"`
+	CurrentStreak       pgtype.Int4        `json:"current_streak"`
+	AtRisk              bool               `json:"at_risk"`
+	GraceEndsAt         pgtype.Timestamptz `json:"grace_ends_at"`
+	ComputedAt          pgtype.Timestamptz `json:"computed_at"`
+	NextRefreshAt       pgtype.Timestamptz `json:"next_refresh_at"`
+	RulesVersion        int32              `json:"rules_version"`
+	ReferredLinkCount   int64              `json:"referred_link_count"`
+	ReferredIrlCount    int64              `json:"referred_irl_count"`
+	ReferredLinkMinor   int64              `json:"referred_link_minor"`
+	ReferredIrlMinor    int64              `json:"referred_irl_minor"`
+	StreakSince         pgtype.Timestamptz `json:"streak_since"`
+	CurrentMonthlyMinor int64              `json:"current_monthly_minor"`
+	Active              bool               `json:"active"`
 }
 
 // The caller locks the projection before aggregating its referred rows.
@@ -458,6 +469,9 @@ func (q *Queries) SaveProjection(ctx context.Context, arg SaveProjectionParams) 
 		arg.ReferredIrlCount,
 		arg.ReferredLinkMinor,
 		arg.ReferredIrlMinor,
+		arg.StreakSince,
+		arg.CurrentMonthlyMinor,
+		arg.Active,
 	)
 	return err
 }

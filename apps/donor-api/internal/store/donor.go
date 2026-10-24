@@ -74,6 +74,8 @@ type Preferences struct {
 	PushReferralConverted bool  `json:"push_referral_converted"`
 	PushStreakAtRisk      bool  `json:"push_streak_at_risk"`
 	PushStreakMilestone   bool  `json:"push_streak_milestone"`
+	RankingsOptedOut      bool  `json:"rankings_opted_out"`
+	NetworkVisible        bool  `json:"network_visible"`
 }
 
 // defaultPreferences apply until a donor first saves a choice.
@@ -88,6 +90,7 @@ func readPreferences(ctx context.Context, q *queries.Queries, donor pgtype.UUID)
 	return Preferences{
 		Version: pref.Version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
 		PushReferralConverted: pref.PushReferralConverted, PushStreakAtRisk: pref.PushStreakAtRisk, PushStreakMilestone: pref.PushStreakMilestone,
+		RankingsOptedOut: pref.RankingsOptedOut, NetworkVisible: pref.NetworkVisible,
 	}, err
 }
 
@@ -147,6 +150,7 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, pref Pr
 		if err = q.SavePreference(ctx, queries.SavePreferenceParams{
 			ID: id, DonorID: d.ID, Version: version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
 			PushReferralConverted: pref.PushReferralConverted, PushStreakAtRisk: pref.PushStreakAtRisk, PushStreakMilestone: pref.PushStreakMilestone,
+			RankingsOptedOut: pref.RankingsOptedOut, NetworkVisible: pref.NetworkVisible,
 		}); err != nil {
 			return Profile{}, err
 		}
@@ -158,6 +162,7 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, pref Pr
 			ID: event, DonorID: d.ID, Version: version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
 			PushReferralConverted: pgtype.Bool{Bool: pref.PushReferralConverted, Valid: true}, PushStreakAtRisk: pgtype.Bool{Bool: pref.PushStreakAtRisk, Valid: true},
 			PushStreakMilestone: pgtype.Bool{Bool: pref.PushStreakMilestone, Valid: true}, ConsentVersion: consentVersion,
+			RankingsOptedOut: pgtype.Bool{Bool: pref.RankingsOptedOut, Valid: true}, NetworkVisible: pgtype.Bool{Bool: pref.NetworkVisible, Valid: true},
 		}); err != nil {
 			return Profile{}, err
 		}

@@ -183,27 +183,30 @@ type DonorMessage struct {
 }
 
 type DonorMetricProjection struct {
-	DonorID           pgtype.UUID        `json:"donor_id"`
-	ReferrerID        pgtype.UUID        `json:"referrer_id"`
-	ReferralKind      pgtype.Text        `json:"referral_kind"`
-	FirstGiftID       pgtype.Text        `json:"first_gift_id"`
-	NetMinor          pgtype.Int8        `json:"net_minor"`
-	FoundingAwardedAt pgtype.Timestamptz `json:"founding_awarded_at"`
-	BestStreak        int32              `json:"best_streak"`
-	CurrentStreak     pgtype.Int4        `json:"current_streak"`
-	AtRisk            bool               `json:"at_risk"`
-	GraceEndsAt       pgtype.Timestamptz `json:"grace_ends_at"`
-	ComputedAt        pgtype.Timestamptz `json:"computed_at"`
-	NextRefreshAt     pgtype.Timestamptz `json:"next_refresh_at"`
-	ID                pgtype.UUID        `json:"id"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	RefreshFailures   int32              `json:"refresh_failures"`
-	RefreshError      pgtype.Text        `json:"refresh_error"`
-	RulesVersion      int32              `json:"rules_version"`
-	ReferredLinkCount int64              `json:"referred_link_count"`
-	ReferredIrlCount  int64              `json:"referred_irl_count"`
-	ReferredLinkMinor int64              `json:"referred_link_minor"`
-	ReferredIrlMinor  int64              `json:"referred_irl_minor"`
+	DonorID             pgtype.UUID        `json:"donor_id"`
+	ReferrerID          pgtype.UUID        `json:"referrer_id"`
+	ReferralKind        pgtype.Text        `json:"referral_kind"`
+	FirstGiftID         pgtype.Text        `json:"first_gift_id"`
+	NetMinor            pgtype.Int8        `json:"net_minor"`
+	FoundingAwardedAt   pgtype.Timestamptz `json:"founding_awarded_at"`
+	BestStreak          int32              `json:"best_streak"`
+	CurrentStreak       pgtype.Int4        `json:"current_streak"`
+	AtRisk              bool               `json:"at_risk"`
+	GraceEndsAt         pgtype.Timestamptz `json:"grace_ends_at"`
+	ComputedAt          pgtype.Timestamptz `json:"computed_at"`
+	NextRefreshAt       pgtype.Timestamptz `json:"next_refresh_at"`
+	ID                  pgtype.UUID        `json:"id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	RefreshFailures     int32              `json:"refresh_failures"`
+	RefreshError        pgtype.Text        `json:"refresh_error"`
+	RulesVersion        int32              `json:"rules_version"`
+	ReferredLinkCount   int64              `json:"referred_link_count"`
+	ReferredIrlCount    int64              `json:"referred_irl_count"`
+	ReferredLinkMinor   int64              `json:"referred_link_minor"`
+	ReferredIrlMinor    int64              `json:"referred_irl_minor"`
+	StreakSince         pgtype.Timestamptz `json:"streak_since"`
+	CurrentMonthlyMinor int64              `json:"current_monthly_minor"`
+	Active              bool               `json:"active"`
 }
 
 type DonorOidcIdentity struct {
@@ -275,6 +278,8 @@ type DonorPreference struct {
 	PushReferralConverted bool               `json:"push_referral_converted"`
 	PushStreakAtRisk      bool               `json:"push_streak_at_risk"`
 	PushStreakMilestone   bool               `json:"push_streak_milestone"`
+	RankingsOptedOut      bool               `json:"rankings_opted_out"`
+	NetworkVisible        bool               `json:"network_visible"`
 }
 
 type DonorPushNotification struct {

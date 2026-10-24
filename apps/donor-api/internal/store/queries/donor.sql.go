@@ -355,8 +355,8 @@ func (q *Queries) RecordPhoneCodeAttempt(ctx context.Context, phone string) erro
 
 const recordPreferenceConsent = `-- name: RecordPreferenceConsent :exec
 INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,
- push_referral_converted,push_streak_at_risk,push_streak_milestone,consent_version,source)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'account')
+ push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,consent_version,source)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'account')
 `
 
 type RecordPreferenceConsentParams struct {
@@ -368,6 +368,8 @@ type RecordPreferenceConsentParams struct {
 	PushReferralConverted pgtype.Bool `json:"push_referral_converted"`
 	PushStreakAtRisk      pgtype.Bool `json:"push_streak_at_risk"`
 	PushStreakMilestone   pgtype.Bool `json:"push_streak_milestone"`
+	RankingsOptedOut      pgtype.Bool `json:"rankings_opted_out"`
+	NetworkVisible        pgtype.Bool `json:"network_visible"`
 	ConsentVersion        string      `json:"consent_version"`
 }
 
@@ -381,6 +383,8 @@ func (q *Queries) RecordPreferenceConsent(ctx context.Context, arg RecordPrefere
 		arg.PushReferralConverted,
 		arg.PushStreakAtRisk,
 		arg.PushStreakMilestone,
+		arg.RankingsOptedOut,
+		arg.NetworkVisible,
 		arg.ConsentVersion,
 	)
 	return err
@@ -432,11 +436,12 @@ func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) 
 
 const savePreference = `-- name: SavePreference :exec
 INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,
- push_referral_converted,push_streak_at_risk,push_streak_milestone)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(donor_id) DO UPDATE
+ push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(donor_id) DO UPDATE
 SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_emails=EXCLUDED.marketing_emails,
  push_referral_converted=EXCLUDED.push_referral_converted,push_streak_at_risk=EXCLUDED.push_streak_at_risk,
- push_streak_milestone=EXCLUDED.push_streak_milestone
+ push_streak_milestone=EXCLUDED.push_streak_milestone,rankings_opted_out=EXCLUDED.rankings_opted_out,
+ network_visible=EXCLUDED.network_visible
 `
 
 type SavePreferenceParams struct {
@@ -448,6 +453,8 @@ type SavePreferenceParams struct {
 	PushReferralConverted bool        `json:"push_referral_converted"`
 	PushStreakAtRisk      bool        `json:"push_streak_at_risk"`
 	PushStreakMilestone   bool        `json:"push_streak_milestone"`
+	RankingsOptedOut      bool        `json:"rankings_opted_out"`
+	NetworkVisible        bool        `json:"network_visible"`
 }
 
 func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) error {
@@ -460,6 +467,8 @@ func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) 
 		arg.PushReferralConverted,
 		arg.PushStreakAtRisk,
 		arg.PushStreakMilestone,
+		arg.RankingsOptedOut,
+		arg.NetworkVisible,
 	)
 	return err
 }
