@@ -18,7 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: "24", cache: npm, cache-dependency-path: apps/atm-ledger/package-lock.json }
+        # No cache: npm — on a persistent self-hosted runner ~/.npm already
+        # survives between runs, and the setup-node cache-save post-step (tar +
+        # zstdmt of the npm cache) can hang for minutes and blow the job timeout.
+        with: { node-version: "24" }
       - run: npm ci
         working-directory: apps/atm-ledger
       - run: make test-ledger lint-ledger
@@ -63,7 +66,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: "22", cache: npm, cache-dependency-path: apps/web/package-lock.json }
+        # No cache: npm — see the ledger job; the cache-save post-step can hang
+        # on the self-hosted runner and cancel the job at its timeout.
+        with: { node-version: "22" }
       - run: npm ci
         working-directory: apps/web
       - run: make test-web
