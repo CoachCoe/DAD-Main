@@ -301,6 +301,9 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		if streak.GraceEndsAt != nil {
 			out.GraceEndsAt = timestamp(*streak.GraceEndsAt)
 		}
+		if streak.Since != nil {
+			out.StreakSince = timestamp(*streak.Since)
+		}
 	}
 	out.NextRefreshAt = nextRefresh(out, h, refundBoundaries, stops, now)
 	if err = recomputeReferredTotals(ctx, q, id, &out); err != nil {

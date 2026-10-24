@@ -5984,6 +5984,187 @@
           }
         }
       }
+    },
+    "/donor/me/badges": {
+      "get": {
+        "operationId": "donorBadges",
+        "summary": "The donor's badge wall",
+        "tags": [
+          "Badges"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadgeList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}/badges/grant": {
+      "post": {
+        "operationId": "grantBadge",
+        "summary": "Grant a badge (super-admin)",
+        "tags": [
+          "Badges"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BadgeCodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/donors/{donor_id}/badges/revoke": {
+      "post": {
+        "operationId": "revokeBadge",
+        "summary": "Revoke a badge (super-admin)",
+        "tags": [
+          "Badges"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "donor_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown one."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BadgeCodeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6460,6 +6641,17 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "ladder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StreakLadder"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Day-based streak card (PRD S-2/S-3); absent when there is no streak."
           }
         },
         "required": [
@@ -6533,6 +6725,17 @@
                     "type": "null"
                   }
                 ]
+              },
+              "rank": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Ranking"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The donor's own ranking (S-4), or null when unranked."
               }
             },
             "required": [
@@ -6541,7 +6744,8 @@
               "mode",
               "referrals",
               "state",
-              "streak"
+              "streak",
+              "rank"
             ],
             "additionalProperties": false
           }
@@ -8695,6 +8899,137 @@
           "region",
           "metrics",
           "distinct_shown"
+        ],
+        "additionalProperties": false
+      },
+      "StreakLadder": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_milestone": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "next_milestone": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "days_to_next": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "bar": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            }
+          }
+        },
+        "required": [
+          "days",
+          "last_milestone",
+          "next_milestone",
+          "days_to_next",
+          "bar"
+        ],
+        "additionalProperties": false
+      },
+      "BadgeView": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "perk": {
+            "type": "string"
+          },
+          "earned": {
+            "type": "boolean"
+          },
+          "earned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "code",
+          "title",
+          "perk",
+          "earned"
+        ],
+        "additionalProperties": false
+      },
+      "BadgeList": {
+        "type": "object",
+        "properties": {
+          "badges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BadgeView"
+            }
+          }
+        },
+        "required": [
+          "badges"
+        ],
+        "additionalProperties": false
+      },
+      "BadgeCodeRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "Ranking": {
+        "type": "object",
+        "properties": {
+          "national_percentile": {
+            "type": "integer",
+            "description": "Top-percentile bucket; 1 = top 1%."
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city_rank": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "computed_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "national_percentile",
+          "city",
+          "city_rank",
+          "computed_at"
         ],
         "additionalProperties": false
       }

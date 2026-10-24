@@ -114,6 +114,7 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		}, nil
 	case "projections":
 		retention := &store.TouchRetention{DB: pool}
+		rankings := store.RankingService{DB: pool}
 		return func(ctx context.Context) (bool, error) {
 			now := time.Now().UTC()
 			purged, err := retention.PurgeNext(ctx, now)
@@ -121,7 +122,12 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 				return false, err
 			}
 			processed, err := store.RefreshDueProjections(ctx, pool, now, store.ProjectionBatch)
-			return purged || processed > 0, err
+			if err != nil {
+				return purged || processed > 0, err
+			}
+			// Periodic, throttled global ranking rollup (PRD §6.4, risk #6).
+			ranked, err := rankings.RefreshIfDue(ctx, now)
+			return purged || processed > 0 || ranked, err
 		}, nil
 	case "push":
 		config, err := push.FromEnvironment(getenv)

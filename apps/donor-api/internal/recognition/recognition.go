@@ -399,3 +399,83 @@ func countStreak(
 func Milestone(months int64) bool {
 	return months == 3 || months == 6 || (months >= 12 && months%12 == 0)
 }
+
+// LadderMilestones are the streak-card milestones in DAYS (PRD S-3): a fixed
+// early set, then every additional 365 days. Monthly billing makes the count a
+// display of days since the current run began — days accrue fast enough for the
+// ladder to be climbable, where counting monthly periods would stall it.
+var LadderMilestones = []int64{7, 30, 100, 365, 500, 1000, 1095, 1460}
+
+// ladderBarDays is the width of the streak card's segmented bar (PRD S-2).
+const ladderBarDays = 30
+
+// StreakLadder is the streak card's display data (PRD S-2/S-3): the current
+// streak length in days, the next milestone and how many days remain, the last
+// milestone reached, and a 30-day segmented bar (most recent day last).
+type StreakLadder struct {
+	Days          int64  `json:"days"`
+	LastMilestone int64  `json:"last_milestone"`
+	NextMilestone *int64 `json:"next_milestone"`
+	DaysToNext    *int64 `json:"days_to_next"`
+	Bar           []bool `json:"bar"`
+}
+
+// nextLadderMilestone returns the first milestone strictly greater than days.
+// Past the fixed set the ladder continues every 365 days (PRD S-3 "+365").
+func nextLadderMilestone(days int64) (int64, bool) {
+	for _, m := range LadderMilestones {
+		if m > days {
+			return m, true
+		}
+	}
+	last := LadderMilestones[len(LadderMilestones)-1]
+	// Continue at 365-day steps beyond the final fixed milestone.
+	steps := (days-last)/365 + 1
+	return last + steps*365, true
+}
+
+// lastLadderMilestone returns the highest milestone at or below days, or 0.
+func lastLadderMilestone(days int64) int64 {
+	var reached int64
+	for _, m := range LadderMilestones {
+		if m <= days {
+			reached = m
+		}
+	}
+	if days >= LadderMilestones[len(LadderMilestones)-1] {
+		last := LadderMilestones[len(LadderMilestones)-1]
+		reached = last + (days-last)/365*365
+	}
+	return reached
+}
+
+// Ladder derives the streak card from a streak and the moment it is read. Days
+// is the whole days from the run's start (Since) to asOf; a streak with no run
+// shows zero days, no reached milestone, the first milestone as next, and an
+// empty bar. The bar marks, for each of the last 30 days ending at asOf,
+// whether the streak was already running on that day.
+func (s Streak) Ladder(asOf time.Time) StreakLadder {
+	if s.Since == nil {
+		next := LadderMilestones[0]
+		return StreakLadder{NextMilestone: &next, DaysToNext: &next, Bar: make([]bool, ladderBarDays)}
+	}
+	start := utc(*s.Since)
+	days := int64(utc(asOf).Sub(start).Hours() / 24)
+	if days < 0 {
+		days = 0
+	}
+	ladder := StreakLadder{Days: days, LastMilestone: lastLadderMilestone(days)}
+	if next, ok := nextLadderMilestone(days); ok {
+		toNext := next - days
+		ladder.NextMilestone = &next
+		ladder.DaysToNext = &toNext
+	}
+	bar := make([]bool, ladderBarDays)
+	for i := range bar {
+		// bar[ladderBarDays-1] is today; bar[0] is 29 days ago.
+		dayOffset := int64(ladderBarDays - 1 - i)
+		bar[i] = days >= dayOffset
+	}
+	ladder.Bar = bar
+	return ladder
+}

@@ -7,6 +7,7 @@ import (
 	"math"
 	"time"
 
+	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -21,6 +22,7 @@ type DonorDashboard struct {
 	Referrals     *ReferralSummary `json:"referrals"`
 	State         string           `json:"state"`
 	Streak        *StreakSummary   `json:"streak"`
+	Rank          *Ranking         `json:"rank"`
 }
 
 type ReferralSummary struct {
@@ -36,6 +38,9 @@ type StreakSummary struct {
 	AtRisk      bool       `json:"at_risk"`
 	Current     int32      `json:"current"`
 	GraceEndsAt *time.Time `json:"grace_ends_at"`
+	// Ladder is the day-based streak card (PRD S-2/S-3): days since the run
+	// began, the milestone ladder, days to the next milestone, and the 30-day bar.
+	Ladder *recognition.StreakLadder `json:"ladder,omitempty"`
 }
 
 // MarshalJSON reports a dashboard still being prepared by its state alone.
@@ -88,7 +93,20 @@ func dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time
 		if row.GraceEndsAt.Valid {
 			result.Streak.GraceEndsAt = &row.GraceEndsAt.Time
 		}
+		// The day-based ladder derives from the run's start date (streak_since).
+		var since *time.Time
+		if row.StreakSince.Valid {
+			since = &row.StreakSince.Time
+		}
+		ladder := (recognition.Streak{Since: since}).Ladder(now)
+		result.Streak.Ladder = &ladder
 	}
+	// Rank line under the streak (S-4): the donor's own position only.
+	rank, err := ForDonor(ctx, q, id)
+	if err != nil {
+		return DonorDashboard{}, err
+	}
+	result.Rank = rank
 	return result, nil
 }
 

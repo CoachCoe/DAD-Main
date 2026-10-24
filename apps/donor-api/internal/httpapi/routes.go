@@ -64,6 +64,7 @@ func (a *api) routes() []route {
 		a.appWrite("POST /donor/me/push-device/unregister", a.unregisterPushDevice),
 		a.donorRead("GET /donor/me/conversions", a.conversions),
 		a.donorRead("GET /donor/me/today-initiative", a.todayInitiative),
+		a.donorRead("GET /donor/me/badges", a.donorBadges),
 		a.donorRead("GET /donor/me/sharing", a.sharing),
 		a.donorWrite("POST /donor/me/sharing", a.saveSharing),
 		a.donorRead("GET /donor/me/referral-code.svg", a.referralCode),
@@ -104,6 +105,8 @@ func (a *api) routes() []route {
 		a.staffRead("GET /donor/staff/donors/{donor_id}/actions/pending", a.pendingAction),
 		a.staffRead("GET /donor/staff/audit", a.auditEvents),
 		a.staffWrite("POST /donor/staff/donors/{donor_id}/claim-email", a.requestClaim),
+		a.staffWrite("POST /donor/staff/donors/{donor_id}/badges/grant", a.grantBadge),
+		a.staffWrite("POST /donor/staff/donors/{donor_id}/badges/revoke", a.revokeBadge),
 		a.staffWrite("POST /donor/staff/messages/{message_id}/resend", a.resendMessage),
 
 		a.staffRead("GET /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund", a.refundQuote),

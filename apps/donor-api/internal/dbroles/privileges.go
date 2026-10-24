@@ -59,7 +59,7 @@ var grants = map[string]map[Role]string{
 	"donor_email_changes": {API: "SELECT, INSERT, UPDATE", EmailChangeWorker: "SELECT, UPDATE",
 		Monitor: "SELECT (attempts, available_at, sent_at, stage)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
 	"donor_identity_events":   {API: "SELECT, INSERT"},
-	"donor_preferences":       {API: "SELECT, INSERT, UPDATE, DELETE", MessageWorker: "SELECT", PushWorker: "SELECT"},
+	"donor_preferences":       {API: "SELECT, INSERT, UPDATE, DELETE", MessageWorker: "SELECT", PushWorker: "SELECT", ProjectionWorker: "SELECT"},
 	"donor_preference_events": {API: "SELECT, INSERT"},
 
 	"donor_checkouts": {API: "SELECT, INSERT", StripeWorker: "SELECT", ProjectionWorker: "SELECT", ReconcileJob: "SELECT"},
@@ -174,6 +174,8 @@ var grants = map[string]map[Role]string{
 	"donor_initiative_metrics":   {API: "SELECT, INSERT, UPDATE, DELETE", ProjectionWorker: "SELECT"},
 	"donor_initiative_spend":     {API: "SELECT, INSERT, UPDATE, DELETE", ProjectionWorker: "SELECT"},
 	"donor_initiative_exposures": {API: "SELECT, INSERT, UPDATE"},
+	"donor_badges":               {API: "SELECT, INSERT, UPDATE"},
+	"donor_rankings":             {API: "SELECT", ProjectionWorker: "SELECT, INSERT, UPDATE, DELETE"},
 }
 
 // privileges is a canonical set of grants: "SELECT" for a table privilege,

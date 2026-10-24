@@ -1,0 +1,14 @@
+-- Persist the streak run's start date for the day-based streak ladder (PRD
+-- S-2/S-3). Phase 3.1.
+--
+-- The projection already materializes the streak's period COUNT
+-- (current_streak); the streak CARD additionally shows days since the current
+-- run began and a day-based milestone ladder, which needs the run's start date.
+-- recognition.GivingStreak already returns that date (Streak.Since) and the
+-- projection builder already holds it; this column lets the dashboard read it
+-- back as a cheap lookup instead of recomputing the streak on every request.
+--
+-- Nullable: a donor with no active run has no run start. It is refreshed by the
+-- same projection worker that maintains current_streak, so it stays consistent
+-- with it.
+ALTER TABLE donor_metric_projections ADD COLUMN streak_since TIMESTAMP WITH TIME ZONE;

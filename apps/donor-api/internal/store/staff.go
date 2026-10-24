@@ -35,6 +35,7 @@ var rolePermissions = map[string][]string{
 	"FINANCE": {"data.export", "donor.read", "gift.cancel", "gift.refund", "message.resend"},
 	"ADMIN": {
 		"audit.read",
+		"badge.manage",
 		"content.publish",
 		"data.export",
 		"donor.read",

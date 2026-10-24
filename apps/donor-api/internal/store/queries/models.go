@@ -204,6 +204,7 @@ type DonorMetricProjection struct {
 	ReferredIrlCount  int64              `json:"referred_irl_count"`
 	ReferredLinkMinor int64              `json:"referred_link_minor"`
 	ReferredIrlMinor  int64              `json:"referred_irl_minor"`
+	StreakSince       pgtype.Timestamptz `json:"streak_since"`
 }
 
 type DonorOidcIdentity struct {
@@ -275,6 +276,7 @@ type DonorPreference struct {
 	PushReferralConverted bool               `json:"push_referral_converted"`
 	PushStreakAtRisk      bool               `json:"push_streak_at_risk"`
 	PushStreakMilestone   bool               `json:"push_streak_milestone"`
+	RankingsOptedOut      bool               `json:"rankings_opted_out"`
 }
 
 type DonorPushNotification struct {
