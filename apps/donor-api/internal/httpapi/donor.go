@@ -24,6 +24,7 @@ type DashboardSource interface {
 
 type DonorSource interface {
 	Profile(context.Context, string) (store.Profile, error)
+	SaveProfile(context.Context, string, store.ProfileUpdate) (store.Profile, error)
 	SavePreferences(context.Context, string, store.Preferences) (store.Profile, error)
 	Sessions(context.Context, string) (store.Sessions, error)
 	SignOutSession(context.Context, string, pgtype.UUID) (store.Sessions, error)
@@ -61,6 +62,12 @@ func donorStatus(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "The push token is not valid for this platform"
 	case errors.Is(err, store.ErrPublicName):
 		return http.StatusUnprocessableEntity, "Choose a public first name or nickname of 1 to 80 characters"
+	case errors.Is(err, store.ErrZip):
+		return http.StatusUnprocessableEntity, "Enter a valid US ZIP code"
+	case errors.Is(err, store.ErrCity):
+		return http.StatusUnprocessableEntity, "Enter a city of 1 to 80 characters"
+	case errors.Is(err, store.ErrPhone):
+		return http.StatusUnprocessableEntity, "Enter a valid phone number in international format"
 	case errors.Is(err, pgx.ErrNoRows):
 		return http.StatusNotFound, "Record not found"
 	case errors.Is(err, store.ErrReceipt):
@@ -79,6 +86,28 @@ func (a *api) dashboard(w http.ResponseWriter, r *http.Request, session string) 
 
 func (a *api) profile(w http.ResponseWriter, r *http.Request, session string) {
 	a.donor().serve(w, r, func(ctx context.Context) (any, error) { return a.Donor.Profile(ctx, session) })
+}
+
+func (a *api) saveProfile(w http.ResponseWriter, r *http.Request, session string) {
+	var body struct {
+		Zip   *string `json:"zip"`
+		City  *string `json:"city"`
+		Phone *string `json:"phone"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	update := store.ProfileUpdate{}
+	if body.Zip != nil {
+		update.Zip = *body.Zip
+	}
+	if body.City != nil {
+		update.City = *body.City
+	}
+	if body.Phone != nil {
+		update.Phone = *body.Phone
+	}
+	a.donor().serve(w, r, func(ctx context.Context) (any, error) { return a.Donor.SaveProfile(ctx, session, update) })
 }
 
 func (a *api) savePreferences(w http.ResponseWriter, r *http.Request, session string) {

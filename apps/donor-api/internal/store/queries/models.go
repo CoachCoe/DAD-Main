@@ -16,6 +16,11 @@ type Donor struct {
 	ReferralCode pgtype.Text        `json:"referral_code"`
 	ID           pgtype.UUID        `json:"id"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	AccountRole  string             `json:"account_role"`
+	Zip          pgtype.Text        `json:"zip"`
+	City         pgtype.Text        `json:"city"`
+	Timezone     pgtype.Text        `json:"timezone"`
+	Phone        pgtype.Text        `json:"phone"`
 }
 
 type DonorAmountChange struct {

@@ -188,7 +188,7 @@ func (q *Queries) ReferralTouchByToken(ctx context.Context, tokenHash string) (D
 }
 
 const referrerByCode = `-- name: ReferrerByCode :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false
 `
 
 func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) (Donor, error) {
@@ -202,6 +202,11 @@ func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) 
 		&i.ReferralCode,
 		&i.ID,
 		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
 	)
 	return i, err
 }
@@ -241,7 +246,7 @@ func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) 
 }
 
 const saveSharing = `-- name: SaveSharing :one
-UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at
+UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone
 `
 
 type SaveSharingParams struct {
@@ -261,6 +266,51 @@ func (q *Queries) SaveSharing(ctx context.Context, arg SaveSharingParams) (Donor
 		&i.ReferralCode,
 		&i.ID,
 		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
+	)
+	return i, err
+}
+
+const updateDonorProfile = `-- name: UpdateDonorProfile :one
+UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone
+`
+
+type UpdateDonorProfileParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Zip      pgtype.Text `json:"zip"`
+	City     pgtype.Text `json:"city"`
+	Timezone pgtype.Text `json:"timezone"`
+	Phone    pgtype.Text `json:"phone"`
+}
+
+// Replace the donor's self-service identity fields. account_role is deliberately
+// never written here: a role is fixed at row creation and immutable (PRD §3).
+func (q *Queries) UpdateDonorProfile(ctx context.Context, arg UpdateDonorProfileParams) (Donor, error) {
+	row := q.db.QueryRow(ctx, updateDonorProfile,
+		arg.ID,
+		arg.Zip,
+		arg.City,
+		arg.Timezone,
+		arg.Phone,
+	)
+	var i Donor
+	err := row.Scan(
+		&i.Email,
+		&i.ClaimedAt,
+		&i.Disabled,
+		&i.PublicName,
+		&i.ReferralCode,
+		&i.ID,
+		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
 	)
 	return i, err
 }

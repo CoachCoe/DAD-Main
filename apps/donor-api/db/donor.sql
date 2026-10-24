@@ -58,3 +58,9 @@ WITH deleted AS (
  )) RETURNING touched_at,id
 )
 SELECT touched_at,id FROM deleted ORDER BY touched_at,id;
+
+
+-- name: UpdateDonorProfile :one
+-- Replace the donor's self-service identity fields. account_role is deliberately
+-- never written here: a role is fixed at row creation and immutable (PRD §3).
+UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING *;

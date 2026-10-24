@@ -1284,6 +1284,88 @@
       }
     },
     "/donor/me/profile": {
+      "post": {
+        "operationId": "saveProfile",
+        "summary": "Save identity profile fields",
+        "description": "Replaces the donor's self-service identity fields. `timezone` is derived from `zip` (US ZIP to IANA zone) and is never accepted from the client; `account_role` is immutable and cannot be set here. A field sent empty clears its stored value; a blank `zip` clears the derived `timezone` with it. 422 for an invalid ZIP, phone, or city.",
+        "tags": [
+          "Donor"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "zip": {
+                    "type": "string",
+                    "description": "US ZIP (`12345` or `12345-6789`). Empty clears the ZIP and derived timezone.",
+                    "pattern": "^$|^[0-9]{5}(-[0-9]{4})?$"
+                  },
+                  "city": {
+                    "type": "string",
+                    "description": "Display city. Empty clears it.",
+                    "maxLength": 80
+                  },
+                  "phone": {
+                    "type": "string",
+                    "description": "E.164 phone, e.g. `+14155550123`. Empty clears it.",
+                    "pattern": "^$|^\\+[1-9][0-9]{1,14}$"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      },
       "get": {
         "operationId": "profile",
         "summary": "Profile and notification preferences",
@@ -5262,6 +5344,39 @@
               "null"
             ]
           },
+          "account_role": {
+            "type": "string",
+            "enum": [
+              "DONOR",
+              "PARTNER"
+            ],
+            "description": "The principal's role, fixed at account creation and immutable."
+          },
+          "zip": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IANA zone derived from the ZIP; drives day-level streak state in the donor's own day."
+          },
+          "phone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "referral_emails": {
             "type": "boolean"
           },
@@ -5292,6 +5407,11 @@
         "required": [
           "email",
           "public_name",
+          "account_role",
+          "zip",
+          "city",
+          "timezone",
+          "phone",
           "referral_emails",
           "marketing_emails",
           "push_referral_converted",

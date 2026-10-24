@@ -26,7 +26,7 @@ func (q *Queries) ConsumeDonorLinks(ctx context.Context, arg ConsumeDonorLinksPa
 }
 
 const donorByEmail = `-- name: DonorByEmail :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at FROM donors WHERE email = $1
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone FROM donors WHERE email = $1
 `
 
 func (q *Queries) DonorByEmail(ctx context.Context, email string) (Donor, error) {
@@ -40,6 +40,11 @@ func (q *Queries) DonorByEmail(ctx context.Context, email string) (Donor, error)
 		&i.ReferralCode,
 		&i.ID,
 		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
 	)
 	return i, err
 }
@@ -83,7 +88,7 @@ func (q *Queries) InsertStripeEvent(ctx context.Context, arg InsertStripeEventPa
 }
 
 const lockDonor = `-- name: LockDonor :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at FROM donors WHERE id = $1 FOR NO KEY UPDATE
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone FROM donors WHERE id = $1 FOR NO KEY UPDATE
 `
 
 // Serialize donor writes without blocking foreign keys that reference this donor.
@@ -98,6 +103,11 @@ func (q *Queries) LockDonor(ctx context.Context, id pgtype.UUID) (Donor, error) 
 		&i.ReferralCode,
 		&i.ID,
 		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
 	)
 	return i, err
 }

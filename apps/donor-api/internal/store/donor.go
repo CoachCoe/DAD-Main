@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dad/donor-api/internal/geo"
 	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store/queries"
@@ -55,6 +56,11 @@ type DonorService struct {
 type Profile struct {
 	Email          string  `json:"email"`
 	PublicName     *string `json:"public_name"`
+	AccountRole    string  `json:"account_role"`
+	Zip            *string `json:"zip"`
+	City           *string `json:"city"`
+	Timezone       *string `json:"timezone"`
+	Phone          *string `json:"phone"`
 	ConsentVersion string  `json:"consent_version"`
 	Preferences
 }
@@ -105,7 +111,11 @@ type GiftsPage struct {
 
 func readProfile(ctx context.Context, q *queries.Queries, donor queries.Donor) (Profile, error) {
 	pref, err := readPreferences(ctx, q, donor.ID)
-	return Profile{Email: donor.Email, PublicName: textPointer(donor.PublicName), ConsentVersion: consentVersion, Preferences: pref}, err
+	return Profile{
+		Email: donor.Email, PublicName: textPointer(donor.PublicName), AccountRole: donor.AccountRole,
+		Zip: textPointer(donor.Zip), City: textPointer(donor.City), Timezone: textPointer(donor.Timezone),
+		Phone: textPointer(donor.Phone), ConsentVersion: consentVersion, Preferences: pref,
+	}, err
 }
 
 func (s DonorService) Profile(ctx context.Context, token string) (Profile, error) {
@@ -152,6 +162,72 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, pref Pr
 			return Profile{}, err
 		}
 		return readProfile(ctx, q, d)
+	})
+}
+
+var (
+	ErrZip   = fmt.Errorf("%w", geo.ErrZip)
+	ErrPhone = errors.New("enter a valid phone number in international format, e.g. +14155550123")
+	ErrCity  = errors.New("enter a city of 1 to 80 characters")
+)
+
+// phonePattern mirrors the ck_donor_phone database constraint (E.164).
+var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
+
+// ProfileUpdate is the donor's self-service identity input. Every field is
+// optional and clears the stored value when empty, except that timezone is
+// never taken from the client: it is always derived from zip so the two cannot
+// disagree. account_role is absent by design — it is immutable (PRD §3).
+type ProfileUpdate struct {
+	Zip   string
+	City  string
+	Phone string
+}
+
+// SaveProfile validates the donor's identity input, derives the IANA timezone
+// from the ZIP, and replaces zip/city/timezone/phone. A blank ZIP clears both
+// zip and the derived timezone together.
+func (s DonorService) SaveProfile(ctx context.Context, token string, in ProfileUpdate) (Profile, error) {
+	zip, city, phone := strings.TrimSpace(in.Zip), strings.TrimSpace(in.City), strings.TrimSpace(in.Phone)
+
+	var zipCol, tzCol pgtype.Text
+	if zip != "" {
+		normalized, err := geo.NormalizeZip(zip)
+		if err != nil {
+			return Profile{}, ErrZip
+		}
+		zone, err := geo.Timezone(normalized)
+		if err != nil {
+			return Profile{}, ErrZip
+		}
+		zipCol, tzCol = text(normalized), text(zone)
+	}
+
+	var cityCol pgtype.Text
+	if city != "" {
+		if utf8.RuneCountInString(city) > 80 {
+			return Profile{}, ErrCity
+		}
+		cityCol = text(city)
+	}
+
+	var phoneCol pgtype.Text
+	if phone != "" {
+		if !phonePattern.MatchString(phone) {
+			return Profile{}, ErrPhone
+		}
+		phoneCol = text(phone)
+	}
+
+	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, _ time.Time) (Profile, error) {
+		q := queries.New(tx)
+		updated, err := q.UpdateDonorProfile(ctx, queries.UpdateDonorProfileParams{
+			ID: d.ID, Zip: zipCol, City: cityCol, Timezone: tzCol, Phone: phoneCol,
+		})
+		if err != nil {
+			return Profile{}, err
+		}
+		return readProfile(ctx, q, updated)
 	})
 }
 

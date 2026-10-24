@@ -189,3 +189,80 @@ func TestConcurrentSharingKeepsOnePermanentCode(t *testing.T) {
 		t.Fatal("concurrent sharing returned different codes")
 	}
 }
+
+func TestSaveProfileDerivesTimezoneAndValidates(t *testing.T) {
+	s, token, _ := donorServiceFixture(t)
+	ctx := context.Background()
+
+	// A new donor's role is DONOR and identity fields are empty.
+	profile, err := s.Profile(ctx, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.AccountRole != "DONOR" {
+		t.Fatalf("new donor role = %q; want DONOR", profile.AccountRole)
+	}
+	if profile.Zip != nil || profile.City != nil || profile.Timezone != nil || profile.Phone != nil {
+		t.Fatalf("new donor identity fields not empty: %+v", profile)
+	}
+
+	// A valid Chicago ZIP derives America/Chicago; city and phone are stored as given.
+	profile, err = s.SaveProfile(ctx, token, ProfileUpdate{Zip: "60601", City: "Chicago", Phone: "+13125550123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Zip == nil || *profile.Zip != "60601" {
+		t.Errorf("zip = %v; want 60601", profile.Zip)
+	}
+	if profile.Timezone == nil || *profile.Timezone != "America/Chicago" {
+		t.Errorf("timezone = %v; want America/Chicago", profile.Timezone)
+	}
+	if profile.City == nil || *profile.City != "Chicago" {
+		t.Errorf("city = %v; want Chicago", profile.City)
+	}
+	if profile.Phone == nil || *profile.Phone != "+13125550123" {
+		t.Errorf("phone = %v; want +13125550123", profile.Phone)
+	}
+	// Role is untouched by a profile save (immutability, PRD §3).
+	if profile.AccountRole != "DONOR" {
+		t.Errorf("role changed to %q after profile save", profile.AccountRole)
+	}
+
+	// Switching to a San Francisco ZIP re-derives the timezone.
+	profile, err = s.SaveProfile(ctx, token, ProfileUpdate{Zip: "94103"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Timezone == nil || *profile.Timezone != "America/Los_Angeles" {
+		t.Errorf("timezone = %v; want America/Los_Angeles", profile.Timezone)
+	}
+	// Omitted city/phone are cleared (every save is a full replace).
+	if profile.City != nil || profile.Phone != nil {
+		t.Errorf("city/phone not cleared on replace: city=%v phone=%v", profile.City, profile.Phone)
+	}
+
+	// A blank ZIP clears both the ZIP and the derived timezone together.
+	profile, err = s.SaveProfile(ctx, token, ProfileUpdate{Zip: ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Zip != nil || profile.Timezone != nil {
+		t.Errorf("blank zip did not clear zip/timezone: zip=%v tz=%v", profile.Zip, profile.Timezone)
+	}
+
+	// Invalid inputs are rejected with the right typed errors, and nothing is written.
+	for _, tc := range []struct {
+		name   string
+		update ProfileUpdate
+		want   error
+	}{
+		{"bad zip", ProfileUpdate{Zip: "123"}, ErrZip},
+		{"unresolvable zip", ProfileUpdate{Zip: "00000"}, ErrZip},
+		{"bad phone", ProfileUpdate{Phone: "5550123"}, ErrPhone},
+		{"long city", ProfileUpdate{City: strings.Repeat("x", 81)}, ErrCity},
+	} {
+		if _, err := s.SaveProfile(ctx, token, tc.update); !errors.Is(err, tc.want) {
+			t.Errorf("%s: error = %v; want %v", tc.name, err, tc.want)
+		}
+	}
+}
