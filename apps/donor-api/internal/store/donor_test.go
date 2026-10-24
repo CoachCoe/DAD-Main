@@ -122,7 +122,8 @@ func TestSharingRotationAppliesLastTouchAndExpiry(t *testing.T) {
 		t.Fatal("last touch not applied", later, err)
 	}
 	saved, err := queries.New(pool).ReferralTouchByToken(ctx, HashToken(touch.Token))
-	if err != nil || saved.Kind != "IRL" || !saved.ExpiresAt.Time.Equal(now.Add(10*24*time.Hour+30*24*time.Hour).Truncate(time.Microsecond)) {
+	if err != nil || saved.Kind != "IRL" ||
+		!saved.ExpiresAt.Time.Equal(now.Add(10*24*time.Hour+30*24*time.Hour).Truncate(time.Microsecond)) {
 		t.Fatal("last-touch attribution type/expiry not updated", err)
 	}
 	rotated, err := first.SaveSharing(ctx, token, "First", true)

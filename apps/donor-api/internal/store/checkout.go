@@ -233,12 +233,23 @@ func checkoutParams(site publicSite, email string, draft queries.InsertCheckoutP
 		metadata["dad_referrer_id"] = draft.ReferrerID.String()
 		metadata["dad_referral_kind"] = draft.ReferralKind.String
 	}
-	price := map[string]any{"currency": "usd", "unit_amount": request.Amount, "product_data": map[string]string{"name": "DAD monthly giving"},
-		"recurring": map[string]string{"interval": "month"}}
-	params := map[string]any{"mode": "subscription", "customer_email": email, "client_reference_id": checkoutID.String(), "metadata": metadata,
-		"line_items": []any{map[string]any{"price_data": price, "quantity": 1}}, "allowed_payment_method_types": []string{"card"},
-		"success_url": site.checkoutReturn(request.Amount, request.Frequency), "cancel_url": site.donate(),
-		"expires_at":        draft.CreatedAt.Time.Add(checkoutLifetime).Unix(),
-		"subscription_data": map[string]any{"metadata": metadata}}
+	price := map[string]any{
+		"currency":     "usd",
+		"unit_amount":  request.Amount,
+		"product_data": map[string]string{"name": "DAD monthly giving"},
+		"recurring":    map[string]string{"interval": "month"},
+	}
+	params := map[string]any{
+		"mode":                         "subscription",
+		"customer_email":               email,
+		"client_reference_id":          checkoutID.String(),
+		"metadata":                     metadata,
+		"line_items":                   []any{map[string]any{"price_data": price, "quantity": 1}},
+		"allowed_payment_method_types": []string{"card"},
+		"success_url":                  site.checkoutReturn(request.Amount, request.Frequency),
+		"cancel_url":                   site.donate(),
+		"expires_at":                   draft.CreatedAt.Time.Add(checkoutLifetime).Unix(),
+		"subscription_data":            map[string]any{"metadata": metadata},
+	}
 	return json.Marshal(params)
 }

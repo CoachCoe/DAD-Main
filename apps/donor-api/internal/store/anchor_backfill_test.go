@@ -36,7 +36,8 @@ func TestAnchorBackfillSyncsSubscriptionsSavedWithoutOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	var hasAnchor bool
-	if err := r.db.QueryRow(ctx, "SELECT billing_anchor IS NOT NULL FROM donor_subscriptions WHERE attempt_id=$1", r.attempt).Scan(&hasAnchor); err != nil || hasAnchor {
+	if err := r.db.QueryRow(ctx, "SELECT billing_anchor IS NOT NULL FROM donor_subscriptions WHERE attempt_id=$1", r.attempt).Scan(&hasAnchor); err != nil ||
+		hasAnchor {
 		t.Fatal("billing anchor present before the backfill", hasAnchor, err)
 	}
 
