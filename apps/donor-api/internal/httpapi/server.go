@@ -45,6 +45,7 @@ type Services struct {
 	DonorPasskeys   DonorPasskeySource
 	PhoneSignIn     PhoneSignInSource
 	OIDCSignIn      OIDCSignInSource
+	Analytics       AnalyticsSource
 	Dashboard       DashboardSource
 	Recurring       RecurringSource
 	Push            PushSource

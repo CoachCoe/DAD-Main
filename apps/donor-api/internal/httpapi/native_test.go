@@ -364,6 +364,7 @@ func TestOnlyDonorAccountRoutesAdmitTheApp(t *testing.T) {
 		"POST /donor/oidc/{provider}/sign-in":  true,
 		"POST /donor/logout":                   true,
 		"POST /donor/logout-all":               true,
+		"POST /analytics/events":               true,
 	}
 	server := NewServer("", Services{})
 	for _, route := range allRoutes() {

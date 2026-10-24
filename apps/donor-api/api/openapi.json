@@ -554,6 +554,141 @@
         }
       }
     },
+    "/analytics/events": {
+      "post": {
+        "operationId": "ingestAnalytics",
+        "summary": "Record analytics events",
+        "description": "Ingests a batch of §9 analytics events from any platform into the shared append-only stream. Authenticated-or-anonymous: a valid donor session attributes the events, otherwise they are recorded anonymously (events before sign-in are expected). The platform source is the native client's `X-DAD-Platform` header, or WEB for a browser. The whole batch is rejected (422) if any event has an unknown name or an invalid property payload. Batch size is capped at 100.",
+        "tags": [
+          "Public"
+        ],
+        "security": [],
+        "x-rate-limit": "analytics",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "events": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "A §9 taxonomy event name.",
+                          "enum": [
+                            "app_opened",
+                            "role_selected",
+                            "signup_started",
+                            "signup_completed",
+                            "attribution_captured",
+                            "gift_started",
+                            "gift_completed",
+                            "gift_failed",
+                            "gift_recovered",
+                            "gift_lapsed",
+                            "amount_changed",
+                            "gift_cancelled",
+                            "account_deleted",
+                            "invite_shared",
+                            "irl_code_shown",
+                            "referral_converted",
+                            "badge_earned",
+                            "milestone_reached",
+                            "rankings_toggled",
+                            "volunteer_opted_in",
+                            "event_viewed",
+                            "event_reserved",
+                            "event_waitlisted",
+                            "event_checked_in",
+                            "team_created",
+                            "team_joined",
+                            "partner_signup_submitted",
+                            "partner_approved",
+                            "partner_report_exported",
+                            "push_opened"
+                          ]
+                        },
+                        "occurred_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "Client event time (RFC 3339). Rejected if missing or implausibly in the future."
+                        },
+                        "properties": {
+                          "type": "object",
+                          "description": "Typed payload for the events that carry one: attribution_captured requires {source: link|IRL|company}, invite_shared requires {channel}, push_opened requires {type}. All other events take no properties.",
+                          "additionalProperties": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "occurred_at"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "events"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The batch was accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accepted": {
+                      "type": "integer",
+                      "description": "Number of events stored."
+                    }
+                  },
+                  "required": [
+                    "accepted"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/donor/public/partner-signup": {
       "post": {
         "operationId": "partnerSignup",

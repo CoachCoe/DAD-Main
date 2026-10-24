@@ -22,6 +22,9 @@ var (
 	visitorLimit = rateClass{"visitor", 60}
 	accountLimit = rateClass{"account", 30}
 	staffLimit   = rateClass{"staff", 60}
+	// Analytics is batched (up to MaxAnalyticsBatch events per call) and emitted
+	// frequently by every client, so it gets a higher per-minute allowance.
+	analyticsLimit = rateClass{"analytics", 120}
 )
 
 const maxRatePeers = 65536

@@ -182,6 +182,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.Dashboard = store.DashboardReader{DB: pool}
 	services.Account = store.AccountService{DB: pool}
 	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
+	services.Analytics = store.AnalyticsService{DB: pool}
 	if passkeys {
 		donorPasskeys, err := store.NewDonorPasskeyService(pool, services.Origin)
 		if err != nil {
