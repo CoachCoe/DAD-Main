@@ -138,7 +138,7 @@ func QuoteASCII(value string) (string, error) {
 // CheckoutPreimage expects the canonical email produced by the identity adapter.
 // Nil visitor and empty visitor are distinct in the existing request hash contract.
 func CheckoutPreimage(email string, amount int64, frequency string, visitor *string) (string, error) {
-	if amount < 100 || (frequency != "MONTHLY" && frequency != "ONE_TIME") {
+	if amount < 100 || frequency != "MONTHLY" {
 		return "", ErrInvalid
 	}
 	quoted, err := QuoteASCII(email)

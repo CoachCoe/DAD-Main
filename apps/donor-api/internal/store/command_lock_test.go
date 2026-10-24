@@ -265,46 +265,18 @@ func TestEventWorkerReadsProcessorOutsideDonorLock(t *testing.T) {
 		}
 		assertEventProcessed(t, r.workerFixture, event, true)
 	})
-	t.Run("payment", func(t *testing.T) {
-		f := newWorkerFixture(t, "ONE_TIME")
-		checkout := f.checkout(t)
-		payment := "pi_" + f.donorID.String()
-		f.charge(t, payment, time.Now())
-		event := f.receive(
-			t,
-			"payment_intent.succeeded",
-			map[string]any{
-				"id":              payment,
-				"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
-				"status":          "succeeded",
-				"currency":        "usd",
-				"amount_received": 3000,
-			},
-		)
-		process(t, f, nil)
-		assertEventProcessed(t, f, event, true)
-	})
 	for _, recordedMeanwhile := range []bool{false, true} {
 		name := "refund"
 		if recordedMeanwhile {
 			name = "refund recorded meanwhile"
 		}
 		t.Run(name, func(t *testing.T) {
-			f := newWorkerFixture(t, "ONE_TIME")
+			f := newWorkerFixture(t, "MONTHLY")
 			checkout := f.checkout(t)
-			payment := "pi_" + f.donorID.String()
-			f.charge(t, payment, time.Now())
-			f.receive(
-				t,
-				"payment_intent.succeeded",
-				map[string]any{
-					"id":              payment,
-					"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
-					"status":          "succeeded",
-					"currency":        "usd",
-					"amount_received": 3000,
-				},
-			)
+			invoiceID := "in_" + f.donorID.String()
+			payment := "pi_" + invoiceID
+			start := time.Now().UTC().Truncate(time.Second).Add(-2 * 24 * time.Hour)
+			f.receive(t, "invoice.payment_succeeded", invoice(checkout.CheckoutID, invoiceID, start, true))
 			f.process(t)
 			refund := "re_" + f.donorID.String()
 			f.gateway.refunds[refund] = paymentObject(

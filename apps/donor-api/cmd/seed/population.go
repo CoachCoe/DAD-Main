@@ -32,14 +32,12 @@ const (
 // code, and sharing influence is heavy-tailed.
 const (
 	abandonedShare       = 0.08 // started checkout, never paid
-	oneTimeShare         = 0.22
 	referredShare        = 0.45 // arrived through a referral touch
 	lateTouchShare       = 0.03 // of referred: the window had lapsed by checkout
 	irlShare             = 0.35
 	claimShare           = 0.60 // givers who claim an account
 	sharerShare          = 0.40 // claimed donors who choose a public name
 	preferenceShare      = 0.30 // claimed donors who saved notification choices
-	extraGiftShare       = 0.06 // monthly donors with an additional one-time gift
 	renewalFailure       = 0.05
 	cancelHazard         = 0.015 // per renewal, cancelled by the donor at period end
 	scheduledCancelShare = 0.02  // of live subscriptions, ending at the current period's end
@@ -52,7 +50,6 @@ const (
 // Gift amounts in cents by weight: the $30, $90 and $150 presets, round
 // custom amounts, and 0 for any other whole-dollar amount.
 var monthlyAmounts = weighted[int64]{{3000, 60}, {1000, 12}, {5000, 12}, {10000, 8}, {9000, 3}, {15000, 2}, {0, 3}}
-var oneTimeAmounts = weighted[int64]{{3000, 30}, {5000, 20}, {10000, 20}, {1000, 10}, {15000, 5}, {9000, 5}, {0, 10}}
 
 var names = []string{"Ada", "Amara", "Ben", "Carmen", "Chen", "Dara", "Eli", "Fatima", "Gabe", "Hana", "Ines", "Jamal",
 	"Kai", "Lena", "Mateo", "Mira", "Nadia", "Omar", "Priya", "Quinn", "Rosa", "Sam", "Tariq", "Uma", "Vera", "Wes",
@@ -240,25 +237,9 @@ func (g *generator) join(d *donor, sharers *sharerPool) {
 	case x < abandonedShare:
 		c.amount, c.frequency, c.status = g.amount(monthlyAmounts), "MONTHLY", "EXPIRED"
 		return
-	case x < abandonedShare+oneTimeShare:
-		c.amount, c.frequency, c.status = g.amount(oneTimeAmounts), "ONE_TIME", "COMPLETE"
-		g.oneTime(c, d.createdAt.Add(g.seconds(10*time.Minute)))
 	default:
 		c.amount, c.frequency, c.status = g.amount(monthlyAmounts), "MONTHLY", "COMPLETE"
 		g.monthly(c)
-		if g.r.Float64() < extraGiftShare {
-			extra := &checkout{
-				id:        g.uuid(),
-				attempt:   g.uuid(),
-				donor:     d,
-				amount:    g.amount(oneTimeAmounts),
-				frequency: "ONE_TIME",
-				status:    "COMPLETE",
-			}
-			extra.createdAt = d.createdAt.Add(g.seconds(g.now.Sub(d.createdAt) - 15*time.Minute))
-			d.checkouts = append(d.checkouts, extra)
-			g.oneTime(extra, extra.createdAt.Add(g.seconds(10*time.Minute)))
-		}
 	}
 	first := c.gifts[0].paidAt
 	if g.r.Float64() < claimShare {
@@ -282,12 +263,6 @@ func (g *generator) join(d *donor, sharers *sharerPool) {
 			d.streakKnown = false
 		}
 	}
-}
-
-func (g *generator) oneTime(c *checkout, paid time.Time) {
-	c.session = g.stripeID("cs_test_")
-	pi := g.stripeID("pi_")
-	g.addGift(c, &gift{id: g.uuid(), object: pi, paymentIntent: pi, amount: c.amount, frequency: "ONE_TIME", paidAt: paid})
 }
 
 func (g *generator) addGift(c *checkout, gift *gift) {

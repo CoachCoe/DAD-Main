@@ -278,8 +278,7 @@
                     "type": "string",
                     "description": "Defaults to MONTHLY when omitted; null is invalid.",
                     "enum": [
-                      "MONTHLY",
-                      "ONE_TIME"
+                      "MONTHLY"
                     ]
                   }
                 },

@@ -72,7 +72,7 @@ func (f retentionFixture) checkout(t *testing.T, kind string, expires time.Time)
 		t,
 		f.pool,
 		`INSERT INTO donor_checkouts (id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at,created_at)
-VALUES ($1,$2,3000,'ONE_TIME',$3,$4,$5,$6)`,
+VALUES ($1,$2,3000,'MONTHLY',$3,$4,$5,$6)`,
 		id,
 		f.giver,
 		f.referrer,
@@ -91,7 +91,7 @@ func (f retentionFixture) gift(t *testing.T, checkout pgtype.UUID, paid time.Tim
 		t,
 		f.pool,
 		`INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind)
-SELECT $1,$2,id,$3,3000,'USD','ONE_TIME',$4,CASE WHEN $5::bool THEN referrer_id END,CASE WHEN $5::bool THEN referral_kind END
+SELECT $1,$2,id,$3,3000,'USD','MONTHLY',$4,CASE WHEN $5::bool THEN referrer_id END,CASE WHEN $5::bool THEN referral_kind END
 FROM donor_checkouts WHERE id=$6`,
 		testID(t),
 		f.giver,

@@ -40,7 +40,7 @@ func TestAnnualSummaryReadsGiftsAndRefundsInTwoQueries(t *testing.T) {
 	mustExec(
 		t,
 		tx,
-		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')",
+		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','MONTHLY')",
 		checkout,
 		owner,
 	)
@@ -50,7 +50,7 @@ func TestAnnualSummaryReadsGiftsAndRefundsInTwoQueries(t *testing.T) {
 		mustExec(
 			t,
 			tx,
-			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)",
+			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','MONTHLY',$5)",
 			gift,
 			owner,
 			checkout,
@@ -101,7 +101,7 @@ func TestReceiptsScopeNewYorkYearAndLaterRefunds(t *testing.T) {
 	mustExec(
 		t,
 		tx,
-		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')",
+		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','MONTHLY')",
 		checkout,
 		owner,
 	)
@@ -115,7 +115,7 @@ func TestReceiptsScopeNewYorkYearAndLaterRefunds(t *testing.T) {
 		mustExec(
 			t,
 			tx,
-			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)",
+			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','MONTHLY',$5)",
 			id,
 			owner,
 			checkout,

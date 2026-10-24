@@ -231,7 +231,6 @@ func (w EventWorker) retrieveRefund(ctx context.Context, id string) (payments.Ob
 // eventFacts is processor state for a checkout event, fetched before the
 // donor lock is taken.
 type eventFacts struct {
-	charged      time.Time
 	subscription *subscriptionSnapshot
 }
 
@@ -246,13 +245,6 @@ func (w EventWorker) prefetch(
 	var facts eventFacts
 	subscription := data.Text("subscription")
 	switch kind := event.EventType; {
-	case kind == "payment_intent.succeeded":
-		if draft.Frequency != "ONE_TIME" || data.Text("status") != "succeeded" {
-			return facts, payments.ErrFacts
-		}
-		var err error
-		facts.charged, err = w.chargeSucceededAt(ctx, data.Text("id"))
-		return facts, err
 	case strings.HasPrefix(kind, "customer.subscription."):
 		subscription = data.Text("id")
 	case kind == "checkout.session.completed":
@@ -279,33 +271,6 @@ func (w EventWorker) prefetch(
 	}
 	facts.subscription, err = fetchSubscription(ctx, q, fetcher, attempt.ID, subscription)
 	return facts, err
-}
-
-// chargeSucceededAt returns when a one-time gift's card charge succeeded,
-// which is what the Founding Donor cutoff names. The event may be created or
-// delivered later, so the charge time comes from the processor rather than the
-// webhook payload, which the receiver strips of the expanded charge.
-func (w EventWorker) chargeSucceededAt(ctx context.Context, id string) (time.Time, error) {
-	if w.Gateway == nil {
-		return time.Time{}, payments.ErrUnconfigured
-	}
-	intent, err := w.Gateway.RetrievePaymentIntent(ctx, id)
-	if err != nil {
-		return time.Time{}, err
-	}
-	charge, err := intent.Object("latest_charge")
-	if err != nil {
-		return time.Time{}, err
-	}
-	created, err := charge.Unix("created")
-	if err != nil || intent.Text("id") != id || intent.Text("status") != "succeeded" || !intent.BoolIs("livemode", false) ||
-		charge.Text("payment_intent") != id ||
-		charge.Text("status") != "succeeded" ||
-		!charge.BoolIs("paid", true) ||
-		!charge.BoolIs("livemode", false) {
-		return time.Time{}, payments.ErrFacts
-	}
-	return created, nil
 }
 
 func bindSubscription(ctx context.Context, q *queries.Queries, attempt queries.DonorStripeCheckout, subscription string) error {
@@ -369,7 +334,7 @@ func (w EventWorker) applyLockedCheckoutEvent(
 		}
 		return recordBillingObservation(ctx, q, period, event, "FAILED", amount, data.Text("billing_reason"), event.OccurredAt.Time, now)
 	}
-	payment, err := paymentFacts(ctx, q, event, data, draft, attempt, expected, facts.charged)
+	payment, err := paymentFacts(ctx, q, event, data, draft, attempt, expected)
 	if err != nil {
 		return err
 	}
@@ -504,20 +469,10 @@ func paymentFacts(
 	draft queries.DonorCheckout,
 	attempt queries.DonorStripeCheckout,
 	expected int64,
-	charged time.Time,
 ) (paidGift, error) {
 	out := paidGift{objectID: data.Text("id")}
 	var err error
 	switch event.EventType {
-	case "payment_intent.succeeded":
-		if draft.Frequency != "ONE_TIME" || data.Text("status") != "succeeded" {
-			return out, payments.ErrFacts
-		}
-		if out.amount, err = data.Int("amount_received"); err != nil {
-			return out, err
-		}
-		out.paid = charged
-		out.paymentIntent = data.Text("id")
 	case "invoice.payment_succeeded":
 		before, e1 := data.IntDefault("starting_balance")
 		after, e2 := data.IntDefault("ending_balance")

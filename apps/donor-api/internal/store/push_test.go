@@ -294,12 +294,12 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 			DonorID:   "ben",
 			Amount:    3000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    paid,
 			Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "IRL", ExpiresAt: paid.Add(24 * time.Hour)},
 		},
 	)
-	h.gift(recognition.Gift{ID: "unreferred", DonorID: "cara", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid})
+	h.gift(recognition.Gift{ID: "unreferred", DonorID: "cara", Amount: 3000, Currency: "USD", Frequency: "MONTHLY", PaidAt: paid})
 	// An old conversion is history, not news, for a referrer who installs the app later.
 	h.gift(
 		recognition.Gift{
@@ -307,7 +307,7 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 			DonorID:   "dee",
 			Amount:    3000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    paid.Add(-48 * time.Hour),
 			Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: paid},
 		},
@@ -607,7 +607,7 @@ func TestReferralConversionsFeedShowsOnlyChannelAndTime(t *testing.T) {
 		mustExec(
 			t,
 			pool,
-			"INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'ONE_TIME',$3,$4,$5)",
+			"INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'MONTHLY',$3,$4,$5)",
 			checkout,
 			id,
 			referrer,
@@ -618,7 +618,7 @@ func TestReferralConversionsFeedShowsOnlyChannelAndTime(t *testing.T) {
 		mustExec(
 			t,
 			pool,
-			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5,$6,$7)",
+			"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$3,$4,3000,'USD','MONTHLY',$5,$6,$7)",
 			testID(t),
 			id,
 			checkout,

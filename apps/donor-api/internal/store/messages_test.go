@@ -127,7 +127,7 @@ func TestRecoveryReminderSupersededByLaterGraceDay(t *testing.T) {
 }
 
 func TestReferralSuppressionRechecksPreferencesAfterRendering(t *testing.T) {
-	f := newWorkerFixture(t, "ONE_TIME")
+	f := newWorkerFixture(t, "MONTHLY")
 	ctx := context.Background()
 	now := time.Now()
 	referred, _ := donor(t, f.db)

@@ -30,15 +30,13 @@ func TestGenerateIsDeterministic(t *testing.T) {
 
 func TestPopulationHasALaunchShape(t *testing.T) {
 	pop := generate(50000, 0, 1, asOf)
-	var oneTime, abandoned, monthly, monthly30, referred, sharers, referrers, heavy, periods, failed int
+	var abandoned, monthly, monthly30, referred, sharers, referrers, heavy, periods, failed int
 	var mostReferrals int64
 	var longest, atRisk, cancelled, pastDue, refunds int
 	for _, d := range pop.donors {
 		switch first := d.checkouts[0]; {
 		case first.status == "EXPIRED":
 			abandoned++
-		case first.frequency == "ONE_TIME":
-			oneTime++
 		default:
 			monthly++
 			if first.amount == 3000 {
@@ -83,8 +81,7 @@ func TestPopulationHasALaunchShape(t *testing.T) {
 	}
 	share := func(n int) float64 { return float64(n) / float64(len(pop.donors)) }
 	for name, check := range map[string]struct{ got, want, tolerance float64 }{
-		"monthly":      {share(monthly), 1 - abandonedShare - oneTimeShare, 0.02},
-		"one-time":     {share(oneTime), oneTimeShare, 0.02},
+		"monthly":      {share(monthly), 1 - abandonedShare, 0.02},
 		"abandoned":    {share(abandoned), abandonedShare, 0.01},
 		"$30 monthly":  {float64(monthly30) / float64(monthly), 0.60, 0.02},
 		"referred":     {share(referred), 0.40, 0.08},

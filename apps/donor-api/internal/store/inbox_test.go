@@ -24,18 +24,24 @@ func TestVerifiedInboxDurabilityAndConcurrentRedelivery(t *testing.T) {
 		map[string]any{
 			"object":      "event",
 			"id":          eventID,
-			"type":        "payment_intent.succeeded",
+			"type":        "invoice.payment_succeeded",
 			"created":     1700000000,
 			"api_version": payments.APIVersion,
 			"livemode":    false,
 			"data": map[string]any{
 				"object": map[string]any{
-					"id":              "pi_test",
-					"metadata":        map[string]any{"dad_checkout_id": id.String()},
-					"customer":        "private customer",
-					"currency":        "usd",
-					"amount_received": 3000,
-					"status":          "succeeded",
+					"id":             "in_test",
+					"customer":       "private customer",
+					"currency":       "usd",
+					"amount_paid":    3000,
+					"status":         "paid",
+					"billing_reason": "subscription_cycle",
+					"parent": map[string]any{
+						"subscription_details": map[string]any{
+							"subscription": "sub_test",
+							"metadata":     map[string]any{"dad_checkout_id": id.String()},
+						},
+					},
 				},
 			},
 		},

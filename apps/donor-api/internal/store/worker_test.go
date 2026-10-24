@@ -3,16 +3,13 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
-	"sync"
 	"testing"
 	"time"
 
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/payments"
-	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -437,60 +434,6 @@ func TestInvalidInvoiceRollsBackAllFinancialEffects(t *testing.T) {
 	}
 }
 
-func TestOneTimeInboxConcurrentWorkers(t *testing.T) {
-	f := newWorkerFixture(t, "ONE_TIME")
-	checkout := f.checkout(t)
-	ctx := context.Background()
-	f.charge(t, "pi_"+f.donorID.String(), time.Now())
-	f.receive(
-		t,
-		"payment_intent.succeeded",
-		map[string]any{
-			"id":              "pi_" + f.donorID.String(),
-			"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
-			"status":          "succeeded",
-			"currency":        "usd",
-			"amount_received": 3000,
-		},
-	)
-	var wg sync.WaitGroup
-	results := make(chan bool, 2)
-	failures := make(chan error, 2)
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); worked, err := f.worker.ProcessNext(ctx); results <- worked; failures <- err }()
-	}
-	wg.Wait()
-	close(results)
-	close(failures)
-	for err := range failures {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	processed := 0
-	for value := range results {
-		if value {
-			processed++
-		}
-	}
-	if processed != 1 {
-		t.Fatal("event claimed by multiple workers")
-	}
-	var observations int
-	if err := f.db.QueryRow(ctx, "SELECT count(*) FROM donor_billing_observations WHERE source_event_id IN (SELECT id FROM donor_stripe_events WHERE stripe_event_id=ANY($1::text[]))", f.events).Scan(&observations); err != nil ||
-		observations != 0 {
-		t.Fatalf("one-time gift entered recurring history: %d %v", observations, err)
-	}
-	p, err := queries.New(f.db).Projection(ctx, f.donorID)
-	if err != nil || p.NetMinor.Int64 != 3000 || p.CurrentStreak.Int32 != 0 {
-		t.Fatal("one-time payment changed streak")
-	}
-	if _, err = authenticate(ctx, queries.New(f.db), "", time.Now()); !errors.Is(err, ErrDenied) {
-		t.Fatal("payment granted account access")
-	}
-}
-
 func eventRetryState(t *testing.T, f *workerFixture, id string) (attempts int, failure string, delay time.Duration) {
 	t.Helper()
 	var seconds float64
@@ -501,22 +444,13 @@ func eventRetryState(t *testing.T, f *workerFixture, id string) (attempts int, f
 }
 
 func TestTransientGatewayFailureBacksOffThenSucceeds(t *testing.T) {
-	f := newWorkerFixture(t, "ONE_TIME")
+	f := newWorkerFixture(t, "MONTHLY")
 	checkout := f.checkout(t)
 	ctx := context.Background()
-	payment := "pi_" + f.donorID.String()
-	f.charge(t, payment, time.Now())
-	f.receive(
-		t,
-		"payment_intent.succeeded",
-		map[string]any{
-			"id":              payment,
-			"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
-			"status":          "succeeded",
-			"currency":        "usd",
-			"amount_received": 3000,
-		},
-	)
+	invoiceID := "in_" + f.donorID.String()
+	payment := "pi_" + invoiceID
+	start := time.Now().UTC().Truncate(time.Second).Add(-2 * 24 * time.Hour)
+	f.receive(t, "invoice.payment_succeeded", invoice(checkout.CheckoutID, invoiceID, start, true))
 	f.process(t)
 	refundID := "re_" + f.donorID.String()
 	event := f.receive(t, "refund.updated", map[string]any{"id": refundID, "payment_intent": payment, "status": "succeeded"})
@@ -545,10 +479,11 @@ func TestTransientGatewayFailureBacksOffThenSucceeds(t *testing.T) {
 }
 
 func TestRefundBeforeGiftIsRetriedAfterGiftExists(t *testing.T) {
-	f := newWorkerFixture(t, "ONE_TIME")
+	f := newWorkerFixture(t, "MONTHLY")
 	checkout := f.checkout(t)
 	ctx := context.Background()
-	payment := "pi_" + f.donorID.String()
+	invoiceID := "in_" + f.donorID.String()
+	payment := "pi_" + invoiceID
 	refundID := "re_" + f.donorID.String()
 	f.gateway.refunds[refundID] = paymentObject(
 		t,
@@ -559,18 +494,8 @@ func TestRefundBeforeGiftIsRetriedAfterGiftExists(t *testing.T) {
 	if attempts, failure, delay := eventRetryState(t, f, refund); attempts != 1 || failure != "MissingRecord" || delay <= 0 {
 		t.Fatalf("early refund: attempts=%d failure=%s delay=%s", attempts, failure, delay)
 	}
-	f.charge(t, payment, time.Now())
-	gift := f.receive(
-		t,
-		"payment_intent.succeeded",
-		map[string]any{
-			"id":              payment,
-			"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
-			"status":          "succeeded",
-			"currency":        "usd",
-			"amount_received": 3000,
-		},
-	)
+	start := time.Now().UTC().Truncate(time.Second).Add(-2 * 24 * time.Hour)
+	gift := f.receive(t, "invoice.payment_succeeded", invoice(checkout.CheckoutID, invoiceID, start, true))
 	f.process(t)
 	assertEventProcessed(t, f, gift, true)
 	assertEventProcessed(t, f, refund, false)
@@ -580,81 +505,5 @@ func TestRefundBeforeGiftIsRetriedAfterGiftExists(t *testing.T) {
 	p, err := queries.New(f.db).Projection(ctx, f.donorID)
 	if err != nil || p.NetMinor.Int64 != 0 || !p.FoundingAwardedAt.Valid {
 		t.Fatal("late refund not reconciled", p.NetMinor, err)
-	}
-}
-
-func TestOneTimeGiftIsPaidWhenItsChargeSucceeded(t *testing.T) {
-	f := newWorkerFixture(t, "ONE_TIME")
-	checkout := f.checkout(t)
-	ctx := context.Background()
-	payment := "pi_" + f.donorID.String()
-	charged := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
-	f.charge(t, payment, charged)
-	event := f.receive(
-		t,
-		"payment_intent.succeeded",
-		map[string]any{
-			"id":              payment,
-			"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
-			"status":          "succeeded",
-			"currency":        "usd",
-			"amount_received": 3000,
-		},
-	)
-	// The event is created after the Founding Donor cutoff, but the charge succeeded before it.
-	if _, err := f.db.Exec(ctx, "UPDATE donor_stripe_events SET occurred_at=$2 WHERE stripe_event_id=$1", event, recognition.FoundingCutoff.Add(24*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	f.process(t)
-	assertEventProcessed(t, f, event, true)
-	var paid time.Time
-	if err := f.db.QueryRow(ctx, "SELECT paid_at FROM donor_gifts WHERE stripe_object_id=$1", payment).Scan(&paid); err != nil ||
-		!paid.Equal(charged) {
-		t.Fatal("gift not paid at its charge time", paid, err)
-	}
-	p, err := queries.New(f.db).Projection(ctx, f.donorID)
-	if err != nil || !p.FoundingAwardedAt.Valid || !p.FoundingAwardedAt.Time.Equal(charged) {
-		t.Fatal("charge before the cutoff did not award Founding Donor", p.FoundingAwardedAt, err)
-	}
-}
-
-func TestOneTimeGiftRequiresSucceededCharge(t *testing.T) {
-	for name, edit := range map[string]func(intent, charge map[string]any){
-		"unexpanded charge": func(intent, _ map[string]any) { intent["latest_charge"] = "ch_fixture" },
-		"failed charge":     func(_, charge map[string]any) { charge["status"] = "failed" },
-		"other payment":     func(_, charge map[string]any) { charge["payment_intent"] = "pi_other" },
-		"live charge":       func(_, charge map[string]any) { charge["livemode"] = true },
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := newWorkerFixture(t, "ONE_TIME")
-			checkout := f.checkout(t)
-			payment := "pi_" + f.donorID.String()
-			charge := map[string]any{
-				"id":             "ch_" + payment,
-				"payment_intent": payment,
-				"status":         "succeeded",
-				"paid":           true,
-				"livemode":       false,
-				"created":        time.Now().Unix(),
-			}
-			intent := map[string]any{"id": payment, "status": "succeeded", "livemode": false, "latest_charge": charge}
-			edit(intent, charge)
-			f.gateway.intents[payment] = paymentObject(t, intent)
-			event := f.receive(
-				t,
-				"payment_intent.succeeded",
-				map[string]any{
-					"id":              payment,
-					"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
-					"status":          "succeeded",
-					"currency":        "usd",
-					"amount_received": 3000,
-				},
-			)
-			f.process(t)
-			if attempts, failure, _ := eventRetryState(t, f, event); attempts != 1 || failure != "InvalidFacts" {
-				t.Fatalf("attempts=%d failure=%s", attempts, failure)
-			}
-		})
 	}
 }

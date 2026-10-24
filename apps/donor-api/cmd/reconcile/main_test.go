@@ -331,13 +331,13 @@ func TestPendingRefundBacklogIsFullyCheckedInBoundedBatches(t *testing.T) {
 	const donor = "00000000-0000-4000-8000-000000000001"
 	for _, statement := range []string{
 		"INSERT INTO donors(id,email) VALUES('" + donor + "','batch@reconciliation.invalid')",
-		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES('" + donor + "','" + donor + "',3000,'ONE_TIME')",
+		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES('" + donor + "','" + donor + "',3000,'MONTHLY')",
 	} {
 		if _, err := owner.Exec(ctx, statement); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := owner.Exec(ctx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$1,$1,'pi_batch',3000,'USD','ONE_TIME',$2)", donor, win.Start.Add(-48*time.Hour)); err != nil {
+	if _, err := owner.Exec(ctx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$1,$1,'pi_batch',3000,'USD','MONTHLY',$2)", donor, win.Start.Add(-48*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	const count = 10105

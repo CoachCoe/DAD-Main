@@ -2379,7 +2379,7 @@ export interface operations {
                      * @description Defaults to MONTHLY when omitted; null is invalid.
                      * @enum {string}
                      */
-                    frequency?: "MONTHLY" | "ONE_TIME";
+                    frequency?: "MONTHLY";
                 };
             };
         };
