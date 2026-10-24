@@ -1688,6 +1688,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/me/events/{event_id}/reserve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reserve a spot (or join the waitlist) at an event (E-4) */
+        post: operations["reserveEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/events/{event_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a reservation; promotes the waitlist head (E-4/E-9) */
+        post: operations["cancelEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/me/network": {
         parameters: {
             query?: never;
@@ -2749,6 +2783,15 @@ export interface components {
              * @description Number of spots; 0 means uncapped.
              */
             capacity: number;
+            /** @description Spots remaining (capacity minus reserved), floored at 0; null when uncapped. */
+            spots_left: number | null;
+            /** @description The signed-in donor's own status for this event; null on an anonymous read or no active reservation. */
+            reservation_status: ("RESERVED" | "WAITLISTED") | null;
+        };
+        /** @description The outcome of a reserve or cancel (E-4). */
+        ReservationResult: {
+            /** @enum {string} */
+            status: "RESERVED" | "WAITLISTED" | "CANCELLED";
         };
         /** @description A staff create/update of an event's editable fields (E-3). */
         EventInput: {
@@ -5902,6 +5945,58 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    reserveEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    cancelEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["Unavailable"];
         };
     };

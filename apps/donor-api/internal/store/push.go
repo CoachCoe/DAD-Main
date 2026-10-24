@@ -188,6 +188,13 @@ func pushSuppression(
 			return "streak_ended", nil
 		}
 		return "", nil
+	case "EVENT_PROMOTED":
+		// Event alerts ride on the volunteer opt-in (E-1). Expiry (the event
+		// start) is already handled above; there is no further fact to recheck.
+		if !pref.Volunteer {
+			return "opted_out", nil
+		}
+		return "", nil
 	}
 	return "", payments.ErrFacts
 }
@@ -225,6 +232,9 @@ func pushContent(job queries.DonorPushNotification) (push.Notification, error) {
 		}
 		n.Title = span + " in a row"
 		n.Body = "You have given every month for " + span + ". Thank you for keeping your test gifts going."
+	case "EVENT_PROMOTED":
+		n.Title = "A spot opened up"
+		n.Body = "You are off the waitlist — your spot at an upcoming event is confirmed. Open the app for details."
 	default:
 		return n, payments.ErrFacts
 	}

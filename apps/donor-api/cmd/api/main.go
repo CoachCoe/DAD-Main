@@ -181,6 +181,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.InitiativeRead = store.InitiativeReader{DB: pool}
 	services.TodayInitiative = store.DonorInitiativeService{DB: pool}
 	services.EventRead = store.EventReader{DB: pool}
+	services.Reservations = store.ReservationService{DB: pool}
 	services.Partner = store.PartnerService{DB: pool}
 	services.Dashboard = store.DashboardReader{DB: pool}
 	services.Account = store.AccountService{DB: pool}

@@ -11,6 +11,55 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const activeReservationCount = `-- name: ActiveReservationCount :one
+SELECT count(*) FROM donor_event_reservations
+WHERE event_id=$1 AND status IN ('RESERVED', 'WAITLISTED')
+`
+
+func (q *Queries) ActiveReservationCount(ctx context.Context, eventID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, activeReservationCount, eventID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const donorReservationsForEvents = `-- name: DonorReservationsForEvents :many
+SELECT event_id, status FROM donor_event_reservations
+WHERE donor_id=$1 AND event_id = ANY($2::uuid[])
+  AND status IN ('RESERVED', 'WAITLISTED')
+`
+
+type DonorReservationsForEventsParams struct {
+	DonorID  pgtype.UUID   `json:"donor_id"`
+	EventIds []pgtype.UUID `json:"event_ids"`
+}
+
+type DonorReservationsForEventsRow struct {
+	EventID pgtype.UUID `json:"event_id"`
+	Status  string      `json:"status"`
+}
+
+// The signed-in donor's active reservation status per event, for the list.
+func (q *Queries) DonorReservationsForEvents(ctx context.Context, arg DonorReservationsForEventsParams) ([]DonorReservationsForEventsRow, error) {
+	rows, err := q.db.Query(ctx, donorReservationsForEvents, arg.DonorID, arg.EventIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DonorReservationsForEventsRow{}
+	for rows.Next() {
+		var i DonorReservationsForEventsRow
+		if err := rows.Scan(&i.EventID, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const eventByID = `-- name: EventByID :one
 SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at FROM donor_events WHERE id=$1
 `
@@ -108,6 +157,50 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) error 
 	return err
 }
 
+const lockEvent = `-- name: LockEvent :one
+SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at FROM donor_events WHERE id=$1 FOR UPDATE
+`
+
+// Serializes capacity decisions: a reserve/cancel holds this row lock so two
+// donors cannot each take the last seat.
+func (q *Queries) LockEvent(ctx context.Context, id pgtype.UUID) (DonorEvent, error) {
+	row := q.db.QueryRow(ctx, lockEvent, id)
+	var i DonorEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Title,
+		&i.Type,
+		&i.Description,
+		&i.Venue,
+		&i.Address,
+		&i.City,
+		&i.Zip,
+		&i.StartsAt,
+		&i.EndsAt,
+		&i.Capacity,
+		&i.PublishState,
+		&i.PublishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const promoteReservation = `-- name: PromoteReservation :exec
+UPDATE donor_event_reservations SET status='RESERVED', updated_at=$2 WHERE id=$1
+`
+
+type PromoteReservationParams struct {
+	ID        pgtype.UUID        `json:"id"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) PromoteReservation(ctx context.Context, arg PromoteReservationParams) error {
+	_, err := q.db.Exec(ctx, promoteReservation, arg.ID, arg.UpdatedAt)
+	return err
+}
+
 const publishEvent = `-- name: PublishEvent :exec
 UPDATE donor_events
 SET publish_state='PUBLISHED', published_at=$2, updated_at=$2
@@ -121,6 +214,128 @@ type PublishEventParams struct {
 
 func (q *Queries) PublishEvent(ctx context.Context, arg PublishEventParams) error {
 	_, err := q.db.Exec(ctx, publishEvent, arg.ID, arg.PublishedAt)
+	return err
+}
+
+const queueEventPush = `-- name: QueueEventPush :exec
+INSERT INTO donor_push_notifications (id, donor_id, category, dedup_key, context, available_at, expires_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7)
+ON CONFLICT (dedup_key) DO NOTHING
+`
+
+type QueueEventPushParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	Category    string             `json:"category"`
+	DedupKey    string             `json:"dedup_key"`
+	Context     []byte             `json:"context"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+}
+
+// Queues one push notification for a donor about an event (e.g. waitlist
+// promotion). dedup_key makes it idempotent; the worker gates on the donor's
+// category preference and token at send time, so this only enqueues.
+func (q *Queries) QueueEventPush(ctx context.Context, arg QueueEventPushParams) error {
+	_, err := q.db.Exec(ctx, queueEventPush,
+		arg.ID,
+		arg.DonorID,
+		arg.Category,
+		arg.DedupKey,
+		arg.Context,
+		arg.AvailableAt,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const reservationFor = `-- name: ReservationFor :one
+SELECT id, event_id, donor_id, status, reserved_at, created_at, updated_at FROM donor_event_reservations WHERE event_id=$1 AND donor_id=$2
+`
+
+type ReservationForParams struct {
+	EventID pgtype.UUID `json:"event_id"`
+	DonorID pgtype.UUID `json:"donor_id"`
+}
+
+func (q *Queries) ReservationFor(ctx context.Context, arg ReservationForParams) (DonorEventReservation, error) {
+	row := q.db.QueryRow(ctx, reservationFor, arg.EventID, arg.DonorID)
+	var i DonorEventReservation
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.DonorID,
+		&i.Status,
+		&i.ReservedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const reservedCount = `-- name: ReservedCount :one
+SELECT count(*) FROM donor_event_reservations
+WHERE event_id=$1 AND status='RESERVED'
+`
+
+func (q *Queries) ReservedCount(ctx context.Context, eventID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, reservedCount, eventID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const reservedCountsForEvents = `-- name: ReservedCountsForEvents :many
+SELECT event_id, count(*)::bigint AS reserved
+FROM donor_event_reservations
+WHERE event_id = ANY($1::uuid[]) AND status='RESERVED'
+GROUP BY event_id
+`
+
+type ReservedCountsForEventsRow struct {
+	EventID  pgtype.UUID `json:"event_id"`
+	Reserved int64       `json:"reserved"`
+}
+
+// RESERVED count per event, for the near-city list's spots-left without N+1.
+func (q *Queries) ReservedCountsForEvents(ctx context.Context, eventIds []pgtype.UUID) ([]ReservedCountsForEventsRow, error) {
+	rows, err := q.db.Query(ctx, reservedCountsForEvents, eventIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReservedCountsForEventsRow{}
+	for rows.Next() {
+		var i ReservedCountsForEventsRow
+		if err := rows.Scan(&i.EventID, &i.Reserved); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setReservationStatus = `-- name: SetReservationStatus :exec
+UPDATE donor_event_reservations SET status=$3, updated_at=$4 WHERE event_id=$1 AND donor_id=$2
+`
+
+type SetReservationStatusParams struct {
+	EventID   pgtype.UUID        `json:"event_id"`
+	DonorID   pgtype.UUID        `json:"donor_id"`
+	Status    string             `json:"status"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) SetReservationStatus(ctx context.Context, arg SetReservationStatusParams) error {
+	_, err := q.db.Exec(ctx, setReservationStatus,
+		arg.EventID,
+		arg.DonorID,
+		arg.Status,
+		arg.UpdatedAt,
+	)
 	return err
 }
 
@@ -266,4 +481,58 @@ func (q *Queries) UpdateEvent(ctx context.Context, arg UpdateEventParams) error 
 		arg.UpdatedAt,
 	)
 	return err
+}
+
+const upsertReservation = `-- name: UpsertReservation :exec
+INSERT INTO donor_event_reservations (id, event_id, donor_id, status, reserved_at, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$6)
+ON CONFLICT (event_id, donor_id) DO UPDATE
+SET status=EXCLUDED.status, reserved_at=EXCLUDED.reserved_at, updated_at=EXCLUDED.updated_at
+`
+
+type UpsertReservationParams struct {
+	ID         pgtype.UUID        `json:"id"`
+	EventID    pgtype.UUID        `json:"event_id"`
+	DonorID    pgtype.UUID        `json:"donor_id"`
+	Status     string             `json:"status"`
+	ReservedAt pgtype.Timestamptz `json:"reserved_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+// Reuses the (event,donor) row when a donor re-reserves after cancelling;
+// reserved_at is only set on the row's first non-cancelled entry (passed in).
+func (q *Queries) UpsertReservation(ctx context.Context, arg UpsertReservationParams) error {
+	_, err := q.db.Exec(ctx, upsertReservation,
+		arg.ID,
+		arg.EventID,
+		arg.DonorID,
+		arg.Status,
+		arg.ReservedAt,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const waitlistHead = `-- name: WaitlistHead :one
+SELECT id, event_id, donor_id, status, reserved_at, created_at, updated_at FROM donor_event_reservations
+WHERE event_id=$1 AND status='WAITLISTED'
+ORDER BY reserved_at ASC, id ASC
+LIMIT 1
+`
+
+// The earliest-queued waitlisted donor for an event, the one promoted when a
+// seat frees (E-4 FIFO).
+func (q *Queries) WaitlistHead(ctx context.Context, eventID pgtype.UUID) (DonorEventReservation, error) {
+	row := q.db.QueryRow(ctx, waitlistHead, eventID)
+	var i DonorEventReservation
+	err := row.Scan(
+		&i.ID,
+		&i.EventID,
+		&i.DonorID,
+		&i.Status,
+		&i.ReservedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

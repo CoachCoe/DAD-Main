@@ -6273,6 +6273,120 @@
         }
       }
     },
+    "/donor/me/events/{event_id}/reserve": {
+      "post": {
+        "operationId": "reserveEvent",
+        "summary": "Reserve a spot (or join the waitlist) at an event (E-4)",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/events/{event_id}/cancel": {
+      "post": {
+        "operationId": "cancelEvent",
+        "summary": "Cancel a reservation; promotes the waitlist head (E-4/E-9)",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-rate-limit": "account",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReservationResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/donor/me/network": {
       "get": {
         "operationId": "donorNetwork",
@@ -9547,6 +9661,33 @@
             "type": "integer",
             "format": "int32",
             "description": "Number of spots; 0 means uncapped."
+          },
+          "spots_left": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "format": "int32"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Spots remaining (capacity minus reserved), floored at 0; null when uncapped."
+          },
+          "reservation_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "RESERVED",
+                  "WAITLISTED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The signed-in donor's own status for this event; null on an anonymous read or no active reservation."
           }
         },
         "required": [
@@ -9560,7 +9701,27 @@
           "city",
           "starts_at",
           "ends_at",
-          "capacity"
+          "capacity",
+          "spots_left",
+          "reservation_status"
+        ],
+        "additionalProperties": false
+      },
+      "ReservationResult": {
+        "type": "object",
+        "description": "The outcome of a reserve or cancel (E-4).",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "RESERVED",
+              "WAITLISTED",
+              "CANCELLED"
+            ]
+          }
+        },
+        "required": [
+          "status"
         ],
         "additionalProperties": false
       },

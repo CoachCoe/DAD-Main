@@ -24,6 +24,12 @@ type EventReadSource interface {
 	Detail(context.Context, pgtype.UUID) (store.EventView, error)
 }
 
+// ReservationSource books, waitlists, and cancels event reservations (E-4/E-9).
+type ReservationSource interface {
+	Reserve(context.Context, string, pgtype.UUID) (store.ReservationResult, error)
+	Cancel(context.Context, string, pgtype.UUID) (store.ReservationResult, error)
+}
+
 func (a *api) eventsAdmin() service {
 	return service{
 		a.Events != nil,
@@ -107,4 +113,29 @@ func (a *api) eventDetail(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "public, max-age=60")
 		writeJSON(w, http.StatusOK, body)
 	}
+}
+
+// reserveEvent books (or waitlists) the signed-in donor at an event (E-4).
+func (a *api) reserveEvent(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "event_id")
+	if !ok {
+		return
+	}
+	svc := service{a.Reservations != nil, donorUnavailable, writeTimeout, donorStatus}
+	svc.serve(w, r, func(ctx context.Context) (any, error) {
+		return a.Reservations.Reserve(ctx, session, id)
+	})
+}
+
+// cancelEvent cancels the signed-in donor's reservation, promoting the waitlist
+// head if a seat freed (E-4/E-9).
+func (a *api) cancelEvent(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "event_id")
+	if !ok {
+		return
+	}
+	svc := service{a.Reservations != nil, donorUnavailable, writeTimeout, donorStatus}
+	svc.serve(w, r, func(ctx context.Context) (any, error) {
+		return a.Reservations.Cancel(ctx, session, id)
+	})
 }

@@ -67,6 +67,8 @@ func (a *api) routes() []route {
 		a.donorRead("GET /donor/me/badges", a.donorBadges),
 		a.donorRead("GET /donor/me/network", a.donorNetwork),
 		a.donorRead("GET /donor/me/events", a.events),
+		a.donorWrite("POST /donor/me/events/{event_id}/reserve", a.reserveEvent),
+		a.donorWrite("POST /donor/me/events/{event_id}/cancel", a.cancelEvent),
 		a.donorRead("GET /donor/me/sharing", a.sharing),
 		a.donorWrite("POST /donor/me/sharing", a.saveSharing),
 		a.donorRead("GET /donor/me/referral-code.svg", a.referralCode),

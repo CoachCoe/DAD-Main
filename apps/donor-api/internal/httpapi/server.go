@@ -63,6 +63,7 @@ type Services struct {
 	Network         NetworkSource
 	Events          EventSource
 	EventRead       EventReadSource
+	Reservations    ReservationSource
 }
 
 type api struct {
