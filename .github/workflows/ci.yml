@@ -13,18 +13,23 @@ concurrency:
 
 jobs:
   ledger:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, dad, linux]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: "24", cache: npm, cache-dependency-path: apps/atm-ledger/package-lock.json }
+        # No cache: npm — on a persistent self-hosted runner ~/.npm already
+        # survives between runs, and the setup-node cache-save post-step (tar +
+        # zstdmt of the npm cache) can hang for minutes and blow the job timeout.
+        with: { node-version: "24" }
       - run: npm ci
         working-directory: apps/atm-ledger
       - run: make test-ledger lint-ledger
 
   api:
-    runs-on: ubuntu-24.04
+    # GitHub-hosted: uses a Postgres service container, which is a Linux-only
+    # Actions feature (the self-hosted macOS runner cannot run service containers).
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
       postgres:
@@ -56,19 +61,24 @@ jobs:
       - run: make lint-go
 
   web:
-    runs-on: ubuntu-24.04
+    runs-on: [self-hosted, dad, linux]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: "22", cache: npm, cache-dependency-path: apps/web/package-lock.json }
+        # No cache: npm — see the ledger job; the cache-save post-step can hang
+        # on the self-hosted runner and cancel the job at its timeout.
+        with: { node-version: "22" }
       - run: npm ci
         working-directory: apps/web
       - run: make test-web
       - run: make lint-web
 
   deploy:
-    runs-on: ubuntu-24.04
+    # GitHub-hosted: runs `docker build` / `docker compose`. Docker Desktop on the
+    # self-hosted macOS runner cannot authenticate image pulls from its headless
+    # launchd service (no interactive keychain), so this must stay on Linux.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,7 +93,9 @@ jobs:
       - run: make check-images
 
   browser:
-    runs-on: ubuntu-24.04
+    # GitHub-hosted: uses a Postgres service container (Linux-only Actions feature)
+    # and `playwright install --with-deps` (apt-get, Linux-only).
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
