@@ -989,23 +989,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/enrolments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Recipient enrolment queue (inactive until R2) */
-        get: operations["enrolments"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/donor/staff/donors/{donor_id}/claim-email": {
         parameters: {
             query?: never;
@@ -1443,7 +1426,7 @@ export interface components {
             total_minor: number;
         };
         StreakSummary: {
-            /** @description A renewal failed and is inside its 14-day grace period. */
+            /** @description A renewal failed and is inside its 7-day grace period. */
             at_risk: boolean;
             /** Format: int32 */
             current: number;
@@ -1982,11 +1965,6 @@ export interface components {
         };
         PendingAction: {
             action: components["schemas"]["StaffAction"] | null;
-        };
-        Enrolments: {
-            /** @description Always empty until R2. */
-            enrolments: unknown[];
-            state: string;
         };
         QueuedMessage: {
             /** Format: uuid */
@@ -3343,6 +3321,28 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    paymentMethod: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     cancelRecurring: {
         parameters: {
             query?: never;
@@ -3937,29 +3937,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["Unprocessable"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    enrolments: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Enrolments"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
             503: components["responses"]["Unavailable"];
         };
     };

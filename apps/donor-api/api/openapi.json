@@ -5150,7 +5150,7 @@
         "properties": {
           "at_risk": {
             "type": "boolean",
-            "description": "A renewal failed and is inside its 14-day grace period."
+            "description": "A renewal failed and is inside its 7-day grace period."
           },
           "current": {
             "type": "integer",

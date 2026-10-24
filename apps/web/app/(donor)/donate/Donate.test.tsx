@@ -26,16 +26,13 @@ describe("sandbox giving", () => {
     expect(screen.getByRole("button", { name: "Continue to test checkout" })).toBeEnabled();
   });
 
-  it("defaults to monthly, discloses the actual charge, and removes daily framing for one-time", () => {
+  it("discloses the actual monthly charge with daily framing", () => {
     render(<Donate />);
-    expect(screen.getByRole("radio", { name: "Monthly" })).toBeChecked();
     expect(screen.getByRole("button", { name: "$30/month · about $1 a day" })).toBeVisible();
-    fireEvent.click(screen.getByRole("radio", { name: "One time" }));
-    expect(screen.queryByText(/about \$1 a day/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "$30 once" })).toBeVisible();
+    expect(screen.getByLabelText("Monthly amount (USD)")).toBeVisible();
   });
 
-  it("restates a custom amount with its daily framing, and a one-time amount without", () => {
+  it("restates a custom monthly amount with its daily framing", () => {
     render(<Donate />);
     const amount = screen.getByLabelText("Monthly amount (USD)");
     fireEvent.change(amount, { target: { value: "45" } });
@@ -43,9 +40,6 @@ describe("sandbox giving", () => {
     expect(amount).toHaveAccessibleDescription(/\$45\/month/);
     fireEvent.change(amount, { target: { value: "0.10" } });
     expect(screen.queryByText(/^You’ll give/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("radio", { name: "One time" }));
-    fireEvent.change(screen.getByLabelText("One-time amount (USD)"), { target: { value: "45" } });
-    expect(screen.getByText(/^You’ll give/)).toHaveTextContent("You’ll give $45 once");
   });
 
   it("marks exactly the chosen preset as pressed", () => {
@@ -95,8 +89,7 @@ describe("sandbox giving", () => {
     const fetch = vi.fn().mockRejectedValueOnce(new TypeError("Failed to fetch"));
     vi.stubGlobal("fetch", fetch);
     const { unmount } = render(<Donate />);
-    fireEvent.click(screen.getByRole("radio", { name: "One time" }));
-    fireEvent.change(screen.getByLabelText("One-time amount (USD)"), { target: { value: "$1,000" } });
+    fireEvent.change(screen.getByLabelText("Monthly amount (USD)"), { target: { value: "$300" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
     await expectAlert("offline");
@@ -106,15 +99,14 @@ describe("sandbox giving", () => {
       .mockResolvedValue(new Response(JSON.stringify({ url: "https://evil.example/" }), { status: 200 }));
     vi.stubGlobal("fetch", retry);
     render(<Donate />);
-    expect(await screen.findByRole("radio", { name: "One time" })).toBeChecked();
-    expect(screen.getByLabelText("One-time amount (USD)")).toHaveValue("$1,000");
+    expect(await screen.findByLabelText("Monthly amount (USD)")).toHaveValue("$300");
     expect(screen.getByLabelText("Email")).toHaveValue("ben@example.org");
     fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
     await waitFor(() => expect(retry).toHaveBeenCalled());
     expect(JSON.parse(retry.mock.calls[0][1].body)).toEqual({
       email: "ben@example.org",
-      amount_minor: 100000,
-      frequency: "ONE_TIME",
+      amount_minor: 30000,
+      frequency: "MONTHLY",
     });
   });
 

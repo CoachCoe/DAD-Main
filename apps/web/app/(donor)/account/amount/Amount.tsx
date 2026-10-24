@@ -126,7 +126,8 @@ export default function Amount() {
         <>
           {data?.state === "unavailable" && (
             <p>
-              Your monthly amount can’t be changed right now. Changes are available for an active gift that isn’t ending.
+              Your monthly amount can’t be changed right now. Changes are available for an active gift that isn’t
+              ending.
             </p>
           )}
           {data?.state === "ready" && (

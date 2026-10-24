@@ -151,25 +151,6 @@ func (f *workerFixture) checkout(t *testing.T) payments.CheckoutResult {
 	return result
 }
 
-// charge publishes a one-time payment whose card charge succeeded at the given time.
-func (f *workerFixture) charge(t *testing.T, payment string, at time.Time) {
-	t.Helper()
-	f.gateway.intents[payment] = paymentObject(
-		t,
-		map[string]any{"id": payment, "object": "payment_intent", "status": "succeeded", "livemode": false, "amount_received": 3000,
-			"latest_charge": map[string]any{
-				"id":             "ch_" + payment,
-				"object":         "charge",
-				"payment_intent": payment,
-				"status":         "succeeded",
-				"paid":           true,
-				"livemode":       false,
-				"amount":         3000,
-				"created":        at.Unix(),
-			}},
-	)
-}
-
 func (f *workerFixture) receive(t *testing.T, kind string, obj map[string]any) string {
 	t.Helper()
 	return f.receiveAt(t, kind, obj, time.Now())
