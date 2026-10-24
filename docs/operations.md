@@ -864,38 +864,51 @@ backup scheduling, retention, alerting, and off-host recovery ownership before l
 
 ## Continuous integration
 
-CI runs in GitHub Actions (`.github/workflows/`). The `ci.yml`, `atm.yml`, and
-`mobile-foundation.yml` jobs run on **self-hosted runners** so a private repo's
-test matrix does not consume GitHub-hosted Actions minutes; `cloudflare-ranges.yml`
-stays on GitHub-hosted (`ubuntu-24.04`) because it is a weekly schedule that must
-fire even when no self-hosted machine is online.
+CI runs in GitHub Actions (`.github/workflows/`). Most jobs run on **self-hosted
+runners** so a private repo's test matrix does not consume GitHub-hosted Actions
+minutes. A few jobs stay **GitHub-hosted** because they require a genuine Linux
+host that the self-hosted (Apple Silicon macOS) runner cannot provide:
+
+- `api` and `browser` use Postgres **service containers**, a Linux-only Actions
+  feature.
+- `deploy` runs `docker build` / `docker compose`, which the headless macOS
+  runner service cannot authenticate non-interactively.
+- `cloudflare-ranges.yml` is a weekly schedule that must fire even when no
+  self-hosted machine is online.
+
+Everything else — the Go/web/ledger jobs in `ci.yml`, all of `atm.yml`, and the
+`contract` + `swift-compatibility` jobs in `mobile-foundation.yml` — runs
+self-hosted.
 
 ### Runner labels
 
 Jobs target runner labels, not a specific machine:
 
-- `[self-hosted, dad, linux]` — the Go/web/ledger/deploy/browser matrix. A Linux
-  host, or a macOS host with Docker Desktop (the Postgres service containers and
-  the sqlc/deploy Docker steps need a working Docker daemon).
+- `[self-hosted, dad, linux]` — pure-toolchain jobs (Go, Node, make, Swift
+  tooling). These need **no Docker**: the `api`/`browser`/`deploy` Docker jobs
+  stay GitHub-hosted (see above). An Apple Silicon macOS host serves this label
+  fine (GitHub label matching is case-insensitive, so the auto-added `macOS`
+  label coexists with an explicit `linux`).
 - `[self-hosted, dad, macos]` — the `swift-compatibility` job only, which compiles
   the generated Swift contract with Apple tooling and therefore needs macOS.
 
-One macOS host with Docker Desktop can carry **both** labels: register it with
-`dad`, `macos`, and `linux` and it serves every job. A separate Linux host can
-carry `dad` + `linux` for the non-Swift jobs.
+One macOS host carries **both** labels: register it with `dad`, `macos`, and
+`linux` and it serves every self-hosted job. A separate Linux host can carry
+`dad` + `linux` for the non-Swift jobs — and a Linux host **with Docker** could
+additionally take over the `api`/`browser`/`deploy` jobs (flip their `runs-on`
+back to `[self-hosted, dad, linux]`), which is the path to going fully
+self-hosted.
 
 ### Host prerequisites
 
-The runner host must provide the toolchains the jobs assume (the `setup-go` /
-`setup-node` steps still download pinned versions, but Docker and system tools
+The runner host must provide the toolchains the self-hosted jobs assume (the
+`setup-go` / `setup-node` steps still download pinned versions, but system tools
 must exist):
 
-- **Docker** running (service containers + `make check-images` / sqlc).
 - **git**, **bash**, **make**, and the usual build tools.
 - For the `macos` label: a recent **Xcode / Swift toolchain** for `swift test`.
-- The `deploy` job validates compose and builds images; it needs no live AWS
-  credentials for CI (it only runs `config -q` and `check-images`), but keep any
-  real secrets out of the runner's environment.
+- **No Docker is required** for the self-hosted jobs — the Docker-dependent
+  jobs (`api`, `browser`, `deploy`) run on GitHub-hosted Linux.
 
 ### Registering a runner (operator)
 

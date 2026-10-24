@@ -24,7 +24,9 @@ jobs:
       - run: make test-ledger lint-ledger
 
   api:
-    runs-on: [self-hosted, dad, linux]
+    # GitHub-hosted: uses a Postgres service container, which is a Linux-only
+    # Actions feature (the self-hosted macOS runner cannot run service containers).
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
       postgres:
@@ -68,7 +70,10 @@ jobs:
       - run: make lint-web
 
   deploy:
-    runs-on: [self-hosted, dad, linux]
+    # GitHub-hosted: runs `docker build` / `docker compose`. Docker Desktop on the
+    # self-hosted macOS runner cannot authenticate image pulls from its headless
+    # launchd service (no interactive keychain), so this must stay on Linux.
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,7 +88,9 @@ jobs:
       - run: make check-images
 
   browser:
-    runs-on: [self-hosted, dad, linux]
+    # GitHub-hosted: uses a Postgres service container (Linux-only Actions feature)
+    # and `playwright install --with-deps` (apt-get, Linux-only).
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
