@@ -66,6 +66,7 @@ func (a *api) routes() []route {
 		a.donorRead("GET /donor/me/today-initiative", a.todayInitiative),
 		a.donorRead("GET /donor/me/badges", a.donorBadges),
 		a.donorRead("GET /donor/me/network", a.donorNetwork),
+		a.donorRead("GET /donor/me/events", a.events),
 		a.donorRead("GET /donor/me/sharing", a.sharing),
 		a.donorWrite("POST /donor/me/sharing", a.saveSharing),
 		a.donorRead("GET /donor/me/referral-code.svg", a.referralCode),
@@ -132,7 +133,11 @@ func (a *api) routes() []route {
 		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/metrics/{position}/delete", a.deleteInitiativeMetric),
 		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/spend", a.setInitiativeSpend),
 		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/spend/delete", a.deleteInitiativeSpend),
+		a.staffWrite("POST /donor/staff/events", a.createEvent),
+		a.staffWrite("POST /donor/staff/events/{event_id}", a.updateEvent),
+		a.staffWrite("POST /donor/staff/events/{event_id}/publish", a.publishEvent),
 		a.public("GET /initiatives/{initiative_id}/spend", a.initiativeSpend),
+		a.public("GET /events/{event_id}", a.eventDetail),
 	}
 }
 

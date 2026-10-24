@@ -61,6 +61,8 @@ type Services struct {
 	TodayInitiative TodayInitiativeSource
 	Badges          BadgeSource
 	Network         NetworkSource
+	Events          EventSource
+	EventRead       EventReadSource
 }
 
 type api struct {

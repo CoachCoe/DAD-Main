@@ -5922,6 +5922,46 @@
         }
       }
     },
+    "/events/{event_id}": {
+      "get": {
+        "operationId": "eventDetail",
+        "summary": "A published event's detail page (E-3)",
+        "tags": [
+          "Events"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed ID is 404, like an unknown or draft one."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventView"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/initiatives/{initiative_id}/spend": {
       "get": {
         "operationId": "initiativeSpend",
@@ -5993,6 +6033,239 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/events": {
+      "post": {
+        "operationId": "createEvent",
+        "summary": "Create a draft event",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/events/{event_id}": {
+      "post": {
+        "operationId": "updateEvent",
+        "summary": "Update a draft event",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/staff/events/{event_id}/publish": {
+      "post": {
+        "operationId": "publishEvent",
+        "summary": "Publish a draft event",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "staffCookieAuth": []
+          }
+        ],
+        "x-rate-limit": "staff",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/me/events": {
+      "get": {
+        "operationId": "donorEvents",
+        "summary": "Upcoming events in and near the donor's city (E-2)",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "cookieAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/EventView"
+                      }
+                    }
+                  },
+                  "required": [
+                    "events"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "503": {
             "$ref": "#/components/responses/Unavailable"
@@ -9227,6 +9500,116 @@
           "invitees",
           "anonymous_active"
         ],
+        "additionalProperties": false
+      },
+      "EventView": {
+        "type": "object",
+        "description": "One event as a donor sees it (E-3).",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "VOLUNTEER",
+              "COMMUNITY",
+              "INVITE_ONLY"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "venue": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "capacity": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Number of spots; 0 means uncapped."
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "title",
+          "type",
+          "description",
+          "venue",
+          "address",
+          "city",
+          "starts_at",
+          "ends_at",
+          "capacity"
+        ],
+        "additionalProperties": false
+      },
+      "EventInput": {
+        "type": "object",
+        "description": "A staff create/update of an event's editable fields (E-3).",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "VOLUNTEER",
+              "COMMUNITY",
+              "INVITE_ONLY"
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "venue": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "city": {
+            "type": "string"
+          },
+          "zip": {
+            "type": "string"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "capacity": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
         "additionalProperties": false
       }
     }
