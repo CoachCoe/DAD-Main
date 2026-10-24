@@ -170,6 +170,10 @@ var grants = map[string]map[Role]string{
 	"donor_content_sources":      {API: "SELECT, INSERT", Rekey: "SELECT (id, encrypted_data), UPDATE (encrypted_data)"},
 	"donor_content_publications": {API: "SELECT, INSERT"},
 	"donor_content_head":         {API: "SELECT, INSERT, UPDATE"},
+	"donor_initiatives":          {API: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT"},
+	"donor_initiative_metrics":   {API: "SELECT, INSERT, UPDATE, DELETE", ProjectionWorker: "SELECT"},
+	"donor_initiative_spend":     {API: "SELECT, INSERT, UPDATE, DELETE", ProjectionWorker: "SELECT"},
+	"donor_initiative_exposures": {API: "SELECT, INSERT, UPDATE"},
 }
 
 // privileges is a canonical set of grants: "SELECT" for a table privilege,

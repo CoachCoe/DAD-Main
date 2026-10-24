@@ -178,6 +178,8 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	}
 	services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
 	services.Content = store.ContentReader{DB: pool}
+	services.InitiativeRead = store.InitiativeReader{DB: pool}
+	services.TodayInitiative = store.DonorInitiativeService{DB: pool}
 	services.Partner = store.PartnerService{DB: pool}
 	services.Dashboard = store.DashboardReader{DB: pool}
 	services.Account = store.AccountService{DB: pool}
@@ -225,6 +227,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.Staff, services.Admin, services.Exports = staff, staff, staff
 		services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
 		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKeys: contentKeys}
+		services.Initiatives = store.InitiativeService{Staff: staff}
 	}
 	return services, pool.Close, nil
 }

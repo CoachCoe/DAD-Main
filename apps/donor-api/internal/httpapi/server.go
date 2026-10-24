@@ -51,11 +51,14 @@ type Services struct {
 	Push            PushSource
 	Wallet          *wallet.Issuer
 
-	Staff        StaffSource
-	Admin        AdminSource
-	StaffFinance StaffFinanceSource
-	Exports      ExportSource
-	ContentAdmin ContentAdminSource
+	Staff           StaffSource
+	Admin           AdminSource
+	StaffFinance    StaffFinanceSource
+	Exports         ExportSource
+	ContentAdmin    ContentAdminSource
+	Initiatives     InitiativeSource
+	InitiativeRead  InitiativeReadSource
+	TodayInitiative TodayInitiativeSource
 }
 
 type api struct {
