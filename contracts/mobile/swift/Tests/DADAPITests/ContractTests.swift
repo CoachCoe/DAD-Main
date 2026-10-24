@@ -13,7 +13,7 @@ final class ContractTests: XCTestCase {
     }
 
     func testProfileDecodesNullablePublicName() throws {
-        let body = Data(#"{"email":"donor@example.org","public_name":null,"account_role":"DONOR","zip":null,"city":null,"timezone":null,"phone":null,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":true,"version":3,"consent_version":"synthetic-v1"}"#.utf8)
+        let body = Data(#"{"email":"donor@example.org","public_name":null,"account_role":"DONOR","zip":null,"city":null,"timezone":null,"phone":null,"referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":true,"rankings_opted_out":false,"network_visible":false,"version":3,"consent_version":"synthetic-v1"}"#.utf8)
         let profile = try JSONDecoder().decode(Components.Schemas.Profile.self, from: body)
         // Decoding with account_role (and the other new required identity
         // fields) present is the contract check: the generated Profile now
@@ -24,7 +24,7 @@ final class ContractTests: XCTestCase {
     }
 
     func testProfileDecodesPopulatedIdentityFields() throws {
-        let body = Data(#"{"email":"donor@example.org","public_name":"Dana","account_role":"DONOR","zip":"94103","city":"San Francisco","timezone":"America/Los_Angeles","phone":"+14155550123","referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":true,"version":1,"consent_version":"synthetic-v1"}"#.utf8)
+        let body = Data(#"{"email":"donor@example.org","public_name":"Dana","account_role":"DONOR","zip":"94103","city":"San Francisco","timezone":"America/Los_Angeles","phone":"+14155550123","referral_emails":true,"marketing_emails":false,"push_referral_converted":true,"push_streak_at_risk":true,"push_streak_milestone":true,"rankings_opted_out":false,"network_visible":false,"version":1,"consent_version":"synthetic-v1"}"#.utf8)
         let profile = try JSONDecoder().decode(Components.Schemas.Profile.self, from: body)
         XCTAssertEqual(profile.zip, "94103")
         XCTAssertEqual(profile.timezone, "America/Los_Angeles")
