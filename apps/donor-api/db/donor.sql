@@ -64,3 +64,34 @@ SELECT touched_at,id FROM deleted ORDER BY touched_at,id;
 -- Replace the donor's self-service identity fields. account_role is deliberately
 -- never written here: a role is fixed at row creation and immutable (PRD §3).
 UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING *;
+
+
+-- name: UpsertPhoneCode :exec
+-- Last request wins: a new code for the same phone overwrites the pending one
+-- and resets the attempt counter.
+INSERT INTO donor_phone_codes (phone, code_hash, attempts, expires_at)
+VALUES ($1, $2, 0, $3)
+ON CONFLICT (phone) DO UPDATE SET code_hash=EXCLUDED.code_hash, attempts=0, expires_at=EXCLUDED.expires_at, created_at=now();
+
+-- name: PhoneCode :one
+SELECT phone, code_hash, attempts, expires_at, created_at FROM donor_phone_codes WHERE phone=$1 FOR UPDATE;
+
+-- name: RecordPhoneCodeAttempt :exec
+UPDATE donor_phone_codes SET attempts=attempts+1 WHERE phone=$1;
+
+-- name: DeletePhoneCode :exec
+DELETE FROM donor_phone_codes WHERE phone=$1;
+
+-- name: DonorByPhone :one
+SELECT * FROM donors WHERE phone=$1 AND disabled=false;
+
+-- name: OIDCIdentity :one
+SELECT id, donor_id, provider, subject, created_at, last_used_at FROM donor_oidc_identities
+WHERE provider=$1 AND subject=$2;
+
+-- name: InsertOIDCIdentity :exec
+INSERT INTO donor_oidc_identities (id, donor_id, provider, subject, last_used_at)
+VALUES ($1, $2, $3, $4, $5);
+
+-- name: TouchOIDCIdentity :exec
+UPDATE donor_oidc_identities SET last_used_at=$2 WHERE id=$1;

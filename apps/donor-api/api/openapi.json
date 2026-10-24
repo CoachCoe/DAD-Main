@@ -4455,6 +4455,256 @@
         }
       }
     },
+    "/donor/phone/sign-in/options": {
+      "post": {
+        "operationId": "beginPhoneSignIn",
+        "summary": "Send a phone sign-in code",
+        "description": "Sends a one-time SMS code to a donor's phone. The response is always `{\"sent\": true}` and never reveals whether the phone has an account. 503 with this method unavailable when the deployment has no SMS provider configured.",
+        "tags": [
+          "Account"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "description": "E.164 phone, e.g. +14155550123.",
+                    "pattern": "^\\+[1-9][0-9]{1,14}$"
+                  }
+                },
+                "required": [
+                  "phone"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A code was requested (sent only if the phone matches an account).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sent": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "sent"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/phone/sign-in": {
+      "post": {
+        "operationId": "finishPhoneSignIn",
+        "summary": "Finish a phone sign-in",
+        "description": "Verifies the SMS code and signs the donor in. 401 covers a wrong, expired, or over-tried code and a phone with no account alike, so none reveals whether an account exists. 503 when no SMS provider is configured.",
+        "tags": [
+          "Account"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "phone": {
+                    "type": "string",
+                    "pattern": "^\\+[1-9][0-9]{1,14}$"
+                  },
+                  "code": {
+                    "type": "string",
+                    "description": "The 6-digit code from the SMS.",
+                    "minLength": 1,
+                    "maxLength": 16
+                  },
+                  "device_name": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Native requests only, optional. Ignored for browser requests."
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "IOS",
+                      "ANDROID"
+                    ],
+                    "description": "Native requests only, optional. Ignored for browser requests."
+                  }
+                },
+                "required": [
+                  "phone",
+                  "code"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/SignedIn"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
+    "/donor/oidc/{provider}/sign-in": {
+      "post": {
+        "operationId": "oidcSignIn",
+        "summary": "Sign in with Apple or Google",
+        "description": "Verifies a provider id_token and signs in the donor it belongs to. The identity is matched by a prior link, else by the token's verified email against an existing account (which records the link). 401 covers an unverifiable token and a verified identity with no matching account alike; account creation happens in the giving flow, not here. 503 when the provider is not configured.",
+        "tags": [
+          "Account"
+        ],
+        "security": [],
+        "x-rate-limit": "auth",
+        "x-clients": [
+          "browser",
+          "native"
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "apple",
+                "google"
+              ]
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id_token": {
+                    "type": "string",
+                    "description": "The provider's id_token (JWT) from the native or web sign-in SDK.",
+                    "minLength": 1,
+                    "maxLength": 8192
+                  },
+                  "device_name": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "Native requests only, optional. Ignored for browser requests."
+                  },
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "IOS",
+                      "ANDROID"
+                    ],
+                    "description": "Native requests only, optional. Ignored for browser requests."
+                  }
+                },
+                "required": [
+                  "id_token"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "$ref": "#/components/responses/SignedIn"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/donor/passkeys/sign-in": {
       "post": {
         "operationId": "finishDonorPasskeySignIn",
@@ -4858,6 +5108,43 @@
       }
     },
     "responses": {
+      "SignedIn": {
+        "description": "Signed in.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "description": "Browser request: the session is set only as the `dad_donor_session` cookie.",
+                  "properties": {
+                    "signed_in": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "signed_in"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "$ref": "#/components/schemas/NativeSession",
+                  "description": "Native request."
+                }
+              ]
+            }
+          }
+        },
+        "headers": {
+          "Set-Cookie": {
+            "description": "Browser requests only.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        }
+      },
       "BadRequest": {
         "description": "The request could not be verified.",
         "content": {

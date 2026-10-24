@@ -22,8 +22,10 @@ import (
 	"dad/donor-api/internal/httpapi"
 	"dad/donor-api/internal/mail"
 	"dad/donor-api/internal/migrations"
+	"dad/donor-api/internal/oidc"
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/push"
+	"dad/donor-api/internal/sms"
 	"dad/donor-api/internal/store"
 	"dad/donor-api/internal/wallet"
 )
@@ -187,6 +189,22 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 			return services, release, fmt.Errorf("donor passkeys: %w", err)
 		}
 		services.DonorPasskeys = donorPasskeys
+	}
+	smsSettings, err := sms.FromEnvironment(getenv)
+	if err != nil {
+		pool.Close()
+		return services, release, fmt.Errorf("SMS sign-in: %w", err)
+	}
+	if sender := sms.NewSender(smsSettings); sender != nil {
+		services.PhoneSignIn = store.PhoneService{DB: pool, Sender: sender}
+	}
+	oidcSettings, err := oidc.FromEnvironment(getenv)
+	if err != nil {
+		pool.Close()
+		return services, release, fmt.Errorf("OIDC sign-in: %w", err)
+	}
+	if verifier := oidc.NewVerifier(oidcSettings); verifier != nil {
+		services.OIDCSignIn = store.OIDCService{DB: pool, Verifier: verifier, Settings: oidcSettings}
 	}
 	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}

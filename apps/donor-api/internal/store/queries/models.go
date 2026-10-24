@@ -172,6 +172,15 @@ type DonorMetricProjection struct {
 	ReferredIrlMinor  int64              `json:"referred_irl_minor"`
 }
 
+type DonorOidcIdentity struct {
+	ID         pgtype.UUID        `json:"id"`
+	DonorID    pgtype.UUID        `json:"donor_id"`
+	Provider   string             `json:"provider"`
+	Subject    string             `json:"subject"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
+}
+
 type DonorPartnerSignup struct {
 	Organization   string             `json:"organization"`
 	Name           string             `json:"name"`
@@ -212,6 +221,14 @@ type DonorPaymentUpdate struct {
 	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
 	ID              pgtype.UUID        `json:"id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorPhoneCode struct {
+	Phone     string             `json:"phone"`
+	CodeHash  string             `json:"code_hash"`
+	Attempts  int32              `json:"attempts"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type DonorPreference struct {
