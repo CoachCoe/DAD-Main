@@ -43,6 +43,9 @@ type Services struct {
 	EmailChange     EmailChangeSource
 	Donor           DonorSource
 	DonorPasskeys   DonorPasskeySource
+	PhoneSignIn     PhoneSignInSource
+	OIDCSignIn      OIDCSignInSource
+	Analytics       AnalyticsSource
 	Dashboard       DashboardSource
 	Recurring       RecurringSource
 	Push            PushSource

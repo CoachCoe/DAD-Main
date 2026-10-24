@@ -359,8 +359,12 @@ func TestOnlyDonorAccountRoutesAdmitTheApp(t *testing.T) {
 		"POST /donor/email-change/confirm":     true,
 		"POST /donor/passkeys/sign-in/options": true,
 		"POST /donor/passkeys/sign-in":         true,
+		"POST /donor/phone/sign-in/options":    true,
+		"POST /donor/phone/sign-in":            true,
+		"POST /donor/oidc/{provider}/sign-in":  true,
 		"POST /donor/logout":                   true,
 		"POST /donor/logout-all":               true,
+		"POST /analytics/events":               true,
 	}
 	server := NewServer("", Services{})
 	for _, route := range allRoutes() {

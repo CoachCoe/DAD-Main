@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dad/donor-api/internal/geo"
 	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store/queries"
@@ -55,6 +56,11 @@ type DonorService struct {
 type Profile struct {
 	Email          string  `json:"email"`
 	PublicName     *string `json:"public_name"`
+	AccountRole    string  `json:"account_role"`
+	Zip            *string `json:"zip"`
+	City           *string `json:"city"`
+	Timezone       *string `json:"timezone"`
+	Phone          *string `json:"phone"`
 	ConsentVersion string  `json:"consent_version"`
 	Preferences
 }
@@ -105,7 +111,11 @@ type GiftsPage struct {
 
 func readProfile(ctx context.Context, q *queries.Queries, donor queries.Donor) (Profile, error) {
 	pref, err := readPreferences(ctx, q, donor.ID)
-	return Profile{Email: donor.Email, PublicName: textPointer(donor.PublicName), ConsentVersion: consentVersion, Preferences: pref}, err
+	return Profile{
+		Email: donor.Email, PublicName: textPointer(donor.PublicName), AccountRole: donor.AccountRole,
+		Zip: textPointer(donor.Zip), City: textPointer(donor.City), Timezone: textPointer(donor.Timezone),
+		Phone: textPointer(donor.Phone), ConsentVersion: consentVersion, Preferences: pref,
+	}, err
 }
 
 func (s DonorService) Profile(ctx context.Context, token string) (Profile, error) {
@@ -153,6 +163,111 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, pref Pr
 		}
 		return readProfile(ctx, q, d)
 	})
+}
+
+var (
+	ErrZip   = fmt.Errorf("%w", geo.ErrZip)
+	ErrPhone = errors.New("enter a valid phone number in international format, e.g. +14155550123")
+	ErrCity  = errors.New("enter a city of 1 to 80 characters")
+)
+
+// phonePattern mirrors the ck_donor_phone database constraint (E.164).
+var phonePattern = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
+
+// ProfileUpdate is the donor's self-service identity input. Every field is
+// optional and clears the stored value when empty, except that timezone is
+// never taken from the client: it is always derived from zip so the two cannot
+// disagree. account_role is absent by design — it is immutable (PRD §3).
+type ProfileUpdate struct {
+	Zip   string
+	City  string
+	Phone string
+}
+
+// SaveProfile validates the donor's identity input, derives the IANA timezone
+// from the ZIP, and replaces zip/city/timezone/phone. A blank ZIP clears both
+// zip and the derived timezone together.
+func (s DonorService) SaveProfile(ctx context.Context, token string, in ProfileUpdate) (Profile, error) {
+	zip, city, phone := strings.TrimSpace(in.Zip), strings.TrimSpace(in.City), strings.TrimSpace(in.Phone)
+
+	var zipCol, tzCol pgtype.Text
+	if zip != "" {
+		normalized, err := geo.NormalizeZip(zip)
+		if err != nil {
+			return Profile{}, ErrZip
+		}
+		zone, err := geo.Timezone(normalized)
+		if err != nil {
+			return Profile{}, ErrZip
+		}
+		zipCol, tzCol = text(normalized), text(zone)
+	}
+
+	var cityCol pgtype.Text
+	if city != "" {
+		if utf8.RuneCountInString(city) > 80 {
+			return Profile{}, ErrCity
+		}
+		cityCol = text(city)
+	}
+
+	var phoneCol pgtype.Text
+	if phone != "" {
+		if !phonePattern.MatchString(phone) {
+			return Profile{}, ErrPhone
+		}
+		phoneCol = text(phone)
+	}
+
+	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, _ time.Time) (Profile, error) {
+		q := queries.New(tx)
+		updated, err := q.UpdateDonorProfile(ctx, queries.UpdateDonorProfileParams{
+			ID: d.ID, Zip: zipCol, City: cityCol, Timezone: tzCol, Phone: phoneCol,
+		})
+		if err != nil {
+			return Profile{}, err
+		}
+		return readProfile(ctx, q, updated)
+	})
+}
+
+// DeleteAccount erases the signed-in donor's personal data (PRD §6.12). It
+// anonymises the donor row and removes personal satellites — passkeys, OIDC
+// identities, preferences, login links, email-change tokens, and all sessions
+// (which also clears push tokens) — while retaining the financial ledger
+// (gifts, checkouts, billing periods, refunds), which is required for legal and
+// tax records and carries no personal data of its own. The erasure is recorded
+// in donor_deletions, a durable audit that outlives the scrub. The donor is
+// signed out everywhere as part of the deletion, so no session survives it.
+func (s DonorService) DeleteAccount(ctx context.Context, token string) error {
+	_, err := donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (struct{}, error) {
+		q := queries.New(tx)
+		if err := q.RecordDonorDeletion(ctx, queries.RecordDonorDeletionParams{DonorID: d.ID, DeletedAt: timestamp(now)}); err != nil {
+			return struct{}{}, err
+		}
+		if _, err := q.DeleteAllDonorPasskeys(ctx, d.ID); err != nil {
+			return struct{}{}, err
+		}
+		if err := q.DeleteDonorOIDCIdentities(ctx, d.ID); err != nil {
+			return struct{}{}, err
+		}
+		if err := q.DeleteDonorPreferences(ctx, d.ID); err != nil {
+			return struct{}{}, err
+		}
+		if err := q.CancelEmailChanges(ctx, d.ID); err != nil {
+			return struct{}{}, err
+		}
+		if err := q.ConsumeDonorLinks(ctx, queries.ConsumeDonorLinksParams{DonorID: d.ID, ConsumedAt: timestamp(now)}); err != nil {
+			return struct{}{}, err
+		}
+		if err := q.RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: d.ID, RevokedAt: timestamp(now)}); err != nil {
+			return struct{}{}, err
+		}
+		// Scrub the donor row last, so a failure above leaves the account intact
+		// and retryable rather than half-erased.
+		return struct{}{}, q.AnonymizeDonor(ctx, d.ID)
+	})
+	return err
 }
 
 // sharing offers referral links only once the donor has chosen a public name.
@@ -307,6 +422,103 @@ func captureTouch(ctx context.Context, q *queries.Queries, code, kind, visitor s
 			ExpiresAt:  timestamp(now.Add(referralWindow)),
 		},
 	)
+}
+
+// companyCode is the accepted employer-code form; it mirrors the ck_donor_company_code
+// database constraint (uppercase alphanumeric, 2-64 chars, internal hyphens).
+var companyCode = regexp.MustCompile(`^[A-Z0-9][A-Z0-9-]{1,63}$`)
+
+// CompanyCapture is the visitor token to keep after a company-code touch, empty
+// for a malformed code.
+type CompanyCapture struct {
+	Token string `json:"token"`
+}
+
+// CaptureCompanyCode records a pre-signup visit through an employer's company
+// code against an anonymous visitor token, so the attribution survives the app
+// install gap and binds at first gift (resolved to a partner in a later phase).
+// Last touch wins. A malformed code keeps the visitor's existing unexpired touch
+// if any, else records nothing. The code is normalised to upper case.
+func (s DonorService) CaptureCompanyCode(ctx context.Context, code, visitor string, now time.Time) (CompanyCapture, error) {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (CompanyCapture, error) {
+		q := queries.New(tx)
+		if !companyCode.MatchString(code) {
+			// Unknown/malformed: keep an existing unexpired touch, else nothing.
+			if visitor != "" {
+				if touch, err := q.CompanyTouchByToken(ctx, HashToken(visitor)); err == nil && touch.ExpiresAt.Time.After(now) {
+					return CompanyCapture{Token: visitor}, nil
+				} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					return CompanyCapture{}, err
+				}
+			}
+			return CompanyCapture{}, nil
+		}
+		// Reuse the visitor's token while its touch is unexpired, else mint one.
+		token := visitor
+		if token != "" {
+			if touch, err := q.CompanyTouchByToken(ctx, HashToken(visitor)); err != nil {
+				if !errors.Is(err, pgx.ErrNoRows) {
+					return CompanyCapture{}, err
+				}
+				token = ""
+			} else if !touch.ExpiresAt.Time.After(now) {
+				token = ""
+			}
+		}
+		if token == "" {
+			fresh, err := randomToken(32)
+			if err != nil {
+				return CompanyCapture{}, err
+			}
+			token = fresh
+		}
+		id, err := NewID()
+		if err != nil {
+			return CompanyCapture{}, err
+		}
+		if err := q.UpsertCompanyTouch(ctx, queries.UpsertCompanyTouchParams{
+			ID: id, TokenHash: HashToken(token), CompanyCode: code,
+			TouchedAt: timestamp(now), ExpiresAt: timestamp(now.Add(referralWindow)),
+		}); err != nil {
+			return CompanyCapture{}, err
+		}
+		return CompanyCapture{Token: token}, nil
+	})
+}
+
+// BindCapturedCompanyCode binds the company code captured for visitor onto
+// donor, once, at the point the donor is established (first gift). It is a
+// no-op when the visitor has no unexpired touch or the donor already carries a
+// code. The partner this code resolves to is applied in a later phase; this
+// only preserves the attribution against the account. It returns the bound code
+// if one was set, empty otherwise.
+func (s DonorService) BindCapturedCompanyCode(ctx context.Context, donor pgtype.UUID, visitor string, now time.Time) (string, error) {
+	if visitor == "" {
+		return "", nil
+	}
+	var bound string
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		touch, err := q.CompanyTouchByToken(ctx, HashToken(visitor))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !touch.ExpiresAt.Time.After(now) {
+			return nil
+		}
+		if err := q.BindDonorCompanyCode(ctx, queries.BindDonorCompanyCodeParams{
+			ID: donor, CompanyCode: text(touch.CompanyCode),
+		}); err != nil {
+			return err
+		}
+		bound = touch.CompanyCode
+		return nil
+	})
+	return bound, err
 }
 
 func (s DonorService) Gifts(ctx context.Context, token string, offset int64) (GiftsPage, error) {
