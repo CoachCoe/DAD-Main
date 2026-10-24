@@ -21,6 +21,7 @@ type Donor struct {
 	City         pgtype.Text        `json:"city"`
 	Timezone     pgtype.Text        `json:"timezone"`
 	Phone        pgtype.Text        `json:"phone"`
+	CompanyCode  pgtype.Text        `json:"company_code"`
 }
 
 type DonorAmountChange struct {

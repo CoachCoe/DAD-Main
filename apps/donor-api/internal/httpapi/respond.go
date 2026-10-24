@@ -32,6 +32,7 @@ const (
 	donorCookie    = "dad_donor_session"
 	staffCookie    = "dad_staff_session"
 	referralCookie = "dad_referral"
+	companyCookie  = "dad_company"
 )
 
 // classifier maps a service error to a public status and message.

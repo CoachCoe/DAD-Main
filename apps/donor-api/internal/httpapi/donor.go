@@ -34,6 +34,7 @@ type DonorSource interface {
 	SaveSharing(context.Context, string, string, bool) (store.Sharing, error)
 	ReferrerName(context.Context, string) (string, error)
 	CaptureReferral(context.Context, string, string, string, time.Time) (store.ReferralCapture, error)
+	CaptureCompanyCode(context.Context, string, string, time.Time) (store.CompanyCapture, error)
 	Gifts(context.Context, string, int64) (store.GiftsPage, error)
 	Receipt(context.Context, string, pgtype.UUID) (store.Receipt, error)
 	AnnualSummary(context.Context, string, int) (store.AnnualSummary, error)
@@ -256,6 +257,32 @@ func (a *api) captureReferral(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setCookie(w, referralCookie, result.Token, age, http.SameSiteLaxMode)
 	writeJSON(w, http.StatusOK, map[string]any{"captured": result.Token != "", "public_name": result.PublicName})
+}
+
+// captureCompany records a pre-signup company-code visit on an anonymous
+// visitor cookie, mirroring referral capture. The response never reveals whether
+// the code resolves to a partner (that resolution is a later phase).
+func (a *api) captureCompany(w http.ResponseWriter, r *http.Request) {
+	code, ok := referralCode(w, r)
+	if !ok {
+		return
+	}
+	if !a.donor().available(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	result, err := a.Donor.CaptureCompanyCode(ctx, code, cookieValue(r, companyCookie), time.Now().UTC())
+	if err != nil {
+		respond(w, r, nil, err, donorStatus)
+		return
+	}
+	age := referralCookieAge
+	if result.Token == "" {
+		age = -1
+	}
+	a.setCookie(w, companyCookie, result.Token, age, http.SameSiteLaxMode)
+	writeJSON(w, http.StatusOK, map[string]any{"captured": result.Token != ""})
 }
 
 func (a *api) gifts(w http.ResponseWriter, r *http.Request, session string) {

@@ -152,6 +152,10 @@ var grants = map[string]map[Role]string{
 
 	"donor_phone_codes":     {API: "SELECT, INSERT, UPDATE, DELETE"},
 	"donor_oidc_identities": {API: "SELECT, INSERT, UPDATE"},
+	"donor_company_touches": {
+		API:              "SELECT, INSERT, UPDATE (company_code, touched_at, expires_at), DELETE",
+		ProjectionWorker: "SELECT, DELETE",
+	},
 
 	"donor_staff":                {API: "SELECT, INSERT, UPDATE", StaffCLI: "SELECT, INSERT, UPDATE"},
 	"donor_staff_passkeys":       {API: "SELECT, INSERT, UPDATE, DELETE", StaffCLI: "SELECT, DELETE"},

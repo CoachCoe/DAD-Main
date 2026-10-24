@@ -95,3 +95,25 @@ VALUES ($1, $2, $3, $4, $5);
 
 -- name: TouchOIDCIdentity :exec
 UPDATE donor_oidc_identities SET last_used_at=$2 WHERE id=$1;
+
+
+-- name: UpsertCompanyTouch :exec
+-- Last touch wins: a new company code for the same visitor token overwrites the
+-- code, time and expiry recorded for that token.
+INSERT INTO donor_company_touches (id, token_hash, company_code, touched_at, expires_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (token_hash) DO UPDATE
+SET company_code=EXCLUDED.company_code, touched_at=EXCLUDED.touched_at, expires_at=EXCLUDED.expires_at;
+
+-- name: CompanyTouchByToken :one
+SELECT id, token_hash, company_code, touched_at, expires_at, created_at
+FROM donor_company_touches WHERE token_hash=$1;
+
+-- name: BindDonorCompanyCode :exec
+-- Record the captured company code on the donor at first gift, only if one is
+-- not already set (first bind wins; the touch's last-touch rule already chose
+-- which code that is).
+UPDATE donors SET company_code=$2 WHERE id=$1 AND company_code IS NULL;
+
+-- name: PurgeCompanyTouches :exec
+DELETE FROM donor_company_touches WHERE expires_at<=$1;

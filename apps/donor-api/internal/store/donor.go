@@ -385,6 +385,103 @@ func captureTouch(ctx context.Context, q *queries.Queries, code, kind, visitor s
 	)
 }
 
+// companyCode is the accepted employer-code form; it mirrors the ck_donor_company_code
+// database constraint (uppercase alphanumeric, 2-64 chars, internal hyphens).
+var companyCode = regexp.MustCompile(`^[A-Z0-9][A-Z0-9-]{1,63}$`)
+
+// CompanyCapture is the visitor token to keep after a company-code touch, empty
+// for a malformed code.
+type CompanyCapture struct {
+	Token string `json:"token"`
+}
+
+// CaptureCompanyCode records a pre-signup visit through an employer's company
+// code against an anonymous visitor token, so the attribution survives the app
+// install gap and binds at first gift (resolved to a partner in a later phase).
+// Last touch wins. A malformed code keeps the visitor's existing unexpired touch
+// if any, else records nothing. The code is normalised to upper case.
+func (s DonorService) CaptureCompanyCode(ctx context.Context, code, visitor string, now time.Time) (CompanyCapture, error) {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (CompanyCapture, error) {
+		q := queries.New(tx)
+		if !companyCode.MatchString(code) {
+			// Unknown/malformed: keep an existing unexpired touch, else nothing.
+			if visitor != "" {
+				if touch, err := q.CompanyTouchByToken(ctx, HashToken(visitor)); err == nil && touch.ExpiresAt.Time.After(now) {
+					return CompanyCapture{Token: visitor}, nil
+				} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+					return CompanyCapture{}, err
+				}
+			}
+			return CompanyCapture{}, nil
+		}
+		// Reuse the visitor's token while its touch is unexpired, else mint one.
+		token := visitor
+		if token != "" {
+			if touch, err := q.CompanyTouchByToken(ctx, HashToken(visitor)); err != nil {
+				if !errors.Is(err, pgx.ErrNoRows) {
+					return CompanyCapture{}, err
+				}
+				token = ""
+			} else if !touch.ExpiresAt.Time.After(now) {
+				token = ""
+			}
+		}
+		if token == "" {
+			fresh, err := randomToken(32)
+			if err != nil {
+				return CompanyCapture{}, err
+			}
+			token = fresh
+		}
+		id, err := NewID()
+		if err != nil {
+			return CompanyCapture{}, err
+		}
+		if err := q.UpsertCompanyTouch(ctx, queries.UpsertCompanyTouchParams{
+			ID: id, TokenHash: HashToken(token), CompanyCode: code,
+			TouchedAt: timestamp(now), ExpiresAt: timestamp(now.Add(referralWindow)),
+		}); err != nil {
+			return CompanyCapture{}, err
+		}
+		return CompanyCapture{Token: token}, nil
+	})
+}
+
+// BindCapturedCompanyCode binds the company code captured for visitor onto
+// donor, once, at the point the donor is established (first gift). It is a
+// no-op when the visitor has no unexpired touch or the donor already carries a
+// code. The partner this code resolves to is applied in a later phase; this
+// only preserves the attribution against the account. It returns the bound code
+// if one was set, empty otherwise.
+func (s DonorService) BindCapturedCompanyCode(ctx context.Context, donor pgtype.UUID, visitor string, now time.Time) (string, error) {
+	if visitor == "" {
+		return "", nil
+	}
+	var bound string
+	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		touch, err := q.CompanyTouchByToken(ctx, HashToken(visitor))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if !touch.ExpiresAt.Time.After(now) {
+			return nil
+		}
+		if err := q.BindDonorCompanyCode(ctx, queries.BindDonorCompanyCodeParams{
+			ID: donor, CompanyCode: text(touch.CompanyCode),
+		}); err != nil {
+			return err
+		}
+		bound = touch.CompanyCode
+		return nil
+	})
+	return bound, err
+}
+
 func (s DonorService) Gifts(ctx context.Context, token string, offset int64) (GiftsPage, error) {
 	if !pageOffsetValid(offset) {
 		return GiftsPage{}, payments.ErrFacts

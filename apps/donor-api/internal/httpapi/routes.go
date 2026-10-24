@@ -35,6 +35,7 @@ func (a *api) routes() []route {
 		a.visitor("POST /donor/checkouts", a.beginCheckout),
 		a.public("GET /donor/referrals/{code}", a.referrer),
 		a.visitor("POST /donor/referrals/{code}", a.captureReferral),
+		a.visitor("POST /donor/company/{code}", a.captureCompany),
 		a.visitor("POST /donor/public/partner-signup", a.partnerSignup),
 
 		a.donorEntry("POST /donor/login", a.login),

@@ -472,6 +472,88 @@
         }
       }
     },
+    "/donor/company/{code}": {
+      "post": {
+        "operationId": "captureCompany",
+        "summary": "Record a company-code visit",
+        "description": "Web only. Records a pre-signup visit through an employer's company code on the HttpOnly `dad_company` cookie (30 days, last touch wins) so the attribution survives the app install gap; it binds to the account at first gift. The code is normalised to upper case. The response never reveals whether the code resolves to a partner.",
+        "tags": [
+          "Public"
+        ],
+        "security": [],
+        "x-rate-limit": "visitor",
+        "x-clients": [
+          "browser"
+        ],
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{0,64}$"
+            },
+            "description": "Company code; any other form is 404."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "captured": {
+                      "type": "boolean",
+                      "description": "False when the visit did not start or keep a company-code window."
+                    }
+                  },
+                  "required": [
+                    "captured"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/donor/public/partner-signup": {
       "post": {
         "operationId": "partnerSignup",

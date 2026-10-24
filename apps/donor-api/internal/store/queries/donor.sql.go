@@ -11,6 +11,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bindDonorCompanyCode = `-- name: BindDonorCompanyCode :exec
+UPDATE donors SET company_code=$2 WHERE id=$1 AND company_code IS NULL
+`
+
+type BindDonorCompanyCodeParams struct {
+	ID          pgtype.UUID `json:"id"`
+	CompanyCode pgtype.Text `json:"company_code"`
+}
+
+// Record the captured company code on the donor at first gift, only if one is
+// not already set (first bind wins; the touch's last-touch rule already chose
+// which code that is).
+func (q *Queries) BindDonorCompanyCode(ctx context.Context, arg BindDonorCompanyCodeParams) error {
+	_, err := q.db.Exec(ctx, bindDonorCompanyCode, arg.ID, arg.CompanyCode)
+	return err
+}
+
 const capturedReferrerName = `-- name: CapturedReferrerName :one
 SELECT d.public_name FROM donors d JOIN donor_referral_touches t ON t.referrer_id=d.id
 WHERE t.token_hash=$1 AND d.disabled=false
@@ -23,6 +40,34 @@ func (q *Queries) CapturedReferrerName(ctx context.Context, tokenHash string) (p
 	return public_name, err
 }
 
+const companyTouchByToken = `-- name: CompanyTouchByToken :one
+SELECT id, token_hash, company_code, touched_at, expires_at, created_at
+FROM donor_company_touches WHERE token_hash=$1
+`
+
+type CompanyTouchByTokenRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	TokenHash   string             `json:"token_hash"`
+	CompanyCode string             `json:"company_code"`
+	TouchedAt   pgtype.Timestamptz `json:"touched_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CompanyTouchByToken(ctx context.Context, tokenHash string) (CompanyTouchByTokenRow, error) {
+	row := q.db.QueryRow(ctx, companyTouchByToken, tokenHash)
+	var i CompanyTouchByTokenRow
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.CompanyCode,
+		&i.TouchedAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const deletePhoneCode = `-- name: DeletePhoneCode :exec
 DELETE FROM donor_phone_codes WHERE phone=$1
 `
@@ -33,7 +78,7 @@ func (q *Queries) DeletePhoneCode(ctx context.Context, phone string) error {
 }
 
 const donorByPhone = `-- name: DonorByPhone :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone FROM donors WHERE phone=$1 AND disabled=false
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code FROM donors WHERE phone=$1 AND disabled=false
 `
 
 func (q *Queries) DonorByPhone(ctx context.Context, phone pgtype.Text) (Donor, error) {
@@ -52,6 +97,7 @@ func (q *Queries) DonorByPhone(ctx context.Context, phone pgtype.Text) (Donor, e
 		&i.City,
 		&i.Timezone,
 		&i.Phone,
+		&i.CompanyCode,
 	)
 	return i, err
 }
@@ -175,6 +221,15 @@ func (q *Queries) PhoneCode(ctx context.Context, phone string) (DonorPhoneCode, 
 	return i, err
 }
 
+const purgeCompanyTouches = `-- name: PurgeCompanyTouches :exec
+DELETE FROM donor_company_touches WHERE expires_at<=$1
+`
+
+func (q *Queries) PurgeCompanyTouches(ctx context.Context, expiresAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, purgeCompanyTouches, expiresAt)
+	return err
+}
+
 const purgeReferralTouches = `-- name: PurgeReferralTouches :many
 WITH deleted AS (
  DELETE FROM donor_referral_touches WHERE id=ANY(ARRAY(
@@ -295,7 +350,7 @@ func (q *Queries) ReferralTouchByToken(ctx context.Context, tokenHash string) (D
 }
 
 const referrerByCode = `-- name: ReferrerByCode :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false
 `
 
 func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) (Donor, error) {
@@ -314,6 +369,7 @@ func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) 
 		&i.City,
 		&i.Timezone,
 		&i.Phone,
+		&i.CompanyCode,
 	)
 	return i, err
 }
@@ -353,7 +409,7 @@ func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) 
 }
 
 const saveSharing = `-- name: SaveSharing :one
-UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone
+UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code
 `
 
 type SaveSharingParams struct {
@@ -378,6 +434,7 @@ func (q *Queries) SaveSharing(ctx context.Context, arg SaveSharingParams) (Donor
 		&i.City,
 		&i.Timezone,
 		&i.Phone,
+		&i.CompanyCode,
 	)
 	return i, err
 }
@@ -397,7 +454,7 @@ func (q *Queries) TouchOIDCIdentity(ctx context.Context, arg TouchOIDCIdentityPa
 }
 
 const updateDonorProfile = `-- name: UpdateDonorProfile :one
-UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone
+UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code
 `
 
 type UpdateDonorProfileParams struct {
@@ -432,8 +489,37 @@ func (q *Queries) UpdateDonorProfile(ctx context.Context, arg UpdateDonorProfile
 		&i.City,
 		&i.Timezone,
 		&i.Phone,
+		&i.CompanyCode,
 	)
 	return i, err
+}
+
+const upsertCompanyTouch = `-- name: UpsertCompanyTouch :exec
+INSERT INTO donor_company_touches (id, token_hash, company_code, touched_at, expires_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (token_hash) DO UPDATE
+SET company_code=EXCLUDED.company_code, touched_at=EXCLUDED.touched_at, expires_at=EXCLUDED.expires_at
+`
+
+type UpsertCompanyTouchParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	TokenHash   string             `json:"token_hash"`
+	CompanyCode string             `json:"company_code"`
+	TouchedAt   pgtype.Timestamptz `json:"touched_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+}
+
+// Last touch wins: a new company code for the same visitor token overwrites the
+// code, time and expiry recorded for that token.
+func (q *Queries) UpsertCompanyTouch(ctx context.Context, arg UpsertCompanyTouchParams) error {
+	_, err := q.db.Exec(ctx, upsertCompanyTouch,
+		arg.ID,
+		arg.TokenHash,
+		arg.CompanyCode,
+		arg.TouchedAt,
+		arg.ExpiresAt,
+	)
+	return err
 }
 
 const upsertPhoneCode = `-- name: UpsertPhoneCode :exec
