@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -435,5 +436,131 @@ func TestCheckInDisabledWithoutSecret(t *testing.T) {
 	_, tok := signedInDonor(t, pool)
 	if _, err := res.CheckIn(ctx, tok, "anything"); !errors.Is(err, ErrCheckInDisabled) {
 		t.Fatalf("check-in without a configured secret: %v", err)
+	}
+}
+
+// TestEventReminderSweep covers E-7: the 24h and 2h sweeps queue one reminder
+// per reserved donor per window, deduped so repeated sweeps do not re-queue,
+// and they do not touch events outside the window or cancelled reservations.
+func TestEventReminderSweep(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	res := ReservationService{DB: pool}
+	rem := EventReminderService{DB: pool}
+
+	// Event in ~90 minutes (inside the 2h window, inside the 24h window).
+	soon := eventInput("soon", "San Francisco", "94103", "VOLUNTEER", 90*time.Minute)
+	soonID, err := events.Create(ctx, adminToken, soon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, soonID); err != nil {
+		t.Fatal(err)
+	}
+	// Event in ~10 days (outside both windows).
+	far := eventInput("far", "San Francisco", "94103", "VOLUNTEER", 240*time.Hour)
+	farID, err := events.Create(ctx, adminToken, far)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, farID); err != nil {
+		t.Fatal(err)
+	}
+
+	reserver, reserverTok := signedInDonor(t, pool)
+	pushCleanupDonor(t, pool, reserver)
+	if _, err := res.Reserve(ctx, reserverTok, soonID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := res.Reserve(ctx, reserverTok, farID); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	n, err := rem.QueueDueReminders(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The soon event is in both the 24h and the 2h window, so two reminders.
+	if n != 2 {
+		t.Fatalf("first sweep queued %d reminders, want 2 (24h + 2h for the soon event)", n)
+	}
+	// A second sweep is idempotent — the dedup keys already exist.
+	if again, err := rem.QueueDueReminders(ctx, now); err != nil || again != 0 {
+		t.Fatalf("second sweep queued %d (want 0): %v", again, err)
+	}
+	// Only EVENT_REMINDER rows for the soon event, none for the far one.
+	var soonCount, farCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE category='EVENT_REMINDER' AND context->>'event_id'=$1", soonID.String()).Scan(&soonCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE category='EVENT_REMINDER' AND context->>'event_id'=$1", farID.String()).Scan(&farCount); err != nil {
+		t.Fatal(err)
+	}
+	if soonCount != 2 || farCount != 0 {
+		t.Fatalf("reminder rows: soon=%d far=%d, want 2 and 0", soonCount, farCount)
+	}
+}
+
+// TestEventICSAndReportIssue covers E-6/E-10: a published event renders a valid
+// VCALENDAR with escaped fields, invite-only/draft events are not downloadable
+// anonymously, and the report-issue mailto is present when a support email is
+// configured.
+func TestEventICSAndReportIssue(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	reader := EventReader{DB: pool, SupportEmail: "help@dad.example"}
+
+	in := eventInput("gala", "San Francisco", "94103", "COMMUNITY", 48*time.Hour)
+	in.Description = "Food, drinks; and fun" // has a semicolon to exercise escaping
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+
+	ics, err := reader.Calendar(ctx, eventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"BEGIN:VCALENDAR", "BEGIN:VEVENT", "UID:" + eventID.String() + "@dad", "SUMMARY:Event gala", "DTSTART:", "DTEND:", "Food\\, drinks\\; and fun", "END:VCALENDAR"} {
+		if !strings.Contains(ics, want) {
+			t.Fatalf("ics missing %q:\n%s", want, ics)
+		}
+	}
+
+	// report_issue_url present on the detail when a support email is set.
+	v, err := reader.Detail(ctx, eventID)
+	if err != nil || v.ReportIssueURL == nil || !strings.HasPrefix(*v.ReportIssueURL, "mailto:help@dad.example") {
+		t.Fatalf("report issue url: %+v %v", v.ReportIssueURL, err)
+	}
+
+	// An invite-only event is not downloadable anonymously.
+	inv := eventInput("secret", "San Francisco", "94103", "INVITE_ONLY", 48*time.Hour)
+	invID, err := events.Create(ctx, adminToken, inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, invID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.Calendar(ctx, invID); !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("invite-only ics was downloadable: %v", err)
+	}
+
+	// With no support email, report_issue_url is nil.
+	plain := EventReader{DB: pool}
+	if v, err := plain.Detail(ctx, eventID); err != nil || v.ReportIssueURL != nil {
+		t.Fatalf("report url set without support email: %+v %v", v.ReportIssueURL, err)
 	}
 }

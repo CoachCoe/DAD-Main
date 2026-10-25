@@ -5962,6 +5962,46 @@
         }
       }
     },
+    "/events/{event_id}/calendar.ics": {
+      "get": {
+        "operationId": "eventCalendar",
+        "summary": "Download a published event as an .ics calendar file (E-6)",
+        "tags": [
+          "Events"
+        ],
+        "security": [],
+        "parameters": [
+          {
+            "name": "event_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "A malformed, unknown, draft, or invite-only id is 404."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "An iCalendar document.",
+            "content": {
+              "text/calendar": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/Unavailable"
+          }
+        }
+      }
+    },
     "/initiatives/{initiative_id}/spend": {
       "get": {
         "operationId": "initiativeSpend",
@@ -10056,6 +10096,17 @@
               }
             ],
             "description": "\"Invitation earned at ...\" for an INVITE_ONLY event unlocked by a badge perk (E-5); null otherwise."
+          },
+          "report_issue_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "mailto link to report an issue about this event to DAD (E-10); null when no support email is configured."
           }
         },
         "required": [
@@ -10072,7 +10123,8 @@
           "capacity",
           "spots_left",
           "reservation_status",
-          "invitation_note"
+          "invitation_note",
+          "report_issue_url"
         ],
         "additionalProperties": false
       },

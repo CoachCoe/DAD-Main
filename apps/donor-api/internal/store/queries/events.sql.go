@@ -362,6 +362,41 @@ func (q *Queries) QueueEventPush(ctx context.Context, arg QueueEventPushParams) 
 	return err
 }
 
+const queueEventReminders = `-- name: QueueEventReminders :execrows
+INSERT INTO donor_push_notifications (id, donor_id, category, dedup_key, context, available_at, expires_at)
+SELECT gen_random_uuid(), r.donor_id, 'EVENT_REMINDER',
+       'push:event-reminder:' || e.id::text || ':' || r.donor_id::text || ':' || $1::text,
+       json_build_object('event_id', e.id::text, 'window', $1::text),
+       $2::timestamptz, e.starts_at
+FROM donor_events e
+JOIN donor_event_reservations r ON r.event_id = e.id
+WHERE e.publish_state = 'PUBLISHED'
+  AND r.status = 'RESERVED'
+  AND e.starts_at > $2::timestamptz
+  AND e.starts_at <= $3::timestamptz
+ON CONFLICT (dedup_key) DO NOTHING
+`
+
+type QueueEventRemindersParams struct {
+	WindowLabel string             `json:"window_label"`
+	AsOf        pgtype.Timestamptz `json:"as_of"`
+	Until       pgtype.Timestamptz `json:"until"`
+}
+
+// E-7: queue an EVENT_REMINDER push for every reserved (non-cancelled) donor of
+// a published event starting within the given lead window, in one set-based
+// pass. dedup_key is per (event, donor, window label) so each of the 24h and 2h
+// windows fires at most once; expires_at is the event start, so a reminder the
+// worker could not deliver before the event lapses rather than arriving late.
+// window_label distinguishes the two sweeps ('24h' / '2h').
+func (q *Queries) QueueEventReminders(ctx context.Context, arg QueueEventRemindersParams) (int64, error) {
+	result, err := q.db.Exec(ctx, queueEventReminders, arg.WindowLabel, arg.AsOf, arg.Until)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const removeEventGuest = `-- name: RemoveEventGuest :exec
 DELETE FROM donor_event_guests WHERE event_id=$1 AND donor_id=$2
 `

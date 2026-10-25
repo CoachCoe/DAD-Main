@@ -146,6 +146,7 @@ func (a *api) routes() []route {
 		a.staffWrite("POST /donor/staff/events/{event_id}/check-in-token", a.eventCheckInToken),
 		a.public("GET /initiatives/{initiative_id}/spend", a.initiativeSpend),
 		a.public("GET /events/{event_id}", a.eventDetail),
+		a.public("GET /events/{event_id}/calendar.ics", a.eventCalendar),
 	}
 }
 

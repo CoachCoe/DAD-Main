@@ -27,6 +27,7 @@ type EventReadSource interface {
 	InviteOnlyEvents(context.Context, string) ([]store.EventView, error)
 	Detail(context.Context, pgtype.UUID) (store.EventView, error)
 	DetailForDonor(context.Context, string, pgtype.UUID) (store.EventView, error)
+	Calendar(context.Context, pgtype.UUID) (string, error)
 }
 
 // ReservationSource books, waitlists, and cancels event reservations (E-4/E-9),
@@ -119,6 +120,33 @@ func (a *api) eventDetail(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Cache-Control", "public, max-age=60")
 		writeJSON(w, http.StatusOK, body)
+	}
+}
+
+// eventCalendar serves a published event as an .ics download (E-6). INVITE_ONLY
+// and draft events read as not found, like the anonymous detail.
+func (a *api) eventCalendar(w http.ResponseWriter, r *http.Request) {
+	if a.EventRead == nil {
+		writeError(w, r, http.StatusServiceUnavailable, donorUnavailable, nil)
+		return
+	}
+	id, ok := pathID(w, r, "event_id")
+	if !ok {
+		return
+	}
+	ctx, cancel := withTimeout(r, 3*time.Second)
+	defer cancel()
+	ics, err := a.EventRead.Calendar(ctx, id)
+	switch {
+	case errors.Is(err, store.ErrEventNotFound):
+		writeError(w, r, http.StatusNotFound, "Record not found", nil)
+	case err != nil:
+		writeError(w, r, http.StatusServiceUnavailable, donorUnavailable, err)
+	default:
+		w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
+		w.Header().Set("Content-Disposition", "attachment; filename=\"event.ics\"")
+		w.Header().Set("Cache-Control", "public, max-age=60")
+		_, _ = w.Write([]byte(ics))
 	}
 }
 

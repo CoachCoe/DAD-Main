@@ -195,6 +195,12 @@ func pushSuppression(
 			return "opted_out", nil
 		}
 		return "", nil
+	case "EVENT_REMINDER":
+		// Same gate as other event alerts; expiry (event start) handled above.
+		if !pref.Volunteer {
+			return "opted_out", nil
+		}
+		return "", nil
 	}
 	return "", payments.ErrFacts
 }
@@ -235,6 +241,13 @@ func pushContent(job queries.DonorPushNotification) (push.Notification, error) {
 	case "EVENT_PROMOTED":
 		n.Title = "A spot opened up"
 		n.Body = "You are off the waitlist — your spot at an upcoming event is confirmed. Open the app for details."
+	case "EVENT_REMINDER":
+		n.Title = "Your event is coming up"
+		if data.Text("window") == "2h" {
+			n.Body = "An event you reserved starts in about 2 hours. Open the app for the details."
+		} else {
+			n.Body = "An event you reserved is tomorrow. Open the app for the details."
+		}
 	default:
 		return n, payments.ErrFacts
 	}

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -222,7 +223,24 @@ func (s EventService) RemoveGuest(ctx context.Context, token string, eventID, do
 // EventReader is the donor-facing read of published events (Phase 4.2). It only
 // ever returns PUBLISHED events; a draft or unknown id reads as "not found", so
 // the draft side is never observable to donors.
-type EventReader struct{ DB *pgxpool.Pool }
+type EventReader struct {
+	DB *pgxpool.Pool
+	// SupportEmail, when set, is the address the report-issue mailto targets
+	// (E-10); empty leaves report_issue_url nil.
+	SupportEmail string
+}
+
+// reportIssueURL builds the E-10 mailto for an event, or nil when no support
+// address is configured.
+func (r EventReader) reportIssueURL(e queries.DonorEvent) *string {
+	if r.SupportEmail == "" {
+		return nil
+	}
+	u := "mailto:" + r.SupportEmail +
+		"?subject=" + url.QueryEscape("Issue with event: "+e.Title) +
+		"&body=" + url.QueryEscape("Event ID: "+e.ID.String()+"\n\n")
+	return &u
+}
 
 // ErrEventNotFound is returned when an event does not exist or is not published;
 // both map to 404 so the draft state is not observable.
@@ -250,6 +268,9 @@ type EventView struct {
 	// InvitationNote is "Invitation earned at ..." for an INVITE_ONLY event the
 	// donor can see via a badge perk (E-5); nil otherwise.
 	InvitationNote *string `json:"invitation_note"`
+	// ReportIssueURL is a mailto link to report an issue about this event to DAD
+	// (E-10); nil when no support email is configured.
+	ReportIssueURL *string `json:"report_issue_url"`
 }
 
 func eventView(e queries.DonorEvent) EventView {
@@ -318,6 +339,7 @@ func (r EventReader) NearDonor(ctx context.Context, token string) ([]EventView, 
 		out := make([]EventView, 0, len(rows))
 		for _, e := range rows {
 			v := eventView(e)
+			v.ReportIssueURL = r.reportIssueURL(e)
 			v.SpotsLeft = spotsLeft(e.Capacity, reserved[v.ID])
 			if s, ok := status[v.ID]; ok {
 				v.ReservationStatus = &s
@@ -350,6 +372,7 @@ func (r EventReader) Detail(ctx context.Context, id pgtype.UUID) (EventView, err
 // withSpotsLeft builds an EventView and fills SpotsLeft for a capped event.
 func (r EventReader) withSpotsLeft(ctx context.Context, q *queries.Queries, e queries.DonorEvent) (EventView, error) {
 	v := eventView(e)
+	v.ReportIssueURL = r.reportIssueURL(e)
 	if e.Capacity > 0 {
 		reserved, err := q.ReservedCount(ctx, e.ID)
 		if err != nil {
@@ -358,6 +381,69 @@ func (r EventReader) withSpotsLeft(ctx context.Context, q *queries.Queries, e qu
 		v.SpotsLeft = spotsLeft(e.Capacity, reserved)
 	}
 	return v, nil
+}
+
+// Calendar returns an RFC 5545 iCalendar (.ics) document for a published,
+// non-invite event (E-6). A draft, unknown, or INVITE_ONLY id is
+// ErrEventNotFound, matching the anonymous Detail gate.
+func (r EventReader) Calendar(ctx context.Context, id pgtype.UUID) (string, error) {
+	q := queries.New(r.DB)
+	e, err := q.EventByID(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrEventNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if e.PublishState != "PUBLISHED" || e.Type == "INVITE_ONLY" {
+		return "", ErrEventNotFound
+	}
+	return renderICS(e), nil
+}
+
+// renderICS builds a single-VEVENT VCALENDAR. Times are UTC (the trailing Z
+// form), which every calendar client reads correctly. Text fields are escaped
+// per RFC 5545 (comma, semicolon, backslash, newline).
+func renderICS(e queries.DonorEvent) string {
+	stamp := func(t time.Time) string { return t.UTC().Format("20060102T150405Z") }
+	location := e.Venue
+	if e.Address != "" {
+		if location != "" {
+			location += ", "
+		}
+		location += e.Address
+	}
+	var b strings.Builder
+	b.WriteString("BEGIN:VCALENDAR\r\n")
+	b.WriteString("VERSION:2.0\r\n")
+	b.WriteString("PRODID:-//DAD//Events//EN\r\n")
+	b.WriteString("CALSCALE:GREGORIAN\r\n")
+	b.WriteString("METHOD:PUBLISH\r\n")
+	b.WriteString("BEGIN:VEVENT\r\n")
+	b.WriteString("UID:" + e.ID.String() + "@dad\r\n")
+	b.WriteString("DTSTAMP:" + stamp(time.Now()) + "\r\n")
+	b.WriteString("DTSTART:" + stamp(e.StartsAt.Time) + "\r\n")
+	b.WriteString("DTEND:" + stamp(e.EndsAt.Time) + "\r\n")
+	b.WriteString("SUMMARY:" + escapeICS(e.Title) + "\r\n")
+	if e.Description != "" {
+		b.WriteString("DESCRIPTION:" + escapeICS(e.Description) + "\r\n")
+	}
+	if location != "" {
+		b.WriteString("LOCATION:" + escapeICS(location) + "\r\n")
+	}
+	b.WriteString("END:VEVENT\r\n")
+	b.WriteString("END:VCALENDAR\r\n")
+	return b.String()
+}
+
+// escapeICS escapes a text value for an iCalendar property (RFC 5545 §3.3.11).
+func escapeICS(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, ";", "\\;")
+	s = strings.ReplaceAll(s, ",", "\\,")
+	s = strings.ReplaceAll(s, "\r\n", "\\n")
+	s = strings.ReplaceAll(s, "\n", "\\n")
+	return s
 }
 
 // invitationNote is the "Invitation earned at ..." label for an INVITE_ONLY
@@ -774,4 +860,36 @@ func (s ReservationService) CheckIn(ctx context.Context, sessionToken, qrToken s
 		}
 		return CheckInResult{EventID: eventID.String(), CheckedIn: true}, nil
 	})
+}
+
+// EventReminderService queues the 24-hour and 2-hour reminder pushes before an
+// event (PRD §6.10 E-7). It is run periodically by the projections worker; each
+// window is deduped per (event, donor, window), so running it often is cheap
+// and idempotent — a window that has already fired is a no-op.
+type EventReminderService struct{ DB *pgxpool.Pool }
+
+// reminderWindows are the lead times before an event at which a reminder fires.
+var reminderWindows = []struct {
+	label string
+	lead  time.Duration
+}{{"24h", 24 * time.Hour}, {"2h", 2 * time.Hour}}
+
+// QueueDueReminders queues reminders for every published event whose start is
+// within each window and that a donor holds a reservation for. Returns the
+// number of reminders newly queued across both windows.
+func (s EventReminderService) QueueDueReminders(ctx context.Context, now time.Time) (int64, error) {
+	q := queries.New(s.DB)
+	var queued int64
+	for _, w := range reminderWindows {
+		n, err := q.QueueEventReminders(ctx, queries.QueueEventRemindersParams{
+			WindowLabel: w.label,
+			AsOf:        timestamp(now),
+			Until:       timestamp(now.Add(w.lead)),
+		})
+		if err != nil {
+			return queued, err
+		}
+		queued += n
+	}
+	return queued, nil
 }

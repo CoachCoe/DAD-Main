@@ -115,6 +115,7 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 	case "projections":
 		retention := &store.TouchRetention{DB: pool}
 		rankings := store.RankingService{DB: pool}
+		reminders := store.EventReminderService{DB: pool}
 		return func(ctx context.Context) (bool, error) {
 			now := time.Now().UTC()
 			purged, err := retention.PurgeNext(ctx, now)
@@ -127,7 +128,13 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 			}
 			// Periodic, throttled global ranking rollup (PRD §6.4, risk #6).
 			ranked, err := rankings.RefreshIfDue(ctx, now)
-			return purged || processed > 0 || ranked, err
+			if err != nil {
+				return purged || processed > 0 || ranked, err
+			}
+			// Event reminder sweeps (E-7); idempotent per window, so a frequent
+			// sweep is cheap and each 24h/2h window fires once.
+			remind, err := reminders.QueueDueReminders(ctx, now)
+			return purged || processed > 0 || ranked || remind > 0, err
 		}, nil
 	case "push":
 		config, err := push.FromEnvironment(getenv)
