@@ -5,9 +5,9 @@ import { Announcer } from "@/components/donor/Announcer";
 import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
 import { api, failureMessage, type RequestBody, type Schema } from "@/lib/api";
-import { MAX_GIFT_MINOR, MIN_GIFT_MINOR, monthlyFraming, parseDollars } from "@/lib/money";
+import { dailyGiftMinor, MAX_DAILY_DOLLARS, monthlyFraming } from "@/lib/money";
 
-const presets = [3000, 9000, 15000];
+const presets = [1, 3, 5];
 // Remembers this tab's last choice so cancelling Stripe checkout returns to it.
 const CHOICE_KEY = "dad.donate.choice";
 type Choice = { amount: string; email: string };
@@ -23,14 +23,13 @@ function remembered(): Choice | null {
 
 export default function Donate() {
   const [email, setEmail] = useState("");
-  const [amount, setAmount] = useState("30");
+  const [amount, setAmount] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [amountInvalid, setAmountInvalid] = useState(false);
   const amountInput = useRef<HTMLInputElement>(null);
   const attempt = useRef<{ payload: string; key: string } | null>(null);
-  const parsed = parseDollars(amount);
-  const chosen = parsed !== null && parsed >= MIN_GIFT_MINOR && parsed <= MAX_GIFT_MINOR ? parsed : null;
+  const chosen = dailyGiftMinor(amount);
 
   useEffect(() => {
     const choice = remembered();
@@ -64,10 +63,11 @@ export default function Donate() {
     if (busy) return;
     setError("");
     setAmountInvalid(false);
-    const minor = parseDollars(amount);
+    const minor = dailyGiftMinor(amount);
     if (minor === null)
-      return rejectAmount("Enter a dollar amount with no more than two decimal places, like 30 or 30.50.");
-    if (minor < MIN_GIFT_MINOR || minor > MAX_GIFT_MINOR) return rejectAmount("Enter an amount between $1 and $900.");
+      return rejectAmount(
+        `Enter a whole number of dollars a day from $1 to $${MAX_DAILY_DOLLARS}. Larger gifts are arranged with DAD directly.`,
+      );
     const payload = JSON.stringify({
       email,
       amount_minor: minor,
@@ -109,32 +109,31 @@ export default function Donate() {
   return (
     <Page eyebrow="Give" title="Join the beginning">
       <p className="lead">
-        DAD launches in April 2027. A first gift before launch earns a permanent Founding Donor badge.
+        Give a dollar a day, billed monthly. A first gift before January 2027 earns a permanent Founding Donor badge.
       </p>
       <form onSubmit={submit} autoComplete="off">
         <fieldset disabled={busy}>
-          <legend>Choose an amount</legend>
+          <legend>Choose your daily gift</legend>
           <div className="presets">
-            {presets.map((minor) => {
-              const { monthly: perMonth, daily } = monthlyFraming(minor);
-              const value = String(minor / 100);
+            {presets.map((dollars) => {
+              const { monthly: perMonth, daily } = monthlyFraming(dailyGiftMinor(String(dollars)) ?? 0);
               return (
                 <button
-                  key={minor}
+                  key={dollars}
                   type="button"
-                  aria-pressed={parseDollars(amount) === minor}
-                  onClick={() => edit(() => setAmount(value))}
+                  aria-pressed={amount.trim() === String(dollars)}
+                  onClick={() => edit(() => setAmount(String(dollars)))}
                 >
-                  <span>{perMonth}</span> · <span>{daily}</span>
+                  <span>{daily}</span> · <span>{perMonth}</span>
                 </button>
               );
             })}
           </div>
           <label>
-            Monthly amount (USD)
+            Dollars a day
             <input
               ref={amountInput}
-              inputMode="decimal"
+              inputMode="numeric"
               required
               value={amount}
               aria-invalid={amountInvalid || undefined}
@@ -144,7 +143,7 @@ export default function Donate() {
           </label>
           {chosen && (
             <p id="donate-amount">
-              You’ll give <GiftFraming minor={chosen} monthly />
+              You’ll give <GiftFraming minor={chosen} />
             </p>
           )}
         </fieldset>

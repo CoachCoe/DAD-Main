@@ -96,7 +96,7 @@ it("describes a subscription Stripe paused without offering changes", async () =
   render(<RecurringPage />);
   expect(await screen.findByText("Your monthly gift is paused.")).toBeVisible();
   expect(screen.getByRole("link", { name: "Update payment method" })).toBeVisible();
-  expect(screen.queryByRole("link", { name: "Change monthly amount" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Change your daily gift" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
   expect(screen.queryByText(/being set up/)).not.toBeInTheDocument();
 });
@@ -109,7 +109,7 @@ it("says a gift still being set up is being set up", async () => {
   render(<RecurringPage />);
   expect(await screen.findByText("Your monthly gift is still being set up. Refresh in a moment.")).toBeVisible();
   expect(screen.getByRole("button", { name: "Refresh billing details" })).toBeVisible();
-  expect(screen.queryByRole("link", { name: "Change monthly amount" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Change your daily gift" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
 });
 
@@ -128,7 +128,7 @@ it("offers only a payment method update for an ending gift", async () => {
     ),
   ).toBeVisible();
   expect(screen.getByRole("link", { name: "Update payment method" })).toBeVisible();
-  expect(screen.queryByRole("link", { name: "Change monthly amount" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Change your daily gift" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Cancel monthly giving" })).not.toBeInTheDocument();
 });
 
@@ -148,7 +148,7 @@ it("dates billing details by their last Stripe sync and offers changes from them
   expect(synced).toHaveTextContent(`Billing details last updated from Stripe ${formatDateTime(observed)}.`);
   expect(synced).toHaveClass("note");
   expect(screen.getByText(paragraph(`Next renewal: ${formatDate(subscription.period_end)}.`))).toBeVisible();
-  expect(screen.getByRole("link", { name: "Change monthly amount" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "Change your daily gift" })).toBeVisible();
   expect(synced.querySelector("time")).toHaveAttribute("dateTime", observed);
   expect(screen.queryByRole("note")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Cancel monthly giving" })).toBeEnabled();

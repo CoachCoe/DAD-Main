@@ -270,9 +270,10 @@
          "amount_minor": {
           "type": "integer",
           "format": "int64",
-          "description": "Integer USD cents.",
-          "minimum": 100,
-          "maximum": 90000
+          "description": "The monthly charge in integer USD cents: a whole number of dollars a day from $1 to $30, times 30 (3000 to 90000 in steps of 3000).",
+          "minimum": 3000,
+          "maximum": 90000,
+          "multipleOf": 3000
          },
          "frequency": {
           "type": "string",
@@ -2572,13 +2573,16 @@
          "amount_minor": {
           "type": "integer",
           "format": "int64",
-          "minimum": 100,
-          "maximum": 90000
+          "description": "The monthly charge in integer USD cents: a whole number of dollars a day from $1 to $30, times 30 (3000 to 90000 in steps of 3000).",
+          "minimum": 3000,
+          "maximum": 90000,
+          "multipleOf": 3000
          },
          "previous_minor": {
           "type": "integer",
           "format": "int64",
-          "minimum": 100,
+          "description": "The amount the next renewal would charge, which may predate the daily rule.",
+          "minimum": 1,
           "maximum": 99999999
          },
          "effective_at": {

@@ -3770,7 +3770,7 @@ export interface operations {
                     email: string;
                     /**
                      * Format: int64
-                     * @description Integer USD cents.
+                     * @description The monthly charge in integer USD cents: a whole number of dollars a day from $1 to $30, times 30 (3000 to 90000 in steps of 3000).
                      */
                     amount_minor: number;
                     /**
@@ -4872,9 +4872,15 @@ export interface operations {
                 "application/json": {
                     /** Format: uuid */
                     subscription_id: string;
-                    /** Format: int64 */
+                    /**
+                     * Format: int64
+                     * @description The monthly charge in integer USD cents: a whole number of dollars a day from $1 to $30, times 30 (3000 to 90000 in steps of 3000).
+                     */
                     amount_minor: number;
-                    /** Format: int64 */
+                    /**
+                     * Format: int64
+                     * @description The amount the next renewal would charge, which may predate the daily rule.
+                     */
                     previous_minor: number;
                     /** Format: date-time */
                     effective_at: string;

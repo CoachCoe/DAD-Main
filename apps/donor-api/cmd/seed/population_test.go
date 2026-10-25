@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 	"time"
+
+	"dad/donor-api/internal/store"
 )
 
 var asOf = time.Date(2026, 10, 7, 15, 4, 5, 0, time.UTC)
@@ -129,7 +131,7 @@ func TestFactsKeepTheSchemaAndDomainRules(t *testing.T) {
 		monthly := 0
 		for _, c := range d.checkouts {
 			unique(ids, c.id.Bytes)
-			if c.amount < 100 || (c.referrer == nil) != (c.kind == "") || c.referrer == d {
+			if !store.ValidGiftAmount(c.amount) || (c.referrer == nil) != (c.kind == "") || c.referrer == d {
 				t.Fatalf("checkout for donor %d breaks a checkout constraint", d.index)
 			}
 			if c.referrer != nil && !c.referrer.sharingAt.Before(c.expiresAt.Add(-referralWindow)) {

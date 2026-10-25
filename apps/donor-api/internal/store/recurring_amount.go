@@ -12,19 +12,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// Monthly gift amounts are whole cents from $1 to the $900/mo ceiling
-// ($30/day), PRD §14.3.
+// A gift is a whole number of dollars a day from $1 to $30, billed monthly as
+// the daily amount × 30 (PRD G-1, G-2, §14.3).
 const (
-	minAmountMinor = 100
-	maxGiftMinor   = 90_000
+	dayMinor     = 100 * 30
+	maxGiftMinor = 30 * dayMinor
 )
 
-func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxGiftMinor }
+// ValidGiftAmount reports whether a monthly amount is one a donor may choose.
+func ValidGiftAmount(minor int64) bool {
+	return minor >= dayMinor && minor <= maxGiftMinor && minor%dayMinor == 0
+}
 
 // ChangeAmount sets a new monthly amount from the next renewal, without
-// proration. r.Previous must still be the amount that renewal would charge.
+// proration. r.Previous must still be the amount that renewal would charge,
+// which may predate the daily rule.
 func (s RecurringService) ChangeAmount(ctx context.Context, token string, r AmountRequest) (AmountChange, error) {
-	if !ValidRequestID(r.RequestID) || !validAmount(r.Amount) || !validAmount(r.Previous) || r.EffectiveAt.IsZero() {
+	if !ValidRequestID(r.RequestID) || !ValidGiftAmount(r.Amount) || r.Previous <= 0 || r.EffectiveAt.IsZero() {
 		return AmountChange{}, payments.ErrFacts
 	}
 	snapshot, err := s.donorRefresh(ctx, token)

@@ -34,7 +34,7 @@ func (s CheckoutService) BeginCheckout(ctx context.Context, request payments.Che
 	if err != nil {
 		return empty, err
 	}
-	if !ValidRequestID(request.RequestID) || utf8.RuneCountInString(request.Email) > 320 || !validAmount(request.Amount) {
+	if !ValidRequestID(request.RequestID) || utf8.RuneCountInString(request.Email) > 320 || !ValidGiftAmount(request.Amount) {
 		return empty, payments.ErrCheckoutInput
 	}
 	email, err := identity.NormalizeEmail(request.Email)

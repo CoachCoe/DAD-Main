@@ -66,9 +66,9 @@ const (
 	eventDurationMax = 4 * time.Hour
 )
 
-// Gift amounts in cents by weight: the $30, $90 and $150 presets, round
-// custom amounts, and 0 for any other whole-dollar amount.
-var monthlyAmounts = weighted[int64]{{3000, 60}, {1000, 12}, {5000, 12}, {10000, 8}, {9000, 3}, {15000, 2}, {0, 3}}
+// Monthly gift amounts in cents by weight: the $1, $3 and $5 a day presets,
+// a few other daily amounts, and 0 for any whole-dollar daily amount up to $30.
+var monthlyAmounts = weighted[int64]{{3000, 60}, {9000, 14}, {15000, 10}, {6000, 8}, {30000, 3}, {90000, 1}, {0, 4}}
 
 var names = []string{"Ada", "Amara", "Ben", "Carmen", "Chen", "Dara", "Eli", "Fatima", "Gabe", "Hana", "Ines", "Jamal",
 	"Kai", "Lena", "Mateo", "Mira", "Nadia", "Omar", "Priya", "Quinn", "Rosa", "Sam", "Tariq", "Uma", "Vera", "Wes",
@@ -794,7 +794,7 @@ func (g *generator) amount(choices weighted[int64]) int64 {
 	if amount := choices.pick(g.r); amount != 0 {
 		return amount
 	}
-	return int64(5+g.r.IntN(496)) * 100
+	return int64(1+g.r.IntN(30)) * 3000
 }
 
 func (g *generator) kind() string {

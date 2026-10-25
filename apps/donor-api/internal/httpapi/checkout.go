@@ -15,8 +15,6 @@ type CheckoutSource interface {
 	BeginCheckout(context.Context, payments.CheckoutRequest) (payments.CheckoutResult, error)
 }
 
-const minAmountMinor = 100
-
 type checkoutBody struct {
 	Email     *string         `json:"email"`
 	Amount    *int64          `json:"amount_minor"`
@@ -35,7 +33,7 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 	}
 	frequency, ok := optional(body.Frequency, "MONTHLY")
 	if !ok || frequency != "MONTHLY" || body.Email == nil || body.Amount == nil ||
-		utf8.RuneCountInString(*body.Email) > maxEmailRunes || !validAmount(*body.Amount) {
+		utf8.RuneCountInString(*body.Email) > maxEmailRunes || !store.ValidGiftAmount(*body.Amount) {
 		invalidFields(w, r)
 		return
 	}
@@ -67,5 +65,3 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, result)
 	}
 }
-
-func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxGiftMinor }

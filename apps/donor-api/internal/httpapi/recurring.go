@@ -84,7 +84,7 @@ type amountBody struct {
 }
 
 func (b amountBody) valid() bool {
-	return b.ID.Valid && validAmount(b.Amount) && validAmount(b.Previous) && !b.Effective.IsZero()
+	return b.ID.Valid && store.ValidGiftAmount(b.Amount) && b.Previous > 0 && !b.Effective.IsZero()
 }
 
 func changeAmount(s RecurringSource, ctx context.Context, session string, key pgtype.UUID, b amountBody) (store.AmountChange, error) {

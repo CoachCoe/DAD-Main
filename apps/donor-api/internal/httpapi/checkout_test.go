@@ -54,6 +54,8 @@ func TestCheckoutRejectsInvalidRequestsBeforeTheProcessor(t *testing.T) {
 		{"amount over ceiling by a cent", `{"email":"donor@example.org","amount_minor":90001}`, nil, 422},
 		{"amount at $31 a day", `{"email":"donor@example.org","amount_minor":93000}`, nil, 422},
 		{"amount under minimum", `{"email":"donor@example.org","amount_minor":99}`, nil, 422},
+		{"amount under $1 a day", `{"email":"donor@example.org","amount_minor":2999}`, nil, 422},
+		{"amount not whole dollars a day", `{"email":"donor@example.org","amount_minor":4500}`, nil, 422},
 		{"missing key", valid, map[string]string{"Idempotency-Key": ""}, 422},
 		{"version 1 key", valid, map[string]string{"Idempotency-Key": "8f4f52bb-99f6-190e-8313-5156cc4f8b45"}, 422},
 		{"text body", valid, map[string]string{"Content-Type": "text/plain"}, 415},

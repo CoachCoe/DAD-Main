@@ -135,7 +135,7 @@ export default function RecurringGiving() {
               )}
               <nav aria-label="Manage monthly giving" className="links">
                 <Link href="/account/payment-method">Update payment method</Link>
-                {changeable && <Link href="/account/amount">Change monthly amount</Link>}
+                {changeable && <Link href="/account/amount">Change your daily gift</Link>}
               </nav>
               {!subscription.stops_at &&
                 cancellable(subscription.status) &&

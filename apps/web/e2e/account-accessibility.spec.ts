@@ -182,7 +182,7 @@ const recurring = {
   active: {
     subscription,
     text: /^Next renewal: Nov 1, 2026\.$/,
-    links: ["Update payment method", "Change monthly amount"],
+    links: ["Update payment method", "Change your daily gift"],
   },
   ending: {
     subscription: { ...subscription, stops_at: subscription.period_end },

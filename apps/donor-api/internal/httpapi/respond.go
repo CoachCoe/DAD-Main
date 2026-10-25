@@ -25,7 +25,6 @@ const (
 	providerTimeout = 25 * time.Second
 	maxJSONBody     = 256 << 10
 	maxAmountMinor  = 99_999_999
-	maxGiftMinor    = 90_000
 )
 
 const (
