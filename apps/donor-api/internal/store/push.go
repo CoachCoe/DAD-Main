@@ -188,6 +188,39 @@ func pushSuppression(
 			return "streak_ended", nil
 		}
 		return "", nil
+	case "STREAK_LAPSED":
+		if !pref.PushStreakLapsed {
+			return "opted_out", nil
+		}
+		// The lapse holds unless the donor recovered: if the failed period that
+		// ended the run is no longer FAILED (payment recovered), the lapse news
+		// is stale. A cancelled subscription or ended grace does not un-lapse.
+		_, reason, err := failureResolved(ctx, q, data, donor, now)
+		if err != nil {
+			return "", err
+		}
+		if reason == "payment_recovered" || reason == "subscription_cancelled" {
+			return reason, nil
+		}
+		return "", nil
+	case "BADGE_EARNED":
+		if !pref.PushBadgeEarned {
+			return "opted_out", nil
+		}
+		// The earn is permanent, but an admin may have revoked it between queue
+		// and send (B-4); a revoked badge reads as unearned, so do not announce it.
+		code := data.Text("code")
+		if code == "" {
+			return "", payments.ErrFacts
+		}
+		earned, err := q.BadgeEarned(ctx, queries.BadgeEarnedParams{DonorID: donor.ID, Code: code})
+		if err != nil {
+			return "", err
+		}
+		if !earned {
+			return "badge_revoked", nil
+		}
+		return "", nil
 	case "EVENT_PROMOTED":
 		// Event alerts ride on the volunteer opt-in (E-1). Expiry (the event
 		// start) is already handled above; there is no further fact to recheck.
@@ -248,6 +281,15 @@ func pushContent(job queries.DonorPushNotification) (push.Notification, error) {
 		} else {
 			n.Body = "An event you reserved is tomorrow. Open the app for the details."
 		}
+	case "STREAK_LAPSED":
+		n.Title, n.Path = "Your giving streak ended", paymentMethodPath
+		n.Body = "Your monthly test payment did not recover in time, so your streak reset. Start a new streak whenever you are ready."
+	case "BADGE_EARNED":
+		if data.Text("code") == "" {
+			return n, payments.ErrFacts
+		}
+		n.Title = "You earned a new badge"
+		n.Body = "You just earned a badge for your giving. Open the app to see it."
 	default:
 		return n, payments.ErrFacts
 	}

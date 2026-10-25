@@ -105,8 +105,20 @@ func (b BadgeService) Badges(ctx context.Context, token string) ([]BadgeView, er
 		}
 		qualifies := badges.Evaluate(signals)
 		for code := range qualifies {
-			if err := q.EarnBadge(ctx, queries.EarnBadgeParams{DonorID: donor.ID, Code: code, EarnedAt: timestamp(now)}); err != nil {
+			earned, err := q.EarnBadge(ctx, queries.EarnBadgeParams{DonorID: donor.ID, Code: code, EarnedAt: timestamp(now)})
+			if err != nil {
 				return nil, err
+			}
+			// Fire the badge-earned push (§6.11) only for a genuinely new earn;
+			// re-evaluating an already-earned badge affects no rows. The intent
+			// is itself deduped per (donor, badge), so a crash between the earn
+			// and the queue is safe to retry.
+			if earned > 0 {
+				if err := q.QueueBadgePush(ctx, queries.QueueBadgePushParams{
+					DonorID: donor.ID, Code: code, AsOf: timestamp(now), ExpiresAt: timestamp(now.Add(pushLifetime)),
+				}); err != nil {
+					return nil, err
+				}
 			}
 		}
 		rows, err := q.DonorBadges(ctx, donor.ID)

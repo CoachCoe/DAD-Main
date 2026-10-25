@@ -185,6 +185,11 @@ func (s PartnerApplicationService) Approve(ctx context.Context, token string, ap
 			}); err != nil {
 				return pgtype.UUID{}, err
 			}
+			// APPROVED partner email (§6.11). Keyed by partner so it fires once;
+			// delivered to the org's accepted users by the partner message worker.
+			if err = queuePartnerMessage(ctx, q, partnerID, "APPROVED", "partner-approved:"+partnerID.String(), map[string]string{}, now); err != nil {
+				return pgtype.UUID{}, err
+			}
 			return partnerID, auditStaff(ctx, q, actor.ID, "partner.approved", appID.String(),
 				map[string]string{"partner_id": partnerID.String(), "organization": app.Organization}, now)
 		})

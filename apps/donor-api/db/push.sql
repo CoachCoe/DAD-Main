@@ -32,6 +32,15 @@ WITH projection AS (
         ORDER BY due_at DESC LIMIT 1
     ) b WHERE p.at_risk AND b.status='FAILED'
     UNION ALL
+    -- Streak lapsed (§6.11): the latest renewal failed and its 7-day grace has
+    -- fully elapsed with no recovery, so the run ended. Keyed by that period so
+    -- the lapse fires once; distinct from the at-risk reminders inside grace.
+    SELECT p.donor_id,'STREAK_LAPSED','push:streak-lapsed:'||b.id::text,json_build_object('period_id',b.id::text)
+    FROM projection p CROSS JOIN LATERAL (
+        SELECT id,status,due_at FROM donor_billing_periods WHERE donor_id=p.donor_id AND due_at<=sqlc.arg(as_of)::timestamptz
+        ORDER BY due_at DESC LIMIT 1
+    ) b WHERE b.status='FAILED' AND b.due_at + interval '7 days' <= sqlc.arg(as_of)::timestamptz
+    UNION ALL
     SELECT sqlc.arg(donor_id)::uuid,'STREAK_MILESTONE',
         'push:streak-milestone:'||sqlc.arg(donor_id)::text||':'||floor(extract(epoch FROM sqlc.narg(run_started_at)::timestamptz))::bigint::text||':'||sqlc.narg(milestone)::integer::text,
         json_build_object('months',sqlc.narg(milestone)::integer)

@@ -1,18 +1,19 @@
 -- name: SavePreference :exec
 INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,
  push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,
- volunteer,volunteer_interests)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(donor_id) DO UPDATE
+ volunteer,volunteer_interests,push_streak_lapsed,push_badge_earned)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(donor_id) DO UPDATE
 SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_emails=EXCLUDED.marketing_emails,
  push_referral_converted=EXCLUDED.push_referral_converted,push_streak_at_risk=EXCLUDED.push_streak_at_risk,
  push_streak_milestone=EXCLUDED.push_streak_milestone,rankings_opted_out=EXCLUDED.rankings_opted_out,
- network_visible=EXCLUDED.network_visible,volunteer=EXCLUDED.volunteer,volunteer_interests=EXCLUDED.volunteer_interests;
+ network_visible=EXCLUDED.network_visible,volunteer=EXCLUDED.volunteer,volunteer_interests=EXCLUDED.volunteer_interests,
+ push_streak_lapsed=EXCLUDED.push_streak_lapsed,push_badge_earned=EXCLUDED.push_badge_earned;
 
 -- name: RecordPreferenceConsent :exec
 INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,
  push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,
- volunteer,volunteer_interests,consent_version,source)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'account');
+ volunteer,volunteer_interests,consent_version,push_streak_lapsed,push_badge_earned,source)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'account');
 
 -- name: SaveSharing :one
 UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING *;

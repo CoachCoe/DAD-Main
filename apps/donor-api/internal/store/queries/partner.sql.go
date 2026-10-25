@@ -81,6 +81,35 @@ func (q *Queries) AuthenticatedPartnerUser(ctx context.Context, arg Authenticate
 	return i, err
 }
 
+const claimPartnerMessage = `-- name: ClaimPartnerMessage :exec
+UPDATE donor_partner_messages SET available_at=$2 WHERE id=$1
+`
+
+type ClaimPartnerMessageParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+}
+
+func (q *Queries) ClaimPartnerMessage(ctx context.Context, arg ClaimPartnerMessageParams) error {
+	_, err := q.db.Exec(ctx, claimPartnerMessage, arg.ID, arg.AvailableAt)
+	return err
+}
+
+const completePartnerMessage = `-- name: CompletePartnerMessage :exec
+UPDATE donor_partner_messages SET completed_at=$2,suppressed_reason=$3 WHERE id=$1
+`
+
+type CompletePartnerMessageParams struct {
+	ID               pgtype.UUID        `json:"id"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
+}
+
+func (q *Queries) CompletePartnerMessage(ctx context.Context, arg CompletePartnerMessageParams) error {
+	_, err := q.db.Exec(ctx, completePartnerMessage, arg.ID, arg.CompletedAt, arg.SuppressedReason)
+	return err
+}
+
 const decidePartnerApplication = `-- name: DecidePartnerApplication :exec
 UPDATE donor_partner_applications
 SET status=$2, decided_by=$3, decided_at=$4, decision_reason=$5, approved_partner_id=$6, updated_at=$4
@@ -122,6 +151,21 @@ type DisablePartnerUserParams struct {
 // P-4: a partner admin removes a user (soft delete).
 func (q *Queries) DisablePartnerUser(ctx context.Context, arg DisablePartnerUserParams) error {
 	_, err := q.db.Exec(ctx, disablePartnerUser, arg.PartnerID, arg.ID)
+	return err
+}
+
+const failPartnerMessage = `-- name: FailPartnerMessage :exec
+UPDATE donor_partner_messages SET attempts=attempts+1,last_error=$2,available_at=$3 WHERE id=$1
+`
+
+type FailPartnerMessageParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	LastError   pgtype.Text        `json:"last_error"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+}
+
+func (q *Queries) FailPartnerMessage(ctx context.Context, arg FailPartnerMessageParams) error {
+	_, err := q.db.Exec(ctx, failPartnerMessage, arg.ID, arg.LastError, arg.AvailableAt)
 	return err
 }
 
@@ -301,6 +345,32 @@ func (q *Queries) LinkInitiativeToPartner(ctx context.Context, arg LinkInitiativ
 	return err
 }
 
+const nextPartnerMessage = `-- name: NextPartnerMessage :one
+SELECT id, partner_id, kind, dedup_key, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, created_at FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
+`
+
+func (q *Queries) NextPartnerMessage(ctx context.Context, availableAt pgtype.Timestamptz) (DonorPartnerMessage, error) {
+	row := q.db.QueryRow(ctx, nextPartnerMessage, availableAt)
+	var i DonorPartnerMessage
+	err := row.Scan(
+		&i.ID,
+		&i.PartnerID,
+		&i.Kind,
+		&i.DedupKey,
+		&i.Context,
+		&i.AvailableAt,
+		&i.CompletedAt,
+		&i.Attempts,
+		&i.LastError,
+		&i.SuppressedReason,
+		&i.Subject,
+		&i.Body,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const partnerApplicationByID = `-- name: PartnerApplicationByID :one
 SELECT id, organization, website, type, contact_name, title, work_email, phone, workforce_size, status, decided_by, decided_at, decision_reason, approved_partner_id, created_at, updated_at FROM donor_partner_applications WHERE id=$1
 `
@@ -326,6 +396,23 @@ func (q *Queries) PartnerApplicationByID(ctx context.Context, id pgtype.UUID) (D
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const partnerForMessage = `-- name: PartnerForMessage :one
+SELECT id,organization,approved_at FROM donor_partner_signups WHERE id=$1
+`
+
+type PartnerForMessageRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	Organization string             `json:"organization"`
+	ApprovedAt   pgtype.Timestamptz `json:"approved_at"`
+}
+
+func (q *Queries) PartnerForMessage(ctx context.Context, id pgtype.UUID) (PartnerForMessageRow, error) {
+	row := q.db.QueryRow(ctx, partnerForMessage, id)
+	var i PartnerForMessageRow
+	err := row.Scan(&i.ID, &i.Organization, &i.ApprovedAt)
 	return i, err
 }
 
@@ -406,6 +493,65 @@ func (q *Queries) PartnerInitiativesList(ctx context.Context, partnerSignupID pg
 			&i.CommittedMinor,
 			&i.DeployedMinor,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const partnerMessageByID = `-- name: PartnerMessageByID :one
+SELECT id, partner_id, kind, dedup_key, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, created_at FROM donor_partner_messages WHERE id=$1
+`
+
+func (q *Queries) PartnerMessageByID(ctx context.Context, id pgtype.UUID) (DonorPartnerMessage, error) {
+	row := q.db.QueryRow(ctx, partnerMessageByID, id)
+	var i DonorPartnerMessage
+	err := row.Scan(
+		&i.ID,
+		&i.PartnerID,
+		&i.Kind,
+		&i.DedupKey,
+		&i.Context,
+		&i.AvailableAt,
+		&i.CompletedAt,
+		&i.Attempts,
+		&i.LastError,
+		&i.SuppressedReason,
+		&i.Subject,
+		&i.Body,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const partnerMessageRecipients = `-- name: PartnerMessageRecipients :many
+SELECT email,name FROM donor_partner_users
+WHERE partner_id=$1 AND disabled=false AND accepted_at IS NOT NULL
+ORDER BY email
+`
+
+type PartnerMessageRecipientsRow struct {
+	Email string `json:"email"`
+	Name  string `json:"name"`
+}
+
+// The org's users who can receive mail: accepted (completed first sign-in) and
+// not disabled. A pending invitee has their own invite email and is not yet a
+// recipient of status notices.
+func (q *Queries) PartnerMessageRecipients(ctx context.Context, partnerID pgtype.UUID) ([]PartnerMessageRecipientsRow, error) {
+	rows, err := q.db.Query(ctx, partnerMessageRecipients, partnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PartnerMessageRecipientsRow{}
+	for rows.Next() {
+		var i PartnerMessageRecipientsRow
+		if err := rows.Scan(&i.Email, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -643,6 +789,47 @@ func (q *Queries) PartnerUsersForPartner(ctx context.Context, partnerID pgtype.U
 	return items, nil
 }
 
+const partnersDueMonthlyReport = `-- name: PartnersDueMonthlyReport :many
+SELECT s.id FROM donor_partner_signups s
+WHERE s.approved_at IS NOT NULL
+AND EXISTS(SELECT 1 FROM donor_initiatives i WHERE i.partner_signup_id=s.id AND i.publish_state='PUBLISHED')
+AND NOT EXISTS(
+    SELECT 1 FROM donor_partner_messages m
+    WHERE m.partner_id=s.id AND m.kind='MONTHLY_REPORT'
+    AND m.dedup_key='partner-monthly:'||s.id::text||':'||$1::text
+)
+ORDER BY s.id
+LIMIT $2::int
+`
+
+type PartnersDueMonthlyReportParams struct {
+	Period string `json:"period"`
+	Batch  int32  `json:"batch"`
+}
+
+// Approved partners with at least one published initiative that have not had a
+// MONTHLY_REPORT queued for the given year-month. Drives the monthly sweep;
+// the dedup_key carries the period so each partner is mailed once per month.
+func (q *Queries) PartnersDueMonthlyReport(ctx context.Context, arg PartnersDueMonthlyReportParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, partnersDueMonthlyReport, arg.Period, arg.Batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pendingPartnerApplications = `-- name: PendingPartnerApplications :many
 SELECT id, organization, website, type, contact_name, title, work_email, phone, workforce_size, status, decided_by, decided_at, decision_reason, approved_partner_id, created_at, updated_at FROM donor_partner_applications
 WHERE status='PENDING'
@@ -722,6 +909,49 @@ func (q *Queries) PromotePartnerOrg(ctx context.Context, arg PromotePartnerOrgPa
 		arg.WorkforceSize,
 		arg.CompanyCode,
 	)
+	return err
+}
+
+const queuePartnerMessage = `-- name: QueuePartnerMessage :exec
+INSERT INTO donor_partner_messages (id,partner_id,kind,dedup_key,context,available_at)
+VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (dedup_key) DO NOTHING
+`
+
+type QueuePartnerMessageParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	PartnerID   pgtype.UUID        `json:"partner_id"`
+	Kind        string             `json:"kind"`
+	DedupKey    string             `json:"dedup_key"`
+	Context     []byte             `json:"context"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+}
+
+// Queues one org-level partner email intent, deduped by key so the same event
+// enqueues at most once. Delivery fans out to the org's users (PartnerMessageRecipients).
+func (q *Queries) QueuePartnerMessage(ctx context.Context, arg QueuePartnerMessageParams) error {
+	_, err := q.db.Exec(ctx, queuePartnerMessage,
+		arg.ID,
+		arg.PartnerID,
+		arg.Kind,
+		arg.DedupKey,
+		arg.Context,
+		arg.AvailableAt,
+	)
+	return err
+}
+
+const renderPartnerMessage = `-- name: RenderPartnerMessage :exec
+UPDATE donor_partner_messages SET subject=$2,body=$3 WHERE id=$1
+`
+
+type RenderPartnerMessageParams struct {
+	ID      pgtype.UUID `json:"id"`
+	Subject pgtype.Text `json:"subject"`
+	Body    pgtype.Text `json:"body"`
+}
+
+func (q *Queries) RenderPartnerMessage(ctx context.Context, arg RenderPartnerMessageParams) error {
+	_, err := q.db.Exec(ctx, renderPartnerMessage, arg.ID, arg.Subject, arg.Body)
 	return err
 }
 
