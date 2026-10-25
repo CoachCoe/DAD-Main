@@ -201,7 +201,15 @@ func (s EventService) AddGuest(ctx context.Context, token string, eventID, donor
 			}); err != nil {
 				return struct{}{}, err
 			}
-			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.guest_added", eventID.String(), map[string]string{"donor_id": donorID.String()}, now)
+			return struct{}{}, auditStaff(
+				ctx,
+				q,
+				actor.ID,
+				"event.guest_added",
+				eventID.String(),
+				map[string]string{"donor_id": donorID.String()},
+				now,
+			)
 		})
 	return err
 }
@@ -215,7 +223,15 @@ func (s EventService) RemoveGuest(ctx context.Context, token string, eventID, do
 			if err := q.RemoveEventGuest(ctx, queries.RemoveEventGuestParams{EventID: eventID, DonorID: donorID}); err != nil {
 				return struct{}{}, err
 			}
-			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.guest_removed", eventID.String(), map[string]string{"donor_id": donorID.String()}, now)
+			return struct{}{}, auditStaff(
+				ctx,
+				q,
+				actor.ID,
+				"event.guest_removed",
+				eventID.String(),
+				map[string]string{"donor_id": donorID.String()},
+				now,
+			)
 		})
 	return err
 }
@@ -516,7 +532,8 @@ func (r EventReader) InviteOnlyEvents(ctx context.Context, token string) ([]Even
 			if byPerk {
 				v.InvitationNote = invitationNote(e.QualifyingPerk)
 			}
-			if res, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: e.ID, DonorID: d.ID}); err == nil && res.Status != reservationCancelled {
+			if res, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: e.ID, DonorID: d.ID}); err == nil &&
+				res.Status != reservationCancelled {
 				s := res.Status
 				v.ReservationStatus = &s
 			} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -561,7 +578,8 @@ func (r EventReader) DetailForDonor(ctx context.Context, token string, id pgtype
 		if byPerk {
 			v.InvitationNote = invitationNote(e.QualifyingPerk)
 		}
-		if res, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: id, DonorID: d.ID}); err == nil && res.Status != reservationCancelled {
+		if res, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: id, DonorID: d.ID}); err == nil &&
+			res.Status != reservationCancelled {
 			s := res.Status
 			v.ReservationStatus = &s
 		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -741,7 +759,8 @@ func (s ReservationService) promoteWaitlistHead(ctx context.Context, q *queries.
 	}
 	// dedup_key is per (promotion, donor, event) so a re-promotion after a
 	// later cancel/re-waitlist is a distinct, deliverable notification.
-	dedup := "push:event-promoted:" + event.ID.String() + ":" + head.DonorID.String() + ":" + head.ReservedAt.Time.UTC().Format(time.RFC3339Nano)
+	dedup := "push:event-promoted:" + event.ID.String() + ":" + head.DonorID.String() + ":" + head.ReservedAt.Time.UTC().
+		Format(time.RFC3339Nano)
 	return q.QueueEventPush(ctx, queries.QueueEventPushParams{
 		ID: pushID, DonorID: head.DonorID, Category: eventPromotedCategory, DedupKey: dedup,
 		Context: context, AvailableAt: timestamp(now), ExpiresAt: event.StartsAt,

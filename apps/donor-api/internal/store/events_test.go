@@ -43,7 +43,10 @@ func TestEventDraftPublishAndValidation(t *testing.T) {
 	s := EventService{Staff: &StaffService{DB: api}}
 
 	// A non-publisher role cannot create events.
-	if _, err := s.Create(ctx, support, eventInput("water-cleanup", "SF", "94103", "VOLUNTEER", 48*time.Hour)); !errors.Is(err, ErrStaffForbidden) {
+	if _, err := s.Create(ctx, support, eventInput("water-cleanup", "SF", "94103", "VOLUNTEER", 48*time.Hour)); !errors.Is(
+		err,
+		ErrStaffForbidden,
+	) {
 		t.Fatalf("SUPPORT created an event: %v", err)
 	}
 
@@ -199,11 +202,13 @@ func TestReservationCapacityAndWaitlistPromotion(t *testing.T) {
 		t.Fatalf("d1 cancel: %+v %v", r, err)
 	}
 	var d2status string
-	if err := pool.QueryRow(ctx, "SELECT status FROM donor_event_reservations WHERE event_id=$1 AND donor_id=$2", eventID, d2).Scan(&d2status); err != nil || d2status != reservationReserved {
+	if err := pool.QueryRow(ctx, "SELECT status FROM donor_event_reservations WHERE event_id=$1 AND donor_id=$2", eventID, d2).Scan(&d2status); err != nil ||
+		d2status != reservationReserved {
 		t.Fatalf("d2 not promoted: %q %v", d2status, err)
 	}
 	var pushCount int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE donor_id=$1 AND category=$2", d2, eventPromotedCategory).Scan(&pushCount); err != nil || pushCount != 1 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE donor_id=$1 AND category=$2", d2, eventPromotedCategory).Scan(&pushCount); err != nil ||
+		pushCount != 1 {
 		t.Fatalf("d2 promotion push: count=%d %v", pushCount, err)
 	}
 
@@ -213,7 +218,8 @@ func TestReservationCapacityAndWaitlistPromotion(t *testing.T) {
 		t.Fatal(err)
 	}
 	var reservedNow int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_event_reservations WHERE event_id=$1 AND status='RESERVED'", eventID).Scan(&reservedNow); err != nil || reservedNow != 1 {
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_event_reservations WHERE event_id=$1 AND status='RESERVED'", eventID).Scan(&reservedNow); err != nil ||
+		reservedNow != 1 {
 		t.Fatalf("expected exactly one RESERVED after the chain: %d %v", reservedNow, err)
 	}
 }
