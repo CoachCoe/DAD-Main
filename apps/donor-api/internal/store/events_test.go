@@ -15,7 +15,7 @@ import (
 func cleanEvents(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM donor_events")
+		cleanExec(t, "DELETE FROM donor_events")
 	})
 }
 
@@ -229,7 +229,7 @@ func TestReservationCapacityAndWaitlistPromotion(t *testing.T) {
 func pushCleanupDonor(t *testing.T, pool *pgxpool.Pool, donor pgtype.UUID) {
 	t.Helper()
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM donor_push_notifications WHERE donor_id=$1", donor)
+		cleanExec(t, "DELETE FROM donor_push_notifications WHERE donor_id=$1", donor)
 	})
 }
 
@@ -292,7 +292,7 @@ func TestInviteOnlyGating(t *testing.T) {
 	if _, err := pool.Exec(ctx, "INSERT INTO donor_badges (donor_id, code, source, earned_at) VALUES ($1,'F','AUTO',now())", founder); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM donor_badges WHERE donor_id=$1", founder) })
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_badges WHERE donor_id=$1", founder) })
 
 	// A plain donor (no badge, not a guest).
 	plain, plainTok := signedInDonor(t, pool)
@@ -379,7 +379,7 @@ func TestEventCheckIn(t *testing.T) {
 	token := checkInToken(eventID, secret)
 
 	donorID, donorTok := signedInDonor(t, pool)
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM donor_badges WHERE donor_id=$1", donorID) })
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_badges WHERE donor_id=$1", donorID) })
 
 	// No reservation yet -> refused.
 	if _, err := res.CheckIn(ctx, donorTok, token); !errors.Is(err, ErrCheckIn) {

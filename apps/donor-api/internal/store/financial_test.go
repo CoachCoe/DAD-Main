@@ -26,6 +26,15 @@ func mustExec(t *testing.T, tx queries.DBTX, sql string, args ...any) {
 	}
 }
 
+// cleanExec runs a cleanup statement as the database owner and reports a
+// failure, so a test never silently leaves rows behind for later tests.
+func cleanExec(t *testing.T, sql string, args ...any) {
+	t.Helper()
+	if _, err := database(t).Exec(context.Background(), sql, args...); err != nil {
+		t.Errorf("cleanup %q: %v", sql, err)
+	}
+}
+
 func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
