@@ -21,9 +21,8 @@ type PartnerOverview struct {
 	DeployedMinor   int64  `json:"deployed_minor"`
 	DeployedPercent int    `json:"deployed_percent"`
 	PeopleReached   int64  `json:"people_reached"`
-	// OurPeopleAvailable is false in Phase 5 — the "Our People" tile (P-13)
-	// and employees-enrolled land in Phase 6. The field keeps the contract
-	// stable so the web tile can render a "coming soon" state.
+	// OurPeopleAvailable is true from Phase 6: the Our People tile (P-13) and
+	// employees-enrolled are live, served by /donor/partner/our-people.
 	OurPeopleAvailable bool `json:"our_people_available"`
 }
 
@@ -90,7 +89,7 @@ func (s PartnerDashboardService) Overview(ctx context.Context, token string) (Pa
 			Organization:   actor.Organization,
 			CommittedMinor: t.CommittedMinor, DeployedMinor: t.DeployedMinor,
 			DeployedPercent: deployedPercent(t.CommittedMinor, t.DeployedMinor),
-			PeopleReached:   t.PeopleReached, OurPeopleAvailable: false,
+			PeopleReached:   t.PeopleReached, OurPeopleAvailable: true,
 		}, nil
 	})
 }

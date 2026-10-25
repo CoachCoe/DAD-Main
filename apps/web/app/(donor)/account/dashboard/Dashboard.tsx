@@ -169,6 +169,7 @@ export default function Dashboard() {
             <Link href="/account/code">My referral code</Link>
             <Link href="/account/giving">My giving</Link>
             <Link href="/account/profile">Profile and notifications</Link>
+            <Link href="/account/employer">Employer and team</Link>
           </nav>
         </>
       )}

@@ -268,6 +268,13 @@ type DonorPartnerApplication struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
+type DonorPartnerEmployee struct {
+	DonorID    pgtype.UUID        `json:"donor_id"`
+	PartnerID  pgtype.UUID        `json:"partner_id"`
+	TeamID     pgtype.UUID        `json:"team_id"`
+	EnrolledAt pgtype.Timestamptz `json:"enrolled_at"`
+}
+
 type DonorPartnerSignup struct {
 	Organization   string             `json:"organization"`
 	Name           string             `json:"name"`

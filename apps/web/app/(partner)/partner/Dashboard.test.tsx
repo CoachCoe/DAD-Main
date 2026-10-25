@@ -20,6 +20,9 @@ function route(url: string) {
   if (url.endsWith("/users"))
     return Response.json({ users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN" }] });
   if (url.endsWith("/exports")) return Response.json({ exports: [] });
+  if (url.endsWith("/our-people"))
+    return Response.json({ enrolled: 8, given_minor: 80000, avg_streak: 12, suppressed: false });
+  if (url.endsWith("/teams")) return Response.json({ teams: [] });
   return Response.json({});
 }
 
@@ -32,6 +35,6 @@ it("renders the overview tiles with committed, deployed %, and verified people",
   await waitFor(() => expect(screen.getByText("$1,500.00")).toBeInTheDocument());
   expect(screen.getByText("33% of committed")).toBeInTheDocument();
   expect(screen.getByText("200")).toBeInTheDocument();
-  expect(screen.getByText("Our People")).toBeInTheDocument();
+  expect(screen.getByText("Our People enrolled")).toBeInTheDocument();
   expect(screen.getByText("Meals")).toBeInTheDocument();
 });
