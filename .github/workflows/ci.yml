@@ -29,6 +29,12 @@ jobs:
   # hardware/registration step (like the existing runners); the path gate above
   # delivers the savings until then.
   changes:
+    # Fork safety (public repo): self-hosted jobs run only for pushes and
+    # same-repo PRs, never a fork's PR — a forked PR must not execute code on
+    # the self-hosted runner. GitHub-hosted jobs (api/browser/deploy) run in
+    # GitHub's sandbox and are additionally gated by the repo's "require
+    # approval for fork PRs" setting.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, dad, linux]
     timeout-minutes: 5
     outputs:
@@ -83,6 +89,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   ledger:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, dad, linux]
     timeout-minutes: 10
     steps:
@@ -133,6 +140,7 @@ jobs:
       - run: make lint-go
 
   web:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, dad, linux]
     timeout-minutes: 20
     steps:
