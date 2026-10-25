@@ -544,7 +544,19 @@ func (s DonorService) BindCapturedCompanyCode(ctx context.Context, donor pgtype.
 			return err
 		}
 		bound = touch.CompanyCode
-		return nil
+		// EM-2: if the code resolves to an approved partner, link the donor now
+		// so their giving (including gifts already made) rolls up to the
+		// employer. A code that matches no approved partner only stays bound.
+		partnerID, err := q.PartnerByCompanyCode(ctx, text(touch.CompanyCode))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return q.UpsertEmployeeLink(ctx, queries.UpsertEmployeeLinkParams{
+			DonorID: donor, PartnerID: partnerID, EnrolledAt: timestamp(now),
+		})
 	})
 	return bound, err
 }
