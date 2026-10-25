@@ -419,7 +419,7 @@ func (r EventReader) Calendar(ctx context.Context, id pgtype.UUID) (string, erro
 
 // renderICS builds a single-VEVENT VCALENDAR. Times are UTC (the trailing Z
 // form), which every calendar client reads correctly. Text fields are escaped
-// per RFC 5545 (comma, semicolon, backslash, newline).
+// and long lines folded per RFC 5545.
 func renderICS(e queries.DonorEvent) string {
 	stamp := func(t time.Time) string { return t.UTC().Format("20060102T150405Z") }
 	location := e.Venue
@@ -440,12 +440,12 @@ func renderICS(e queries.DonorEvent) string {
 	b.WriteString("DTSTAMP:" + stamp(time.Now()) + "\r\n")
 	b.WriteString("DTSTART:" + stamp(e.StartsAt.Time) + "\r\n")
 	b.WriteString("DTEND:" + stamp(e.EndsAt.Time) + "\r\n")
-	b.WriteString("SUMMARY:" + escapeICS(e.Title) + "\r\n")
+	b.WriteString(foldICS("SUMMARY:" + escapeICS(e.Title)))
 	if e.Description != "" {
-		b.WriteString("DESCRIPTION:" + escapeICS(e.Description) + "\r\n")
+		b.WriteString(foldICS("DESCRIPTION:" + escapeICS(e.Description)))
 	}
 	if location != "" {
-		b.WriteString("LOCATION:" + escapeICS(location) + "\r\n")
+		b.WriteString(foldICS("LOCATION:" + escapeICS(location)))
 	}
 	b.WriteString("END:VEVENT\r\n")
 	b.WriteString("END:VCALENDAR\r\n")
@@ -460,6 +460,24 @@ func escapeICS(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\\n")
 	s = strings.ReplaceAll(s, "\n", "\\n")
 	return s
+}
+
+// foldICS ends a content line, folding it so no physical line exceeds 75
+// octets (RFC 5545 §3.1). A fold never splits a UTF-8 sequence.
+func foldICS(line string) string {
+	var b strings.Builder
+	limit := 75
+	for len(line) > limit {
+		cut := limit
+		for cut > 0 && !utf8.RuneStart(line[cut]) {
+			cut--
+		}
+		b.WriteString(line[:cut] + "\r\n ")
+		line = line[cut:]
+		limit = 74
+	}
+	b.WriteString(line + "\r\n")
+	return b.String()
 }
 
 // invitationNote is the "Invitation earned at ..." label for an INVITE_ONLY
@@ -596,18 +614,13 @@ const (
 	reservationCancelled  = "CANCELLED"
 )
 
-// eventPromotedCategory is the push category for a waitlist promotion (E-4). It
-// is gated at send time on the donor's volunteer opt-in, the same switch that
-// turns on event alerts (E-1).
+// eventPromotedCategory is the push category, and the email kind, of a waitlist
+// promotion (E-4, §6.11).
 const eventPromotedCategory = "EVENT_PROMOTED"
 
-var (
-	// ErrEventFull is never returned to the donor as an error — reserving a
-	// full event waitlists them instead — but is used internally to branch.
-	// ErrReservationClosed is returned when a donor tries to reserve or cancel
-	// after the event has started (E-9: cancel is allowed only up to start).
-	ErrReservationClosed = errors.New("event has already started")
-)
+// ErrReservationClosed is returned when a donor tries to reserve or cancel
+// after the event has started (E-9: cancel is allowed only up to start).
+var ErrReservationClosed = errors.New("event has already started")
 
 // ReservationResult is the outcome of a reserve/cancel, so the caller can tell
 // the donor whether they got a seat or a waitlist place.
@@ -615,9 +628,6 @@ type ReservationResult struct {
 	Status string `json:"status"`
 }
 
-// ReservationService books, waitlists, and cancels event reservations under
-// the event row lock so capacity is enforced race-free, and promotes the
-// waitlist head synchronously on cancel (PRD §6.10 E-4, E-9).
 // ReservationService books, waitlists, and cancels event reservations under
 // the event row lock so capacity is enforced race-free, and promotes the
 // waitlist head synchronously on cancel (PRD §6.10 E-4, E-9). CheckInSecret is
@@ -736,8 +746,9 @@ func (s ReservationService) Cancel(ctx context.Context, token string, eventID pg
 	})
 }
 
-// promoteWaitlistHead promotes the earliest-queued waitlisted donor (if any) to
-// RESERVED and queues a promotion push to them. Called under the event lock.
+// promoteWaitlistHead promotes the earliest-queued waitlisted donor, if any, to
+// RESERVED and queues the promotion push and email (§6.11). Called under the
+// event lock.
 func (s ReservationService) promoteWaitlistHead(ctx context.Context, q *queries.Queries, event queries.DonorEvent, now time.Time) error {
 	head, err := q.WaitlistHead(ctx, event.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -757,13 +768,21 @@ func (s ReservationService) promoteWaitlistHead(ctx context.Context, q *queries.
 	if err != nil {
 		return err
 	}
-	// dedup_key is per (promotion, donor, event) so a re-promotion after a
-	// later cancel/re-waitlist is a distinct, deliverable notification.
-	dedup := "push:event-promoted:" + event.ID.String() + ":" + head.DonorID.String() + ":" + head.ReservedAt.Time.UTC().
-		Format(time.RFC3339Nano)
-	return q.QueueEventPush(ctx, queries.QueueEventPushParams{
-		ID: pushID, DonorID: head.DonorID, Category: eventPromotedCategory, DedupKey: dedup,
+	// Keyed by the waitlist place, so a later re-promotion is a new notice.
+	promotion := event.ID.String() + ":" + head.DonorID.String() + ":" + head.ReservedAt.Time.UTC().Format(time.RFC3339Nano)
+	if err = q.QueueEventPush(ctx, queries.QueueEventPushParams{
+		ID: pushID, DonorID: head.DonorID, Category: eventPromotedCategory, DedupKey: "push:event-promoted:" + promotion,
 		Context: context, AvailableAt: timestamp(now), ExpiresAt: event.StartsAt,
+	}); err != nil {
+		return err
+	}
+	messageID, err := NewID()
+	if err != nil {
+		return err
+	}
+	return q.InsertFinancialMessage(ctx, queries.InsertFinancialMessageParams{
+		ID: messageID, DonorID: head.DonorID, Kind: eventPromotedCategory, DedupKey: "message:event-promoted:" + promotion,
+		Context: context, AvailableAt: timestamp(now),
 	})
 }
 
@@ -836,7 +855,7 @@ type CheckInResult struct {
 
 // CheckIn records the signed-in donor's attendance from a scanned QR token
 // (E-8). It verifies the token, requires the event to be within its window
-// (starts_at..ends_at) and the donor to hold a non-cancelled reservation, then
+// (starts_at..ends_at) and the donor to hold a seat, not a waitlist place, then
 // stamps checked_in_at. A second scan is a no-op success.
 func (s ReservationService) CheckIn(ctx context.Context, sessionToken, qrToken string) (CheckInResult, error) {
 	if s.CheckInSecret == "" {
@@ -866,7 +885,7 @@ func (s ReservationService) CheckIn(ctx context.Context, sessionToken, qrToken s
 		if err != nil {
 			return CheckInResult{}, err
 		}
-		if existing.Status == reservationCancelled {
+		if existing.Status != reservationReserved {
 			return CheckInResult{}, ErrCheckIn
 		}
 		if existing.CheckedInAt.Valid {

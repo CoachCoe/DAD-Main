@@ -6577,7 +6577,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "Checks the signed-in donor in from the QR code shown at the venue (E-8). Accepted only between the event's start and end, and only for a donor holding a reserved seat, not a waitlist place; 422 otherwise. A second scan succeeds with `already_checked_in`."
    }
   },
   "/donor/me/events/invite-only": {

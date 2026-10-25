@@ -1766,7 +1766,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Check in at an event by scanning its QR token (E-8) */
+        /**
+         * Check in at an event by scanning its QR token (E-8)
+         * @description Checks the signed-in donor in from the QR code shown at the venue (E-8). Accepted only between the event's start and end, and only for a donor holding a reserved seat, not a waitlist place; 422 otherwise. A second scan succeeds with `already_checked_in`.
+         */
         post: operations["checkInEvent"];
         delete?: never;
         options?: never;

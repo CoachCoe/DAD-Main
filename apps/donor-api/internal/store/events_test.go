@@ -6,8 +6,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/mail"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -162,7 +165,7 @@ func TestReservationCapacityAndWaitlistPromotion(t *testing.T) {
 	cleanEvents(t, pool)
 	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	events := EventService{Staff: &StaffService{DB: api}}
-	res := ReservationService{DB: pool}
+	res := ReservationService{DB: api}
 
 	// A published event with capacity 1 starting in the future.
 	in := eventInput("gala", "San Francisco", "94103", "COMMUNITY", 48*time.Hour)
@@ -212,10 +215,58 @@ func TestReservationCapacityAndWaitlistPromotion(t *testing.T) {
 		t.Fatalf("d2 promotion push: count=%d %v", pushCount, err)
 	}
 
+	// The promotion is also emailed (§6.11), naming the event and linking to it.
+	transport := &recordingMail{}
+	worker := MessageWorker{
+		DB:        as(t, dbroles.MessageWorker),
+		Settings:  mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys},
+		Origin:    "https://donor.example.org",
+		Transport: transport,
+	}
+	for {
+		worked, err := worker.DeliverNext(ctx, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !worked {
+			break
+		}
+	}
+	var promoted *mail.Message
+	for i, m := range transport.messages {
+		if strings.HasPrefix(m.Subject, "You're off the waitlist") {
+			promoted = &transport.messages[i]
+		}
+	}
+	if promoted == nil || promoted.Subject != "You're off the waitlist for Event gala" ||
+		!strings.Contains(promoted.Body, "https://donor.example.org/events/"+eventID.String()) {
+		t.Fatalf("promotion email: %+v", promoted)
+	}
+
+	// The push is about d2's own seat, so it goes out though d2 never opted in
+	// as a volunteer, and stops once the seat is released.
+	var job queries.DonorPushNotification
+	for _, intent := range pushIntents(t, pool, d2) {
+		if intent.Category == eventPromotedCategory {
+			job = intent
+		}
+	}
+	donorRow, err := queries.New(pool).LockDonor(ctx, d2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reason, err := pushSuppression(ctx, queries.New(pool), job, donorRow, time.Now().UTC()); err != nil || reason != "" {
+		t.Fatalf("promotion push suppressed for a non-volunteer: %q %v", reason, err)
+	}
+
 	// d2 (now RESERVED) cancels -> d3 (last on the waitlist) is promoted, so
 	// exactly one RESERVED remains.
 	if _, err := res.Cancel(ctx, t2, eventID); err != nil {
 		t.Fatal(err)
+	}
+	if reason, err := pushSuppression(ctx, queries.New(pool), job, donorRow, time.Now().UTC()); err != nil ||
+		reason != "reservation_released" {
+		t.Fatalf("promotion push for a released seat: %q %v", reason, err)
 	}
 	var reservedNow int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_event_reservations WHERE event_id=$1 AND status='RESERVED'", eventID).Scan(&reservedNow); err != nil ||
@@ -230,6 +281,7 @@ func pushCleanupDonor(t *testing.T, pool *pgxpool.Pool, donor pgtype.UUID) {
 	t.Helper()
 	t.Cleanup(func() {
 		cleanExec(t, "DELETE FROM donor_push_notifications WHERE donor_id=$1", donor)
+		cleanExec(t, "DELETE FROM donor_messages WHERE donor_id=$1", donor)
 	})
 }
 
@@ -364,7 +416,7 @@ func TestEventCheckIn(t *testing.T) {
 	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	events := EventService{Staff: &StaffService{DB: api}}
 	const secret = "test-checkin-secret"
-	res := ReservationService{DB: pool, CheckInSecret: secret}
+	res := ReservationService{DB: api, CheckInSecret: secret}
 
 	// An event happening right now (started an hour ago, ends in an hour).
 	in := eventInput("beach-cleanup", "San Francisco", "94103", "VOLUNTEER", -1*time.Hour)
@@ -384,6 +436,18 @@ func TestEventCheckIn(t *testing.T) {
 	// No reservation yet -> refused.
 	if _, err := res.CheckIn(ctx, donorTok, token); !errors.Is(err, ErrCheckIn) {
 		t.Fatalf("check-in without reservation accepted: %v", err)
+	}
+	// A waitlist place is not a seat -> refused.
+	waitlisted, waitlistedTok := signedInDonor(t, pool)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_event_reservations (id, event_id, donor_id, status, reserved_at, created_at, updated_at) VALUES (gen_random_uuid(),$1,$2,'WAITLISTED',now(),now(),now())",
+		eventID,
+		waitlisted,
+	)
+	if _, err := res.CheckIn(ctx, waitlistedTok, token); !errors.Is(err, ErrCheckIn) {
+		t.Fatalf("waitlisted donor checked in: %v", err)
 	}
 	// Seed a reservation directly: the donor reserved before the event started
 	// (Reserve itself is correctly closed once an event has begun, E-9).
@@ -526,7 +590,7 @@ func TestEventICSAndReportIssue(t *testing.T) {
 	reader := EventReader{DB: pool, SupportEmail: "help@dad.example"}
 
 	in := eventInput("gala", "San Francisco", "94103", "COMMUNITY", 48*time.Hour)
-	in.Description = "Food, drinks; and fun" // has a semicolon to exercise escaping
+	in.Description = "Food, drinks; and fun. " + strings.Repeat("Bring a friend — café tables outside. ", 6)
 	eventID, err := events.Create(ctx, adminToken, in)
 	if err != nil {
 		t.Fatal(err)
@@ -539,8 +603,15 @@ func TestEventICSAndReportIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"BEGIN:VCALENDAR", "BEGIN:VEVENT", "UID:" + eventID.String() + "@dad", "SUMMARY:Event gala", "DTSTART:", "DTEND:", "Food\\, drinks\\; and fun", "END:VCALENDAR"} {
-		if !strings.Contains(ics, want) {
+	for _, line := range strings.Split(strings.TrimSuffix(ics, "\r\n"), "\r\n") {
+		if len(line) > 75 || !utf8.ValidString(line) {
+			t.Fatalf("ics line is %d octets or splits a character: %q", len(line), line)
+		}
+	}
+	unfolded := strings.ReplaceAll(ics, "\r\n ", "")
+	for _, want := range []string{"BEGIN:VCALENDAR", "BEGIN:VEVENT", "UID:" + eventID.String() + "@dad", "SUMMARY:Event gala", "DTSTART:", "DTEND:",
+		"DESCRIPTION:Food\\, drinks\\; and fun. Bring a friend — café tables outside.", "END:VCALENDAR"} {
+		if !strings.Contains(unfolded, want) {
 			t.Fatalf("ics missing %q:\n%s", want, ics)
 		}
 	}

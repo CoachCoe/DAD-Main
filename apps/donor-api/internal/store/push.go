@@ -221,21 +221,26 @@ func pushSuppression(
 			return "badge_revoked", nil
 		}
 		return "", nil
-	case "EVENT_PROMOTED":
-		// Event alerts ride on the volunteer opt-in (E-1). Expiry (the event
-		// start) is already handled above; there is no further fact to recheck.
-		if !pref.Volunteer {
-			return "opted_out", nil
-		}
-		return "", nil
-	case "EVENT_REMINDER":
-		// Same gate as other event alerts; expiry (event start) handled above.
-		if !pref.Volunteer {
-			return "opted_out", nil
-		}
-		return "", nil
+	case "EVENT_PROMOTED", "EVENT_REMINDER":
+		return reservationLapsed(ctx, q, data, donor)
 	}
 	return "", payments.ErrFacts
+}
+
+// reservationLapsed reports why a notice about the donor's seat at an event no
+// longer applies: they cancelled it or are back on the waitlist. These notices
+// concern a reservation the donor made, so unlike new-event alerts they do not
+// depend on the volunteer opt-in (E-1).
+func reservationLapsed(ctx context.Context, q *queries.Queries, data payments.Object, donor queries.Donor) (string, error) {
+	event, err := parseID(data.Text("event_id"))
+	if err != nil {
+		return "", err
+	}
+	reservation, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: event, DonorID: donor.ID})
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && reservation.Status != reservationReserved) {
+		return "reservation_released", nil
+	}
+	return "", err
 }
 
 // pushContent is what a notification says. It names no one and no amount:
