@@ -289,15 +289,17 @@ type DonorPartnerSignup struct {
 }
 
 type DonorPartnerUser struct {
-	ID         pgtype.UUID        `json:"id"`
-	PartnerID  pgtype.UUID        `json:"partner_id"`
-	Email      string             `json:"email"`
-	Name       string             `json:"name"`
-	Role       string             `json:"role"`
-	InvitedBy  pgtype.UUID        `json:"invited_by"`
-	AcceptedAt pgtype.Timestamptz `json:"accepted_at"`
-	Disabled   bool               `json:"disabled"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	ID              pgtype.UUID        `json:"id"`
+	PartnerID       pgtype.UUID        `json:"partner_id"`
+	Email           string             `json:"email"`
+	Name            string             `json:"name"`
+	Role            string             `json:"role"`
+	InvitedBy       pgtype.UUID        `json:"invited_by"`
+	AcceptedAt      pgtype.Timestamptz `json:"accepted_at"`
+	Disabled        bool               `json:"disabled"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	InviteTokenHash pgtype.Text        `json:"invite_token_hash"`
+	InviteExpiresAt pgtype.Timestamptz `json:"invite_expires_at"`
 }
 
 type DonorPasskey struct {

@@ -73,6 +73,40 @@ SELECT * FROM donor_partner_users WHERE partner_id=$1 AND email=$2;
 -- P-4: a partner admin removes a user (soft delete).
 UPDATE donor_partner_users SET disabled=true WHERE partner_id=$1 AND id=$2;
 
+-- name: InvitePartnerUser :exec
+-- P-4: a partner admin invites a VIEWER (or ADMIN) by email with a pending
+-- link token. On conflict (re-invite) the token and role are refreshed.
+INSERT INTO donor_partner_users (id, partner_id, email, name, role, invited_by, invite_token_hash, invite_expires_at, created_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+ON CONFLICT (partner_id, email) DO UPDATE
+SET role=EXCLUDED.role, invite_token_hash=EXCLUDED.invite_token_hash, invite_expires_at=EXCLUDED.invite_expires_at, disabled=false;
+
+-- name: PartnerUserByInvite :one
+SELECT * FROM donor_partner_users WHERE invite_token_hash=$1;
+
+-- name: AcceptPartnerInvite :exec
+-- Clears the pending invite and marks the user active on first sign-in.
+UPDATE donor_partner_users
+SET accepted_at=$2, invite_token_hash=NULL, invite_expires_at=NULL
+WHERE id=$1;
+
+-- name: InsertPartnerSession :exec
+INSERT INTO donor_partner_sessions (id, partner_user_id, token_hash, expires_at, created_at)
+VALUES ($1,$2,$3,$4,$5);
+
+-- name: AuthenticatedPartnerUser :one
+-- Resolves a live partner session to its user + org, rejecting expired/revoked
+-- sessions and disabled users.
+SELECT u.*, p.organization, p.approved_at
+FROM donor_partner_sessions s
+JOIN donor_partner_users u ON u.id = s.partner_user_id
+JOIN donor_partner_signups p ON p.id = u.partner_id
+WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at > sqlc.arg(as_of)::timestamptz
+  AND NOT u.disabled;
+
+-- name: RevokePartnerSession :exec
+UPDATE donor_partner_sessions SET revoked_at=$2 WHERE token_hash=$1 AND revoked_at IS NULL;
+
 -- name: PartnerSpendByCategory :many
 -- P-12: spend by category across a partner's linked initiatives (totals only).
 SELECT s.category, sum(s.amount_minor)::bigint AS amount_minor

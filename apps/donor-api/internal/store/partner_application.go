@@ -166,14 +166,22 @@ func (s PartnerApplicationService) Approve(ctx context.Context, token string, ap
 			}); err != nil {
 				return pgtype.UUID{}, err
 			}
-			// P-3: the signer becomes the first partner ADMIN.
+			// P-3: the signer becomes the first partner ADMIN, with a pending
+			// invite token so they can complete first sign-in (AcceptInvite).
 			userID, err := NewID()
 			if err != nil {
 				return pgtype.UUID{}, err
 			}
-			if err = q.InsertPartnerUser(ctx, queries.InsertPartnerUserParams{
+			invite, err := randomToken(32)
+			if err != nil {
+				return pgtype.UUID{}, err
+			}
+			if err = q.InvitePartnerUser(ctx, queries.InvitePartnerUserParams{
 				ID: userID, PartnerID: partnerID, Email: app.WorkEmail, Name: app.ContactName,
-				Role: "ADMIN", AcceptedAt: timestamp(now), CreatedAt: timestamp(now),
+				Role: "ADMIN", InvitedBy: pgtype.UUID{},
+				InviteTokenHash: pgtype.Text{String: HashToken(invite), Valid: true},
+				InviteExpiresAt: timestamp(now.Add(partnerInviteLifetime)),
+				CreatedAt:       timestamp(now),
 			}); err != nil {
 				return pgtype.UUID{}, err
 			}

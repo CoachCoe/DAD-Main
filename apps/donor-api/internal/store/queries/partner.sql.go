@@ -11,6 +11,76 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acceptPartnerInvite = `-- name: AcceptPartnerInvite :exec
+UPDATE donor_partner_users
+SET accepted_at=$2, invite_token_hash=NULL, invite_expires_at=NULL
+WHERE id=$1
+`
+
+type AcceptPartnerInviteParams struct {
+	ID         pgtype.UUID        `json:"id"`
+	AcceptedAt pgtype.Timestamptz `json:"accepted_at"`
+}
+
+// Clears the pending invite and marks the user active on first sign-in.
+func (q *Queries) AcceptPartnerInvite(ctx context.Context, arg AcceptPartnerInviteParams) error {
+	_, err := q.db.Exec(ctx, acceptPartnerInvite, arg.ID, arg.AcceptedAt)
+	return err
+}
+
+const authenticatedPartnerUser = `-- name: AuthenticatedPartnerUser :one
+SELECT u.id, u.partner_id, u.email, u.name, u.role, u.invited_by, u.accepted_at, u.disabled, u.created_at, u.invite_token_hash, u.invite_expires_at, p.organization, p.approved_at
+FROM donor_partner_sessions s
+JOIN donor_partner_users u ON u.id = s.partner_user_id
+JOIN donor_partner_signups p ON p.id = u.partner_id
+WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at > $2::timestamptz
+  AND NOT u.disabled
+`
+
+type AuthenticatedPartnerUserParams struct {
+	TokenHash string             `json:"token_hash"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+}
+
+type AuthenticatedPartnerUserRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	PartnerID       pgtype.UUID        `json:"partner_id"`
+	Email           string             `json:"email"`
+	Name            string             `json:"name"`
+	Role            string             `json:"role"`
+	InvitedBy       pgtype.UUID        `json:"invited_by"`
+	AcceptedAt      pgtype.Timestamptz `json:"accepted_at"`
+	Disabled        bool               `json:"disabled"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	InviteTokenHash pgtype.Text        `json:"invite_token_hash"`
+	InviteExpiresAt pgtype.Timestamptz `json:"invite_expires_at"`
+	Organization    string             `json:"organization"`
+	ApprovedAt      pgtype.Timestamptz `json:"approved_at"`
+}
+
+// Resolves a live partner session to its user + org, rejecting expired/revoked
+// sessions and disabled users.
+func (q *Queries) AuthenticatedPartnerUser(ctx context.Context, arg AuthenticatedPartnerUserParams) (AuthenticatedPartnerUserRow, error) {
+	row := q.db.QueryRow(ctx, authenticatedPartnerUser, arg.TokenHash, arg.AsOf)
+	var i AuthenticatedPartnerUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.PartnerID,
+		&i.Email,
+		&i.Name,
+		&i.Role,
+		&i.InvitedBy,
+		&i.AcceptedAt,
+		&i.Disabled,
+		&i.CreatedAt,
+		&i.InviteTokenHash,
+		&i.InviteExpiresAt,
+		&i.Organization,
+		&i.ApprovedAt,
+	)
+	return i, err
+}
+
 const decidePartnerApplication = `-- name: DecidePartnerApplication :exec
 UPDATE donor_partner_applications
 SET status=$2, decided_by=$3, decided_at=$4, decision_reason=$5, approved_partner_id=$6, updated_at=$4
@@ -92,6 +162,30 @@ func (q *Queries) InsertPartnerApplication(ctx context.Context, arg InsertPartne
 	return err
 }
 
+const insertPartnerSession = `-- name: InsertPartnerSession :exec
+INSERT INTO donor_partner_sessions (id, partner_user_id, token_hash, expires_at, created_at)
+VALUES ($1,$2,$3,$4,$5)
+`
+
+type InsertPartnerSessionParams struct {
+	ID            pgtype.UUID        `json:"id"`
+	PartnerUserID pgtype.UUID        `json:"partner_user_id"`
+	TokenHash     string             `json:"token_hash"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) InsertPartnerSession(ctx context.Context, arg InsertPartnerSessionParams) error {
+	_, err := q.db.Exec(ctx, insertPartnerSession,
+		arg.ID,
+		arg.PartnerUserID,
+		arg.TokenHash,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const insertPartnerUser = `-- name: InsertPartnerUser :exec
 INSERT INTO donor_partner_users (id, partner_id, email, name, role, invited_by, accepted_at, created_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -120,6 +214,42 @@ func (q *Queries) InsertPartnerUser(ctx context.Context, arg InsertPartnerUserPa
 		arg.Role,
 		arg.InvitedBy,
 		arg.AcceptedAt,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const invitePartnerUser = `-- name: InvitePartnerUser :exec
+INSERT INTO donor_partner_users (id, partner_id, email, name, role, invited_by, invite_token_hash, invite_expires_at, created_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+ON CONFLICT (partner_id, email) DO UPDATE
+SET role=EXCLUDED.role, invite_token_hash=EXCLUDED.invite_token_hash, invite_expires_at=EXCLUDED.invite_expires_at, disabled=false
+`
+
+type InvitePartnerUserParams struct {
+	ID              pgtype.UUID        `json:"id"`
+	PartnerID       pgtype.UUID        `json:"partner_id"`
+	Email           string             `json:"email"`
+	Name            string             `json:"name"`
+	Role            string             `json:"role"`
+	InvitedBy       pgtype.UUID        `json:"invited_by"`
+	InviteTokenHash pgtype.Text        `json:"invite_token_hash"`
+	InviteExpiresAt pgtype.Timestamptz `json:"invite_expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+// P-4: a partner admin invites a VIEWER (or ADMIN) by email with a pending
+// link token. On conflict (re-invite) the token and role are refreshed.
+func (q *Queries) InvitePartnerUser(ctx context.Context, arg InvitePartnerUserParams) error {
+	_, err := q.db.Exec(ctx, invitePartnerUser,
+		arg.ID,
+		arg.PartnerID,
+		arg.Email,
+		arg.Name,
+		arg.Role,
+		arg.InvitedBy,
+		arg.InviteTokenHash,
+		arg.InviteExpiresAt,
 		arg.CreatedAt,
 	)
 	return err
@@ -278,7 +408,7 @@ func (q *Queries) PartnerSpendByCategory(ctx context.Context, partnerSignupID pg
 }
 
 const partnerUserByEmail = `-- name: PartnerUserByEmail :one
-SELECT id, partner_id, email, name, role, invited_by, accepted_at, disabled, created_at FROM donor_partner_users WHERE partner_id=$1 AND email=$2
+SELECT id, partner_id, email, name, role, invited_by, accepted_at, disabled, created_at, invite_token_hash, invite_expires_at FROM donor_partner_users WHERE partner_id=$1 AND email=$2
 `
 
 type PartnerUserByEmailParams struct {
@@ -299,12 +429,37 @@ func (q *Queries) PartnerUserByEmail(ctx context.Context, arg PartnerUserByEmail
 		&i.AcceptedAt,
 		&i.Disabled,
 		&i.CreatedAt,
+		&i.InviteTokenHash,
+		&i.InviteExpiresAt,
+	)
+	return i, err
+}
+
+const partnerUserByInvite = `-- name: PartnerUserByInvite :one
+SELECT id, partner_id, email, name, role, invited_by, accepted_at, disabled, created_at, invite_token_hash, invite_expires_at FROM donor_partner_users WHERE invite_token_hash=$1
+`
+
+func (q *Queries) PartnerUserByInvite(ctx context.Context, inviteTokenHash pgtype.Text) (DonorPartnerUser, error) {
+	row := q.db.QueryRow(ctx, partnerUserByInvite, inviteTokenHash)
+	var i DonorPartnerUser
+	err := row.Scan(
+		&i.ID,
+		&i.PartnerID,
+		&i.Email,
+		&i.Name,
+		&i.Role,
+		&i.InvitedBy,
+		&i.AcceptedAt,
+		&i.Disabled,
+		&i.CreatedAt,
+		&i.InviteTokenHash,
+		&i.InviteExpiresAt,
 	)
 	return i, err
 }
 
 const partnerUsersForPartner = `-- name: PartnerUsersForPartner :many
-SELECT id, partner_id, email, name, role, invited_by, accepted_at, disabled, created_at FROM donor_partner_users WHERE partner_id=$1 AND NOT disabled ORDER BY created_at, id
+SELECT id, partner_id, email, name, role, invited_by, accepted_at, disabled, created_at, invite_token_hash, invite_expires_at FROM donor_partner_users WHERE partner_id=$1 AND NOT disabled ORDER BY created_at, id
 `
 
 func (q *Queries) PartnerUsersForPartner(ctx context.Context, partnerID pgtype.UUID) ([]DonorPartnerUser, error) {
@@ -326,6 +481,8 @@ func (q *Queries) PartnerUsersForPartner(ctx context.Context, partnerID pgtype.U
 			&i.AcceptedAt,
 			&i.Disabled,
 			&i.CreatedAt,
+			&i.InviteTokenHash,
+			&i.InviteExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -416,6 +573,20 @@ func (q *Queries) PromotePartnerOrg(ctx context.Context, arg PromotePartnerOrgPa
 		arg.WorkforceSize,
 		arg.CompanyCode,
 	)
+	return err
+}
+
+const revokePartnerSession = `-- name: RevokePartnerSession :exec
+UPDATE donor_partner_sessions SET revoked_at=$2 WHERE token_hash=$1 AND revoked_at IS NULL
+`
+
+type RevokePartnerSessionParams struct {
+	TokenHash string             `json:"token_hash"`
+	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+}
+
+func (q *Queries) RevokePartnerSession(ctx context.Context, arg RevokePartnerSessionParams) error {
+	_, err := q.db.Exec(ctx, revokePartnerSession, arg.TokenHash, arg.RevokedAt)
 	return err
 }
 
