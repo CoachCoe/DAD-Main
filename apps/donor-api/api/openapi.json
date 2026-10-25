@@ -8824,6 +8824,66 @@
      }
     }
    }
+  },
+  "/donor/staff/report": {
+   "get": {
+    "operationId": "staffReport",
+    "summary": "Success metrics report",
+    "tags": [
+     "Staff donors"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "start",
+      "in": "query",
+      "required": true,
+      "description": "Inclusive window start, RFC3339 (UTC).",
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      }
+     },
+     {
+      "name": "end",
+      "in": "query",
+      "required": true,
+      "description": "Exclusive window end and observation cutoff, RFC3339 (UTC).",
+      "schema": {
+       "type": "string",
+       "format": "date-time"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Report"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
   }
  },
  "components": {
@@ -9482,9 +9542,17 @@
       "type": "boolean",
       "description": "App notification when a declined monthly payment puts the donor's giving streak at risk. Starts on."
      },
+     "push_streak_lapsed": {
+      "type": "boolean",
+      "description": "App notification when the donor's giving streak has lapsed after the grace period on a failed monthly payment. Starts on."
+     },
      "push_streak_milestone": {
       "type": "boolean",
       "description": "App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on."
+     },
+     "push_badge_earned": {
+      "type": "boolean",
+      "description": "App notification when the donor earns a new badge. Starts on."
      },
      "rankings_opted_out": {
       "type": "boolean",
@@ -9532,7 +9600,9 @@
      "volunteer",
      "volunteer_interests",
      "version",
-     "consent_version"
+     "consent_version",
+     "push_streak_lapsed",
+     "push_badge_earned"
     ],
     "additionalProperties": false
    },
@@ -12049,6 +12119,266 @@
       "description": "Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event."
      }
     },
+    "additionalProperties": false
+   },
+   "ReportMetric": {
+    "type": "object",
+    "properties": {
+     "available": {
+      "type": "boolean",
+      "description": "Whether the server can compute this metric."
+     },
+     "reason": {
+      "type": "string",
+      "description": "Why the metric is unavailable, when available is false."
+     },
+     "value": {
+      "type": "integer",
+      "format": "int64"
+     }
+    },
+    "required": [
+     "available",
+     "value"
+    ],
+    "additionalProperties": false
+   },
+   "ReportSourceConversions": {
+    "type": "object",
+    "properties": {
+     "source": {
+      "type": "string",
+      "description": "Frozen attribution source: DIRECT, LINK or IRL."
+     },
+     "frequency": {
+      "type": "string",
+      "description": "Gift frequency: MONTHLY or ONE_TIME."
+     },
+     "donors": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "gross_minor": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Gross collected cents for these first gifts."
+     }
+    },
+    "required": [
+     "source",
+     "frequency",
+     "donors",
+     "gross_minor"
+    ],
+    "additionalProperties": false
+   },
+   "ReportGiftMix": {
+    "type": "object",
+    "properties": {
+     "frequency": {
+      "type": "string",
+      "description": "Gift frequency: MONTHLY or ONE_TIME."
+     },
+     "gifts": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "collected_minor": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Collected cents."
+     }
+    },
+    "required": [
+     "frequency",
+     "gifts",
+     "collected_minor"
+    ],
+    "additionalProperties": false
+   },
+   "ReportViralCoefficient": {
+    "type": "object",
+    "properties": {
+     "cohort": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Donors who referred at least one donor in the window."
+     },
+     "gross_conversions": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "qualified_conversions": {
+      "type": "integer",
+      "format": "int64"
+     }
+    },
+    "required": [
+     "cohort",
+     "gross_conversions",
+     "qualified_conversions"
+    ],
+    "additionalProperties": false
+   },
+   "ReportInvoluntaryChurn": {
+    "type": "object",
+    "properties": {
+     "failed_periods": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "lost_minor": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Scheduled cents lost to failed renewals past the retry deadline."
+     },
+     "recovered_periods": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "recovered_minor": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Cents recovered against the failed-period cohort."
+     }
+    },
+    "required": [
+     "failed_periods",
+     "lost_minor",
+     "recovered_periods",
+     "recovered_minor"
+    ],
+    "additionalProperties": false
+   },
+   "ReportRetention": {
+    "type": "object",
+    "properties": {
+     "reached_m3": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "retained_m3": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "reached_m6": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "retained_m6": {
+      "type": "integer",
+      "format": "int64"
+     }
+    },
+    "required": [
+     "reached_m3",
+     "retained_m3",
+     "reached_m6",
+     "retained_m6"
+    ],
+    "additionalProperties": false
+   },
+   "ReportTimeToFirstGift": {
+    "type": "object",
+    "properties": {
+     "sample": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "median_seconds": {
+      "type": "integer",
+      "format": "int64"
+     }
+    },
+    "required": [
+     "sample",
+     "median_seconds"
+    ],
+    "additionalProperties": false
+   },
+   "Report": {
+    "type": "object",
+    "properties": {
+     "period_start": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Inclusive window start (UTC)."
+     },
+     "period_end": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Exclusive window end (UTC); also the observation cutoff."
+     },
+     "observation_cutoff": {
+      "type": "string",
+      "format": "date-time",
+      "description": "As-of time the metrics were computed against (UTC)."
+     },
+     "timezone": {
+      "type": "string",
+      "description": "Always UTC."
+     },
+     "coverage_note": {
+      "type": "string",
+      "description": "Discloses the committed-facts coverage boundary."
+     },
+     "founding_donors": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "first_gift_by_source": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/ReportSourceConversions"
+      }
+     },
+     "gift_mix": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/ReportGiftMix"
+      }
+     },
+     "viral_coefficient": {
+      "$ref": "#/components/schemas/ReportViralCoefficient"
+     },
+     "referral_link_minor": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "referral_irl_minor": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "involuntary_churn": {
+      "$ref": "#/components/schemas/ReportInvoluntaryChurn"
+     },
+     "time_to_first_gift": {
+      "$ref": "#/components/schemas/ReportTimeToFirstGift"
+     },
+     "retention": {
+      "$ref": "#/components/schemas/ReportRetention"
+     },
+     "seven_day_share_rate": {
+      "$ref": "#/components/schemas/ReportMetric"
+     }
+    },
+    "required": [
+     "period_start",
+     "period_end",
+     "observation_cutoff",
+     "timezone",
+     "coverage_note",
+     "founding_donors",
+     "first_gift_by_source",
+     "gift_mix",
+     "viral_coefficient",
+     "referral_link_minor",
+     "referral_irl_minor",
+     "involuntary_churn",
+     "time_to_first_gift",
+     "retention",
+     "seven_day_share_rate"
+    ],
     "additionalProperties": false
    }
   }

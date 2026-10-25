@@ -48,6 +48,13 @@ var (
 //
 // partner.* are defined now though the /partner/* and partner-admin routes land
 // in Phase 5 PR-B, so the role model is complete and PR-B only references them.
+//
+// report.read is the §4 success-metrics read (the staff KPI report). It is NOT
+// a super-admin-only power: the org-wide metrics inform every operator's area
+// (Growth reads acquisition/referral/retention, Partnerships the partner and
+// network totals, Impact the giving mix), so all four roles hold it. It is a
+// pure read of committed facts and grants no mutation, so it carries none of
+// the §8 reserved powers' risk.
 var rolePermissions = map[string][]string{
 	"SUPER_ADMIN": {
 		"audit.read",
@@ -59,11 +66,12 @@ var rolePermissions = map[string][]string{
 		"gift.refund",
 		"message.resend",
 		"partner.manage",
+		"report.read",
 		"staff.manage",
 	},
-	"OP_PARTNERSHIPS": {"audit.read", "donor.read", "message.resend", "partner.manage"},
-	"OP_GROWTH":       {"content.publish"},
-	"OP_IMPACT":       {"content.publish"},
+	"OP_PARTNERSHIPS": {"audit.read", "donor.read", "message.resend", "partner.manage", "report.read"},
+	"OP_GROWTH":       {"content.publish", "report.read"},
+	"OP_IMPACT":       {"content.publish", "report.read"},
 }
 
 func staffPermissions(role string) []string { return rolePermissions[role] }
