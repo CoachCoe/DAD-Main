@@ -13,6 +13,8 @@ type Initiatives = ResponseBody<"/donor/partner/initiatives", "get">;
 type Spend = ResponseBody<"/donor/partner/spend", "get">;
 type Users = ResponseBody<"/donor/partner/users", "get">;
 type Exports = ResponseBody<"/donor/partner/exports", "get">;
+type OurPeople = ResponseBody<"/donor/partner/our-people", "get">;
+type Teams = ResponseBody<"/donor/partner/teams", "get">;
 
 function Tile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -30,6 +32,8 @@ export default function Dashboard() {
   const spend = useApiResource<Spend>("/donor/partner/spend");
   const users = useApiResource<Users>("/donor/partner/users");
   const exports = useApiResource<Exports>("/donor/partner/exports");
+  const ourPeople = useApiResource<OurPeople>("/donor/partner/our-people");
+  const teams = useApiResource<Teams>("/donor/partner/teams");
 
   const o = overview.data;
   const [busy, setBusy] = useState(false);
@@ -114,7 +118,15 @@ export default function Dashboard() {
             <Tile label="Committed" value={formatMoney(o.committed_minor)} />
             <Tile label="Deployed" value={formatMoney(o.deployed_minor)} hint={`${o.deployed_percent}% of committed`} />
             <Tile label="People reached" value={o.people_reached.toLocaleString()} hint="Verified figures only" />
-            <Tile label="Our People" value="Coming soon" hint="Employee enrolment arrives in a later release" />
+            {ourPeople.data && !ourPeople.data.suppressed ? (
+              <Tile
+                label="Our People enrolled"
+                value={ourPeople.data.enrolled.toLocaleString()}
+                hint={`${formatMoney(ourPeople.data.given_minor)} given · avg streak ${ourPeople.data.avg_streak}`}
+              />
+            ) : (
+              <Tile label="Our People enrolled" value="—" hint="Shown once 5+ employees are enrolled" />
+            )}
           </div>
         </section>
       )}
@@ -180,6 +192,33 @@ export default function Dashboard() {
           </>
         )}
       </section>
+
+      {teams.data && teams.data.teams.length > 0 && (
+        <section aria-label="Teams">
+          <h2>Team leaderboard</h2>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Team</th>
+                <th scope="col">Active givers</th>
+                <th scope="col">Avg streak</th>
+                <th scope="col">Volunteer hours</th>
+              </tr>
+            </thead>
+            <tbody>
+              {teams.data.teams.map((t) => (
+                <tr key={t.team_id}>
+                  <td>{t.name}</td>
+                  <td>{t.active_givers}</td>
+                  <td>{t.avg_streak}</td>
+                  <td>{Math.round(t.volunteer_minutes / 60)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="note">Teams with fewer than 5 members are not shown.</p>
+        </section>
+      )}
 
       {users.data && (
         <section aria-label="Users">
