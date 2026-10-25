@@ -9,6 +9,7 @@ import (
 	"dad/donor-api/internal/store/queries"
 	"github.com/go-pdf/fpdf"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // PartnerOverview is the §7.3 dashboard header: committed, deployed (with the
@@ -53,6 +54,30 @@ type PartnerReportRow struct {
 
 // PartnerDashboardService reads the authenticated partner's dashboard.
 type PartnerDashboardService struct{ Portal PartnerPortalService }
+
+// The portal-user + auth operations delegate to the embedded PartnerPortalService
+// so the HTTP layer can take one partner-portal dependency covering both the
+// dashboard (§7.3) and user management (§7.2).
+
+func (s PartnerDashboardService) AcceptInvite(ctx context.Context, invite string) (string, error) {
+	return s.Portal.AcceptInvite(ctx, invite)
+}
+
+func (s PartnerDashboardService) SignOut(ctx context.Context, token string) error {
+	return s.Portal.SignOut(ctx, token)
+}
+
+func (s PartnerDashboardService) Users(ctx context.Context, token string) ([]PartnerUser, error) {
+	return s.Portal.Users(ctx, token)
+}
+
+func (s PartnerDashboardService) Invite(ctx context.Context, token, email, name, role string) (string, error) {
+	return s.Portal.Invite(ctx, token, email, name, role)
+}
+
+func (s PartnerDashboardService) RemoveUser(ctx context.Context, token string, userID pgtype.UUID) error {
+	return s.Portal.RemoveUser(ctx, token, userID)
+}
 
 // Overview computes the header tiles for the calling partner.
 func (s PartnerDashboardService) Overview(ctx context.Context, token string) (PartnerOverview, error) {

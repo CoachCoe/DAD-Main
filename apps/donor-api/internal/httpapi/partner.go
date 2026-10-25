@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"dad/donor-api/internal/store"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -38,10 +39,17 @@ type StaffPartnerSource interface {
 	SetMatch(ctx context.Context, token string, partnerID pgtype.UUID, workforce, rateBP int32, capMinor int64) error
 }
 
-// partnerSession reads the partner bearer token. The portal is a browser app
+// partnerSessionMaxAge mirrors the 12h store session lifetime.
+const partnerSessionMaxAge = 12 * time.Hour
+
+// partnerSession reads the partner session: the first-party cookie the web
+// portal carries, else the bearer token an API client sends. The portal is a browser app
 // that stores the session token from AcceptInvite and sends it as a bearer —
 // it is never a donor or staff cookie (P-5: a partner login is not a donor).
 func partnerSession(r *http.Request) string {
+	if cookie := cookieValue(r, partnerCookie); validToken(cookie) {
+		return cookie
+	}
 	scheme, token, _ := strings.Cut(r.Header.Get("Authorization"), " ")
 	if !strings.EqualFold(scheme, "Bearer") || !validToken(token) {
 		return ""
@@ -105,11 +113,13 @@ func (a *api) partnerAccept(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
+		a.setCookie(w, partnerCookie, token, int(partnerSessionMaxAge.Seconds()), http.SameSiteLaxMode)
 		return map[string]any{"session": token}, nil
 	})
 }
 
 func (a *api) partnerSignOut(w http.ResponseWriter, r *http.Request, session string) {
+	a.setCookie(w, partnerCookie, "", -1, http.SameSiteLaxMode)
 	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
 		return map[string]any{"signed_out": true}, a.PartnerPortal.SignOut(ctx, session)
 	})
