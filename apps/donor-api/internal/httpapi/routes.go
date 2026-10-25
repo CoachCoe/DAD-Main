@@ -7,10 +7,11 @@ import "net/http"
 type auth string
 
 const (
-	noAuth     auth = "none"
-	donorAuth  auth = "donor"  // browser cookie, or bearer token from the donor app
-	staffAuth  auth = "staff"  // browser cookie only
-	stripeAuth auth = "stripe" // Stripe-Signature over the raw body
+	noAuth      auth = "none"
+	donorAuth   auth = "donor"   // browser cookie, or bearer token from the donor app
+	partnerAuth auth = "partner" // browser cookie, or bearer token from the app
+	staffAuth   auth = "staff"   // browser cookie only
+	stripeAuth  auth = "stripe"  // Stripe-Signature over the raw body
 )
 
 type route struct {
@@ -39,7 +40,8 @@ func (a *api) routes() []route {
 		{"POST /analytics/events", noAuth, a.guarded(a.Origin, analyticsLimit, true, a.ingestAnalytics)},
 		a.visitor("POST /donor/public/partner-signup", a.partnerSignup),
 		a.visitor("POST /donor/public/partner-apply", a.partnerApply),
-		a.visitor("POST /donor/partner/accept-invite", a.partnerAccept),
+		a.partnerEntry("POST /donor/partner/sign-in", a.partnerSignIn),
+		a.partnerEntry("POST /donor/partner/accept-invite", a.partnerAccept),
 
 		a.donorEntry("POST /donor/login", a.login),
 		a.donorEntry("POST /donor/claim", a.claim),
@@ -243,15 +245,21 @@ func (a *api) staffWrite(pattern string, handler sessionHandler) route {
 	return route{pattern, staffAuth, sameOrigin(a.guarded(a.StaffOrigin, staffLimit, false, signedIn(a.staffSession, handler)))}
 }
 
-// partnerRead / partnerWrite serve the partner portal, authenticated by the
-// partner bearer session (not a donor or staff cookie — P-5). Writes take the
-// account rate budget and admit the public origin the portal is served from.
+// partnerEntry routes request and exchange the partner portal's emailed
+// sign-in links, from a browser or the app.
+func (a *api) partnerEntry(pattern string, handler http.HandlerFunc) route {
+	return route{pattern, noAuth, a.guarded(a.Origin, authLimit, true, handler)}
+}
+
+// partnerRead and partnerWrite serve the partner portal on the public origin
+// and in the app, authenticated by a partner session, never a donor or staff
+// one (P-5).
 func (a *api) partnerRead(pattern string, handler sessionHandler) route {
-	return route{pattern, noAuth, signedIn(partnerSession, handler)}
+	return route{pattern, partnerAuth, signedIn(partnerSession, handler)}
 }
 
 func (a *api) partnerWrite(pattern string, handler sessionHandler) route {
-	return route{pattern, noAuth, a.guarded(a.Origin, accountLimit, false, signedIn(partnerSession, handler))}
+	return route{pattern, partnerAuth, a.guarded(a.Origin, accountLimit, true, signedIn(partnerSession, handler))}
 }
 
 // sameOrigin refuses a request the browser reports, in Sec-Fetch-Site, as

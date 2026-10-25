@@ -7,7 +7,7 @@
    "name": "MIT",
    "identifier": "MIT"
   },
-  "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=\u2026` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh and the push-device routes admit nothing else; giving, referral capture, partner signup, and every staff route are web-only.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"\u2026\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `\u2026+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
+  "description": "The DAD (Dynamic Aid Delivery) donor API, serving the web app, the donor iOS/Android app, and the staff back office.\n\n## Clients and authentication\n- **Browsers** authenticate with HttpOnly cookies. Every mutation must carry the exact configured `Origin`; this is the CSRF defense. The API sends no CORS headers.\n- **The donor app** sends `X-DAD-Client: native` on every request, never sends `Origin` or cookies, and authenticates with `Authorization: Bearer <access token>`. A request with Origin or cookies is a browser request whatever else it carries. Sign in by calling POST /donor/login, opening the emailed `/account/claim#token=\u2026` link in the app, and sending the fragment's token to POST /donor/claim as a native request, which returns a 15-minute access token and a rotating refresh token. Exchange the refresh token at POST /donor/refresh when the access token expires or a request answers 401; send one refresh at a time and keep only the newest tokens. Routes that admit the app list `native` in `x-clients`, and POST /donor/refresh and the push-device routes admit nothing else; giving, referral capture, partner applications, and every staff route are web-only.\n- **Partner portal** users are separate from donors (P-5). They sign in by calling POST /donor/partner/sign-in and opening the emailed `/partner/accept#token=\u2026` link, whose token POST /donor/partner/accept-invite exchanges for a 12-hour session: an HttpOnly cookie for a browser, or a bearer token for a native request, sent like the donor app's.\n- Staff routes are browser-only and never accept bearer tokens. The back office runs on its own host (`DONOR_STAFF_ORIGIN`): staff mutations require that exact `Origin`, and donor and public mutations require the public one, so neither site can act on the other.\n\n## Rate limits\nMutations are rate limited per client address and class (`x-rate-limit`): auth 10/min, visitor 60/min, account 30/min, staff 60/min, with bursts up to the same size. Exceeding one answers 429 with `Retry-After`. Reads are not rate limited by the API.\n\n## Conventions\n- Errors are always `application/json` `{\"detail\": \"\u2026\"}` with the status below; the detail is safe to display. A 503 for a feature the deployment has not configured adds a stable `code` and should not be retried. Unknown routes and malformed record IDs answer 404, wrong methods 405 with `Allow`.\n- Request bodies are one JSON object with exactly the documented fields (unknown fields, trailing data, NUL characters, and `null` for a defaulted field are 422), at most 256 KiB unless stated (larger is 413).\n- Money is integer USD cents in fields ending `_minor`; the API shows the same numbers on every client.\n- Timestamps are RFC 3339 strings, UTC, possibly with fractional seconds (`2026-10-06T14:03:00Z`, `\u2026+00:00` in gift records). Dates are `YYYY-MM-DD`.\n- Lists page by `offset`, 50 rows per page; a response's `next_offset` (or `next_<list>_offset`) is the next page's offset, or null on the last page.\n- Commands that reach the payment processor or deliver email require an `Idempotency-Key`; retry with the same key after a timeout or 503.\n- Every response is `Cache-Control: no-store` except published content.\n"
  },
  "servers": [
   {
@@ -7105,17 +7105,88 @@
     }
    }
   },
-  "/donor/partner/accept-invite": {
+  "/donor/partner/sign-in": {
    "post": {
-    "operationId": "partnerAcceptInvite",
-    "summary": "Exchange a partner invite link for a session",
+    "operationId": "partnerRequestSignIn",
+    "summary": "Email a partner portal sign-in link",
+    "description": "503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address belongs to a partner user. Each enabled user of an approved partner with this email receives a single-use link that expires after 15 minutes; at most one a minute and five an hour are sent per user.",
     "tags": [
      "Partner"
     ],
     "security": [],
-    "x-rate-limit": "visitor",
+    "x-rate-limit": "auth",
     "x-clients": [
-     "browser"
+     "browser",
+     "native"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 320
+         }
+        },
+        "required": [
+         "email"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "202": {
+      "description": "Accepted, whether or not the address belongs to a partner user.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "message": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "message"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/partner/accept-invite": {
+   "post": {
+    "operationId": "partnerAcceptInvite",
+    "summary": "Exchange an emailed partner sign-in link for a session",
+    "tags": [
+     "Partner"
+    ],
+    "security": [],
+    "x-rate-limit": "auth",
+    "x-clients": [
+     "browser",
+     "native"
     ],
     "requestBody": {
      "required": true,
@@ -7125,7 +7196,9 @@
         "type": "object",
         "properties": {
          "invite": {
-          "type": "string"
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 128
          }
         },
         "required": [
@@ -7145,12 +7218,14 @@
          "type": "object",
          "properties": {
           "session": {
-           "type": "string"
+           "type": "string",
+           "description": "Native requests only."
+          },
+          "signed_in": {
+           "type": "boolean",
+           "description": "Browser requests only."
           }
          },
-         "required": [
-          "session"
-         ],
          "additionalProperties": false
         }
        }
@@ -7158,9 +7233,6 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
-     },
-     "409": {
-      "$ref": "#/components/responses/Conflict"
      },
      "422": {
       "$ref": "#/components/responses/Unprocessable"
@@ -7171,7 +7243,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "The link (`/partner/accept#token=\u2026`) comes from an approval, an invitation, or POST /donor/partner/sign-in. It is single-use: approval and invitation links expire after 7 days, requested links after 15 minutes. A browser receives an HttpOnly session cookie and `signed_in`; the app, sending a native request, receives the bearer `session` instead."
    }
   },
   "/donor/partner/overview": {
@@ -7181,7 +7254,14 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "responses": {
      "200": {
       "description": "OK",
@@ -7191,6 +7271,16 @@
          "type": "object",
          "properties": {
           "organization": {
+           "type": "string"
+          },
+          "role": {
+           "type": "string",
+           "enum": [
+            "ADMIN",
+            "VIEWER"
+           ]
+          },
+          "company_code": {
            "type": "string"
           },
           "committed_minor": {
@@ -7208,17 +7298,42 @@
            "type": "integer",
            "format": "int64"
           },
-          "our_people_available": {
-           "type": "boolean"
+          "employees_enrolled": {
+           "type": [
+            "integer",
+            "null"
+           ],
+           "format": "int64"
+          },
+          "workforce_size": {
+           "type": "integer"
+          },
+          "enrolled_percent": {
+           "type": [
+            "integer",
+            "null"
+           ]
+          },
+          "updated_at": {
+           "type": [
+            "string",
+            "null"
+           ],
+           "format": "date-time"
           }
          },
          "required": [
           "organization",
+          "role",
+          "company_code",
           "committed_minor",
           "deployed_minor",
           "deployed_percent",
           "people_reached",
-          "our_people_available"
+          "employees_enrolled",
+          "workforce_size",
+          "enrolled_percent",
+          "updated_at"
          ],
          "additionalProperties": false
         }
@@ -7234,7 +7349,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "Every figure is published and verified; nothing is estimated. Employee enrollment is null while fewer than 5 employees are linked (EM-3), and its percentage also without a workforce size. `updated_at` is when any figure last changed, null before a published initiative. `role` is the caller's own (ADMIN or VIEWER)."
    }
   },
   "/donor/partner/initiatives": {
@@ -7244,7 +7360,14 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "responses": {
      "200": {
       "description": "OK",
@@ -7267,6 +7390,19 @@
              "summary": {
               "type": "string"
              },
+             "status": {
+              "type": "string",
+              "enum": [
+               "ACTIVE",
+               "COMPLETE"
+              ]
+             },
+             "region": {
+              "type": "string"
+             },
+             "county_count": {
+              "type": "integer"
+             },
              "committed_minor": {
               "type": "integer",
               "format": "int64"
@@ -7274,14 +7410,79 @@
              "deployed_minor": {
               "type": "integer",
               "format": "int64"
+             },
+             "metrics": {
+              "type": "array",
+              "items": {
+               "type": "object",
+               "properties": {
+                "label": {
+                 "type": "string"
+                },
+                "value": {
+                 "type": "integer",
+                 "format": "int64"
+                },
+                "unit": {
+                 "type": "string",
+                 "enum": [
+                  "USD_CENTS",
+                  "PEOPLE",
+                  "INITIATIVES",
+                  "PARTNERS"
+                 ]
+                },
+                "verified_on": {
+                 "type": "string",
+                 "format": "date"
+                }
+               },
+               "required": [
+                "label",
+                "value",
+                "unit",
+                "verified_on"
+               ],
+               "additionalProperties": false
+              }
+             },
+             "spend": {
+              "type": "array",
+              "items": {
+               "type": "object",
+               "properties": {
+                "category": {
+                 "type": "string"
+                },
+                "amount_minor": {
+                 "type": "integer",
+                 "format": "int64"
+                }
+               },
+               "required": [
+                "category",
+                "amount_minor"
+               ],
+               "additionalProperties": false
+              }
+             },
+             "updated_at": {
+              "type": "string",
+              "format": "date-time"
              }
             },
             "required": [
              "id",
              "title",
              "summary",
+             "status",
+             "region",
+             "county_count",
              "committed_minor",
-             "deployed_minor"
+             "deployed_minor",
+             "metrics",
+             "spend",
+             "updated_at"
             ],
             "additionalProperties": false
            }
@@ -7304,7 +7505,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "Published co-initiatives, active first, each with every published verified headline metric in display order, its spend by category, and when its figures last changed."
    }
   },
   "/donor/partner/spend": {
@@ -7314,7 +7516,14 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "responses": {
      "200": {
       "description": "OK",
@@ -7371,7 +7580,14 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "responses": {
      "200": {
       "description": "OK",
@@ -7433,10 +7649,18 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "x-rate-limit": "account",
     "x-clients": [
-     "browser"
+     "browser",
+     "native"
     ],
     "requestBody": {
      "required": true,
@@ -7473,12 +7697,12 @@
         "schema": {
          "type": "object",
          "properties": {
-          "invite": {
-           "type": "string"
+          "invited": {
+           "type": "boolean"
           }
          },
          "required": [
-          "invite"
+          "invited"
          ],
          "additionalProperties": false
         }
@@ -7503,7 +7727,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "Admin only. Emails the person a single-use invitation link that expires after 7 days. Re-inviting an existing user refreshes their role and re-enables them."
    }
   },
   "/donor/partner/exports": {
@@ -7513,7 +7738,14 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "responses": {
      "200": {
       "description": "OK",
@@ -7589,7 +7821,14 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "responses": {
      "200": {
       "description": "Branded impact report PDF",
@@ -7621,10 +7860,18 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "x-rate-limit": "account",
     "x-clients": [
-     "browser"
+     "browser",
+     "native"
     ],
     "parameters": [
      {
@@ -7699,10 +7946,18 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "x-rate-limit": "account",
     "x-clients": [
-     "browser"
+     "browser",
+     "native"
     ],
     "requestBody": {
      "required": true,
@@ -8343,11 +8598,18 @@
           },
           "team_name": {
            "type": "string"
+          },
+          "leaderboard": {
+           "type": "array",
+           "items": {
+            "$ref": "#/components/schemas/TeamLeaderboardRow"
+           }
           }
          },
          "required": [
           "partner_id",
-          "organization"
+          "organization",
+          "leaderboard"
          ],
          "additionalProperties": false
         }
@@ -8360,7 +8622,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "The signed-in donor's employer and team, and their company's team leaderboard (EM-5, teams with fewer than 5 members left out). An unlinked donor gets empty fields."
    },
    "post": {
     "operationId": "employeeJoinTeam",
@@ -8445,7 +8708,14 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "responses": {
      "200": {
       "description": "OK",
@@ -8458,11 +8728,26 @@
            "type": "integer",
            "format": "int64"
           },
+          "workforce_size": {
+           "type": "integer"
+          },
           "given_minor": {
            "type": "integer",
            "format": "int64"
           },
-          "avg_streak": {
+          "matched_minor": {
+           "type": "integer",
+           "format": "int64"
+          },
+          "avg_streak_days": {
+           "type": "integer",
+           "format": "int64"
+          },
+          "volunteer_minutes": {
+           "type": "integer",
+           "format": "int64"
+          },
+          "teams": {
            "type": "integer",
            "format": "int64"
           },
@@ -8472,8 +8757,12 @@
          },
          "required": [
           "enrolled",
+          "workforce_size",
           "given_minor",
-          "avg_streak",
+          "matched_minor",
+          "avg_streak_days",
+          "volunteer_minutes",
+          "teams",
           "suppressed"
          ],
          "additionalProperties": false
@@ -8490,7 +8779,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "Totals for the partner's linked employees (P-13): giving net of refunds, this calendar year's match owed (`matched_minor`), average current streak in days, volunteer minutes from event check-ins, and the number of teams. While fewer than 5 employees are linked every figure is 0 and `suppressed` is true (EM-3); individuals are never returned."
    }
   },
   "/donor/partner/teams": {
@@ -8500,7 +8790,14 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "responses": {
      "200": {
       "description": "OK",
@@ -8512,35 +8809,7 @@
           "teams": {
            "type": "array",
            "items": {
-            "type": "object",
-            "properties": {
-             "team_id": {
-              "type": "string"
-             },
-             "name": {
-              "type": "string"
-             },
-             "active_givers": {
-              "type": "integer",
-              "format": "int64"
-             },
-             "avg_streak": {
-              "type": "integer",
-              "format": "int64"
-             },
-             "volunteer_minutes": {
-              "type": "integer",
-              "format": "int64"
-             }
-            },
-            "required": [
-             "team_id",
-             "name",
-             "active_givers",
-             "avg_streak",
-             "volunteer_minutes"
-            ],
-            "additionalProperties": false
+            "$ref": "#/components/schemas/TeamLeaderboardRow"
            }
           }
          },
@@ -8561,7 +8830,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "The company team leaderboard (EM-5), ranked by combined active giving (annualized pledges of members whose gift is current). Teams with fewer than 5 members are left out."
    }
   },
   "/donor/partner/workforce": {
@@ -8571,10 +8841,18 @@
     "tags": [
      "Partner"
     ],
-    "security": [],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
     "x-rate-limit": "account",
     "x-clients": [
-     "browser"
+     "browser",
+     "native"
     ],
     "requestBody": {
      "required": true,
@@ -8910,6 +9188,17 @@
     "in": "header",
     "name": "Stripe-Signature",
     "description": "Stripe webhook signature over the raw request body."
+   },
+   "partnerCookieAuth": {
+    "type": "apiKey",
+    "in": "cookie",
+    "name": "dad_partner_session",
+    "description": "Partner portal session: HttpOnly, Secure on HTTPS, SameSite=Lax, 12 hours. Set by POST /donor/partner/accept-invite for browser requests. Mutations also require the exact configured `Origin`. Never a donor or staff session."
+   },
+   "partnerBearerAuth": {
+    "type": "http",
+    "scheme": "bearer",
+    "description": "Partner app session token, from POST /donor/partner/accept-invite sent as a native request. It lasts 12 hours. Accepted only on native requests (`X-DAD-Client: native`, no `Origin`, no `Cookie`), like bearerAuth. Never accepted for donor or staff routes."
    }
   },
   "parameters": {
@@ -12378,6 +12667,42 @@
      "time_to_first_gift",
      "retention",
      "seven_day_share_rate"
+    ],
+    "additionalProperties": false
+   },
+   "TeamLeaderboardRow": {
+    "type": "object",
+    "properties": {
+     "team_id": {
+      "type": "string"
+     },
+     "name": {
+      "type": "string"
+     },
+     "active_givers": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "annualized_minor": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "avg_streak_days": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "volunteer_minutes": {
+      "type": "integer",
+      "format": "int64"
+     }
+    },
+    "required": [
+     "team_id",
+     "name",
+     "active_givers",
+     "annualized_minor",
+     "avg_streak_days",
+     "volunteer_minutes"
     ],
     "additionalProperties": false
    }

@@ -37,6 +37,10 @@ func (s publicSite) claim(token, next string) string {
 	return link
 }
 
+func (s publicSite) partnerSignIn(token string) string {
+	return string(s) + "/partner/accept#token=" + token
+}
+
 func (s publicSite) emailChange(token string) string {
 	return string(s) + "/account/email-change#token=" + token
 }

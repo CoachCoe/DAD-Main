@@ -275,6 +275,19 @@ type DonorPartnerEmployee struct {
 	EnrolledAt pgtype.Timestamptz `json:"enrolled_at"`
 }
 
+type DonorPartnerLoginEmail struct {
+	ID             pgtype.UUID        `json:"id"`
+	PartnerUserID  pgtype.UUID        `json:"partner_user_id"`
+	Kind           string             `json:"kind"`
+	EncryptedToken []byte             `json:"encrypted_token"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	Attempts       int32              `json:"attempts"`
+	LastError      pgtype.Text        `json:"last_error"`
+	AvailableAt    pgtype.Timestamptz `json:"available_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorPartnerMessage struct {
 	ID               pgtype.UUID        `json:"id"`
 	PartnerID        pgtype.UUID        `json:"partner_id"`

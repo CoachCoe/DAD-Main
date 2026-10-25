@@ -185,11 +185,8 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.EventCheckInSecret = getenv("DONOR_EVENT_CHECKIN_SECRET")
 	services.Partner = store.PartnerService{DB: pool}
 	portal := store.PartnerPortalService{DB: pool}
-	services.PartnerPortal = store.PartnerDashboardService{Portal: portal}
+	services.PartnerPortal = store.PartnerDashboardService{PartnerPortalService: portal}
 	services.PartnerApply = store.PartnerApplicationService{DB: pool}
-	emp := store.EmployeeService{DB: pool}
-	services.EmployeeDonor = store.EmployeeDonorAdapter{Emp: emp}
-	services.EmployeePartner = store.EmployeePartnerAdapter{Emp: emp, Portal: portal}
 	services.Dashboard = store.DashboardReader{DB: pool}
 	services.Account = store.AccountService{DB: pool}
 	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
@@ -227,8 +224,9 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if email != nil {
 		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKeys: email.EncryptionKeys}
 	}
+	var staff *store.StaffService
 	if services.StaffOrigin != "" {
-		staff, err := store.NewStaffService(pool, services.StaffOrigin)
+		staff, err = store.NewStaffService(pool, services.StaffOrigin)
 		if err != nil {
 			pool.Close()
 			return services, release, errors.New("staff configuration is invalid")
@@ -237,13 +235,17 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
 		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKeys: contentKeys}
 		services.Initiatives = store.InitiativeService{Staff: staff}
-		services.Badges = store.BadgeService{DB: pool, Staff: staff}
-		services.Network = store.NetworkService{DB: pool}
 		services.Events = store.EventService{Staff: staff}
 		services.Reporting = &store.ReportingService{Staff: staff}
 		services.StaffPartner = store.PartnerApplicationService{DB: pool, Staff: staff}
-		services.EmployeeStaff = store.EmployeeStaffAdapter{Emp: store.EmployeeService{DB: pool}, Staff: staff}
 	}
+	employees := store.EmployeeService{DB: pool, Staff: staff}
+	services.EmployeeDonor, services.EmployeePartner = employees, employees
+	if staff != nil {
+		services.EmployeeStaff = employees
+	}
+	services.Badges = store.BadgeService{DB: pool, Staff: staff}
+	services.Network = store.NetworkService{DB: pool}
 	return services, pool.Close, nil
 }
 

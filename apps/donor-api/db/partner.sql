@@ -50,44 +50,30 @@ WHERE id=$1 AND approved_at IS NOT NULL;
 -- §8/P-3: link an initiative to its partner org.
 UPDATE donor_initiatives SET partner_signup_id=$2, updated_at=$3 WHERE id=$1;
 
--- name: PartnerInitiatives :many
--- A partner's linked initiatives (for the portal dashboards), published only.
-SELECT * FROM donor_initiatives
-WHERE partner_signup_id=$1 AND publish_state='PUBLISHED'
-ORDER BY started_on DESC, id;
-
--- name: InsertPartnerUser :exec
--- P-4: a partner admin invites a user (ADMIN or VIEWER). The signer of an
--- approved application is inserted as the first ADMIN (invited_by NULL).
-INSERT INTO donor_partner_users (id, partner_id, email, name, role, invited_by, accepted_at, created_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-ON CONFLICT (partner_id, email) DO NOTHING;
-
 -- name: PartnerUsersForPartner :many
 SELECT * FROM donor_partner_users WHERE partner_id=$1 AND NOT disabled ORDER BY created_at, id;
-
--- name: PartnerUserByEmail :one
-SELECT * FROM donor_partner_users WHERE partner_id=$1 AND email=$2;
 
 -- name: DisablePartnerUser :exec
 -- P-4: a partner admin removes a user (soft delete).
 UPDATE donor_partner_users SET disabled=true WHERE partner_id=$1 AND id=$2;
 
--- name: InvitePartnerUser :exec
--- P-4: a partner admin invites a VIEWER (or ADMIN) by email with a pending
--- link token. On conflict (re-invite) the token and role are refreshed.
-INSERT INTO donor_partner_users (id, partner_id, email, name, role, invited_by, invite_token_hash, invite_expires_at, created_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+-- name: InvitePartnerUser :one
+-- P-4: a partner admin invites a VIEWER (or ADMIN) by email; the signer of an
+-- approved application is invited as the first ADMIN. Re-inviting refreshes
+-- the role and re-enables a removed user. The emailed link is minted on delivery.
+INSERT INTO donor_partner_users (id, partner_id, email, name, role, invited_by, created_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7)
 ON CONFLICT (partner_id, email) DO UPDATE
-SET role=EXCLUDED.role, invite_token_hash=EXCLUDED.invite_token_hash, invite_expires_at=EXCLUDED.invite_expires_at, disabled=false;
+SET role=EXCLUDED.role, disabled=false
+RETURNING id;
 
 -- name: PartnerUserByInvite :one
 SELECT * FROM donor_partner_users WHERE invite_token_hash=$1;
 
 -- name: AcceptPartnerInvite :exec
--- Clears the pending invite and marks the user active on first sign-in.
+-- Spends the sign-in link; the first one also marks the user accepted.
 UPDATE donor_partner_users
-SET accepted_at=$2, invite_token_hash=NULL, invite_expires_at=NULL
+SET accepted_at=coalesce(accepted_at, $2), invite_token_hash=NULL, invite_expires_at=NULL
 WHERE id=$1;
 
 -- name: InsertPartnerSession :exec
@@ -117,20 +103,29 @@ GROUP BY s.category
 ORDER BY s.category;
 
 -- name: PartnerOverviewTotals :one
--- P-10 tiles: committed (sum of committed_minor over the partner's published
--- initiatives), deployed (sum of their spend), and people reached (sum of
--- published verified PEOPLE metrics). Totals only, published only; an
--- unverified metric is never counted (§7.3 "hidden, never estimated").
+-- P-10 tiles over the partner's published initiatives: committed, deployed
+-- (their spend), people reached (published verified PEOPLE metrics, never an
+-- estimate, §7.3), linked employees, and when any of those figures last changed.
 SELECT
+  p.company_code,
+  p.workforce_size,
   coalesce((SELECT sum(i.committed_minor) FROM donor_initiatives i
-            WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
+            WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
             JOIN donor_initiatives i ON i.id=s.initiative_id
-            WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'), 0)::bigint AS deployed_minor,
+            WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'), 0)::bigint AS deployed_minor,
   coalesce((SELECT sum(m.value) FROM donor_initiative_metrics m
             JOIN donor_initiatives i ON i.id=m.initiative_id
-            WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
-              AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE'), 0)::bigint AS people_reached;
+            WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'
+              AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE'), 0)::bigint AS people_reached,
+  (SELECT count(*) FROM donor_partner_employees e WHERE e.partner_id=p.id)::bigint AS employees_enrolled,
+  (SELECT greatest(max(i.updated_at), max(m.updated_at), max(s.updated_at))
+   FROM donor_initiatives i
+   LEFT JOIN donor_initiative_metrics m ON m.initiative_id=i.id AND m.publish_state='PUBLISHED'
+   LEFT JOIN donor_initiative_spend s ON s.initiative_id=i.id
+   WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED')::timestamptz AS updated_at
+FROM donor_partner_signups p
+WHERE p.id=$1;
 
 -- name: InsertPartnerReport :exec
 -- P-14: record one dashboard PDF export for the export-history list.
@@ -148,12 +143,32 @@ ORDER BY r.created_at DESC
 LIMIT 50;
 
 -- name: PartnerInitiativesList :many
--- P-11: the partner's published initiatives with committed + deployed totals.
-SELECT i.id, i.title, i.summary, i.committed_minor,
-  coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s WHERE s.initiative_id=i.id), 0)::bigint AS deployed_minor
+-- P-11: the partner's published initiatives with committed and deployed totals
+-- and when any of their figures last changed.
+SELECT i.id, i.title, i.summary, i.status, i.region, cardinality(i.counties)::int AS county_count, i.committed_minor,
+  coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s WHERE s.initiative_id=i.id), 0)::bigint AS deployed_minor,
+  greatest(i.updated_at,
+    (SELECT max(m.updated_at) FROM donor_initiative_metrics m WHERE m.initiative_id=i.id AND m.publish_state='PUBLISHED'),
+    (SELECT max(s.updated_at) FROM donor_initiative_spend s WHERE s.initiative_id=i.id))::timestamptz AS updated_at
 FROM donor_initiatives i
 WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
-ORDER BY i.title;
+ORDER BY i.status, i.title;
+
+-- name: PartnerInitiativeMetrics :many
+-- P-11 detail: every published headline metric of the partner's initiatives.
+SELECT m.initiative_id, m.label, m.value, m.unit, m.verified_on
+FROM donor_initiative_metrics m
+JOIN donor_initiatives i ON i.id = m.initiative_id
+WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED'
+ORDER BY m.initiative_id, m.position;
+
+-- name: PartnerInitiativeSpend :many
+-- P-11/P-12: spend by category for each of the partner's initiatives.
+SELECT s.initiative_id, s.category, s.amount_minor
+FROM donor_initiative_spend s
+JOIN donor_initiatives i ON i.id = s.initiative_id
+WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+ORDER BY s.initiative_id, s.category;
 
 -- name: QueuePartnerMessage :exec
 -- Queues one org-level partner email intent, deduped by key so the same event
@@ -205,3 +220,55 @@ AND NOT EXISTS(
 )
 ORDER BY s.id
 LIMIT sqlc.arg(batch)::int;
+
+-- name: QueuePartnerLoginEmail :exec
+-- An approval or invitation always queues; a requested sign-in link is limited
+-- to one a minute and five an hour per user, so requests from many addresses
+-- cannot flood an inbox.
+INSERT INTO donor_partner_login_emails (id, partner_user_id, kind, available_at, created_at)
+SELECT sqlc.arg(id)::uuid, sqlc.arg(partner_user_id)::uuid, sqlc.arg(kind)::text,
+  sqlc.arg(available_at)::timestamptz, sqlc.arg(available_at)::timestamptz
+WHERE sqlc.arg(kind)::text <> 'SIGN_IN' OR (
+  NOT EXISTS (SELECT 1 FROM donor_partner_login_emails
+              WHERE partner_user_id=sqlc.arg(partner_user_id)::uuid AND kind='SIGN_IN'
+                AND created_at > sqlc.arg(available_at)::timestamptz - interval '1 minute')
+  AND (SELECT count(*) FROM donor_partner_login_emails
+       WHERE partner_user_id=sqlc.arg(partner_user_id)::uuid AND kind='SIGN_IN'
+         AND created_at > sqlc.arg(available_at)::timestamptz - interval '1 hour') < 5
+);
+
+-- name: PartnerUsersForSignIn :many
+-- The enabled users of approved partners who sign in with this email.
+SELECT u.id FROM donor_partner_users u
+JOIN donor_partner_signups p ON p.id = u.partner_id
+WHERE u.email=$1 AND NOT u.disabled AND p.approved_at IS NOT NULL
+ORDER BY u.id;
+
+-- name: NextPartnerLoginEmail :one
+SELECT * FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
+
+-- name: PartnerLoginEmailByID :one
+SELECT * FROM donor_partner_login_emails WHERE id=$1 FOR UPDATE;
+
+-- name: LockPartnerLoginRecipient :one
+SELECT u.id, u.email, u.name, u.role, u.disabled, u.invite_token_hash, p.organization, p.approved_at
+FROM donor_partner_users u
+JOIN donor_partner_signups p ON p.id = u.partner_id
+WHERE u.id=$1
+FOR UPDATE OF u;
+
+-- name: SetPartnerUserLink :exec
+UPDATE donor_partner_users SET invite_token_hash=$2, invite_expires_at=$3 WHERE id=$1;
+
+-- name: PreparePartnerLoginEmail :exec
+UPDATE donor_partner_login_emails SET encrypted_token=$2, expires_at=$3 WHERE id=$1;
+
+-- name: ClaimPartnerLoginEmail :exec
+UPDATE donor_partner_login_emails SET attempts=attempts+1, available_at=$2 WHERE id=$1;
+
+-- name: CompletePartnerLoginEmail :exec
+UPDATE donor_partner_login_emails SET completed_at=$2, encrypted_token=NULL, last_error=NULL WHERE id=$1;
+
+-- name: FailPartnerLoginEmail :exec
+UPDATE donor_partner_login_emails SET last_error=$2, available_at=$3 WHERE id=$1 AND completed_at IS NULL;

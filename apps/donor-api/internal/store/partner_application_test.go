@@ -14,12 +14,18 @@ func cleanPartners(t *testing.T, pool *pgxpool.Pool) {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, s := range []string{
+			"DELETE FROM donor_partner_reports",
+			"DELETE FROM donor_partner_login_emails",
+			"DELETE FROM donor_partner_messages",
 			"DELETE FROM donor_partner_users",
 			"UPDATE donor_initiatives SET partner_signup_id=NULL WHERE partner_signup_id IS NOT NULL",
 			"DELETE FROM donor_partner_applications",
-			"DELETE FROM donor_partner_signups WHERE approved_at IS NOT NULL",
+			"DELETE FROM donor_partner_signups s WHERE approved_at IS NOT NULL" +
+				" AND NOT EXISTS (SELECT 1 FROM donor_partner_employees e WHERE e.partner_id=s.id)",
 		} {
-			_, _ = pool.Exec(ctx, s)
+			if _, err := pool.Exec(ctx, s); err != nil {
+				t.Errorf("%s: %v", s, err)
+			}
 		}
 	})
 }

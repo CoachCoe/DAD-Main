@@ -98,47 +98,40 @@ func partnerAdminWrite[T any](
 	})
 }
 
-// Invite adds a partner user by email (P-4). Admin-only. Returns the invite
-// token to email them (the portal link carries it). Re-inviting refreshes the
-// token and role.
-func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, role string) (string, error) {
+// Invite adds a partner user by email and emails them a sign-in link (P-4).
+// Admin-only. Re-inviting refreshes the role and re-enables a removed user.
+func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, role string) error {
 	if role != "ADMIN" && role != "VIEWER" {
-		return "", ErrPartnerApplication
+		return ErrPartnerApplication
 	}
 	email, err := identity.NormalizeEmail(email)
 	if err != nil {
-		return "", ErrPartnerApplication
+		return ErrPartnerApplication
 	}
 	name = identity.TrimSpace(name)
 	if utf8.RuneCountInString(name) > 100 || !plainText(name, false) {
-		return "", ErrPartnerApplication
+		return ErrPartnerApplication
 	}
-	return partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, now time.Time) (string, error) {
+	_, err = partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, now time.Time) (struct{}, error) {
 		q := queries.New(tx)
 		id, err := NewID()
 		if err != nil {
-			return "", err
+			return struct{}{}, err
 		}
-		invite, err := randomToken(32)
-		if err != nil {
-			return "", err
-		}
-		if err = q.InvitePartnerUser(ctx, queries.InvitePartnerUserParams{
+		user, err := q.InvitePartnerUser(ctx, queries.InvitePartnerUserParams{
 			ID: id, PartnerID: actor.PartnerID, Email: email, Name: name, Role: role,
-			InvitedBy:       actor.UserID,
-			InviteTokenHash: pgtype.Text{String: HashToken(invite), Valid: true},
-			InviteExpiresAt: timestamp(now.Add(partnerInviteLifetime)),
-			CreatedAt:       timestamp(now),
-		}); err != nil {
-			return "", err
+			InvitedBy: actor.UserID, CreatedAt: timestamp(now),
+		})
+		if err != nil {
+			return struct{}{}, err
 		}
-		return invite, nil
+		return struct{}{}, queuePartnerLogin(ctx, q, user, partnerLinkInvited, now)
 	})
+	return err
 }
 
-// AcceptInvite exchanges an invite token for a partner session token (first
-// sign-in), clearing the pending invite. The same flow re-issues a session for
-// an already-accepted user via a fresh sign-in link.
+// AcceptInvite exchanges an emailed sign-in link, whether an invitation or a
+// requested sign-in, for a partner session token. Each link works once.
 func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string) (string, error) {
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (string, error) {
 		q := queries.New(tx)

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
+import { TeamLeaderboard } from "@/components/donor/TeamLeaderboard";
 import { api, type ResponseBody } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
@@ -110,6 +111,16 @@ export default function Employer() {
               {busy ? "Saving…" : data.team_name ? "Change team" : "Join team"}
             </button>
           </form>
+          <section aria-labelledby="leaderboard-heading">
+            <h2 id="leaderboard-heading">{data.organization} team leaderboard</h2>
+            {data.leaderboard.length > 0 ? (
+              <TeamLeaderboard teams={data.leaderboard} />
+            ) : (
+              <p className="note">
+                Teams appear here once they have at least 5 members. Invite colleagues to join yours.
+              </p>
+            )}
+          </section>
         </>
       )}
       <Announcer status={status} alert={error} />

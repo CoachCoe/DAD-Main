@@ -151,6 +151,9 @@ func (b BadgeService) Grant(ctx context.Context, token string, donorID pgtype.UU
 	if _, ok := badges.Lookup(code); !ok {
 		return ErrStaffInput
 	}
+	if b.Staff == nil {
+		return ErrStaffDenied
+	}
 	_, err := staffDonorWrite(ctx, b.Staff, token, "badge.manage", donorID,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
@@ -166,6 +169,9 @@ func (b BadgeService) Grant(ctx context.Context, token string, donorID pgtype.UU
 func (b BadgeService) Revoke(ctx context.Context, token string, donorID pgtype.UUID, code string) error {
 	if _, ok := badges.Lookup(code); !ok {
 		return ErrStaffInput
+	}
+	if b.Staff == nil {
+		return ErrStaffDenied
 	}
 	_, err := staffDonorWrite(ctx, b.Staff, token, "badge.manage", donorID,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {

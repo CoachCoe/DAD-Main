@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"dad/donor-api/internal/identity"
+	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -21,33 +22,47 @@ var (
 	ErrTeam = errors.New("invalid team")
 )
 
-// EmployeeService resolves a donor's company code to a partner and reads the
-// employee-giving aggregates. Reuses the donor and partner session helpers.
-type EmployeeService struct{ DB *pgxpool.Pool }
-
-// PartnerOurPeople is the §7.3 Our People tile (EM-3), k-anonymised.
-type PartnerOurPeople struct {
-	Enrolled   int64 `json:"enrolled"`
-	GivenMinor int64 `json:"given_minor"`
-	AvgStreak  int64 `json:"avg_streak"`
-	Suppressed bool  `json:"suppressed"`
+// EmployeeService is employee giving for all three audiences: the donor's
+// company code and team, the partner's k-anonymised aggregates, and the staff
+// matching ledger. Staff is nil when the back office is not configured.
+type EmployeeService struct {
+	DB    *pgxpool.Pool
+	Staff *StaffService
 }
 
-// EmployeeTeamRow is one row of the team leaderboard (EM-5).
+// PartnerOurPeople is the Our People view (P-13). While fewer than
+// minimumGroup employees are linked every figure is zero and Suppressed is set
+// (EM-3). MatchedMinor is this calendar year's match owed (EM-6, EM-7).
+type PartnerOurPeople struct {
+	Enrolled         int64 `json:"enrolled"`
+	WorkforceSize    int32 `json:"workforce_size"`
+	GivenMinor       int64 `json:"given_minor"`
+	MatchedMinor     int64 `json:"matched_minor"`
+	AvgStreakDays    int64 `json:"avg_streak_days"`
+	VolunteerMinutes int64 `json:"volunteer_minutes"`
+	Teams            int64 `json:"teams"`
+	Suppressed       bool  `json:"suppressed"`
+}
+
+// EmployeeTeamRow is one team on the company leaderboard (EM-5).
+// AnnualizedMinor is the combined active giving it is ranked by.
 type EmployeeTeamRow struct {
 	TeamID           string `json:"team_id"`
 	Name             string `json:"name"`
 	ActiveGivers     int64  `json:"active_givers"`
-	AvgStreak        int64  `json:"avg_streak"`
+	AnnualizedMinor  int64  `json:"annualized_minor"`
+	AvgStreakDays    int64  `json:"avg_streak_days"`
 	VolunteerMinutes int64  `json:"volunteer_minutes"`
 }
 
-// DonorTeam is the donor's own employer + team (EM-2/EM-4), for /donor/me/team.
+// DonorTeam is the donor's employer, their team, and their company's
+// leaderboard (EM-2, EM-4, EM-5), for /donor/me/team.
 type DonorTeam struct {
-	PartnerID    string `json:"partner_id"`
-	Organization string `json:"organization"`
-	TeamID       string `json:"team_id,omitempty"`
-	TeamName     string `json:"team_name,omitempty"`
+	PartnerID    string            `json:"partner_id"`
+	Organization string            `json:"organization"`
+	TeamID       string            `json:"team_id,omitempty"`
+	TeamName     string            `json:"team_name,omitempty"`
+	Leaderboard  []EmployeeTeamRow `json:"leaderboard"`
 }
 
 // MatchStatus is the §8 matching view (EM-6/EM-7): owed this calendar year and
@@ -92,12 +107,13 @@ func (s EmployeeService) Enroll(ctx context.Context, token, code string) (string
 	})
 }
 
-// Team returns the donor's employer + team, or a zero value when unlinked.
+// Team returns the donor's employer, team and company leaderboard, or a zero
+// value when unlinked.
 func (s EmployeeService) Team(ctx context.Context, token string) (DonorTeam, error) {
-	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (DonorTeam, error) {
+	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (DonorTeam, error) {
 		link, err := q.EmployeeLink(ctx, d.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return DonorTeam{}, nil
+			return DonorTeam{Leaderboard: []EmployeeTeamRow{}}, nil
 		}
 		if err != nil {
 			return DonorTeam{}, err
@@ -107,6 +123,9 @@ func (s EmployeeService) Team(ctx context.Context, token string) (DonorTeam, err
 			return DonorTeam{}, err
 		}
 		out := DonorTeam{PartnerID: link.PartnerID.String(), Organization: org}
+		if out.Leaderboard, err = teamLeaderboard(ctx, q, link.PartnerID, now); err != nil {
+			return DonorTeam{}, err
+		}
 		if link.TeamID.Valid {
 			team, err := q.TeamByID(ctx, link.TeamID)
 			if err != nil {
@@ -166,57 +185,82 @@ func teamByName(ctx context.Context, q *queries.Queries, partnerID pgtype.UUID, 
 	return newID, nil
 }
 
-// OurPeople returns the k-anonymised Our People aggregate for the calling
-// partner (EM-3). Any partner role may view; individuals are never returned.
-func (s EmployeeService) OurPeople(ctx context.Context, token string, portal PartnerPortalService) (PartnerOurPeople, error) {
-	return partnerRead(ctx, portal.DB, token, func(q *queries.Queries, actor PartnerActor) (PartnerOurPeople, error) {
-		row, err := q.PartnerOurPeople(ctx, actor.PartnerID)
+// calendarYear bounds a matching year: the cap resets each
+// calendar year (EM-6), in the zone DAD's tax years use.
+func calendarYear(year int) (time.Time, time.Time) {
+	start := time.Date(year, 1, 1, 0, 0, 0, 0, recognition.NewYork)
+	return start, start.AddDate(1, 0, 0)
+}
+
+// matchOwed is a year's gifts times the match rate, capped (EM-6). A cap of
+// zero means no cap.
+func matchOwed(giftsMinor int64, rateBP int32, capMinor int64) int64 {
+	owed := giftsMinor * int64(rateBP) / 10000
+	if capMinor > 0 {
+		owed = min(owed, capMinor)
+	}
+	return owed
+}
+
+// OurPeople returns the calling partner's Our People totals (P-13). Any
+// partner role may view; individuals are never returned (EM-3).
+func (s EmployeeService) OurPeople(ctx context.Context, token string) (PartnerOurPeople, error) {
+	return partnerRead(ctx, s.DB, token, func(q *queries.Queries, actor PartnerActor) (PartnerOurPeople, error) {
+		now := time.Now().UTC()
+		start, end := calendarYear(now.In(recognition.NewYork).Year())
+		row, err := q.PartnerOurPeople(ctx, queries.PartnerOurPeopleParams{
+			PartnerID: actor.PartnerID, YearStart: timestamp(start), YearEnd: timestamp(end), AsOf: timestamp(now),
+		})
 		if err != nil {
 			return PartnerOurPeople{}, err
 		}
+		if row.Enrolled < minimumGroup {
+			return PartnerOurPeople{WorkforceSize: row.WorkforceSize, Suppressed: true}, nil
+		}
 		return PartnerOurPeople{
-			Enrolled: row.Enrolled, GivenMinor: row.GivenMinor,
-			AvgStreak: row.AvgStreak, Suppressed: row.Suppressed,
+			Enrolled: row.Enrolled, WorkforceSize: row.WorkforceSize, GivenMinor: row.GivenMinor,
+			MatchedMinor:  matchOwed(row.YearGivenMinor, row.MatchRateBp, row.MatchCapMinor),
+			AvgStreakDays: row.AvgStreakDays, VolunteerMinutes: row.VolunteerMinutes, Teams: row.Teams,
 		}, nil
 	})
 }
 
-// Teams returns the partner's team leaderboard (EM-5), teams under 5 suppressed.
-func (s EmployeeService) Teams(ctx context.Context, token string, portal PartnerPortalService) ([]EmployeeTeamRow, error) {
-	return partnerRead(ctx, portal.DB, token, func(q *queries.Queries, actor PartnerActor) ([]EmployeeTeamRow, error) {
-		rows, err := q.TeamLeaderboard(ctx, actor.PartnerID)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]EmployeeTeamRow, 0, len(rows))
-		for _, r := range rows {
-			out = append(out, EmployeeTeamRow{
-				TeamID: r.TeamID.String(), Name: r.Name, ActiveGivers: r.ActiveGivers,
-				AvgStreak: r.AvgStreak, VolunteerMinutes: r.VolunteerMinutes,
-			})
-		}
-		return out, nil
+func teamLeaderboard(ctx context.Context, q *queries.Queries, partnerID pgtype.UUID, now time.Time) ([]EmployeeTeamRow, error) {
+	rows, err := q.TeamLeaderboard(ctx, queries.TeamLeaderboardParams{PartnerID: partnerID, AsOf: timestamp(now), Minimum: minimumGroup})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]EmployeeTeamRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, EmployeeTeamRow{
+			TeamID: r.TeamID.String(), Name: r.Name, ActiveGivers: r.ActiveGivers, AnnualizedMinor: r.AnnualizedMinor,
+			AvgStreakDays: r.AvgStreakDays, VolunteerMinutes: r.VolunteerMinutes,
+		})
+	}
+	return out, nil
+}
+
+// Teams returns the calling partner's team leaderboard (EM-5).
+func (s EmployeeService) Teams(ctx context.Context, token string) ([]EmployeeTeamRow, error) {
+	return partnerRead(ctx, s.DB, token, func(q *queries.Queries, actor PartnerActor) ([]EmployeeTeamRow, error) {
+		return teamLeaderboard(ctx, q, actor.PartnerID, time.Now().UTC())
 	})
 }
 
 // Match computes the matching status for a partner in a calendar year (EM-6):
 // owed = linked-employee gifts (including pre-link) × rate, capped at the annual
 // cap; outstanding = owed − received. Staff-only (partner.manage).
-func (s EmployeeService) Match(
-	ctx context.Context,
-	staff *StaffService,
-	token string,
-	partnerID pgtype.UUID,
-	year int32,
-) (MatchStatus, error) {
-	return staffWrite(ctx, staff, token, partnerPermission, func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (MatchStatus, error) {
+func (s EmployeeService) Match(ctx context.Context, token string, partnerID pgtype.UUID, year int32) (MatchStatus, error) {
+	if s.Staff == nil {
+		return MatchStatus{}, ErrStaffDenied
+	}
+	return staffWrite(ctx, s.Staff, token, partnerPermission, func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (MatchStatus, error) {
 		q := queries.New(tx)
 		terms, err := q.PartnerMatchTerms(ctx, partnerID)
 		if err != nil {
 			return MatchStatus{}, err
 		}
-		start := time.Date(int(year), 1, 1, 0, 0, 0, 0, time.UTC)
-		end := start.AddDate(1, 0, 0)
+		start, end := calendarYear(int(year))
 		gifts, err := q.LinkedEmployeeGiftsInYear(ctx, queries.LinkedEmployeeGiftsInYearParams{
 			PartnerID: partnerID, YearStart: timestamp(start), YearEnd: timestamp(end),
 		})
@@ -227,14 +271,8 @@ func (s EmployeeService) Match(
 		if err != nil {
 			return MatchStatus{}, err
 		}
-		owed := gifts * int64(terms.MatchRateBp) / 10000
-		if terms.MatchCapMinor > 0 && owed > terms.MatchCapMinor {
-			owed = terms.MatchCapMinor
-		}
-		outstanding := owed - paid
-		if outstanding < 0 {
-			outstanding = 0
-		}
+		owed := matchOwed(gifts, terms.MatchRateBp, terms.MatchCapMinor)
+		outstanding := max(owed-paid, 0)
 		return MatchStatus{
 			Year: year, RateBP: terms.MatchRateBp, CapMinor: terms.MatchCapMinor,
 			GiftsMinor: gifts, OwedMinor: owed, PaidMinor: paid, OutstandingMinor: outstanding,
@@ -244,94 +282,44 @@ func (s EmployeeService) Match(
 
 // RecordMatchPayment records an offline match payment received (EM-7). No money
 // moves. Staff-only.
-func (s EmployeeService) RecordMatchPayment(
-	ctx context.Context,
-	staff *StaffService,
-	token string,
-	partnerID pgtype.UUID,
-	year int32,
-	amountMinor int64,
-) error {
+func (s EmployeeService) RecordMatchPayment(ctx context.Context, token string, partnerID pgtype.UUID, year int32, amountMinor int64) error {
 	if amountMinor <= 0 {
 		return ErrPartnerApplication
 	}
-	_, err := staffWrite(ctx, staff, token, partnerPermission, func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
-		q := queries.New(tx)
-		id, err := NewID()
-		if err != nil {
-			return struct{}{}, err
-		}
-		if err = q.InsertMatchPayment(ctx, queries.InsertMatchPaymentParams{
-			ID: id, PartnerID: partnerID, Year: year, AmountMinor: amountMinor,
-			ReceivedAt: timestamp(now), RecordedBy: actor.ID,
-		}); err != nil {
-			return struct{}{}, err
-		}
-		return struct{}{}, auditStaff(ctx, q, actor.ID, "partner.match_payment", partnerID.String(), nil, now)
-	})
+	if s.Staff == nil {
+		return ErrStaffDenied
+	}
+	_, err := staffWrite(
+		ctx,
+		s.Staff,
+		token,
+		partnerPermission,
+		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
+			q := queries.New(tx)
+			id, err := NewID()
+			if err != nil {
+				return struct{}{}, err
+			}
+			if err = q.InsertMatchPayment(ctx, queries.InsertMatchPaymentParams{
+				ID: id, PartnerID: partnerID, Year: year, AmountMinor: amountMinor,
+				ReceivedAt: timestamp(now), RecordedBy: actor.ID,
+			}); err != nil {
+				return struct{}{}, err
+			}
+			return struct{}{}, auditStaff(ctx, q, actor.ID, "partner.match_payment", partnerID.String(), nil, now)
+		},
+	)
 	return err
 }
 
 // SetWorkforce updates a partner's workforce size (EM-9). Partner admin only.
-func (s EmployeeService) SetWorkforce(ctx context.Context, token string, portal PartnerPortalService, size int32) error {
+func (s EmployeeService) SetWorkforce(ctx context.Context, token string, size int32) error {
 	if size < 0 {
 		return ErrPartnerApplication
 	}
-	_, err := partnerAdminWrite(ctx, portal.DB, token, func(tx pgx.Tx, actor PartnerActor, _ time.Time) (struct{}, error) {
+	_, err := partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, _ time.Time) (struct{}, error) {
 		return struct{}{}, queries.New(tx).
 			SetPartnerWorkforce(ctx, queries.SetPartnerWorkforceParams{ID: actor.PartnerID, WorkforceSize: size})
 	})
 	return err
-}
-
-// Adapters bind the extra dependencies (partner portal pool, staff service) so
-// the HTTP layer can take narrow, dependency-free source interfaces.
-
-// EmployeeDonorAdapter is the donor-facing surface.
-type EmployeeDonorAdapter struct{ Emp EmployeeService }
-
-func (a EmployeeDonorAdapter) Enroll(ctx context.Context, token, code string) (string, error) {
-	return a.Emp.Enroll(ctx, token, code)
-}
-func (a EmployeeDonorAdapter) Team(ctx context.Context, token string) (DonorTeam, error) {
-	return a.Emp.Team(ctx, token)
-}
-func (a EmployeeDonorAdapter) JoinTeam(ctx context.Context, token, name string) (string, error) {
-	return a.Emp.JoinTeam(ctx, token, name)
-}
-
-// EmployeePartnerAdapter binds the partner portal (for session auth).
-type EmployeePartnerAdapter struct {
-	Emp    EmployeeService
-	Portal PartnerPortalService
-}
-
-func (a EmployeePartnerAdapter) OurPeople(ctx context.Context, token string) (PartnerOurPeople, error) {
-	return a.Emp.OurPeople(ctx, token, a.Portal)
-}
-func (a EmployeePartnerAdapter) Teams(ctx context.Context, token string) ([]EmployeeTeamRow, error) {
-	return a.Emp.Teams(ctx, token, a.Portal)
-}
-func (a EmployeePartnerAdapter) SetWorkforce(ctx context.Context, token string, size int32) error {
-	return a.Emp.SetWorkforce(ctx, token, a.Portal, size)
-}
-
-// EmployeeStaffAdapter binds the staff service (for partner.manage auth).
-type EmployeeStaffAdapter struct {
-	Emp   EmployeeService
-	Staff *StaffService
-}
-
-func (a EmployeeStaffAdapter) Match(ctx context.Context, token string, partnerID pgtype.UUID, year int32) (MatchStatus, error) {
-	return a.Emp.Match(ctx, a.Staff, token, partnerID, year)
-}
-
-func (a EmployeeStaffAdapter) RecordMatchPayment(
-	ctx context.Context,
-	token string,
-	partnerID pgtype.UUID,
-	year int32,
-	amountMinor int64,
-) error {
-	return a.Emp.RecordMatchPayment(ctx, a.Staff, token, partnerID, year, amountMinor)
 }

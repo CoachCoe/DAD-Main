@@ -13,9 +13,14 @@ test("mobile contract preserves native operations and excludes privileged and br
     "/donor/me/profile",
     "/donor/me/dashboard",
     "/donor/me/push-device",
+    "/donor/partner/sign-in",
+    "/donor/partner/accept-invite",
+    "/donor/partner/overview",
+    "/donor/partner/users",
   ]) {
     assert.deepEqual(mobile.paths[path], original.paths[path]);
   }
+  assert.equal(mobile.paths["/donor/public/partner-apply"], undefined);
   for (const path of Object.keys(mobile.paths)) {
     assert.ok(
       !path.startsWith("/donor/staff/") && !path.startsWith("/donor/checkouts") && !path.includes("stripe/webhook"),

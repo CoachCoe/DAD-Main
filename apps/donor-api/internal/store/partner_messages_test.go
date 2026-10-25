@@ -30,7 +30,7 @@ func queuePartnerIntent(t *testing.T, partnerID interface{ String() string }, ki
 		 VALUES ($1,$2,$3,$4,'{}',now()) ON CONFLICT (dedup_key) DO NOTHING`,
 		mustNewID(t), partnerID, kind, key)
 	t.Cleanup(func() {
-		_, _ = database(t).Exec(context.Background(), "DELETE FROM donor_partner_messages WHERE dedup_key=$1", key)
+		cleanExec(t, "DELETE FROM donor_partner_messages WHERE dedup_key=$1", key)
 	})
 }
 
@@ -57,7 +57,7 @@ func TestPartnerMessageMatrixDeliversEachTriggerOnce(t *testing.T) {
 		`INSERT INTO donor_partner_users (id, partner_id, email, name, role, accepted_at, disabled, created_at)
 		 VALUES ($1,$2,'off@x.test','D','VIEWER',now(),true,now())`, mustNewID(t), partnerID)
 
-	for _, kind := range []string{"APPROVED", "METRICS_VERIFIED", "INITIATIVE_COMPLETE", "MONTHLY_REPORT"} {
+	for _, kind := range []string{"METRICS_VERIFIED", "INITIATIVE_COMPLETE", "MONTHLY_REPORT"} {
 		key := "matrix:" + kind + ":" + partnerID.String()
 		queuePartnerIntent(t, partnerID, kind, key)
 		transport := &recordingMail{}
@@ -102,8 +102,8 @@ func TestPartnerMessageSuppressedWithoutRecipients(t *testing.T) {
 	pool := as(t, dbroles.API)
 	mustExec(t, database(t), "DELETE FROM donor_partner_messages")
 	partnerID := approvedPartner(t, pool, "Empty Org", "EMPTY-"+mustNewID(t).String()[:8], 0, 0)
-	key := "matrix:APPROVED:empty:" + partnerID.String()
-	queuePartnerIntent(t, partnerID, "APPROVED", key)
+	key := "matrix:MONTHLY_REPORT:empty:" + partnerID.String()
+	queuePartnerIntent(t, partnerID, "MONTHLY_REPORT", key)
 	transport := &recordingMail{}
 	w := partnerMessageWorker(t, transport)
 	if worked, err := w.DeliverNext(ctx, time.Now().UTC()); err != nil || !worked {
@@ -139,7 +139,11 @@ func TestPartnerMonthlySweepQueuesOncePerMonth(t *testing.T) {
 		"mon-"+partnerID.String()[:8],
 		partnerID,
 	)
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, "DELETE FROM donor_initiatives WHERE partner_signup_id=$1", partnerID) })
+	t.Cleanup(func() {
+		if _, err := database(t).Exec(ctx, "DELETE FROM donor_initiatives WHERE partner_signup_id=$1", partnerID); err != nil {
+			t.Error(err)
+		}
+	})
 
 	sweep := PartnerMonthlyService{DB: as(t, dbroles.ProjectionWorker)}
 	now := time.Now().UTC()
@@ -156,7 +160,7 @@ func TestPartnerMonthlySweepQueuesOncePerMonth(t *testing.T) {
 		t.Fatalf("monthly re-queued within the same month: %d -> %d", before, after)
 	}
 	t.Cleanup(func() {
-		_, _ = database(t).Exec(ctx, "DELETE FROM donor_partner_messages WHERE partner_id=$1", partnerID)
+		cleanExec(t, "DELETE FROM donor_partner_messages WHERE partner_id=$1", partnerID)
 	})
 }
 

@@ -2,9 +2,12 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"net/url"
+	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"dad/donor-api/internal/identity"
@@ -15,7 +18,7 @@ import (
 )
 
 // partnerPermission gates every staff partner action (§8: Partnerships
-// operators and super admins). Defined in the Phase 5.4 role model.
+// operators and super admins).
 const partnerPermission = "partner.manage"
 
 // ErrPartnerApplication is a validation failure on a partner application.
@@ -133,8 +136,9 @@ func (s PartnerApplicationService) Apply(ctx context.Context, id pgtype.UUID, in
 }
 
 // Approve approves a pending application (§8), promotes its organization into
-// the partner-org anchor initiatives reference, and makes the signer the first
-// partner ADMIN (P-3). Returns the new partner-org id. Audited.
+// the partner-org anchor initiatives reference with its company code (EM-1),
+// and makes the signer the first partner ADMIN, emailing them a sign-in link
+// (P-3). Returns the new partner-org id. Audited.
 func (s PartnerApplicationService) Approve(ctx context.Context, token string, appID pgtype.UUID) (pgtype.UUID, error) {
 	return staffWrite(ctx, s.Staff, token, partnerPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (pgtype.UUID, error) {
@@ -153,10 +157,14 @@ func (s PartnerApplicationService) Approve(ctx context.Context, token string, ap
 			if err != nil {
 				return pgtype.UUID{}, err
 			}
+			code, err := newCompanyCode(app.Organization)
+			if err != nil {
+				return pgtype.UUID{}, err
+			}
 			if err = q.PromotePartnerOrg(ctx, queries.PromotePartnerOrgParams{
 				ID: partnerID, Organization: app.Organization, Name: app.ContactName,
 				Email: app.WorkEmail, Website: app.Website, ApprovedAt: timestamp(now),
-				PartnerType: app.Type, WorkforceSize: app.WorkforceSize,
+				PartnerType: app.Type, WorkforceSize: app.WorkforceSize, CompanyCode: text(code),
 			}); err != nil {
 				return pgtype.UUID{}, err
 			}
@@ -166,33 +174,54 @@ func (s PartnerApplicationService) Approve(ctx context.Context, token string, ap
 			}); err != nil {
 				return pgtype.UUID{}, err
 			}
-			// P-3: the signer becomes the first partner ADMIN, with a pending
-			// invite token so they can complete first sign-in (AcceptInvite).
 			userID, err := NewID()
 			if err != nil {
 				return pgtype.UUID{}, err
 			}
-			invite, err := randomToken(32)
+			admin, err := q.InvitePartnerUser(ctx, queries.InvitePartnerUserParams{
+				ID: userID, PartnerID: partnerID, Email: app.WorkEmail, Name: app.ContactName,
+				Role: "ADMIN", CreatedAt: timestamp(now),
+			})
 			if err != nil {
 				return pgtype.UUID{}, err
 			}
-			if err = q.InvitePartnerUser(ctx, queries.InvitePartnerUserParams{
-				ID: userID, PartnerID: partnerID, Email: app.WorkEmail, Name: app.ContactName,
-				Role: "ADMIN", InvitedBy: pgtype.UUID{},
-				InviteTokenHash: pgtype.Text{String: HashToken(invite), Valid: true},
-				InviteExpiresAt: timestamp(now.Add(partnerInviteLifetime)),
-				CreatedAt:       timestamp(now),
-			}); err != nil {
-				return pgtype.UUID{}, err
-			}
-			// APPROVED partner email (§6.11). Keyed by partner so it fires once;
-			// delivered to the org's accepted users by the partner message worker.
-			if err = queuePartnerMessage(ctx, q, partnerID, "APPROVED", "partner-approved:"+partnerID.String(), map[string]string{}, now); err != nil {
+			if err = queuePartnerLogin(ctx, q, admin, partnerLinkApproved, now); err != nil {
 				return pgtype.UUID{}, err
 			}
 			return partnerID, auditStaff(ctx, q, actor.ID, "partner.approved", appID.String(),
 				map[string]string{"partner_id": partnerID.String(), "organization": app.Organization}, now)
 		})
+}
+
+// companyCodeAlphabet leaves out characters easily misread when a code is
+// typed from a poster or a slide: 0/O, 1/I/L.
+const companyCodeAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+
+// newCompanyCode returns an employer's company code (EM-1): up to six letters
+// and digits of the organization name, so employees recognise it, then six
+// random characters, which keep codes unguessable and collision-free in
+// practice.
+func newCompanyCode(organization string) (string, error) {
+	var prefix strings.Builder
+	for _, r := range strings.ToUpper(organization) {
+		if r < unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			prefix.WriteRune(r)
+			if prefix.Len() == 6 {
+				break
+			}
+		}
+	}
+	random := make([]byte, 6)
+	if _, err := rand.Read(random); err != nil {
+		return "", err
+	}
+	for i, b := range random {
+		random[i] = companyCodeAlphabet[int(b)%len(companyCodeAlphabet)]
+	}
+	if prefix.Len() == 0 {
+		return string(random), nil
+	}
+	return prefix.String() + "-" + string(random), nil
 }
 
 // Reject rejects a pending application with a reason (§8). Audited.

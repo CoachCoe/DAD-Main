@@ -8,6 +8,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 export const digest = (value) => createHash("sha256").update(value).digest("hex");
 
+const bearer = (operation) =>
+  operation.security?.some((requirement) => "bearerAuth" in requirement || "partnerBearerAuth" in requirement);
+
 export function nativeContract(source) {
   const paths = {};
   for (const [path, item] of Object.entries(source.paths)) {
@@ -16,7 +19,7 @@ export function nativeContract(source) {
       if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
       if (
         operation["x-clients"]?.includes("native") ||
-        (method === "get" && (path.startsWith("/donor/me/") || path === "/health/live"))
+        (method === "get" && (bearer(operation) || path === "/health/live"))
       ) {
         operations[method] = structuredClone(operation);
       }

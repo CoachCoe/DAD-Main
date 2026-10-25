@@ -4,7 +4,11 @@ WITH queues AS (
  UNION ALL
  SELECT 'messages',available_at,attempts>=5 FROM donor_messages WHERE completed_at IS NULL
  UNION ALL
+ SELECT 'messages',available_at,attempts>=5 FROM donor_partner_messages WHERE completed_at IS NULL
+ UNION ALL
  SELECT 'login-email',available_at,attempts>=5 FROM donor_login_emails WHERE completed_at IS NULL
+ UNION ALL
+ SELECT 'login-email',available_at,attempts>=5 FROM donor_partner_login_emails WHERE completed_at IS NULL
  UNION ALL
  -- An expired notification will never be sent, so it no longer needs attention.
  SELECT 'push',available_at,attempts>=5 FROM donor_push_notifications

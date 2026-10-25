@@ -173,25 +173,30 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		return nil, configError("DONOR_SMTP_CA could not be loaded")
 	}
 	transport := mail.SMTPTransport{Settings: *settings, RootCAs: roots}
-	var worker deliverer
+	var queues []deliverer
 	switch kind {
 	case "email-changes":
-		worker = store.EmailChangeWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+		queues = []deliverer{store.EmailChangeWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}}
 	case "login-email":
-		worker = store.LoginEmailWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+		queues = []deliverer{
+			store.LoginEmailWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport},
+			store.PartnerLoginEmailWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport},
+		}
 	default:
-		messages := store.MessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
-		partner := store.PartnerMessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
-		return func(ctx context.Context) (bool, error) {
-			now := time.Now().UTC()
-			worked, err := messages.DeliverNext(ctx, now)
-			if worked || err != nil {
+		queues = []deliverer{
+			store.MessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport},
+			store.PartnerMessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport},
+		}
+	}
+	return func(ctx context.Context) (bool, error) {
+		now := time.Now().UTC()
+		for _, queue := range queues {
+			if worked, err := queue.DeliverNext(ctx, now); worked || err != nil {
 				return worked, err
 			}
-			return partner.DeliverNext(ctx, now)
-		}, nil
-	}
-	return func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }, nil
+		}
+		return false, nil
+	}, nil
 }
 
 func main() {

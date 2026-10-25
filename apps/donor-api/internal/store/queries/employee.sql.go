@@ -27,18 +27,6 @@ func (q *Queries) EmployeeLink(ctx context.Context, donorID pgtype.UUID) (DonorP
 	return i, err
 }
 
-const employeesEnrolledCount = `-- name: EmployeesEnrolledCount :one
-SELECT count(*)::bigint AS enrolled FROM donor_partner_employees WHERE partner_id = $1
-`
-
-// The count of linked employees for a partner (EM-2 roll-up).
-func (q *Queries) EmployeesEnrolledCount(ctx context.Context, partnerID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, employeesEnrolledCount, partnerID)
-	var enrolled int64
-	err := row.Scan(&enrolled)
-	return enrolled, err
-}
-
 const insertMatchPayment = `-- name: InsertMatchPayment :exec
 INSERT INTO donor_partner_match_payments (id, partner_id, year, amount_minor, received_at, recorded_by)
 VALUES ($1,$2,$3,$4,$5,$6)
@@ -88,7 +76,8 @@ func (q *Queries) InsertTeam(ctx context.Context, arg InsertTeamParams) error {
 }
 
 const linkedEmployeeGiftsInYear = `-- name: LinkedEmployeeGiftsInYear :one
-SELECT coalesce(sum(g.amount_minor), 0)::bigint AS gifts_minor
+SELECT coalesce(sum(g.amount_minor - coalesce((SELECT sum(r.amount_minor) FROM donor_refunds r
+                                               WHERE r.gift_id = g.id AND r.status = 'SUCCEEDED'), 0)), 0)::bigint AS gifts_minor
 FROM donor_gifts g
 JOIN donor_partner_employees e ON e.donor_id = g.donor_id
 WHERE e.partner_id = $1
@@ -102,9 +91,9 @@ type LinkedEmployeeGiftsInYearParams struct {
 	YearEnd   pgtype.Timestamptz `json:"year_end"`
 }
 
-// Total of all linked employees' gifts in a calendar year (EM-6). Counts gifts
-// made BEFORE the link too (no enrolled_at filter) — the link attributes the
-// whole giving history to the employer for matching.
+// Linked employees' giving in a calendar year, net of refunds (EM-6). Gifts
+// from before an employee linked count too: the link attributes their whole
+// giving to the employer for matching.
 func (q *Queries) LinkedEmployeeGiftsInYear(ctx context.Context, arg LinkedEmployeeGiftsInYearParams) (int64, error) {
 	row := q.db.QueryRow(ctx, linkedEmployeeGiftsInYear, arg.PartnerID, arg.YearStart, arg.YearEnd)
 	var gifts_minor int64
@@ -135,9 +124,9 @@ SELECT id FROM donor_partner_signups
 WHERE company_code = $1 AND approved_at IS NOT NULL
 `
 
-// Employee giving queries (PRD §7.4). Phase 6.
-// Every partner-facing aggregate applies k-anonymity: a group with fewer than 5
-// linked employees is suppressed (EM-3). The threshold is inlined as 5.
+// Employee giving (PRD §7.4). Partners only ever see totals; the caller
+// suppresses any group smaller than its minimum (EM-3). Gift totals are net of
+// succeeded refunds.
 // Resolve an uppercase company code to its APPROVED partner org (EM-1).
 func (q *Queries) PartnerByCompanyCode(ctx context.Context, companyCode pgtype.Text) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, partnerByCompanyCode, companyCode)
@@ -175,40 +164,72 @@ func (q *Queries) PartnerOrganizationByID(ctx context.Context, id pgtype.UUID) (
 
 const partnerOurPeople = `-- name: PartnerOurPeople :one
 WITH linked AS (
-  SELECT e.donor_id FROM donor_partner_employees e WHERE e.partner_id = $1
-), agg AS (
-  SELECT
-    (SELECT count(*) FROM linked)::bigint AS enrolled,
-    coalesce((SELECT sum(g.amount_minor) FROM donor_gifts g WHERE g.donor_id IN (SELECT donor_id FROM linked)), 0)::bigint AS given_minor,
-    coalesce((SELECT avg(m.current_streak) FROM donor_metric_projections m WHERE m.donor_id IN (SELECT donor_id FROM linked) AND m.current_streak IS NOT NULL), 0)::numeric AS avg_streak
+  SELECT e.donor_id FROM donor_partner_employees e WHERE e.partner_id = $4::uuid
+), gifts AS (
+  SELECT g.paid_at,
+    g.amount_minor - coalesce((SELECT sum(r.amount_minor) FROM donor_refunds r
+                               WHERE r.gift_id = g.id AND r.status = 'SUCCEEDED'), 0) AS net_minor
+  FROM donor_gifts g WHERE g.donor_id IN (SELECT donor_id FROM linked)
 )
 SELECT
-  (CASE WHEN enrolled < 5 THEN 0 ELSE enrolled END)::bigint AS enrolled,
-  (CASE WHEN enrolled < 5 THEN 0 ELSE given_minor END)::bigint AS given_minor,
-  (CASE WHEN enrolled < 5 THEN 0 ELSE round(avg_streak) END)::bigint AS avg_streak,
-  (enrolled < 5) AS suppressed
-FROM agg
+  (SELECT count(*) FROM linked)::bigint AS enrolled,
+  coalesce((SELECT sum(net_minor) FROM gifts), 0)::bigint AS given_minor,
+  coalesce((SELECT sum(net_minor) FROM gifts
+            WHERE paid_at >= $1::timestamptz AND paid_at < $2::timestamptz), 0)::bigint AS year_given_minor,
+  coalesce((SELECT round(avg(extract(epoch FROM $3::timestamptz - m.streak_since) / 86400))
+            FROM donor_metric_projections m
+            WHERE m.donor_id IN (SELECT donor_id FROM linked) AND m.streak_since IS NOT NULL), 0)::bigint AS avg_streak_days,
+  coalesce((SELECT sum(extract(epoch FROM ev.ends_at - ev.starts_at) / 60)
+            FROM donor_event_reservations r JOIN donor_events ev ON ev.id = r.event_id
+            WHERE r.donor_id IN (SELECT donor_id FROM linked) AND r.checked_in_at IS NOT NULL), 0)::bigint AS volunteer_minutes,
+  (SELECT count(DISTINCT e.team_id) FROM donor_partner_employees e
+   WHERE e.partner_id = $4::uuid AND e.team_id IS NOT NULL)::bigint AS teams,
+  p.workforce_size, p.match_rate_bp, p.match_cap_minor
+FROM donor_partner_signups p
+WHERE p.id = $4::uuid
 `
 
-type PartnerOurPeopleRow struct {
-	Enrolled   int64 `json:"enrolled"`
-	GivenMinor int64 `json:"given_minor"`
-	AvgStreak  int64 `json:"avg_streak"`
-	Suppressed bool  `json:"suppressed"`
+type PartnerOurPeopleParams struct {
+	YearStart pgtype.Timestamptz `json:"year_start"`
+	YearEnd   pgtype.Timestamptz `json:"year_end"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+	PartnerID pgtype.UUID        `json:"partner_id"`
 }
 
-// Our People aggregate (EM-3): enrolled count, total employee giving, and
-// average current streak across linked employees — SUPPRESSED (all zero,
-// suppressed=true) when fewer than 5 employees are linked. Individuals are
-// never returned.
-func (q *Queries) PartnerOurPeople(ctx context.Context, partnerID pgtype.UUID) (PartnerOurPeopleRow, error) {
-	row := q.db.QueryRow(ctx, partnerOurPeople, partnerID)
+type PartnerOurPeopleRow struct {
+	Enrolled         int64 `json:"enrolled"`
+	GivenMinor       int64 `json:"given_minor"`
+	YearGivenMinor   int64 `json:"year_given_minor"`
+	AvgStreakDays    int64 `json:"avg_streak_days"`
+	VolunteerMinutes int64 `json:"volunteer_minutes"`
+	Teams            int64 `json:"teams"`
+	WorkforceSize    int32 `json:"workforce_size"`
+	MatchRateBp      int32 `json:"match_rate_bp"`
+	MatchCapMinor    int64 `json:"match_cap_minor"`
+}
+
+// Our People (P-13): linked employees, their giving all-time and in the
+// calendar year (the matching base, including gifts from before they linked),
+// their average current streak in days, volunteer minutes from event
+// check-ins (EM-8), and the number of teams.
+func (q *Queries) PartnerOurPeople(ctx context.Context, arg PartnerOurPeopleParams) (PartnerOurPeopleRow, error) {
+	row := q.db.QueryRow(ctx, partnerOurPeople,
+		arg.YearStart,
+		arg.YearEnd,
+		arg.AsOf,
+		arg.PartnerID,
+	)
 	var i PartnerOurPeopleRow
 	err := row.Scan(
 		&i.Enrolled,
 		&i.GivenMinor,
-		&i.AvgStreak,
-		&i.Suppressed,
+		&i.YearGivenMinor,
+		&i.AvgStreakDays,
+		&i.VolunteerMinutes,
+		&i.Teams,
+		&i.WorkforceSize,
+		&i.MatchRateBp,
+		&i.MatchCapMinor,
 	)
 	return i, err
 }
@@ -281,41 +302,49 @@ const teamLeaderboard = `-- name: TeamLeaderboard :many
 WITH members AS (
   SELECT e.team_id, e.donor_id
   FROM donor_partner_employees e
-  WHERE e.partner_id = $1 AND e.team_id IS NOT NULL
-), per_team AS (
-  SELECT
-    t.id AS team_id, t.name,
-    count(mem.donor_id)::bigint AS members,
-    count(mem.donor_id) FILTER (WHERE EXISTS (SELECT 1 FROM donor_gifts g WHERE g.donor_id = mem.donor_id))::bigint AS active_givers,
-    coalesce(round(avg(m.current_streak)), 0)::bigint AS avg_streak,
-    coalesce(sum((SELECT coalesce(sum(EXTRACT(EPOCH FROM (ev.ends_at - ev.starts_at)) / 60), 0)
-                  FROM donor_event_reservations r JOIN donor_events ev ON ev.id = r.event_id
-                  WHERE r.donor_id = mem.donor_id AND r.checked_in_at IS NOT NULL)), 0)::bigint AS volunteer_minutes
-  FROM donor_partner_teams t
-  JOIN members mem ON mem.team_id = t.id
-  LEFT JOIN donor_metric_projections m ON m.donor_id = mem.donor_id
-  WHERE t.partner_id = $1
-  GROUP BY t.id, t.name
+  WHERE e.partner_id = $3::uuid AND e.team_id IS NOT NULL
+), volunteer AS (
+  SELECT r.donor_id, sum(extract(epoch FROM ev.ends_at - ev.starts_at) / 60) AS minutes
+  FROM donor_event_reservations r JOIN donor_events ev ON ev.id = r.event_id
+  WHERE r.checked_in_at IS NOT NULL AND r.donor_id IN (SELECT donor_id FROM members)
+  GROUP BY r.donor_id
 )
-SELECT team_id, name, active_givers, avg_streak, volunteer_minutes
-FROM per_team
-WHERE members >= 5
-ORDER BY active_givers DESC, name
+SELECT t.id AS team_id, t.name,
+  (count(*) FILTER (WHERE m.active))::bigint AS active_givers,
+  (coalesce(sum(m.current_monthly_minor) FILTER (WHERE m.active), 0) * 12)::bigint AS annualized_minor,
+  coalesce(round(avg(extract(epoch FROM $1::timestamptz - m.streak_since) / 86400)
+                 FILTER (WHERE m.streak_since IS NOT NULL)), 0)::bigint AS avg_streak_days,
+  coalesce(sum(v.minutes), 0)::bigint AS volunteer_minutes
+FROM members mem
+JOIN donor_partner_teams t ON t.id = mem.team_id
+LEFT JOIN donor_metric_projections m ON m.donor_id = mem.donor_id
+LEFT JOIN volunteer v ON v.donor_id = mem.donor_id
+GROUP BY t.id, t.name
+HAVING count(*) >= $2::int
+ORDER BY annualized_minor DESC, active_givers DESC, t.name
 `
+
+type TeamLeaderboardParams struct {
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+	Minimum   int32              `json:"minimum"`
+	PartnerID pgtype.UUID        `json:"partner_id"`
+}
 
 type TeamLeaderboardRow struct {
 	TeamID           pgtype.UUID `json:"team_id"`
 	Name             string      `json:"name"`
 	ActiveGivers     int64       `json:"active_givers"`
-	AvgStreak        int64       `json:"avg_streak"`
+	AnnualizedMinor  int64       `json:"annualized_minor"`
+	AvgStreakDays    int64       `json:"avg_streak_days"`
 	VolunteerMinutes int64       `json:"volunteer_minutes"`
 }
 
-// Team leaderboard (EM-5): per team, active givers, average current streak and
-// total volunteer minutes. Teams with fewer than 5 members are SUPPRESSED
-// (omitted). A team's "active givers" is members with at least one gift.
-func (q *Queries) TeamLeaderboard(ctx context.Context, partnerID pgtype.UUID) ([]TeamLeaderboardRow, error) {
-	rows, err := q.db.Query(ctx, teamLeaderboard, partnerID)
+// Team leaderboard (EM-5), ranked by combined active giving (the annualized
+// pledges of members whose gift is current), with average streak in days and
+// volunteer minutes as the secondary views. Teams smaller than the minimum are
+// left out.
+func (q *Queries) TeamLeaderboard(ctx context.Context, arg TeamLeaderboardParams) ([]TeamLeaderboardRow, error) {
+	rows, err := q.db.Query(ctx, teamLeaderboard, arg.AsOf, arg.Minimum, arg.PartnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +356,8 @@ func (q *Queries) TeamLeaderboard(ctx context.Context, partnerID pgtype.UUID) ([
 			&i.TeamID,
 			&i.Name,
 			&i.ActiveGivers,
-			&i.AvgStreak,
+			&i.AnnualizedMinor,
+			&i.AvgStreakDays,
 			&i.VolunteerMinutes,
 		); err != nil {
 			return nil, err

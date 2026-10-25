@@ -1,84 +1,326 @@
 "use client";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useId, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, type ResponseBody } from "@/lib/api";
-import { formatDateTime } from "@/lib/dates";
+import { hours, TeamLeaderboard } from "@/components/donor/TeamLeaderboard";
+import { api, failureMessage, type ResponseBody } from "@/lib/api";
+import { formatDateTime, formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
 type Overview = ResponseBody<"/donor/partner/overview", "get">;
 type Initiatives = ResponseBody<"/donor/partner/initiatives", "get">;
+type Initiative = Initiatives["initiatives"][number];
+type Metric = Initiative["metrics"][number];
 type Spend = ResponseBody<"/donor/partner/spend", "get">;
 type Users = ResponseBody<"/donor/partner/users", "get">;
 type Exports = ResponseBody<"/donor/partner/exports", "get">;
 type OurPeople = ResponseBody<"/donor/partner/our-people", "get">;
 type Teams = ResponseBody<"/donor/partner/teams", "get">;
 
-function Tile({ label, value, hint }: { label: string; value: string; hint?: string }) {
+const sections = [
+  ["overview", "Overview"],
+  ["initiatives", "Initiatives"],
+  ["spend", "Spend"],
+  ["people", "Our People"],
+  ["reports", "Reports"],
+] as const;
+
+function Tile({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
-    <article className="tile">
-      <p className="tile-value">{value}</p>
-      <p className="tile-label">{label}</p>
-      {hint && <p className="note">{hint}</p>}
+    <article className="metric">
+      <h3>{label}</h3>
+      <p className="metricValue">{value}</p>
+      {detail && <p>{detail}</p>}
     </article>
   );
 }
 
-export default function Dashboard() {
-  const overview = useApiResource<Overview>("/donor/partner/overview");
-  const initiatives = useApiResource<Initiatives>("/donor/partner/initiatives");
-  const spend = useApiResource<Spend>("/donor/partner/spend");
-  const users = useApiResource<Users>("/donor/partner/users");
-  const exports = useApiResource<Exports>("/donor/partner/exports");
-  const ourPeople = useApiResource<OurPeople>("/donor/partner/our-people");
-  const teams = useApiResource<Teams>("/donor/partner/teams");
+function metricValue(m: Metric): string {
+  return m.unit === "USD_CENTS" ? formatMoney(m.value) : m.value.toLocaleString("en-US");
+}
 
-  const o = overview.data;
+/** Deployed against committed, as text and as a bar, so the figure never depends on colour alone. */
+function Progress({ deployed, committed }: { deployed: number; committed: number }) {
+  const percent = committed > 0 ? Math.min(100, Math.floor((deployed * 100) / committed)) : 0;
+  return (
+    <div className="progress">
+      <p>
+        {formatMoney(deployed)} deployed of {formatMoney(committed)} committed ({percent}%)
+      </p>
+      <div className="progressTrack" aria-hidden="true">
+        <div className="progressFill" style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function SpendTable({ rows, caption }: { rows: Spend["categories"]; caption: string }) {
+  return (
+    <div className="tableScroll">
+      <table className="dataTable">
+        <caption className="visuallyHidden">{caption}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Category</th>
+            <th scope="col" className="numeric">
+              Total
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.category}>
+              <td>{row.category}</td>
+              <td className="numeric">{formatMoney(row.amount_minor)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function InitiativeCard({ item }: { item: Initiative }) {
+  const complete = item.status === "COMPLETE";
+  const counties = `${item.county_count} ${item.county_count === 1 ? "county" : "counties"}`;
+  const heading = useId();
+  return (
+    <article className="metric" aria-labelledby={heading}>
+      <h3 id={heading} className="initiativeTitle">
+        {item.title}
+      </h3>
+      <p>
+        <span className={complete ? "badge" : "badge current"}>{complete ? "Complete" : "Active"}</span>{" "}
+        {[item.region, item.county_count > 0 ? counties : ""].filter(Boolean).join(" · ")}
+      </p>
+      {complete ? (
+        <p>Final: {formatMoney(item.deployed_minor)} deployed</p>
+      ) : (
+        <Progress deployed={item.deployed_minor} committed={item.committed_minor} />
+      )}
+      {item.metrics.length > 0 && (
+        <dl className="details">
+          {item.metrics.slice(0, 3).map((m) => (
+            <div key={m.label}>
+              <dt>{m.label}</dt>
+              <dd>{metricValue(m)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <details>
+        <summary>All figures and spend</summary>
+        <p>{item.summary}</p>
+        {item.metrics.length > 0 && (
+          <ul className="rows">
+            {item.metrics.map((m) => (
+              <li key={m.label}>
+                <span className="rowSummary">
+                  {m.label}
+                  <br />
+                  <span className="note">Verified {formatDay(m.verified_on)}</span>
+                </span>
+                <strong>{metricValue(m)}</strong>
+              </li>
+            ))}
+          </ul>
+        )}
+        {item.spend.length > 0 && <SpendTable rows={item.spend} caption={`Spend by category for ${item.title}`} />}
+        <p className="note">Last updated {formatDateTime(item.updated_at)}</p>
+      </details>
+    </article>
+  );
+}
+
+function InitiativesSection() {
+  const { resource, data } = useApiResource<Initiatives>("/donor/partner/initiatives");
+  const messages = resourceMessages(resource, {
+    loading: "Loading initiatives…",
+    failure: "Your initiatives could not be loaded right now.",
+  });
+  return (
+    <section id="initiatives" aria-labelledby="initiatives-heading">
+      <h2 id="initiatives-heading">Initiatives</h2>
+      {data &&
+        (data.initiatives.length ? (
+          <div className="metrics">
+            {data.initiatives.map((item) => (
+              <InitiativeCard key={item.id} item={item} />
+            ))}
+          </div>
+        ) : (
+          <p>No published initiatives are linked to your organization yet. DAD links them when they launch.</p>
+        ))}
+      <Announcer status={messages.status} alert={messages.alert} />
+    </section>
+  );
+}
+
+function SpendSection() {
+  const { resource, data } = useApiResource<Spend>("/donor/partner/spend");
+  const messages = resourceMessages(resource, {
+    loading: "Loading spend…",
+    failure: "Spend by category could not be loaded right now.",
+  });
+  return (
+    <section id="spend" aria-labelledby="spend-heading">
+      <h2 id="spend-heading">Spend</h2>
+      <p className="note">
+        Totals by category across all of your initiatives. Each initiative’s own totals are in its card.
+      </p>
+      {data &&
+        (data.categories.length ? (
+          <SpendTable rows={data.categories} caption="Spend by category across all initiatives" />
+        ) : (
+          <p>No spend has been recorded for your initiatives yet.</p>
+        ))}
+      <Announcer status={messages.status} alert={messages.alert} />
+    </section>
+  );
+}
+
+function PeopleSection({ companyCode }: { companyCode: string }) {
+  const people = useApiResource<OurPeople>("/donor/partner/our-people");
+  const teams = useApiResource<Teams>("/donor/partner/teams");
+  const messages = resourceMessages(people.resource, {
+    loading: "Loading Our People…",
+    failure: "Employee figures could not be loaded right now.",
+  });
+  const p = people.data;
+  return (
+    <section id="people" aria-labelledby="people-heading">
+      <h2 id="people-heading">Our People</h2>
+      {companyCode && (
+        <div className="callout highlight">
+          <p>
+            Your company code is <strong className="hash">{companyCode}</strong>. Employees enter it under{" "}
+            <em>Employer and team</em> in their DAD account to link their giving to your organization.
+          </p>
+        </div>
+      )}
+      {p &&
+        (p.suppressed ? (
+          <p>
+            Employee figures appear once at least 5 employees have linked their giving. Individuals are never shown.
+          </p>
+        ) : (
+          <div className="metrics">
+            <Tile
+              label="Employees enrolled"
+              value={p.enrolled.toLocaleString("en-US")}
+              detail={p.workforce_size > 0 ? `of ${p.workforce_size.toLocaleString("en-US")} employees` : undefined}
+            />
+            <Tile label="Matched giving" value={formatMoney(p.matched_minor)} detail="Your match owed this year" />
+            <Tile label="Employee giving" value={formatMoney(p.given_minor)} detail="Since joining" />
+            <Tile label="Volunteer hours" value={hours(p.volunteer_minutes)} detail="From event check-ins" />
+            <Tile
+              label="Teams"
+              value={p.teams.toLocaleString("en-US")}
+              detail={`Average streak ${p.avg_streak_days} days`}
+            />
+          </div>
+        ))}
+      {teams.data && teams.data.teams.length > 0 && (
+        <>
+          <h3>Team leaderboard</h3>
+          <TeamLeaderboard teams={teams.data.teams} />
+        </>
+      )}
+      <Announcer status={messages.status} alert={messages.alert} />
+    </section>
+  );
+}
+
+function ReportsSection({ admin }: { admin: boolean }) {
+  const exports = useApiResource<Exports>("/donor/partner/exports");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [status, setStatus] = useState("");
-  const [invite, setInvite] = useState({ email: "", name: "", role: "VIEWER" });
-  const inviteLink = useRef("");
+  const [error, setError] = useState("");
 
   async function downloadReport() {
+    setBusy(true);
     setError("");
+    setStatus("");
     try {
       const response = await fetch("/api/donor/partner/report.pdf", { credentials: "include" });
       if (!response.ok) throw new Error(String(response.status));
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(await response.blob());
       const link = document.createElement("a");
       link.href = url;
       link.download = "dad-impact-report.pdf";
       link.click();
       URL.revokeObjectURL(url);
-      setStatus("Your branded impact report was downloaded.");
+      setStatus("Your verified impact report was downloaded.");
       exports.reload();
     } catch {
-      setError("The report could not be generated right now. Only partner administrators can export reports.");
+      setError("The report could not be generated right now. Please retry in a moment.");
+    } finally {
+      setBusy(false);
     }
   }
 
+  return (
+    <section id="reports" aria-labelledby="reports-heading">
+      <h2 id="reports-heading">Reports</h2>
+      <p>
+        Verified by DAD. Share it with your board in one click: the report is a branded PDF of this dashboard as it
+        stands, with the time it was exported.
+      </p>
+      {admin ? (
+        <button type="button" className="button" onClick={downloadReport} disabled={busy}>
+          {busy ? "Preparing report…" : "Export verified report (PDF)"}
+        </button>
+      ) : (
+        <p className="note">Your organization’s partner administrators can export the report.</p>
+      )}
+      {exports.data &&
+        (exports.data.exports.length > 0 ? (
+          <>
+            <h3>Previous exports</h3>
+            <ul className="rows">
+              {exports.data.exports.map((row) => (
+                <li key={row.id}>
+                  <span className="rowSummary">
+                    {formatDateTime(row.created_at)}
+                    <br />
+                    <span className="note">by {row.exported_by}</span>
+                  </span>
+                  <span>
+                    {formatMoney(row.committed_minor)} committed · {row.people_reached.toLocaleString("en-US")} people
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <p className="note">No reports have been exported yet.</p>
+        ))}
+      <Announcer status={status} alert={error} />
+    </section>
+  );
+}
+
+function UsersSection() {
+  const users = useApiResource<Users>("/donor/partner/users");
+  const [invite, setInvite] = useState({ email: "", name: "", role: "VIEWER" });
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+
   async function sendInvite(event: React.FormEvent) {
     event.preventDefault();
-    if (busy) return;
     setBusy(true);
     setError("");
     setStatus("");
-    inviteLink.current = "";
     try {
-      const result = await api<{ invite: string }>("/donor/partner/users", {
-        method: "POST",
-        body: JSON.stringify(invite),
-      });
-      inviteLink.current = `${window.location.origin}/partner/accept#token=${result.invite}`;
-      setStatus(`Invited ${invite.email}. Share their sign-in link below.`);
+      await api("/donor/partner/users", { method: "POST", body: JSON.stringify(invite) });
+      setStatus(`We emailed ${invite.email} an invitation to sign in.`);
       setInvite({ email: "", name: "", role: "VIEWER" });
       users.reload();
-    } catch {
-      setError("The invitation could not be sent. Only partner administrators can invite users.");
+    } catch (cause) {
+      setError(failureMessage(cause, "The invitation could not be sent right now. Please retry in a moment."));
     } finally {
       setBusy(false);
     }
@@ -91,204 +333,158 @@ export default function Dashboard() {
       await api(`/donor/partner/users/${id}/remove`, { method: "POST", body: "{}" });
       setStatus(`Removed ${email}.`);
       users.reload();
-    } catch {
-      setError("That user could not be removed. Administrators cannot remove themselves.");
+    } catch (cause) {
+      setError(failureMessage(cause, "That user could not be removed right now."));
     }
   }
 
+  return (
+    <section id="users" aria-labelledby="users-heading">
+      <h2 id="users-heading">Users</h2>
+      {users.data && (
+        <ul className="rows">
+          {users.data.users.map((u) => (
+            <li key={u.id}>
+              <span className="rowSummary">
+                {u.name || u.email}
+                <br />
+                <span className="note">
+                  {u.email} · {u.role === "ADMIN" ? "Administrator" : "Viewer"}
+                </span>
+              </span>
+              <button type="button" className="secondary" onClick={() => removeUser(u.id, u.email)}>
+                Remove<span className="visuallyHidden"> {u.email}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <form onSubmit={sendInvite}>
+        <h3>Invite a colleague</h3>
+        <p className="note">
+          Viewers can see every dashboard. Administrators can also export reports and manage users.
+        </p>
+        <fieldset disabled={busy}>
+          <label>
+            Work email
+            <input
+              type="email"
+              autoComplete="off"
+              value={invite.email}
+              required
+              maxLength={320}
+              onChange={(e) => setInvite({ ...invite, email: e.target.value })}
+            />
+          </label>
+          <label>
+            Name
+            <input
+              value={invite.name}
+              required
+              maxLength={100}
+              onChange={(e) => setInvite({ ...invite, name: e.target.value })}
+            />
+          </label>
+          <label>
+            Role
+            <select value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })}>
+              <option value="VIEWER">Viewer (read-only)</option>
+              <option value="ADMIN">Administrator</option>
+            </select>
+          </label>
+        </fieldset>
+        <button type="submit" className="button" disabled={busy}>
+          {busy ? "Sending…" : "Email invitation"}
+        </button>
+      </form>
+      <Announcer status={status} alert={error} />
+    </section>
+  );
+}
+
+export default function Dashboard() {
+  const overview = useApiResource<Overview>("/donor/partner/overview");
+  const o = overview.data;
   const messages = resourceMessages(overview.resource, {
     loading: "Loading your dashboard…",
     failure: "Your partner dashboard could not be loaded right now. Please retry in a moment.",
     forbidden: "This dashboard requires a partner account.",
   });
+  const admin = o?.role === "ADMIN";
 
   return (
     <Page wide eyebrow="Partner portal" title={o?.organization ?? "Partner dashboard"}>
       {overview.resource.state === "signedOut" && (
-        <p>
-          Your session has ended. <Link href="/partner/apply">Apply to partner with DAD</Link> or open your invitation
-          link again.
-        </p>
+        <div className="callout">
+          <p>Sign in to see your organization’s verified impact.</p>
+          <Link className="button" href="/partner/sign-in">
+            Email me a sign-in link
+          </Link>
+        </div>
       )}
-      {messages.alert && <p className="callout">{messages.alert}</p>}
-
       {o && (
-        <section aria-label="Overview">
-          <div className="tiles">
-            <Tile label="Committed" value={formatMoney(o.committed_minor)} />
-            <Tile label="Deployed" value={formatMoney(o.deployed_minor)} hint={`${o.deployed_percent}% of committed`} />
-            <Tile label="People reached" value={o.people_reached.toLocaleString()} hint="Verified figures only" />
-            {ourPeople.data && !ourPeople.data.suppressed ? (
-              <Tile
-                label="Our People enrolled"
-                value={ourPeople.data.enrolled.toLocaleString()}
-                hint={`${formatMoney(ourPeople.data.given_minor)} given · avg streak ${ourPeople.data.avg_streak}`}
-              />
-            ) : (
-              <Tile label="Our People enrolled" value="—" hint="Shown once 5+ employees are enrolled" />
-            )}
-          </div>
-        </section>
-      )}
-
-      {initiatives.data && (
-        <section aria-label="Initiatives">
-          <h2>Initiatives</h2>
-          {initiatives.data.initiatives.length ? (
-            initiatives.data.initiatives.map((item) => (
-              <article key={item.id}>
-                <h3>{item.title}</h3>
-                <p>{item.summary}</p>
-                <p className="note">
-                  {formatMoney(item.committed_minor)} committed · {formatMoney(item.deployed_minor)} deployed
-                </p>
-              </article>
-            ))
-          ) : (
-            <p>No published initiatives are linked to your organization yet.</p>
-          )}
-        </section>
-      )}
-
-      {spend.data && spend.data.categories.length > 0 && (
-        <section aria-label="Spend by category">
-          <h2>Spend by category</h2>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Category</th>
-                <th scope="col">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {spend.data.categories.map((row) => (
-                <tr key={row.category}>
-                  <td>{row.category}</td>
-                  <td>{formatMoney(row.amount_minor)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-
-      <section aria-label="Reports">
-        <h2>Reports</h2>
-        <p>Download a branded PDF of these figures. Figures are verified by DAD.</p>
-        <button type="button" className="button" onClick={downloadReport}>
-          Download impact report (PDF)
-        </button>
-        {exports.data && exports.data.exports.length > 0 && (
-          <>
-            <h3>Previous exports</h3>
-            <ul>
-              {exports.data.exports.map((row) => (
-                <li key={row.id}>
-                  {formatDateTime(row.created_at)} · {formatMoney(row.committed_minor)} committed ·{" "}
-                  {row.people_reached.toLocaleString()} people · by {row.exported_by}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </section>
-
-      {teams.data && teams.data.teams.length > 0 && (
-        <section aria-label="Teams">
-          <h2>Team leaderboard</h2>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Team</th>
-                <th scope="col">Active givers</th>
-                <th scope="col">Avg streak</th>
-                <th scope="col">Volunteer hours</th>
-              </tr>
-            </thead>
-            <tbody>
-              {teams.data.teams.map((t) => (
-                <tr key={t.team_id}>
-                  <td>{t.name}</td>
-                  <td>{t.active_givers}</td>
-                  <td>{t.avg_streak}</td>
-                  <td>{Math.round(t.volunteer_minutes / 60)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="note">Teams with fewer than 5 members are not shown.</p>
-        </section>
-      )}
-
-      {users.data && (
-        <section aria-label="Users">
-          <h2>Users</h2>
-          <ul>
-            {users.data.users.map((u) => (
-              <li key={u.id}>
-                {u.name} · {u.email} · {u.role}{" "}
-                <button type="button" className="link" onClick={() => removeUser(u.id, u.email)}>
-                  Remove
-                </button>
-              </li>
+        <>
+          <p className="note">
+            Verified by DAD. Every figure here is published and verified; anything not yet verified is left out, never
+            estimated.
+            {o.updated_at && <> Figures last updated {formatDateTime(o.updated_at)}.</>}
+          </p>
+          <nav aria-label="Dashboard sections" className="links">
+            {sections.map(([id, label]) => (
+              <a key={id} href={`#${id}`}>
+                {label}
+              </a>
             ))}
-          </ul>
-          <form onSubmit={sendInvite}>
-            <h3>Invite a user</h3>
-            <fieldset disabled={busy}>
-              <label>
-                Email
-                <input
-                  type="email"
-                  value={invite.email}
-                  required
-                  maxLength={320}
-                  onChange={(e) => setInvite({ ...invite, email: e.target.value })}
-                />
-              </label>
-              <label>
-                Name
-                <input
-                  value={invite.name}
-                  required
-                  maxLength={100}
-                  onChange={(e) => setInvite({ ...invite, name: e.target.value })}
-                />
-              </label>
-              <label>
-                Role
-                <select value={invite.role} onChange={(e) => setInvite({ ...invite, role: e.target.value })}>
-                  <option value="VIEWER">Viewer (read-only)</option>
-                  <option value="ADMIN">Administrator</option>
-                </select>
-              </label>
-            </fieldset>
-            <button type="submit" className="button" disabled={busy}>
-              {busy ? "Inviting…" : "Send invitation"}
+            {admin && <a href="#users">Users</a>}
+          </nav>
+          <section id="overview" aria-labelledby="overview-heading">
+            <h2 id="overview-heading">Overview</h2>
+            <div className="metrics">
+              <Tile label="Committed" value={formatMoney(o.committed_minor)} detail="Across your initiatives" />
+              <Tile
+                label="Deployed"
+                value={formatMoney(o.deployed_minor)}
+                detail={`${o.deployed_percent}% of committed`}
+              />
+              <Tile
+                label="People reached"
+                value={o.people_reached.toLocaleString("en-US")}
+                detail="Verified figures only"
+              />
+              <Tile
+                label="Employees enrolled"
+                value={o.employees_enrolled === null ? "Fewer than 5" : o.employees_enrolled.toLocaleString("en-US")}
+                detail={
+                  o.employees_enrolled === null
+                    ? "Shown once 5 or more employees enroll"
+                    : o.enrolled_percent === null
+                      ? "Workforce size not yet set"
+                      : `${o.enrolled_percent}% of your workforce`
+                }
+              />
+            </div>
+          </section>
+          <InitiativesSection />
+          <SpendSection />
+          <PeopleSection companyCode={o.company_code} />
+          <ReportsSection admin={admin} />
+          {admin && <UsersSection />}
+          <p>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() =>
+                api("/donor/partner/sign-out", { method: "POST", body: "{}" }).finally(() =>
+                  window.location.assign("/partner/sign-in"),
+                )
+              }
+            >
+              Sign out
             </button>
-            {inviteLink.current && (
-              <p className="note">
-                Sign-in link: <code>{inviteLink.current}</code>
-              </p>
-            )}
-          </form>
-        </section>
+          </p>
+        </>
       )}
-
-      <p>
-        <button
-          type="button"
-          className="link"
-          onClick={() =>
-            api("/donor/partner/sign-out", { method: "POST", body: "{}" }).finally(() =>
-              window.location.assign("/partner/accept"),
-            )
-          }
-        >
-          Sign out
-        </button>
-      </p>
-      <Announcer status={status} alert={error} />
+      <Announcer status={messages.status} alert={messages.alert} />
     </Page>
   );
 }

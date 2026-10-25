@@ -639,6 +639,44 @@ details[open] > summary::after {
   font-family: var(--font-mono);
 }
 
+.progress {
+  display: grid;
+  gap: var(--space-2);
+}
+.progressTrack {
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+  overflow: hidden;
+}
+.progressFill {
+  height: 100%;
+  background: var(--ok);
+}
+
+.tableScroll {
+  overflow-x: auto;
+}
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.dataTable :is(th, td) {
+  padding: var(--space-3) var(--space-2);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.dataTable th {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.dataTable .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .links {
   display: flex;
   flex-wrap: wrap;

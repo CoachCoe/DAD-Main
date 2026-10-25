@@ -1927,6 +1927,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/partner/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email a partner portal sign-in link
+         * @description 503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address belongs to a partner user. Each enabled user of an approved partner with this email receives a single-use link that expires after 15 minutes; at most one a minute and five an hour are sent per user.
+         */
+        post: operations["partnerRequestSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/partner/accept-invite": {
         parameters: {
             query?: never;
@@ -1936,7 +1956,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Exchange a partner invite link for a session */
+        /**
+         * Exchange an emailed partner sign-in link for a session
+         * @description The link (`/partner/accept#token=…`) comes from an approval, an invitation, or POST /donor/partner/sign-in. It is single-use: approval and invitation links expire after 7 days, requested links after 15 minutes. A browser receives an HttpOnly session cookie and `signed_in`; the app, sending a native request, receives the bearer `session` instead.
+         */
         post: operations["partnerAcceptInvite"];
         delete?: never;
         options?: never;
@@ -1951,7 +1974,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Partner dashboard overview tiles */
+        /**
+         * Partner dashboard overview tiles
+         * @description Every figure is published and verified; nothing is estimated. Employee enrollment is null while fewer than 5 employees are linked (EM-3), and its percentage also without a workforce size. `updated_at` is when any figure last changed, null before a published initiative. `role` is the caller's own (ADMIN or VIEWER).
+         */
         get: operations["partnerOverview"];
         put?: never;
         post?: never;
@@ -1968,7 +1994,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Partner's published initiatives */
+        /**
+         * Partner's published initiatives
+         * @description Published co-initiatives, active first, each with every published verified headline metric in display order, its spend by category, and when its figures last changed.
+         */
         get: operations["partnerInitiatives"];
         put?: never;
         post?: never;
@@ -2005,7 +2034,10 @@ export interface paths {
         /** List partner portal users */
         get: operations["partnerUsers"];
         put?: never;
-        /** Invite a partner portal user */
+        /**
+         * Invite a partner portal user
+         * @description Admin only. Emails the person a single-use invitation link that expires after 7 days. Re-inviting an existing user refreshes their role and re-enables them.
+         */
         post: operations["partnerInviteUser"];
         delete?: never;
         options?: never;
@@ -2190,7 +2222,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The donor's employer and team */
+        /**
+         * The donor's employer and team
+         * @description The signed-in donor's employer and team, and their company's team leaderboard (EM-5, teams with fewer than 5 members left out). An unlinked donor gets empty fields.
+         */
         get: operations["employeeTeam"];
         put?: never;
         /** Join or create a team */
@@ -2208,7 +2243,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Our People aggregate (k-anonymised) */
+        /**
+         * Our People aggregate (k-anonymised)
+         * @description Totals for the partner's linked employees (P-13): giving net of refunds, this calendar year's match owed (`matched_minor`), average current streak in days, volunteer minutes from event check-ins, and the number of teams. While fewer than 5 employees are linked every figure is 0 and `suppressed` is true (EM-3); individuals are never returned.
+         */
         get: operations["employeeOurPeople"];
         put?: never;
         post?: never;
@@ -2225,7 +2263,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Team leaderboard (teams under 5 suppressed) */
+        /**
+         * Team leaderboard (teams under 5 suppressed)
+         * @description The company team leaderboard (EM-5), ranked by combined active giving (annualized pledges of members whose gift is current). Teams with fewer than 5 members are left out.
+         */
         get: operations["employeeTeams"];
         put?: never;
         post?: never;
@@ -3451,6 +3492,18 @@ export interface components {
             time_to_first_gift: components["schemas"]["ReportTimeToFirstGift"];
             retention: components["schemas"]["ReportRetention"];
             seven_day_share_rate: components["schemas"]["ReportMetric"];
+        };
+        TeamLeaderboardRow: {
+            team_id: string;
+            name: string;
+            /** Format: int64 */
+            active_givers: number;
+            /** Format: int64 */
+            annualized_minor: number;
+            /** Format: int64 */
+            avg_streak_days: number;
+            /** Format: int64 */
+            volunteer_minutes: number;
         };
     };
     responses: {
@@ -6987,6 +7040,39 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    partnerRequestSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Accepted, whether or not the address belongs to a partner user. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     partnerAcceptInvite: {
         parameters: {
             query?: never;
@@ -7009,12 +7095,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        session: string;
+                        /** @description Native requests only. */
+                        session?: string;
+                        /** @description Browser requests only. */
+                        signed_in?: boolean;
                     };
                 };
             };
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
@@ -7037,6 +7125,9 @@ export interface operations {
                 content: {
                     "application/json": {
                         organization: string;
+                        /** @enum {string} */
+                        role: "ADMIN" | "VIEWER";
+                        company_code: string;
                         /** Format: int64 */
                         committed_minor: number;
                         /** Format: int64 */
@@ -7044,7 +7135,12 @@ export interface operations {
                         deployed_percent: number;
                         /** Format: int64 */
                         people_reached: number;
-                        our_people_available: boolean;
+                        /** Format: int64 */
+                        employees_enrolled: number | null;
+                        workforce_size: number;
+                        enrolled_percent: number | null;
+                        /** Format: date-time */
+                        updated_at: string | null;
                     };
                 };
             };
@@ -7073,10 +7169,30 @@ export interface operations {
                             id: string;
                             title: string;
                             summary: string;
+                            /** @enum {string} */
+                            status: "ACTIVE" | "COMPLETE";
+                            region: string;
+                            county_count: number;
                             /** Format: int64 */
                             committed_minor: number;
                             /** Format: int64 */
                             deployed_minor: number;
+                            metrics: {
+                                label: string;
+                                /** Format: int64 */
+                                value: number;
+                                /** @enum {string} */
+                                unit: "USD_CENTS" | "PEOPLE" | "INITIATIVES" | "PARTNERS";
+                                /** Format: date */
+                                verified_on: string;
+                            }[];
+                            spend: {
+                                category: string;
+                                /** Format: int64 */
+                                amount_minor: number;
+                            }[];
+                            /** Format: date-time */
+                            updated_at: string;
                         }[];
                     };
                 };
@@ -7169,7 +7285,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        invite: string;
+                        invited: boolean;
                     };
                 };
             };
@@ -7551,6 +7667,7 @@ export interface operations {
                         organization: string;
                         team_id?: string;
                         team_name?: string;
+                        leaderboard: components["schemas"]["TeamLeaderboardRow"][];
                     };
                 };
             };
@@ -7609,10 +7726,17 @@ export interface operations {
                     "application/json": {
                         /** Format: int64 */
                         enrolled: number;
+                        workforce_size: number;
                         /** Format: int64 */
                         given_minor: number;
                         /** Format: int64 */
-                        avg_streak: number;
+                        matched_minor: number;
+                        /** Format: int64 */
+                        avg_streak_days: number;
+                        /** Format: int64 */
+                        volunteer_minutes: number;
+                        /** Format: int64 */
+                        teams: number;
                         suppressed: boolean;
                     };
                 };
@@ -7638,16 +7762,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        teams: {
-                            team_id: string;
-                            name: string;
-                            /** Format: int64 */
-                            active_givers: number;
-                            /** Format: int64 */
-                            avg_streak: number;
-                            /** Format: int64 */
-                            volunteer_minutes: number;
-                        }[];
+                        teams: components["schemas"]["TeamLeaderboardRow"][];
                     };
                 };
             };

@@ -92,10 +92,11 @@ func TestContractListsExactlyTheServedRoutes(t *testing.T) {
 
 func TestContractSecurityMatchesRouteAuth(t *testing.T) {
 	schemes := map[auth][]string{
-		noAuth:     {},
-		donorAuth:  {"bearerAuth", "cookieAuth"},
-		staffAuth:  {"staffCookieAuth"},
-		stripeAuth: {"stripeSignature"},
+		noAuth:      {},
+		donorAuth:   {"bearerAuth", "cookieAuth"},
+		partnerAuth: {"partnerBearerAuth", "partnerCookieAuth"},
+		staffAuth:   {"staffCookieAuth"},
+		stripeAuth:  {"stripeSignature"},
 	}
 	ops := loadContract(t).operations()
 	for _, route := range allRoutes() {
@@ -232,6 +233,12 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /events/{event_id}":                                     store.EventView{},
 		"GET /donor/me/events/{event_id}":                            store.EventView{},
 		"POST /donor/me/events/check-in":                             store.CheckInResult{},
+		"GET /donor/partner/overview":                                store.PartnerOverview{},
+		"GET /donor/partner/our-people":                              store.PartnerOurPeople{},
+		"GET /donor/me/team":                                         store.DonorTeam{},
+		"GET /donor/partner/initiatives": struct {
+			Initiatives []store.PartnerInitiative `json:"initiatives"`
+		}{},
 	}
 	requests := map[string]any{
 		"POST /donor/passkeys/sign-in":                               donorPasskeySignInBody{},
@@ -251,6 +258,7 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/me/events/check-in":                             checkInBody{},
 		"POST /donor/staff/events":                                   store.EventInput{},
 		"POST /donor/staff/events/{event_id}":                        store.EventInput{},
+		"POST /donor/public/partner-apply":                           store.PartnerApplicationInput{},
 	}
 	c := loadContract(t)
 	ops := c.operations()

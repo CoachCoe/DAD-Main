@@ -39,8 +39,9 @@ func queuePartnerMessage(
 	})
 }
 
-// PartnerMessageWorker delivers queued partner status emails (§6.11 / §7.5):
-// approval, metrics verified, initiative complete, and the monthly report. It
+// PartnerMessageWorker delivers queued partner status emails (§7.5): metrics
+// verified, initiative complete, and the monthly report. The approval email is
+// the signer's sign-in link (PartnerLoginEmailWorker). It
 // reuses the donor mail transport and the same lease + bounded-retry shape as
 // MessageWorker, fanning each intent out to the org's current recipients.
 type PartnerMessageWorker struct {
@@ -66,11 +67,6 @@ func renderPartnerMessage(
 	org := partner.Organization
 	portal := string(site) + "/partner"
 	switch job.Kind {
-	case "APPROVED":
-		return "Your DAD partnership is approved",
-			"Your organization, " + org + ", has been approved as a DAD partner.\n" +
-				"Sign in to your partner portal to see your dashboard and initiatives: " + portal + "\n" +
-				"This is a sandbox notification. DAD launches in April 2027.\n", nil
 	case "METRICS_VERIFIED":
 		return "New verified figures for " + org,
 			"A DAD-verified figure for one of your initiatives has been published.\n" +

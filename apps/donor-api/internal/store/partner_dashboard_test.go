@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"dad/donor-api/internal/dbroles"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -15,7 +16,6 @@ import (
 // a committed amount, one spend category, and one verified PEOPLE metric.
 func seedPartnerInitiative(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID, slug string, committed, spend, people int64) {
 	t.Helper()
-	ctx := context.Background()
 	initID, _ := NewID()
 	mustExec(
 		t,
@@ -48,7 +48,7 @@ func seedPartnerInitiative(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UU
 		people,
 	)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM donor_initiatives WHERE id=$1", initID)
+		cleanExec(t, "DELETE FROM donor_initiatives WHERE id=$1", initID)
 	})
 }
 
@@ -56,7 +56,7 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	apps := PartnerApplicationService{DB: pool, Staff: &StaffService{DB: as(t, dbroles.API)}}
-	dash := PartnerDashboardService{Portal: PartnerPortalService{DB: pool}}
+	dash := PartnerDashboardService{PartnerPortalService{DB: pool}}
 	_, superToken := staffFixture(t, pool, "SUPER_ADMIN")
 	cleanPartners(t, pool)
 
@@ -89,13 +89,20 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	if ov.DeployedPercent != 33 { // 50000/150000
 		t.Fatalf("deployed %% wrong: %d", ov.DeployedPercent)
 	}
-	if !ov.OurPeopleAvailable {
-		t.Fatal("Our People tile must be available from Phase 6")
+	if ov.CompanyCode == "" || ov.UpdatedAt == nil || ov.EmployeesEnrolled != nil {
+		t.Fatalf("company code %q, updated %v, enrolled %v: want a code, a last-updated time, and suppressed enrollment",
+			ov.CompanyCode, ov.UpdatedAt, ov.EmployeesEnrolled)
 	}
 
 	inits, err := dash.Initiatives(ctx, adminSession)
 	if err != nil || len(inits) != 2 {
 		t.Fatalf("initiatives: %d %v", len(inits), err)
+	}
+	a := inits[0]
+	if a.Title != "Initiative delta-a" || a.Status != "ACTIVE" || a.Region != "Northern Nevada" || a.DeployedMinor != 40000 ||
+		len(a.Metrics) != 1 || a.Metrics[0].Value != 150 || a.Metrics[0].VerifiedOn == "" ||
+		len(a.Spend) != 1 || a.Spend[0].Category != "Meals" || a.Spend[0].AmountMinor != 40000 || a.UpdatedAt.IsZero() {
+		t.Fatalf("initiative detail: %+v", a)
 	}
 	spend, err := dash.Spend(ctx, adminSession)
 	if err != nil || len(spend) != 1 || spend[0].AmountMinor != 50000 {
@@ -116,11 +123,11 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	}
 
 	// A VIEWER can read tiles but cannot export (admin-only).
-	viewerInvite, err := dash.Portal.Invite(ctx, adminSession, "analyst@delta.test", "Ana", "VIEWER")
-	if err != nil {
+	mustExec(t, pool, "DELETE FROM donor_partner_login_emails")
+	if err := dash.Invite(ctx, adminSession, "analyst@delta.test", "Ana", "VIEWER"); err != nil {
 		t.Fatal(err)
 	}
-	viewerSession, err := dash.Portal.AcceptInvite(ctx, viewerInvite)
+	viewerSession, err := dash.AcceptInvite(ctx, deliverPartnerLinks(t, time.Now().UTC())["analyst@delta.test"])
 	if err != nil {
 		t.Fatal(err)
 	}

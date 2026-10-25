@@ -17,7 +17,11 @@ type EncryptedColumn struct{ Table, Column string }
 // The columns each encryption key setting protects. A new encrypted column
 // must be listed here, or rotating its key would strand it on a retired key.
 var (
-	EmailKeyColumns   = []EncryptedColumn{{"donor_login_emails", "encrypted_token"}, {"donor_email_changes", "encrypted_token"}}
+	EmailKeyColumns = []EncryptedColumn{
+		{"donor_login_emails", "encrypted_token"},
+		{"donor_partner_login_emails", "encrypted_token"},
+		{"donor_email_changes", "encrypted_token"},
+	}
 	ContentKeyColumns = []EncryptedColumn{{"donor_content_sources", "encrypted_data"}}
 )
 

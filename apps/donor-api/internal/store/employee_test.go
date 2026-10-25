@@ -15,7 +15,6 @@ import (
 // terms, returning its id.
 func approvedPartner(t *testing.T, pool *pgxpool.Pool, org, code string, rateBP int32, capMinor int64) pgtype.UUID {
 	t.Helper()
-	ctx := context.Background()
 	id, _ := NewID()
 	mustExec(
 		t,
@@ -30,10 +29,10 @@ func approvedPartner(t *testing.T, pool *pgxpool.Pool, org, code string, rateBP 
 		capMinor,
 	)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM donor_partner_match_payments WHERE partner_id=$1", id)
-		_, _ = pool.Exec(ctx, "DELETE FROM donor_partner_employees WHERE partner_id=$1", id)
-		_, _ = pool.Exec(ctx, "DELETE FROM donor_partner_teams WHERE partner_id=$1", id)
-		_, _ = pool.Exec(ctx, "DELETE FROM donor_partner_signups WHERE id=$1", id)
+		cleanExec(t, "DELETE FROM donor_partner_match_payments WHERE partner_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_partner_employees WHERE partner_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_partner_teams WHERE partner_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_partner_signups WHERE id=$1", id)
 	})
 	return id
 }
@@ -42,7 +41,6 @@ func approvedPartner(t *testing.T, pool *pgxpool.Pool, org, code string, rateBP 
 // paid at paidAt. Returns the donor id.
 func linkDonorWithGift(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID, amount int64, paidAt time.Time, streak int32) pgtype.UUID {
 	t.Helper()
-	ctx := context.Background()
 	id, _ := donor(t, pool)
 	mustExec(t, pool, "INSERT INTO donor_partner_employees (donor_id, partner_id, enrolled_at) VALUES ($1,$2,now())", id, partnerID)
 	if amount > 0 {
@@ -60,9 +58,9 @@ func linkDonorWithGift(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID, 
 		 VALUES ($1,$2,$2,now(),now()+interval '1 day', $3) ON CONFLICT (donor_id) DO UPDATE SET current_streak=$2`,
 		id, streak, mustNewID(t))
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM donor_gifts WHERE donor_id=$1", id)
-		_, _ = pool.Exec(ctx, "DELETE FROM donor_checkouts WHERE donor_id=$1", id)
-		_, _ = pool.Exec(ctx, "DELETE FROM donor_metric_projections WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_gifts WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_checkouts WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_metric_projections WHERE donor_id=$1", id)
 	})
 	return id
 }
@@ -79,8 +77,7 @@ func mustNewID(t *testing.T) pgtype.UUID {
 func TestEmployeeMatchingAndKAnonymity(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	emp := EmployeeService{DB: pool}
-	staff := &StaffService{DB: as(t, dbroles.API)}
+	emp := EmployeeService{DB: pool, Staff: &StaffService{DB: as(t, dbroles.API)}}
 	_, superToken := staffFixture(t, pool, "SUPER_ADMIN")
 
 	// 10% match, $50 annual cap.
@@ -97,9 +94,8 @@ func TestEmployeeMatchingAndKAnonymity(t *testing.T) {
 	// Our People is SUPPRESSED at 4 linked employees.
 	// (Driven through a partner session for the org.)
 	_, adminID := approvePartnerAdmin(t, pool, partnerID)
-	portal := PartnerPortalService{DB: pool}
 	adminSession := issueTestPartnerSession(t, pool, adminID)
-	op, err := emp.OurPeople(ctx, adminSession, portal)
+	op, err := emp.OurPeople(ctx, adminSession)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +105,7 @@ func TestEmployeeMatchingAndKAnonymity(t *testing.T) {
 
 	// A fifth employee crosses the threshold; now figures are shown.
 	linkDonorWithGift(t, pool, partnerID, 10000, jan, 20)
-	op, err = emp.OurPeople(ctx, adminSession, portal)
+	op, err = emp.OurPeople(ctx, adminSession)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +114,7 @@ func TestEmployeeMatchingAndKAnonymity(t *testing.T) {
 	}
 
 	// Matching: 5 × $100 × 10% = $50 owed, exactly at the $50 cap.
-	status, err := emp.Match(ctx, staff, superToken, partnerID, thisYear)
+	status, err := emp.Match(ctx, superToken, partnerID, thisYear)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +124,7 @@ func TestEmployeeMatchingAndKAnonymity(t *testing.T) {
 
 	// A sixth employee's gift pushes raw match over the cap — owed stays capped.
 	linkDonorWithGift(t, pool, partnerID, 10000, jan, 5)
-	status, err = emp.Match(ctx, staff, superToken, partnerID, thisYear)
+	status, err = emp.Match(ctx, superToken, partnerID, thisYear)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,21 +132,33 @@ func TestEmployeeMatchingAndKAnonymity(t *testing.T) {
 		t.Fatalf("owed must stay at the $50 cap: %+v", status)
 	}
 
+	// A refunded gift no longer counts toward the match or the giving total.
+	refunded := linkDonorWithGift(t, pool, partnerID, 10000, jan, 3)
+	mustExec(t, pool, `INSERT INTO donor_refunds (id, gift_id, stripe_refund_id, amount_minor, currency, status, observed_at)
+		SELECT gen_random_uuid(), id, 're_'||id::text, amount_minor, 'USD', 'SUCCEEDED', now() FROM donor_gifts WHERE donor_id=$1`, refunded)
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_refunds WHERE gift_id IN (SELECT id FROM donor_gifts WHERE donor_id=$1)", refunded)
+	})
+	op, err = emp.OurPeople(ctx, adminSession)
+	if err != nil || op.GivenMinor != 60000 || op.MatchedMinor != 5000 {
+		t.Fatalf("refunded gift counted, or match not shown to the partner: %+v %v", op, err)
+	}
+
 	// A gift in LAST year does not count toward this year (annual reset).
 	linkDonorWithGift(t, pool, partnerID, 10000, lastYear, 1)
-	status, err = emp.Match(ctx, staff, superToken, partnerID, thisYear)
+	status, err = emp.Match(ctx, superToken, partnerID, thisYear)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.GiftsMinor != 60000 { // the six this-year $100 gifts only
+	if status.GiftsMinor != 60000 { // the six unrefunded this-year $100 gifts only
 		t.Fatalf("last-year gift leaked into this year: %+v", status)
 	}
 
 	// Recording an offline payment reduces the outstanding balance; no charge.
-	if err := emp.RecordMatchPayment(ctx, staff, superToken, partnerID, thisYear, 2000); err != nil {
+	if err := emp.RecordMatchPayment(ctx, superToken, partnerID, thisYear, 2000); err != nil {
 		t.Fatal(err)
 	}
-	status, err = emp.Match(ctx, staff, superToken, partnerID, thisYear)
+	status, err = emp.Match(ctx, superToken, partnerID, thisYear)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +168,7 @@ func TestEmployeeMatchingAndKAnonymity(t *testing.T) {
 
 	// An operator without partner.manage cannot read the match.
 	_, growthToken := staffFixture(t, pool, "OP_GROWTH")
-	if _, err := emp.Match(ctx, staff, growthToken, partnerID, thisYear); !errors.Is(err, ErrStaffForbidden) {
+	if _, err := emp.Match(ctx, growthToken, partnerID, thisYear); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatalf("OP_GROWTH read the match: %v", err)
 	}
 }
@@ -170,7 +178,6 @@ func TestEmployeeEnrollAndTeams(t *testing.T) {
 	ctx := context.Background()
 	emp := EmployeeService{DB: pool}
 	partnerID := approvedPartner(t, pool, "Gamma Co", "GAMMA", 0, 0)
-	portal := PartnerPortalService{DB: pool}
 	_, adminID := approvePartnerAdmin(t, pool, partnerID)
 	adminSession := issueTestPartnerSession(t, pool, adminID)
 
@@ -197,12 +204,39 @@ func TestEmployeeEnrollAndTeams(t *testing.T) {
 	}
 
 	// Leaderboard suppresses a team under 5 members (just this one donor).
-	rows, err := emp.Teams(ctx, adminSession, portal)
+	rows, err := emp.Teams(ctx, adminSession)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 0 {
 		t.Fatalf("team under 5 members must be suppressed: %+v", rows)
+	}
+
+	// Two full teams rank by combined active giving: five $30/month givers
+	// beat five members of whom only one gives $90/month and the rest lapsed.
+	fill := func(name string, monthly []int64) {
+		for _, amount := range monthly {
+			id := linkDonorWithGift(t, pool, partnerID, 3000, time.Now().UTC(), 1)
+			if _, err := emp.JoinTeam(ctx, sessionFor(t, pool, id), name); err != nil {
+				t.Fatal(err)
+			}
+			mustExec(t, pool, `UPDATE donor_metric_projections SET active=$2, current_monthly_minor=$3,
+				streak_since=now()-interval '40 days' WHERE donor_id=$1`, id, amount > 0, amount)
+		}
+	}
+	fill("Ops", []int64{9000, 0, 0, 0, 0})
+	fill("Sales", []int64{3000, 3000, 3000, 3000, 3000})
+	rows, err = emp.Teams(ctx, adminSession)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("leaderboard: %+v %v", rows, err)
+	}
+	if rows[0].Name != "Sales" || rows[0].AnnualizedMinor != 180000 || rows[0].ActiveGivers != 5 ||
+		rows[1].Name != "Ops" || rows[1].AnnualizedMinor != 108000 || rows[1].ActiveGivers != 1 || rows[0].AvgStreakDays != 40 {
+		t.Fatalf("leaderboard order or totals: %+v", rows)
+	}
+	team, err = emp.Team(ctx, donorToken)
+	if err != nil || len(team.Leaderboard) != 2 || team.Leaderboard[0].Name != "Sales" {
+		t.Fatalf("donor's company leaderboard: %+v %v", team, err)
 	}
 }
 
@@ -210,12 +244,11 @@ func TestEmployeeEnrollAndTeams(t *testing.T) {
 // partner, returning (userID, userID) — the id is reused as the session owner.
 func approvePartnerAdmin(t *testing.T, pool *pgxpool.Pool, partnerID pgtype.UUID) (pgtype.UUID, string) {
 	t.Helper()
-	ctx := context.Background()
 	uid := mustNewID(t)
 	mustExec(t, pool,
 		`INSERT INTO donor_partner_users (id, partner_id, email, name, role, accepted_at, created_at)
 		 VALUES ($1,$2,$3,'Admin','ADMIN',now(),now())`,
 		uid, partnerID, "admin-"+uid.String()+"@x.test")
-	t.Cleanup(func() { _, _ = pool.Exec(ctx, "DELETE FROM donor_partner_users WHERE id=$1", uid) })
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_partner_users WHERE id=$1", uid) })
 	return uid, uid.String()
 }

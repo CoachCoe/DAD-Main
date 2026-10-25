@@ -15,21 +15,24 @@ export default function Accept() {
     if (token === undefined || started.current) return;
     started.current = true;
     if (!token) {
-      setError("This sign-in link is missing its token. Open the link from your invitation email again.");
+      setError("This sign-in link is missing its token. Open the link from your email again.");
       return;
     }
     api("/donor/partner/accept-invite", { method: "POST", body: JSON.stringify({ invite: token }) })
       .then(() => window.location.assign("/partner"))
-      .catch(() => setError("This invitation link is invalid or has expired. Ask your administrator to resend it."));
+      .catch(() => setError("This sign-in link has already been used or has expired. Request a new one below."));
   }, [token]);
 
   return (
-    <Page eyebrow="Partner portal" title="Signing you in…">
-      <p>Confirming your invitation and opening your partner dashboard.</p>
-      {error && (
+    <Page eyebrow="Partner portal" title={error ? "This link didn’t work" : "Signing you in…"}>
+      {error ? (
         <p>
-          <Link href="/partner/apply">Apply to partner with DAD</Link>
+          <Link className="button" href="/partner/sign-in">
+            Email me a new sign-in link
+          </Link>
         </p>
+      ) : (
+        <p>Confirming your link and opening your partner dashboard.</p>
       )}
       <Announcer status={error ? "" : "Signing in…"} alert={error} />
     </Page>

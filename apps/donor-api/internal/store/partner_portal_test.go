@@ -3,27 +3,59 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/mail"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// TestPartnerPortalInviteAndAuth covers P-4/P-5 + the dedicated partner session:
-// approval issues the signer an invite, accepting it yields a session, an admin
-// can invite a viewer, a viewer cannot invite or remove, and an admin cannot
-// remove themselves.
-func TestPartnerPortalInviteAndAuth(t *testing.T) {
+// deliverPartnerLinks runs the login-email worker until its queue is empty and
+// returns the link token each recipient received last.
+func deliverPartnerLinks(t *testing.T, now time.Time) map[string]string {
+	t.Helper()
+	transport := &recordingMail{}
+	w := PartnerLoginEmailWorker{
+		DB:        as(t, dbroles.LoginEmailWorker),
+		Settings:  mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys},
+		Origin:    "https://donor.example.org",
+		Transport: transport,
+	}
+	for {
+		worked, err := w.DeliverNext(context.Background(), now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !worked {
+			break
+		}
+	}
+	links := map[string]string{}
+	for _, m := range transport.messages {
+		if !strings.Contains(m.Body, "https://donor.example.org/partner/accept#token=") {
+			t.Fatalf("%s: email has no portal link:\n%s", m.To, m.Body)
+		}
+		links[m.To] = tokenFromMail(t, m)
+	}
+	return links
+}
+
+// TestPartnerPortalSignInJourney walks P-2..P-5 as a partner lives them: the
+// approval emails the signer a link that opens an admin session, the admin
+// invites a viewer by email, each link works once, and a user whose session
+// has ended requests a fresh link with nothing but their email.
+func TestPartnerPortalSignInJourney(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	apps := PartnerApplicationService{DB: pool, Staff: &StaffService{DB: as(t, dbroles.API)}}
-	portal := PartnerPortalService{DB: pool}
+	portal := PartnerPortalService{DB: as(t, dbroles.API)}
 	_, superToken := staffFixture(t, pool, "SUPER_ADMIN")
 	cleanPartners(t, pool)
+	mustExec(t, pool, "DELETE FROM donor_partner_login_emails")
 
-	// Approve an application; capture the signer's invite via the DB (the
-	// approval emails it in production).
 	appID := testID(t)
 	if err := apps.Apply(ctx, appID, validApplication("Gamma Co", "lead@gamma.test")); err != nil {
 		t.Fatal(err)
@@ -32,54 +64,124 @@ func TestPartnerPortalInviteAndAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// The signer accepts their invite -> a partner session. We re-issue a fresh
-	// invite through the service to get a usable plaintext token (the approval's
-	// token is only stored hashed).
-	// Admin bootstrap: mint a session directly for the signer admin to drive the
-	// admin-only flows, mirroring what AcceptInvite would produce.
-	var signerID string
-	if err := pool.QueryRow(ctx, "SELECT id FROM donor_partner_users WHERE partner_id=$1 AND role='ADMIN'", partnerID).Scan(&signerID); err != nil {
-		t.Fatal(err)
+	var code string
+	if err := pool.QueryRow(ctx, "SELECT company_code FROM donor_partner_signups WHERE id=$1", partnerID).Scan(&code); err != nil ||
+		!strings.HasPrefix(code, "GAMMAC-") || !companyCode.MatchString(code) {
+		t.Fatalf("approved partner has company code %q (%v), want GAMMAC-…", code, err)
 	}
-	adminSession := issueTestPartnerSession(t, pool, signerID)
 
-	// Admin invites a VIEWER; the returned token accepts into a viewer session.
-	viewerInvite, err := portal.Invite(ctx, adminSession, "viewer@gamma.test", "Val Viewer", "VIEWER")
+	links := deliverPartnerLinks(t, time.Now().UTC())
+	adminSession, err := portal.AcceptInvite(ctx, links["lead@gamma.test"])
 	if err != nil {
+		t.Fatalf("approval link did not sign the signer in: %v", err)
+	}
+	if _, err := portal.AcceptInvite(ctx, links["lead@gamma.test"]); !errors.Is(err, ErrPartnerInvite) {
+		t.Fatalf("approval link worked twice: %v", err)
+	}
+
+	if err := portal.Invite(ctx, adminSession, "viewer@gamma.test", "Val Viewer", "VIEWER"); err != nil {
 		t.Fatalf("admin invite: %v", err)
 	}
-	viewerSession, err := portal.AcceptInvite(ctx, viewerInvite)
+	viewerSession, err := portal.AcceptInvite(ctx, deliverPartnerLinks(t, time.Now().UTC())["viewer@gamma.test"])
 	if err != nil {
-		t.Fatalf("accept invite: %v", err)
+		t.Fatalf("invitation link: %v", err)
 	}
-	// A bad invite token is refused.
-	if _, err := portal.AcceptInvite(ctx, "not-a-real-invite"); !errors.Is(err, ErrPartnerInvite) {
+	if _, err := portal.AcceptInvite(ctx, "not-a-real-invite-token-0123456789abcdef"); !errors.Is(err, ErrPartnerInvite) {
 		t.Fatalf("bad invite accepted: %v", err)
 	}
 
-	// Both can list users (any role); the viewer CANNOT invite or remove.
 	if users, err := portal.Users(ctx, viewerSession); err != nil || len(users) != 2 {
 		t.Fatalf("viewer users list: %d %v", len(users), err)
 	}
-	if _, err := portal.Invite(ctx, viewerSession, "x@gamma.test", "X", "VIEWER"); !errors.Is(err, ErrPartnerForbidden) {
+	if err := portal.Invite(ctx, viewerSession, "x@gamma.test", "X", "VIEWER"); !errors.Is(err, ErrPartnerForbidden) {
 		t.Fatalf("viewer invited a user: %v", err)
 	}
 
-	// The admin removes the viewer; the admin cannot remove themselves.
-	var viewerID string
+	if err := portal.SignOut(ctx, adminSession); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := portal.Users(ctx, adminSession); !errors.Is(err, ErrPartnerDenied) {
+		t.Fatalf("signed-out session still authenticated: %v", err)
+	}
+	if err := portal.RequestSignIn(ctx, " Lead@Gamma.test "); err != nil {
+		t.Fatal(err)
+	}
+	if err := portal.RequestSignIn(ctx, "lead@gamma.test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := portal.RequestSignIn(ctx, "nobody@gamma.test"); err != nil {
+		t.Fatalf("unknown email must not be distinguishable: %v", err)
+	}
+	signIn := deliverPartnerLinks(t, time.Now().UTC())
+	if len(signIn) != 1 {
+		t.Fatalf("sign-in requests sent %v, want one throttled link for the admin only", signIn)
+	}
+	if adminSession, err = portal.AcceptInvite(ctx, signIn["lead@gamma.test"]); err != nil {
+		t.Fatalf("requested sign-in link: %v", err)
+	}
+	if _, err := portal.Users(ctx, adminSession); err != nil {
+		t.Fatalf("new admin session: %v", err)
+	}
+
+	var viewerID, signerID string
 	if err := pool.QueryRow(ctx, "SELECT id FROM donor_partner_users WHERE partner_id=$1 AND role='VIEWER'", partnerID).Scan(&viewerID); err != nil {
 		t.Fatal(err)
 	}
-	if err := portal.RemoveUser(ctx, adminSession, mustUUID(t, viewerID)); err != nil {
-		t.Fatalf("admin remove viewer: %v", err)
+	if err := pool.QueryRow(ctx, "SELECT id FROM donor_partner_users WHERE partner_id=$1 AND role='ADMIN'", partnerID).Scan(&signerID); err != nil {
+		t.Fatal(err)
 	}
 	if err := portal.RemoveUser(ctx, adminSession, mustUUID(t, signerID)); !errors.Is(err, ErrPartnerForbidden) {
 		t.Fatalf("admin removed self: %v", err)
 	}
-	// The removed viewer's session no longer authenticates.
+	if err := portal.RemoveUser(ctx, adminSession, mustUUID(t, viewerID)); err != nil {
+		t.Fatalf("admin remove viewer: %v", err)
+	}
 	if _, err := portal.Users(ctx, viewerSession); !errors.Is(err, ErrPartnerDenied) {
-		t.Fatalf("disabled viewer still authenticated: %v", err)
+		t.Fatalf("removed viewer still authenticated: %v", err)
+	}
+	if err := portal.RequestSignIn(ctx, "viewer@gamma.test"); err != nil {
+		t.Fatal(err)
+	}
+	if sent := deliverPartnerLinks(t, time.Now().UTC()); len(sent) != 0 {
+		t.Fatalf("a removed user was sent a sign-in link: %v", sent)
+	}
+}
+
+// A user holds one live link: a link replaced by a newer one before its email
+// was sent is dropped instead of mailed.
+func TestPartnerLinkReplacedBeforeDeliveryIsNotSent(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	apps := PartnerApplicationService{DB: pool, Staff: &StaffService{DB: as(t, dbroles.API)}}
+	_, superToken := staffFixture(t, pool, "SUPER_ADMIN")
+	cleanPartners(t, pool)
+	mustExec(t, pool, "DELETE FROM donor_partner_login_emails")
+
+	appID := testID(t)
+	if err := apps.Apply(ctx, appID, validApplication("Kappa Org", "kay@kappa.test")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := apps.Approve(ctx, superToken, appID); err != nil {
+		t.Fatal(err)
+	}
+	transport := &recordingMail{failure: errors.New("connection reset")}
+	w := PartnerLoginEmailWorker{
+		DB:        as(t, dbroles.LoginEmailWorker),
+		Settings:  mail.Settings{Host: "smtp.fixture", Port: 587, Sender: "sender@example.org", EncryptionKeys: emailTestKeys},
+		Origin:    "https://donor.example.org",
+		Transport: transport,
+	}
+	now := time.Now().UTC()
+	if worked, err := w.DeliverNext(ctx, now); err != nil || !worked {
+		t.Fatal(worked, err)
+	}
+	mustExec(t, pool, "UPDATE donor_partner_users SET invite_token_hash='replaced' WHERE email='kay@kappa.test'")
+	transport.failure, transport.messages = nil, nil
+	if worked, err := w.DeliverNext(ctx, now.Add(2*time.Minute)); err != nil || !worked {
+		t.Fatal(worked, err)
+	}
+	if len(transport.messages) != 0 {
+		t.Fatalf("sent a replaced link: %v", transport.messages)
 	}
 }
 

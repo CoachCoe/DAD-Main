@@ -228,8 +228,14 @@ func TestInitiativeSpendByCategoryTotalsAndPublishedOnlyRead(t *testing.T) {
 // signedInDonor creates a donor and returns its id and a live session token.
 func signedInDonor(t *testing.T, pool *pgxpool.Pool) (pgtype.UUID, string) {
 	t.Helper()
-	ctx := context.Background()
 	id, _ := donor(t, pool)
+	return id, sessionFor(t, pool, id)
+}
+
+// sessionFor signs an existing donor in and returns the session token.
+func sessionFor(t *testing.T, pool *pgxpool.Pool, id pgtype.UUID) string {
+	t.Helper()
+	ctx := context.Background()
 	token := link(t, pool, id, time.Now().UTC())
 	var access string
 	err := pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
@@ -243,7 +249,7 @@ func signedInDonor(t *testing.T, pool *pgxpool.Pool) (pgtype.UUID, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return id, access
+	return access
 }
 
 func TestDailyRotationDeterministicAndExposureLedger(t *testing.T) {

@@ -289,7 +289,12 @@ test("authenticated accessible surface: /account/employer", async ({ page }) => 
   await page.route("**/api/donor/me/team", (route) => {
     if (route.request().method() !== "GET") return route.fulfill({ json: {} });
     return route.fulfill({
-      json: { partner_id: "9c7e1f20-0a1b-4c3d-8e5f-6a7b8c9d0e1f", organization: "Delta Inc", team_name: "Team A" },
+      json: {
+        partner_id: "9c7e1f20-0a1b-4c3d-8e5f-6a7b8c9d0e1f",
+        organization: "Delta Inc",
+        team_name: "Team A",
+        leaderboard: [],
+      },
     });
   });
   await page.goto("/account/employer");
@@ -303,25 +308,63 @@ test("authenticated accessible surface: /account/employer", async ({ page }) => 
   expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
 });
 
-// Partner portal dashboard (Phase 5): overview tiles, initiatives, spend,
-// teams, users. Authenticated by the partner bearer session; the surfaces are
-// laboured regions with an Announcer live region, so axe covers the structure.
+// The partner portal dashboard: every section, for an administrator, with
+// an initiative, a team leaderboard, and unsuppressed employee figures.
 const partnerPortal: Record<string, unknown> = {
   "/donor/partner/overview": {
     organization: "Delta Inc",
+    role: "ADMIN",
+    company_code: "DELTA-7KQ4MX",
     committed_minor: 150000,
     deployed_minor: 50000,
     deployed_percent: 33,
     people_reached: 200,
-    our_people_available: true,
+    employees_enrolled: 8,
+    workforce_size: 40,
+    enrolled_percent: 20,
+    updated_at: "2026-10-20T15:00:00Z",
   },
-  "/donor/partner/initiatives": { initiatives: [] },
+  "/donor/partner/initiatives": {
+    initiatives: [
+      {
+        id: "i1",
+        title: "Reno Meals",
+        summary: "Hot meals delivered daily.",
+        status: "ACTIVE",
+        region: "Northern Nevada",
+        county_count: 3,
+        committed_minor: 100000,
+        deployed_minor: 40000,
+        metrics: [{ label: "Households served", value: 150, unit: "PEOPLE", verified_on: "2026-10-18" }],
+        spend: [{ category: "Meals", amount_minor: 40000 }],
+        updated_at: "2026-10-20T15:00:00Z",
+      },
+    ],
+  },
   "/donor/partner/spend": { categories: [{ category: "Meals", amount_minor: 50000 }] },
   "/donor/partner/users": { users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN" }] },
   "/donor/partner/exports": { exports: [] },
-  "/donor/partner/our-people": { enrolled: 8, given_minor: 80000, avg_streak: 12, suppressed: false },
+  "/donor/partner/our-people": {
+    enrolled: 8,
+    workforce_size: 40,
+    given_minor: 80000,
+    matched_minor: 8000,
+    avg_streak_days: 40,
+    volunteer_minutes: 300,
+    teams: 1,
+    suppressed: false,
+  },
   "/donor/partner/teams": {
-    teams: [{ team_id: "t1", name: "Team A", active_givers: 6, avg_streak: 9, volunteer_minutes: 300 }],
+    teams: [
+      {
+        team_id: "t1",
+        name: "Team A",
+        active_givers: 6,
+        annualized_minor: 216000,
+        avg_streak_days: 40,
+        volunteer_minutes: 300,
+      },
+    ],
   },
 };
 
@@ -335,7 +378,7 @@ test("authenticated accessible surface: /partner", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   await expect(page.getByText("$1,500.00")).toBeVisible();
   // Every portal panel is a laboured region a screen reader can navigate to.
-  for (const name of ["Overview", "Initiatives", "Spend by category", "Reports", "Teams", "Users"]) {
+  for (const name of ["Overview", "Initiatives", "Spend", "Our People", "Reports", "Users"]) {
     await expect(page.getByRole("region", { name })).toBeVisible();
   }
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
