@@ -12,6 +12,76 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Path gate (PRD §13 CI cost): the hosted jobs (api, browser, deploy) run on
+  # GitHub-hosted Ubuntu and bill real minutes, unlike the self-hosted jobs. This
+  # job diffs the change and emits booleans so a hosted job runs only when files
+  # it actually tests changed — and ALWAYS when this is a push to main/dev (the
+  # authoritative merge-landing run keeps the full suite). It runs self-hosted,
+  # so the gate itself is free.
+  #
+  # FUTURE (eliminates these hosted minutes entirely): api and browser are on
+  # Linux only because they need Postgres SERVICE CONTAINERS and apt-based
+  # `playwright install --with-deps`, and deploy needs Linux Docker — none of
+  # which the self-hosted macOS runner can do. A self-hosted LINUX runner with
+  # KVM/containers (labelled e.g. [self-hosted, dad, linux, docker]) could host
+  # all three at $0: once such a runner is registered, change their `runs-on`
+  # from `ubuntu-latest` to that label and drop the gate's `if`. That is a
+  # hardware/registration step (like the existing runners); the path gate above
+  # delivers the savings until then.
+  changes:
+    runs-on: [self-hosted, dad, linux]
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      deploy: ${{ steps.filter.outputs.deploy }}
+      full: ${{ steps.filter.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          backend=false deploy=false full=false
+          # A push to an integration branch runs the full suite regardless of the
+          # diff: this is the landing run, and a skipped job there would leave a
+          # gap no later trigger fills.
+          if [ "$EVENT" = "push" ] && { [ "$REF" = "refs/heads/main" ] || [ "$REF" = "refs/heads/dev" ]; }; then
+            full=true backend=true deploy=true
+          else
+            # Resolve the comparison base: a PR diffs against its merge base, a
+            # branch push against its before-SHA (or HEAD~1 when that is unset,
+            # e.g. a new branch's first push).
+            if [ "$EVENT" = "pull_request" ] && [ -n "${BASE_SHA:-}" ]; then
+              git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+              base="$BASE_SHA"
+            elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              base="$BEFORE"
+            else
+              base="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+            fi
+            changed="$(git diff --name-only "$base" HEAD || true)"
+            echo "changed files vs $base:"; echo "$changed"
+            match() { echo "$changed" | grep -Eq "$1"; }
+            # backend: Go API, its migrations/sqlc/openapi, the web app (api runs
+            # check-generated which spans web typegen; browser is full-stack E2E),
+            # or the CI workflow itself.
+            if match '^apps/donor-api/|^apps/web/|^Makefile$|^\.github/workflows/ci\.yml$'; then backend=true; fi
+            # deploy: compose/env/ingress/scripts/Dockerfiles, or the CI workflow.
+            if match '^docker-compose|^\.env\..*\.example$|^scripts/|[Dd]ockerfile|^ingress/|^\.github/workflows/ci\.yml$'; then deploy=true; fi
+          fi
+          {
+            echo "full=$full"
+            echo "backend=$backend"
+            echo "deploy=$deploy"
+          } >> "$GITHUB_OUTPUT"
+
   ledger:
     runs-on: [self-hosted, dad, linux]
     timeout-minutes: 10
@@ -29,6 +99,8 @@ jobs:
   api:
     # GitHub-hosted: uses a Postgres service container, which is a Linux-only
     # Actions feature (the self-hosted macOS runner cannot run service containers).
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -78,6 +150,8 @@ jobs:
     # GitHub-hosted: runs `docker build` / `docker compose`. Docker Desktop on the
     # self-hosted macOS runner cannot authenticate image pulls from its headless
     # launchd service (no interactive keychain), so this must stay on Linux.
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -95,6 +169,8 @@ jobs:
   browser:
     # GitHub-hosted: uses a Postgres service container (Linux-only Actions feature)
     # and `playwright install --with-deps` (apt-get, Linux-only).
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
