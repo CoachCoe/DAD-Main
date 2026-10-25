@@ -356,8 +356,8 @@ func (q *Queries) RecordPhoneCodeAttempt(ctx context.Context, phone string) erro
 const recordPreferenceConsent = `-- name: RecordPreferenceConsent :exec
 INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,
  push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,
- volunteer,volunteer_interests,consent_version,source)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'account')
+ volunteer,volunteer_interests,consent_version,push_streak_lapsed,push_badge_earned,source)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'account')
 `
 
 type RecordPreferenceConsentParams struct {
@@ -374,6 +374,8 @@ type RecordPreferenceConsentParams struct {
 	Volunteer             pgtype.Bool `json:"volunteer"`
 	VolunteerInterests    []string    `json:"volunteer_interests"`
 	ConsentVersion        string      `json:"consent_version"`
+	PushStreakLapsed      pgtype.Bool `json:"push_streak_lapsed"`
+	PushBadgeEarned       pgtype.Bool `json:"push_badge_earned"`
 }
 
 func (q *Queries) RecordPreferenceConsent(ctx context.Context, arg RecordPreferenceConsentParams) error {
@@ -391,6 +393,8 @@ func (q *Queries) RecordPreferenceConsent(ctx context.Context, arg RecordPrefere
 		arg.Volunteer,
 		arg.VolunteerInterests,
 		arg.ConsentVersion,
+		arg.PushStreakLapsed,
+		arg.PushBadgeEarned,
 	)
 	return err
 }
@@ -442,12 +446,13 @@ func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) 
 const savePreference = `-- name: SavePreference :exec
 INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,
  push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,
- volunteer,volunteer_interests)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(donor_id) DO UPDATE
+ volunteer,volunteer_interests,push_streak_lapsed,push_badge_earned)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT(donor_id) DO UPDATE
 SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_emails=EXCLUDED.marketing_emails,
  push_referral_converted=EXCLUDED.push_referral_converted,push_streak_at_risk=EXCLUDED.push_streak_at_risk,
  push_streak_milestone=EXCLUDED.push_streak_milestone,rankings_opted_out=EXCLUDED.rankings_opted_out,
- network_visible=EXCLUDED.network_visible,volunteer=EXCLUDED.volunteer,volunteer_interests=EXCLUDED.volunteer_interests
+ network_visible=EXCLUDED.network_visible,volunteer=EXCLUDED.volunteer,volunteer_interests=EXCLUDED.volunteer_interests,
+ push_streak_lapsed=EXCLUDED.push_streak_lapsed,push_badge_earned=EXCLUDED.push_badge_earned
 `
 
 type SavePreferenceParams struct {
@@ -463,6 +468,8 @@ type SavePreferenceParams struct {
 	NetworkVisible        bool        `json:"network_visible"`
 	Volunteer             bool        `json:"volunteer"`
 	VolunteerInterests    []string    `json:"volunteer_interests"`
+	PushStreakLapsed      bool        `json:"push_streak_lapsed"`
+	PushBadgeEarned       bool        `json:"push_badge_earned"`
 }
 
 func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) error {
@@ -479,6 +486,8 @@ func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) 
 		arg.NetworkVisible,
 		arg.Volunteer,
 		arg.VolunteerInterests,
+		arg.PushStreakLapsed,
+		arg.PushBadgeEarned,
 	)
 	return err
 }

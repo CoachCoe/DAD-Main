@@ -78,8 +78,10 @@ func TestFinancialOutboxDeduplicationYearBoundaryAndRollback(t *testing.T) {
 		}
 	}
 	var count int
+	// RECEIPT + ANNUAL(2026) + REFERRAL + RECOVERY(day 0) + RECOVERY(day 5)
+	// + LAPSED (the FAILED period also queues the grace-end lapse notice).
 	if err = tx.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 OR donor_id=$2", id, referrer).Scan(&count); err != nil ||
-		count != 6 {
+		count != 7 {
 		t.Fatalf("wrong outbox cardinality: %d %v", count, err)
 	}
 	var year int

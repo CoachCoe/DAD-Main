@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"slices"
+	"strconv"
 	"time"
 	"unicode/utf8"
 
@@ -147,7 +148,8 @@ func (s InitiativeService) Update(ctx context.Context, token string, id pgtype.U
 				return struct{}{}, err
 			}
 			q := queries.New(tx)
-			if _, err = q.InitiativeByID(ctx, id); err != nil {
+			existing, err := q.InitiativeByID(ctx, id)
+			if err != nil {
 				return struct{}{}, err
 			}
 			if err = q.UpdateInitiative(ctx, queries.UpdateInitiativeParams{
@@ -157,6 +159,16 @@ func (s InitiativeService) Update(ctx context.Context, token string, id pgtype.U
 				PartnerSignupID: params.PartnerSignupID, UpdatedAt: timestamp(now),
 			}); err != nil {
 				return struct{}{}, err
+			}
+			// INITIATIVE_COMPLETE partner email (§6.11) on the ACTIVE->COMPLETE
+			// transition only, for a partner-owned initiative. Keyed per
+			// initiative so a later edit of an already-complete initiative does
+			// not re-notify.
+			if existing.Status != "COMPLETE" && params.Status == "COMPLETE" && params.PartnerSignupID.Valid {
+				key := "partner-complete:" + id.String()
+				if err = queuePartnerMessage(ctx, q, params.PartnerSignupID, "INITIATIVE_COMPLETE", key, map[string]string{"initiative_id": id.String()}, now); err != nil {
+					return struct{}{}, err
+				}
 			}
 			return struct{}{}, auditStaff(ctx, q, actor.ID, "initiative.updated", id.String(), nil, now)
 		})
@@ -252,6 +264,10 @@ func (s InitiativeService) PublishMetric(
 	_, err := staffWrite(ctx, s.Staff, token, initiativePermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
+			initiative, err := q.InitiativeByID(ctx, initiativeID)
+			if err != nil {
+				return struct{}{}, err
+			}
 			metrics, err := q.InitiativeMetrics(ctx, initiativeID)
 			if err != nil {
 				return struct{}{}, err
@@ -268,6 +284,15 @@ func (s InitiativeService) PublishMetric(
 			}
 			if err = q.PublishInitiativeMetric(ctx, queries.PublishInitiativeMetricParams{InitiativeID: initiativeID, Position: position, UpdatedAt: timestamp(now)}); err != nil {
 				return struct{}{}, err
+			}
+			// METRICS_VERIFIED partner email (§6.11): a verified figure for a
+			// partner's initiative went live. Keyed per (initiative, position) so
+			// republishing the same metric does not re-notify.
+			if initiative.PartnerSignupID.Valid {
+				key := "partner-metrics:" + initiativeID.String() + ":" + strconv.FormatInt(int64(position), 10)
+				if err = queuePartnerMessage(ctx, q, initiative.PartnerSignupID, "METRICS_VERIFIED", key, map[string]string{"initiative_id": initiativeID.String()}, now); err != nil {
+					return struct{}{}, err
+				}
 			}
 			return struct{}{}, auditStaff(
 				ctx,

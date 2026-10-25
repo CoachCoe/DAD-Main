@@ -130,6 +130,12 @@ seed:
 loadtest-seeded:
 	$(LOADTEST) -duration 60s -concurrency 256 -max-p99 250ms
 	$(LOADTEST) -duration 5m -concurrency 32 -max-p99 100ms
+	$(LOADTEST) -duration 60s -concurrency 256 \
+		-mix "referral-lookup=0,referral-capture=0,referral-missing=0,content=0,dashboard=0,gifts=0,sharing=0,profile=0,recurring=0,annual-summary=0,events=55,event-detail=45" \
+		-max-p99 400ms
+	$(LOADTEST) -duration 5m -concurrency 32 \
+		-mix "referral-lookup=0,referral-capture=0,referral-missing=0,content=0,gifts=0,sharing=0,profile=0,recurring=0,annual-summary=0,dashboard=40,today-initiative=30,team=30" \
+		-max-p99 150ms
 
 deploy-build:
 	./scripts/deploy.sh build

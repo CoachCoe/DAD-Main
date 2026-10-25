@@ -275,6 +275,22 @@ type DonorPartnerEmployee struct {
 	EnrolledAt pgtype.Timestamptz `json:"enrolled_at"`
 }
 
+type DonorPartnerMessage struct {
+	ID               pgtype.UUID        `json:"id"`
+	PartnerID        pgtype.UUID        `json:"partner_id"`
+	Kind             string             `json:"kind"`
+	DedupKey         string             `json:"dedup_key"`
+	Context          []byte             `json:"context"`
+	AvailableAt      pgtype.Timestamptz `json:"available_at"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	Attempts         int32              `json:"attempts"`
+	LastError        pgtype.Text        `json:"last_error"`
+	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
+	Subject          pgtype.Text        `json:"subject"`
+	Body             pgtype.Text        `json:"body"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorPartnerSignup struct {
 	Organization   string             `json:"organization"`
 	Name           string             `json:"name"`
@@ -361,6 +377,8 @@ type DonorPreference struct {
 	NetworkVisible        bool               `json:"network_visible"`
 	Volunteer             bool               `json:"volunteer"`
 	VolunteerInterests    []string           `json:"volunteer_interests"`
+	PushStreakLapsed      bool               `json:"push_streak_lapsed"`
+	PushBadgeEarned       bool               `json:"push_badge_earned"`
 }
 
 type DonorPushNotification struct {

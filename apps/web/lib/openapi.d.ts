@@ -2286,6 +2286,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/staff/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Success metrics report */
+        get: operations["staffReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2458,8 +2475,12 @@ export interface components {
             push_referral_converted: boolean;
             /** @description App notification when a declined monthly payment puts the donor's giving streak at risk. Starts on. */
             push_streak_at_risk: boolean;
+            /** @description App notification when the donor's giving streak has lapsed after the grace period on a failed monthly payment. Starts on. */
+            push_streak_lapsed: boolean;
             /** @description App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on. */
             push_streak_milestone: boolean;
+            /** @description App notification when the donor earns a new badge. Starts on. */
+            push_badge_earned: boolean;
             /** @description When true the donor is excluded from national/city rankings and from everyone's ranking denominator. Default off (ranked). */
             rankings_opted_out: boolean;
             /** @description When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). Default off. */
@@ -3321,6 +3342,115 @@ export interface components {
              * @enum {string}
              */
             qualifying_perk?: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
+        };
+        ReportMetric: {
+            /** @description Whether the server can compute this metric. */
+            available: boolean;
+            /** @description Why the metric is unavailable, when available is false. */
+            reason?: string;
+            /** Format: int64 */
+            value: number;
+        };
+        ReportSourceConversions: {
+            /** @description Frozen attribution source: DIRECT, LINK or IRL. */
+            source: string;
+            /** @description Gift frequency: MONTHLY or ONE_TIME. */
+            frequency: string;
+            /** Format: int64 */
+            donors: number;
+            /**
+             * Format: int64
+             * @description Gross collected cents for these first gifts.
+             */
+            gross_minor: number;
+        };
+        ReportGiftMix: {
+            /** @description Gift frequency: MONTHLY or ONE_TIME. */
+            frequency: string;
+            /** Format: int64 */
+            gifts: number;
+            /**
+             * Format: int64
+             * @description Collected cents.
+             */
+            collected_minor: number;
+        };
+        ReportViralCoefficient: {
+            /**
+             * Format: int64
+             * @description Donors who referred at least one donor in the window.
+             */
+            cohort: number;
+            /** Format: int64 */
+            gross_conversions: number;
+            /** Format: int64 */
+            qualified_conversions: number;
+        };
+        ReportInvoluntaryChurn: {
+            /** Format: int64 */
+            failed_periods: number;
+            /**
+             * Format: int64
+             * @description Scheduled cents lost to failed renewals past the retry deadline.
+             */
+            lost_minor: number;
+            /** Format: int64 */
+            recovered_periods: number;
+            /**
+             * Format: int64
+             * @description Cents recovered against the failed-period cohort.
+             */
+            recovered_minor: number;
+        };
+        ReportRetention: {
+            /** Format: int64 */
+            reached_m3: number;
+            /** Format: int64 */
+            retained_m3: number;
+            /** Format: int64 */
+            reached_m6: number;
+            /** Format: int64 */
+            retained_m6: number;
+        };
+        ReportTimeToFirstGift: {
+            /** Format: int64 */
+            sample: number;
+            /** Format: int64 */
+            median_seconds: number;
+        };
+        Report: {
+            /**
+             * Format: date-time
+             * @description Inclusive window start (UTC).
+             */
+            period_start: string;
+            /**
+             * Format: date-time
+             * @description Exclusive window end (UTC); also the observation cutoff.
+             */
+            period_end: string;
+            /**
+             * Format: date-time
+             * @description As-of time the metrics were computed against (UTC).
+             */
+            observation_cutoff: string;
+            /** @description Always UTC. */
+            timezone: string;
+            /** @description Discloses the committed-facts coverage boundary. */
+            coverage_note: string;
+            /** Format: int64 */
+            founding_donors: number;
+            first_gift_by_source: components["schemas"]["ReportSourceConversions"][];
+            gift_mix: components["schemas"]["ReportGiftMix"][];
+            viral_coefficient: components["schemas"]["ReportViralCoefficient"];
+            /** Format: int64 */
+            referral_link_minor: number;
+            /** Format: int64 */
+            referral_irl_minor: number;
+            involuntary_churn: components["schemas"]["ReportInvoluntaryChurn"];
+            time_to_first_gift: components["schemas"]["ReportTimeToFirstGift"];
+            retention: components["schemas"]["ReportRetention"];
+            seven_day_share_rate: components["schemas"]["ReportMetric"];
         };
     };
     responses: {
@@ -7638,6 +7768,35 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffReport: {
+        parameters: {
+            query: {
+                /** @description Inclusive window start, RFC3339 (UTC). */
+                start: string;
+                /** @description Exclusive window end and observation cutoff, RFC3339 (UTC). */
+                end: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Report"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };

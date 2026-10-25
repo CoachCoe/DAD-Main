@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -148,6 +149,37 @@ func TestSeededMixRejectsUnknownScenarios(t *testing.T) {
 	}
 	if _, err := seededMix("http://api", "http://web", fixture{}, nil); err == nil {
 		t.Fatal("fixture without referral codes accepted")
+	}
+}
+
+// TestEventScenariosNeedEventIDs covers the event-day mix: the event scenarios
+// are refused when the fixture carries no events, and build URLs from a
+// fixture event id when it does.
+func TestEventScenariosNeedEventIDs(t *testing.T) {
+	codes := fixture{ReferralCodes: []string{"code"}}
+	for _, name := range []string{"events", "event-detail", "event-reserve"} {
+		if _, err := seededMix("http://api", "http://web", codes, map[string]int{name: 5}); err == nil {
+			t.Fatalf("scenario %q accepted with no event ids in the fixture", name)
+		}
+	}
+	withEvents := fixture{ReferralCodes: []string{"code"}, EventIDs: []string{"11111111-1111-4111-8111-111111111111"}}
+	scenarios, err := seededMix("http://api", "http://web", withEvents, map[string]int{"event-detail": 5, "event-reserve": 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := &user{r: rand.New(rand.NewPCG(1, 0))}
+	for _, s := range scenarios {
+		req := s.build(u)
+		switch s.name {
+		case "event-detail":
+			if req.Method != http.MethodGet || !strings.Contains(req.URL.Path, "11111111-1111-4111-8111-111111111111") {
+				t.Fatalf("event-detail did not read the fixture event: %s", req.URL)
+			}
+		case "event-reserve":
+			if req.Method != http.MethodPost || !strings.HasSuffix(req.URL.Path, "/reserve") || req.Header.Get("Origin") != "http://web" {
+				t.Fatalf("event-reserve is not a reserve POST with the site Origin: %s", req.URL)
+			}
+		}
 	}
 }
 

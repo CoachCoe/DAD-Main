@@ -116,6 +116,7 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		retention := &store.TouchRetention{DB: pool}
 		rankings := store.RankingService{DB: pool}
 		reminders := store.EventReminderService{DB: pool}
+		monthlyPartners := store.PartnerMonthlyService{DB: pool}
 		return func(ctx context.Context) (bool, error) {
 			now := time.Now().UTC()
 			purged, err := retention.PurgeNext(ctx, now)
@@ -134,7 +135,13 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 			// Event reminder sweeps (E-7); idempotent per window, so a frequent
 			// sweep is cheap and each 24h/2h window fires once.
 			remind, err := reminders.QueueDueReminders(ctx, now)
-			return purged || processed > 0 || ranked || remind > 0, err
+			if err != nil {
+				return purged || processed > 0 || ranked || remind > 0, err
+			}
+			// Monthly partner report sweep (§6.11); idempotent per partner per
+			// calendar month via the intent's dedup key.
+			monthly, err := monthlyPartners.QueueDueMonthly(ctx, now)
+			return purged || processed > 0 || ranked || remind > 0 || monthly > 0, err
 		}, nil
 	case "push":
 		config, err := push.FromEnvironment(getenv)
@@ -173,7 +180,16 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 	case "login-email":
 		worker = store.LoginEmailWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
 	default:
-		worker = store.MessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+		messages := store.MessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+		partner := store.PartnerMessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+		return func(ctx context.Context) (bool, error) {
+			now := time.Now().UTC()
+			worked, err := messages.DeliverNext(ctx, now)
+			if worked || err != nil {
+				return worked, err
+			}
+			return partner.DeliverNext(ctx, now)
+		}, nil
 	}
 	return func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }, nil
 }

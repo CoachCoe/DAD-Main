@@ -43,6 +43,35 @@ func messageSuppression(
 		return referralSuppression(ctx, q, data, donor)
 	case "RECOVERY":
 		return recoverySuppression(ctx, q, data, donor, now)
+	case "LAPSED":
+		return lapsedSuppression(ctx, q, data, donor, now)
+	}
+	return "", nil
+}
+
+// lapsedSuppression stops a streak-lapsed notice when the lapse did not happen
+// after all: the payment recovered or the gift was cancelled before grace ran
+// out. Once grace has ended on a still-FAILED period the lapse is real and the
+// notice stands. Like the recovery reminder it is a transactional status email
+// with no opt-out (only marketing and referral emails are opt-in).
+func lapsedSuppression(
+	ctx context.Context,
+	q *queries.Queries,
+	data payments.Object,
+	donor queries.Donor,
+	now time.Time,
+) (string, error) {
+	period, reason, err := failureResolved(ctx, q, data, donor, now)
+	if err != nil {
+		return "", err
+	}
+	if reason == "payment_recovered" || reason == "subscription_cancelled" {
+		return reason, nil
+	}
+	// The intent is available only at grace end, but guard against an early
+	// delivery: if grace has not elapsed the run has not lapsed yet.
+	if now.Sub(period.DueAt.Time) < recognition.Grace {
+		return "grace_not_ended", nil
 	}
 	return "", nil
 }
@@ -203,6 +232,8 @@ func renderMessage(
 		return "Your DAD test payment needs attention", "Your monthly test payment was declined. Your giving streak is at risk.\nThe recovery grace period ends " + iso(
 			period.DueAt.Time.Add(recognition.Grace),
 		) + ".\nUpdate your payment method securely: " + site.paymentMethod() + "\nIf signed out, request a sign-in link for the email used to give, then return to payment methods.\nUpdating a card does not itself confirm payment recovery. Stripe's retry sequence handles collection.\nThis essential payment notice concerns sandbox giving, not a real charge.\n", nil
+	case "LAPSED":
+		return "Your DAD giving streak has ended", "Your monthly test payment did not recover within the grace period, so your giving streak has reset to zero.\nYou can start a new streak any time — your next monthly test gift begins it.\nStart giving again securely: " + site.paymentMethod() + "\nIf signed out, request a sign-in link for the email used to give.\nThis is an essential status notice about sandbox giving, not a real charge.\n", nil
 	case "PASSKEY_ADDED":
 		added := data.Text("added_at")
 		if added == "" {

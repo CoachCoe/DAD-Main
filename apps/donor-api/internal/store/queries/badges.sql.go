@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const badgeEarned = `-- name: BadgeEarned :one
+SELECT EXISTS(
+    SELECT 1 FROM donor_badges WHERE donor_id=$1 AND code=$2 AND revoked_at IS NULL
+)
+`
+
+type BadgeEarnedParams struct {
+	DonorID pgtype.UUID `json:"donor_id"`
+	Code    string      `json:"code"`
+}
+
+// True if the donor currently holds this badge (earned and not revoked), for
+// rechecking a badge-earned push at send time (an admin may revoke in between).
+func (q *Queries) BadgeEarned(ctx context.Context, arg BadgeEarnedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, badgeEarned, arg.DonorID, arg.Code)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const donorBadges = `-- name: DonorBadges :many
 SELECT code, source, earned_at, revoked_at FROM donor_badges
 WHERE donor_id=$1
@@ -64,7 +84,7 @@ func (q *Queries) DonorRaisedAmount(ctx context.Context, donorID pgtype.UUID) (b
 	return raised, err
 }
 
-const earnBadge = `-- name: EarnBadge :exec
+const earnBadge = `-- name: EarnBadge :execrows
 INSERT INTO donor_badges (donor_id, code, source, earned_at)
 VALUES ($1, $2, 'AUTO', $3)
 ON CONFLICT (donor_id, code) DO NOTHING
@@ -79,9 +99,14 @@ type EarnBadgeParams struct {
 // Records an auto-earned badge. Permanent: if the row already exists it is left
 // as-is (first-earned time wins); a previously revoked badge is NOT silently
 // re-earned here (a revoke is an admin decision, honoured until an admin grants).
-func (q *Queries) EarnBadge(ctx context.Context, arg EarnBadgeParams) error {
-	_, err := q.db.Exec(ctx, earnBadge, arg.DonorID, arg.Code, arg.EarnedAt)
-	return err
+// Returns rows affected so the caller fires the badge-earned push only for a
+// genuinely new earn.
+func (q *Queries) EarnBadge(ctx context.Context, arg EarnBadgeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, earnBadge, arg.DonorID, arg.Code, arg.EarnedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const grantBadge = `-- name: GrantBadge :exec
@@ -99,6 +124,37 @@ type GrantBadgeParams struct {
 // Admin grant (B-4). Clears any revocation and marks the source as GRANT.
 func (q *Queries) GrantBadge(ctx context.Context, arg GrantBadgeParams) error {
 	_, err := q.db.Exec(ctx, grantBadge, arg.DonorID, arg.Code, arg.EarnedAt)
+	return err
+}
+
+const queueBadgePush = `-- name: QueueBadgePush :exec
+INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
+SELECT gen_random_uuid(),$1::uuid,'BADGE_EARNED',
+    'push:badge:'||$1::text||':'||$2::text,
+    json_build_object('code',$2::text),
+    $3::timestamptz,$4::timestamptz
+WHERE EXISTS(SELECT 1 FROM donor_sessions s WHERE s.donor_id=$1::uuid AND s.push_token IS NOT NULL
+    AND coalesce(s.refresh_expires_at,s.expires_at)>$3::timestamptz)
+ON CONFLICT(dedup_key) DO NOTHING
+`
+
+type QueueBadgePushParams struct {
+	DonorID   pgtype.UUID        `json:"donor_id"`
+	Code      string             `json:"code"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+// Queues a badge-earned push (§6.11) for the donor, keyed so it fires at most
+// once per badge, and only while the donor has a live app device so nothing
+// accumulates for a donor without the app.
+func (q *Queries) QueueBadgePush(ctx context.Context, arg QueueBadgePushParams) error {
+	_, err := q.db.Exec(ctx, queueBadgePush,
+		arg.DonorID,
+		arg.Code,
+		arg.AsOf,
+		arg.ExpiresAt,
+	)
 	return err
 }
 

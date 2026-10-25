@@ -240,6 +240,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.Badges = store.BadgeService{DB: pool, Staff: staff}
 		services.Network = store.NetworkService{DB: pool}
 		services.Events = store.EventService{Staff: staff}
+		services.Reporting = &store.ReportingService{Staff: staff}
 		services.StaffPartner = store.PartnerApplicationService{DB: pool, Staff: staff}
 		services.EmployeeStaff = store.EmployeeStaffAdapter{Emp: store.EmployeeService{DB: pool}, Staff: staff}
 	}

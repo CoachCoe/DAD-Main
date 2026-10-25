@@ -279,3 +279,67 @@ test("email proof page requires an explicit keyboard confirmation", async ({ pag
     (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze()).violations,
   ).toEqual([]);
 });
+
+// Employee giving (Phase 6): the donor links an employer by company code and
+// joins a team. An already-linked donor sees their org and team as text, not a
+// colour-only state.
+test("authenticated accessible surface: /account/employer", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/donor/me/team", (route) => {
+    if (route.request().method() !== "GET") return route.fulfill({ json: {} });
+    return route.fulfill({
+      json: { partner_id: "9c7e1f20-0a1b-4c3d-8e5f-6a7b8c9d0e1f", organization: "Delta Inc", team_name: "Team A" },
+    });
+  });
+  await page.goto("/account/employer");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  // The enrolled state is conveyed in words, not by colour alone.
+  await expect(page.getByText("Delta Inc")).toBeVisible();
+  await expect(page.getByText("Team A")).toBeVisible();
+  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect(results.violations).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
+// Partner portal dashboard (Phase 5): overview tiles, initiatives, spend,
+// teams, users. Authenticated by the partner bearer session; the surfaces are
+// laboured regions with an Announcer live region, so axe covers the structure.
+const partnerPortal: Record<string, unknown> = {
+  "/donor/partner/overview": {
+    organization: "Delta Inc",
+    committed_minor: 150000,
+    deployed_minor: 50000,
+    deployed_percent: 33,
+    people_reached: 200,
+    our_people_available: true,
+  },
+  "/donor/partner/initiatives": { initiatives: [] },
+  "/donor/partner/spend": { categories: [{ category: "Meals", amount_minor: 50000 }] },
+  "/donor/partner/users": { users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN" }] },
+  "/donor/partner/exports": { exports: [] },
+  "/donor/partner/our-people": { enrolled: 8, given_minor: 80000, avg_streak: 12, suppressed: false },
+  "/donor/partner/teams": {
+    teams: [{ team_id: "t1", name: "Team A", active_givers: 6, avg_streak: 9, volunteer_minutes: 300 }],
+  },
+};
+
+test("authenticated accessible surface: /partner", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  for (const [path, json] of Object.entries(partnerPortal)) {
+    await page.route(`**/api${path}`, (route) => route.fulfill({ json: json as object }));
+  }
+  await page.goto("/partner");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.getByText("$1,500.00")).toBeVisible();
+  // Every portal panel is a laboured region a screen reader can navigate to.
+  for (const name of ["Overview", "Initiatives", "Spend by category", "Reports", "Teams", "Users"]) {
+    await expect(page.getByRole("region", { name })).toBeVisible();
+  }
+  const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
+  expect(results.violations).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
+});

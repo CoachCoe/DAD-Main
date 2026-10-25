@@ -154,3 +154,54 @@ SELECT i.id, i.title, i.summary, i.committed_minor,
 FROM donor_initiatives i
 WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
 ORDER BY i.title;
+
+-- name: QueuePartnerMessage :exec
+-- Queues one org-level partner email intent, deduped by key so the same event
+-- enqueues at most once. Delivery fans out to the org's users (PartnerMessageRecipients).
+INSERT INTO donor_partner_messages (id,partner_id,kind,dedup_key,context,available_at)
+VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (dedup_key) DO NOTHING;
+
+-- name: NextPartnerMessage :one
+SELECT * FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
+ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
+
+-- name: PartnerMessageByID :one
+SELECT * FROM donor_partner_messages WHERE id=$1;
+
+-- name: RenderPartnerMessage :exec
+UPDATE donor_partner_messages SET subject=$2,body=$3 WHERE id=$1;
+
+-- name: ClaimPartnerMessage :exec
+UPDATE donor_partner_messages SET available_at=$2 WHERE id=$1;
+
+-- name: CompletePartnerMessage :exec
+UPDATE donor_partner_messages SET completed_at=$2,suppressed_reason=$3 WHERE id=$1;
+
+-- name: FailPartnerMessage :exec
+UPDATE donor_partner_messages SET attempts=attempts+1,last_error=$2,available_at=$3 WHERE id=$1;
+
+-- name: PartnerMessageRecipients :many
+-- The org's users who can receive mail: accepted (completed first sign-in) and
+-- not disabled. A pending invitee has their own invite email and is not yet a
+-- recipient of status notices.
+SELECT email,name FROM donor_partner_users
+WHERE partner_id=$1 AND disabled=false AND accepted_at IS NOT NULL
+ORDER BY email;
+
+-- name: PartnerForMessage :one
+SELECT id,organization,approved_at FROM donor_partner_signups WHERE id=$1;
+
+-- name: PartnersDueMonthlyReport :many
+-- Approved partners with at least one published initiative that have not had a
+-- MONTHLY_REPORT queued for the given year-month. Drives the monthly sweep;
+-- the dedup_key carries the period so each partner is mailed once per month.
+SELECT s.id FROM donor_partner_signups s
+WHERE s.approved_at IS NOT NULL
+AND EXISTS(SELECT 1 FROM donor_initiatives i WHERE i.partner_signup_id=s.id AND i.publish_state='PUBLISHED')
+AND NOT EXISTS(
+    SELECT 1 FROM donor_partner_messages m
+    WHERE m.partner_id=s.id AND m.kind='MONTHLY_REPORT'
+    AND m.dedup_key='partner-monthly:'||s.id::text||':'||sqlc.arg(period)::text
+)
+ORDER BY s.id
+LIMIT sqlc.arg(batch)::int;
