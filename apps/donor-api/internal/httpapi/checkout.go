@@ -43,7 +43,9 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
 		return
 	}
-	request := payments.CheckoutRequest{RequestID: key, Email: *body.Email, Amount: *body.Amount, Frequency: frequency}
+	request := payments.CheckoutRequest{
+		RequestID: key, Email: *body.Email, Amount: *body.Amount, Frequency: frequency, Company: cookieValue(r, companyCookie),
+	}
 	if visitor := cookieValue(r, referralCookie); visitor != "" {
 		request.Visitor = &visitor
 	}

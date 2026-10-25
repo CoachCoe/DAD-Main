@@ -470,8 +470,7 @@ type CompanyCapture struct {
 
 // CaptureCompanyCode records a pre-signup visit through an employer's company
 // code against an anonymous visitor token, so the attribution survives the app
-// install gap and binds at first gift (resolved to a partner in a later phase).
-// Last touch wins. A malformed code keeps the visitor's existing unexpired touch
+// install gap and binds when the donor checks out. Last touch wins. A malformed code keeps the visitor's existing unexpired touch
 // if any, else records nothing. The code is normalised to upper case.
 func (s DonorService) CaptureCompanyCode(ctx context.Context, code, visitor string, now time.Time) (CompanyCapture, error) {
 	code = strings.ToUpper(strings.TrimSpace(code))
@@ -521,50 +520,38 @@ func (s DonorService) CaptureCompanyCode(ctx context.Context, code, visitor stri
 	})
 }
 
-// BindCapturedCompanyCode binds the company code captured for visitor onto
-// donor, once, at the point the donor is established (first gift). It is a
-// no-op when the visitor has no unexpired touch or the donor already carries a
-// code. The partner this code resolves to is applied in a later phase; this
-// only preserves the attribution against the account. It returns the bound code
-// if one was set, empty otherwise.
-func (s DonorService) BindCapturedCompanyCode(ctx context.Context, donor pgtype.UUID, visitor string, now time.Time) (string, error) {
+// bindCompanyCode binds the company code captured for visitor to donor when
+// the donor is established at checkout (D-3, D-4), and links them to the
+// partner it resolves to, so their giving rolls up to the employer (EM-2). It
+// does nothing without an unexpired touch, and never replaces a donor's code
+// or employer. It returns the code it found, or empty.
+func bindCompanyCode(ctx context.Context, q *queries.Queries, donor pgtype.UUID, visitor string, now time.Time) (string, error) {
 	if visitor == "" {
 		return "", nil
 	}
-	var bound string
-	err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		q := queries.New(tx)
-		touch, err := q.CompanyTouchByToken(ctx, HashToken(visitor))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if !touch.ExpiresAt.Time.After(now) {
-			return nil
-		}
-		if err := q.BindDonorCompanyCode(ctx, queries.BindDonorCompanyCodeParams{
-			ID: donor, CompanyCode: text(touch.CompanyCode),
-		}); err != nil {
-			return err
-		}
-		bound = touch.CompanyCode
-		// EM-2: if the code resolves to an approved partner, link the donor now
-		// so their giving (including gifts already made) rolls up to the
-		// employer. A code that matches no approved partner only stays bound.
-		partnerID, err := q.PartnerByCompanyCode(ctx, text(touch.CompanyCode))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		return q.UpsertEmployeeLink(ctx, queries.UpsertEmployeeLinkParams{
-			DonorID: donor, PartnerID: partnerID, EnrolledAt: timestamp(now),
-		})
+	touch, err := q.CompanyTouchByToken(ctx, HashToken(visitor))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !touch.ExpiresAt.Time.After(now) {
+		return "", nil
+	}
+	if err := q.BindDonorCompanyCode(ctx, queries.BindDonorCompanyCodeParams{ID: donor, CompanyCode: text(touch.CompanyCode)}); err != nil {
+		return "", err
+	}
+	partnerID, err := q.PartnerByCompanyCode(ctx, text(touch.CompanyCode))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return touch.CompanyCode, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return touch.CompanyCode, q.UpsertEmployeeLink(ctx, queries.UpsertEmployeeLinkParams{
+		DonorID: donor, PartnerID: partnerID, EnrolledAt: timestamp(now),
 	})
-	return bound, err
 }
 
 func (s DonorService) Gifts(ctx context.Context, token string, offset int64) (GiftsPage, error) {

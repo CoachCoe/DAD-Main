@@ -202,6 +202,15 @@ func (s PartnerPortalService) Users(ctx context.Context, token string) ([]Partne
 	})
 }
 
+// CompanyCode returns the calling partner's company code (EM-1), which any
+// partner role may view (§7.2).
+func (s PartnerPortalService) CompanyCode(ctx context.Context, token string) (string, error) {
+	return partnerRead(ctx, s.DB, token, func(q *queries.Queries, actor PartnerActor) (string, error) {
+		code, err := q.PartnerCompanyCode(ctx, actor.PartnerID)
+		return code.String, err
+	})
+}
+
 // RemoveUser disables a partner user (P-4, admin-only). An admin cannot remove
 // themselves (avoids orphaning the org).
 func (s PartnerPortalService) RemoveUser(ctx context.Context, token string, userID pgtype.UUID) error {

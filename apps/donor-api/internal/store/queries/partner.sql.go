@@ -467,6 +467,17 @@ func (q *Queries) PartnerApplicationByID(ctx context.Context, id pgtype.UUID) (D
 	return i, err
 }
 
+const partnerCompanyCode = `-- name: PartnerCompanyCode :one
+SELECT company_code FROM donor_partner_signups WHERE id=$1
+`
+
+func (q *Queries) PartnerCompanyCode(ctx context.Context, id pgtype.UUID) (pgtype.Text, error) {
+	row := q.db.QueryRow(ctx, partnerCompanyCode, id)
+	var company_code pgtype.Text
+	err := row.Scan(&company_code)
+	return company_code, err
+}
+
 const partnerForMessage = `-- name: PartnerForMessage :one
 SELECT id,organization,approved_at FROM donor_partner_signups WHERE id=$1
 `

@@ -195,9 +195,21 @@ function PeopleSection({ companyCode }: { companyCode: string }) {
       {companyCode && (
         <div className="callout highlight">
           <p>
-            Your company code is <strong className="hash">{companyCode}</strong>. Employees enter it under{" "}
-            <em>Employer and team</em> in their DAD account to link their giving to your organization.
+            Your company code is <strong className="hash">{companyCode}</strong>. Share this link, or show the code
+            below, so employees can link their giving to your organization:{" "}
+            <span className="hash">
+              {window.location.origin}/c/{companyCode}
+            </span>
           </p>
+          {/* biome-ignore lint/performance/noImgElement: a per-partner, same-origin SVG that the image optimizer would only copy */}
+          <img
+            className="referralCode"
+            src="/api/donor/partner/company-code.svg"
+            alt={`QR code for company code ${companyCode}`}
+            width={240}
+            height={240}
+          />
+          <p className="note">Employees who already give can enter the code under Employer and team.</p>
         </div>
       )}
       {p &&

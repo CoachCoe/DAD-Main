@@ -2079,6 +2079,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/partner/company-code.svg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Company code QR code
+         * @description The IRL version of the partner's company code (EM-1): a QR code of `/c/{company code}` on the public site, which saves the code before an employee gives. Any partner role. 404 before the partner has a code.
+         */
+        get: operations["partnerCompanyCode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/partner/users/{userID}/remove": {
         parameters: {
             query?: never;
@@ -7353,6 +7373,29 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerCompanyCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/svg+xml": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };

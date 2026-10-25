@@ -8,9 +8,12 @@ export const dynamic = "force-static";
 
 const APP_ID = /^[A-Z0-9]{10}\.[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
-/** The account pages the app handles; giving and the rest of the public site stay in the browser. */
+/** The account and partner pages the app handles; giving and the rest of the public site stay in the browser. */
 const APP_PATHS = [
   "/r/*",
+  "/c/*",
+  "/partner",
+  "/partner/accept",
   "/account/claim",
   "/account/email-change",
   "/account/payment-method",

@@ -17,7 +17,7 @@ it("names no app until one is configured", async () => {
   }
 });
 
-it("associates the iOS app with the account pages and its passkeys", async () => {
+it("associates the iOS app with the account and partner pages and its passkeys", async () => {
   vi.stubEnv("DONOR_IOS_APP_ID", "ABCDE12345.org.dynamicaid.donor");
   const response = appleAssociation();
   expect(response.status).toBe(200);
@@ -30,6 +30,9 @@ it("associates the iOS app with the account pages and its passkeys", async () =>
           appIDs: ["ABCDE12345.org.dynamicaid.donor"],
           components: [
             { "/": "/r/*" },
+            { "/": "/c/*" },
+            { "/": "/partner" },
+            { "/": "/partner/accept" },
             { "/": "/account/claim" },
             { "/": "/account/email-change" },
             { "/": "/account/payment-method" },

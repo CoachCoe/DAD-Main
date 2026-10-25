@@ -8,7 +8,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dad/donor-api/internal/sharing"
 	"dad/donor-api/internal/store"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -30,6 +32,7 @@ type PartnerPortalSource interface {
 	Spend(ctx context.Context, token string) ([]store.PartnerSpendRow, error)
 	Exports(ctx context.Context, token string) ([]store.PartnerReportRow, error)
 	ExportReport(ctx context.Context, token string) ([]byte, error)
+	CompanyCode(ctx context.Context, token string) (string, error)
 }
 
 // StaffPartnerSource is the staff-side partner administration (§8, partner.manage).
@@ -213,6 +216,40 @@ func (a *api) partnerExports(w http.ResponseWriter, r *http.Request, session str
 		rows, err := a.PartnerPortal.Exports(ctx, session)
 		return map[string]any{"exports": rows}, err
 	})
+}
+
+// partnerCompanyCode is the IRL version of the company code (EM-1): a QR code
+// of the code's landing link, for a poster or a slide.
+func (a *api) partnerCompanyCode(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.partnerPortal().available(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	code, err := a.PartnerPortal.CompanyCode(ctx, session)
+	if err == nil && code == "" {
+		err = pgx.ErrNoRows
+	}
+	if err != nil {
+		respond(w, r, nil, err, partnerPortalStatus)
+		return
+	}
+	image, err := sharing.SVG(a.Origin + "/c/" + code)
+	if err != nil {
+		writeError(w, r, http.StatusServiceUnavailable, "The partner portal is temporarily unavailable", err)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Content-Disposition", "inline")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	_, _ = w.Write(image)
+}
+
+func partnerPortalStatus(err error) (int, string) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return http.StatusNotFound, "Your organization has no company code yet"
+	}
+	return partnerStatusCode(err)
 }
 
 // partnerReport streams the branded PDF (P-14). Not JSON — a file download.

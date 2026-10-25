@@ -78,6 +78,9 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	if _, err := portal.AcceptInvite(ctx, links["lead@gamma.test"]); !errors.Is(err, ErrPartnerInvite) {
 		t.Fatalf("approval link worked twice: %v", err)
 	}
+	if shown, err := portal.CompanyCode(ctx, adminSession); err != nil || shown != code {
+		t.Fatalf("partner sees company code %q (%v), want %q", shown, err, code)
+	}
 
 	if err := portal.Invite(ctx, adminSession, "viewer@gamma.test", "Val Viewer", "VIEWER"); err != nil {
 		t.Fatalf("admin invite: %v", err)

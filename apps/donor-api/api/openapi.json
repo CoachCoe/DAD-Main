@@ -7853,6 +7853,45 @@
     }
    }
   },
+  "/donor/partner/company-code.svg": {
+   "get": {
+    "operationId": "partnerCompanyCode",
+    "summary": "Company code QR code",
+    "description": "The IRL version of the partner's company code (EM-1): a QR code of `/c/{company code}` on the public site, which saves the code before an employee gives. Any partner role. 404 before the partner has a code.",
+    "tags": [
+     "Partner"
+    ],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "image/svg+xml": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
   "/donor/partner/users/{userID}/remove": {
    "post": {
     "operationId": "partnerRemoveUser",

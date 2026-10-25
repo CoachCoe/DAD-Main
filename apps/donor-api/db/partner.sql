@@ -272,3 +272,6 @@ UPDATE donor_partner_login_emails SET completed_at=$2, encrypted_token=NULL, las
 
 -- name: FailPartnerLoginEmail :exec
 UPDATE donor_partner_login_emails SET last_error=$2, available_at=$3 WHERE id=$1 AND completed_at IS NULL;
+
+-- name: PartnerCompanyCode :one
+SELECT company_code FROM donor_partner_signups WHERE id=$1;
