@@ -115,3 +115,42 @@ JOIN donor_initiatives i ON i.id = s.initiative_id
 WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
 GROUP BY s.category
 ORDER BY s.category;
+
+-- name: PartnerOverviewTotals :one
+-- P-10 tiles: committed (sum of committed_minor over the partner's published
+-- initiatives), deployed (sum of their spend), and people reached (sum of
+-- published verified PEOPLE metrics). Totals only, published only; an
+-- unverified metric is never counted (§7.3 "hidden, never estimated").
+SELECT
+  coalesce((SELECT sum(i.committed_minor) FROM donor_initiatives i
+            WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
+  coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
+            JOIN donor_initiatives i ON i.id=s.initiative_id
+            WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'), 0)::bigint AS deployed_minor,
+  coalesce((SELECT sum(m.value) FROM donor_initiative_metrics m
+            JOIN donor_initiatives i ON i.id=m.initiative_id
+            WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+              AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE'), 0)::bigint AS people_reached;
+
+-- name: InsertPartnerReport :exec
+-- P-14: record one dashboard PDF export for the export-history list.
+INSERT INTO donor_partner_reports
+  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7);
+
+-- name: PartnerReports :many
+-- P-14: previous exports for a partner, newest first, with the exporter name.
+SELECT r.id, r.committed_minor, r.deployed_minor, r.people_reached, r.created_at, u.name AS exported_by_name
+FROM donor_partner_reports r
+JOIN donor_partner_users u ON u.id = r.exported_by
+WHERE r.partner_id=$1
+ORDER BY r.created_at DESC
+LIMIT 50;
+
+-- name: PartnerInitiativesList :many
+-- P-11: the partner's published initiatives with committed + deployed totals.
+SELECT i.id, i.title, i.summary, i.committed_minor,
+  coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s WHERE s.initiative_id=i.id), 0)::bigint AS deployed_minor
+FROM donor_initiatives i
+WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+ORDER BY i.title;

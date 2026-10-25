@@ -175,6 +175,7 @@ var grants = map[string]map[Role]string{
 	"donor_partner_applications": {API: "SELECT, INSERT, UPDATE"},
 	"donor_partner_users":        {API: "SELECT, INSERT, UPDATE"},
 	"donor_partner_sessions":     {API: "SELECT, INSERT, UPDATE"},
+	"donor_partner_reports":      {API: "SELECT, INSERT"},
 	"donor_content_sources":      {API: "SELECT, INSERT", Rekey: "SELECT (id, encrypted_data), UPDATE (encrypted_data)"},
 	"donor_content_publications": {API: "SELECT, INSERT"},
 	"donor_content_head":         {API: "SELECT, INSERT, UPDATE"},

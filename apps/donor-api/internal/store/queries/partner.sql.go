@@ -162,6 +162,36 @@ func (q *Queries) InsertPartnerApplication(ctx context.Context, arg InsertPartne
 	return err
 }
 
+const insertPartnerReport = `-- name: InsertPartnerReport :exec
+INSERT INTO donor_partner_reports
+  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7)
+`
+
+type InsertPartnerReportParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	PartnerID      pgtype.UUID        `json:"partner_id"`
+	ExportedBy     pgtype.UUID        `json:"exported_by"`
+	CommittedMinor int64              `json:"committed_minor"`
+	DeployedMinor  int64              `json:"deployed_minor"`
+	PeopleReached  int64              `json:"people_reached"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+// P-14: record one dashboard PDF export for the export-history list.
+func (q *Queries) InsertPartnerReport(ctx context.Context, arg InsertPartnerReportParams) error {
+	_, err := q.db.Exec(ctx, insertPartnerReport,
+		arg.ID,
+		arg.PartnerID,
+		arg.ExportedBy,
+		arg.CommittedMinor,
+		arg.DeployedMinor,
+		arg.PeopleReached,
+		arg.CreatedAt,
+	)
+	return err
+}
+
 const insertPartnerSession = `-- name: InsertPartnerSession :exec
 INSERT INTO donor_partner_sessions (id, partner_user_id, token_hash, expires_at, created_at)
 VALUES ($1,$2,$3,$4,$5)
@@ -343,6 +373,49 @@ func (q *Queries) PartnerInitiatives(ctx context.Context, partnerSignupID pgtype
 	return items, nil
 }
 
+const partnerInitiativesList = `-- name: PartnerInitiativesList :many
+SELECT i.id, i.title, i.summary, i.committed_minor,
+  coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s WHERE s.initiative_id=i.id), 0)::bigint AS deployed_minor
+FROM donor_initiatives i
+WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+ORDER BY i.title
+`
+
+type PartnerInitiativesListRow struct {
+	ID             pgtype.UUID `json:"id"`
+	Title          string      `json:"title"`
+	Summary        string      `json:"summary"`
+	CommittedMinor int64       `json:"committed_minor"`
+	DeployedMinor  int64       `json:"deployed_minor"`
+}
+
+// P-11: the partner's published initiatives with committed + deployed totals.
+func (q *Queries) PartnerInitiativesList(ctx context.Context, partnerSignupID pgtype.UUID) ([]PartnerInitiativesListRow, error) {
+	rows, err := q.db.Query(ctx, partnerInitiativesList, partnerSignupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PartnerInitiativesListRow{}
+	for rows.Next() {
+		var i PartnerInitiativesListRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Summary,
+			&i.CommittedMinor,
+			&i.DeployedMinor,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const partnerOrgByID = `-- name: PartnerOrgByID :one
 SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at, approved_at, partner_type, workforce_size, match_rate_bp, match_cap_minor, company_code, logo_url, description FROM donor_partner_signups WHERE id=$1
 `
@@ -370,6 +443,82 @@ func (q *Queries) PartnerOrgByID(ctx context.Context, id pgtype.UUID) (DonorPart
 		&i.Description,
 	)
 	return i, err
+}
+
+const partnerOverviewTotals = `-- name: PartnerOverviewTotals :one
+SELECT
+  coalesce((SELECT sum(i.committed_minor) FROM donor_initiatives i
+            WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
+  coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
+            JOIN donor_initiatives i ON i.id=s.initiative_id
+            WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'), 0)::bigint AS deployed_minor,
+  coalesce((SELECT sum(m.value) FROM donor_initiative_metrics m
+            JOIN donor_initiatives i ON i.id=m.initiative_id
+            WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+              AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE'), 0)::bigint AS people_reached
+`
+
+type PartnerOverviewTotalsRow struct {
+	CommittedMinor int64 `json:"committed_minor"`
+	DeployedMinor  int64 `json:"deployed_minor"`
+	PeopleReached  int64 `json:"people_reached"`
+}
+
+// P-10 tiles: committed (sum of committed_minor over the partner's published
+// initiatives), deployed (sum of their spend), and people reached (sum of
+// published verified PEOPLE metrics). Totals only, published only; an
+// unverified metric is never counted (§7.3 "hidden, never estimated").
+func (q *Queries) PartnerOverviewTotals(ctx context.Context, partnerSignupID pgtype.UUID) (PartnerOverviewTotalsRow, error) {
+	row := q.db.QueryRow(ctx, partnerOverviewTotals, partnerSignupID)
+	var i PartnerOverviewTotalsRow
+	err := row.Scan(&i.CommittedMinor, &i.DeployedMinor, &i.PeopleReached)
+	return i, err
+}
+
+const partnerReports = `-- name: PartnerReports :many
+SELECT r.id, r.committed_minor, r.deployed_minor, r.people_reached, r.created_at, u.name AS exported_by_name
+FROM donor_partner_reports r
+JOIN donor_partner_users u ON u.id = r.exported_by
+WHERE r.partner_id=$1
+ORDER BY r.created_at DESC
+LIMIT 50
+`
+
+type PartnerReportsRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	CommittedMinor int64              `json:"committed_minor"`
+	DeployedMinor  int64              `json:"deployed_minor"`
+	PeopleReached  int64              `json:"people_reached"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ExportedByName string             `json:"exported_by_name"`
+}
+
+// P-14: previous exports for a partner, newest first, with the exporter name.
+func (q *Queries) PartnerReports(ctx context.Context, partnerID pgtype.UUID) ([]PartnerReportsRow, error) {
+	rows, err := q.db.Query(ctx, partnerReports, partnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PartnerReportsRow{}
+	for rows.Next() {
+		var i PartnerReportsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CommittedMinor,
+			&i.DeployedMinor,
+			&i.PeopleReached,
+			&i.CreatedAt,
+			&i.ExportedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const partnerSpendByCategory = `-- name: PartnerSpendByCategory :many
