@@ -99,6 +99,9 @@ export default function Staff({ q }: { q: string | null }) {
                 </>
               )}
               {actor.permissions.includes("audit.read") && <Link href="/staff/audit">Audit history</Link>}
+              {actor.permissions.includes("partner.manage") && (
+                <Link href="/staff/partners/pending">Partner applications</Link>
+              )}
             </nav>
             <Form action="/staff" role="search">
               <label>
