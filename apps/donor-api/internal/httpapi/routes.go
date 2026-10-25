@@ -38,6 +38,8 @@ func (a *api) routes() []route {
 		a.visitor("POST /donor/company/{code}", a.captureCompany),
 		{"POST /analytics/events", noAuth, a.guarded(a.Origin, analyticsLimit, true, a.ingestAnalytics)},
 		a.visitor("POST /donor/public/partner-signup", a.partnerSignup),
+		a.visitor("POST /donor/public/partner-apply", a.partnerApply),
+		a.visitor("POST /donor/partner/accept-invite", a.partnerAccept),
 
 		a.donorEntry("POST /donor/login", a.login),
 		a.donorEntry("POST /donor/claim", a.claim),
@@ -126,6 +128,20 @@ func (a *api) routes() []route {
 
 		a.staffRead("GET /donor/staff/content", a.contentInventory),
 		a.staffRead("GET /donor/staff/partners", a.partnerInquiries),
+		a.partnerRead("GET /donor/partner/overview", a.partnerOverview),
+		a.partnerRead("GET /donor/partner/initiatives", a.partnerInitiatives),
+		a.partnerRead("GET /donor/partner/spend", a.partnerSpend),
+		a.partnerRead("GET /donor/partner/users", a.partnerUsers),
+		a.partnerRead("GET /donor/partner/exports", a.partnerExports),
+		a.partnerRead("GET /donor/partner/report.pdf", a.partnerReport),
+		a.partnerWrite("POST /donor/partner/users", a.partnerInviteUser),
+		a.partnerWrite("POST /donor/partner/users/{userID}/remove", a.partnerRemoveUser),
+		a.partnerWrite("POST /donor/partner/sign-out", a.partnerSignOut),
+		a.staffRead("GET /donor/staff/partners/pending", a.staffPartnerPending),
+		a.staffWrite("POST /donor/staff/partners/{appID}/approve", a.staffPartnerApprove),
+		a.staffWrite("POST /donor/staff/partners/{appID}/reject", a.staffPartnerReject),
+		a.staffWrite("POST /donor/staff/partners/{partnerID}/link", a.staffPartnerLink),
+		a.staffWrite("POST /donor/staff/partners/{partnerID}/match", a.staffPartnerMatch),
 		a.staffWrite("POST /donor/staff/content/sources", a.uploadSource),
 		a.staffRead("GET /donor/staff/content/sources/{source_id}", a.downloadSource),
 		a.staffWrite("POST /donor/staff/content/publish", a.publish),
@@ -216,6 +232,17 @@ func (a *api) staffRead(pattern string, handler sessionHandler) route {
 
 func (a *api) staffWrite(pattern string, handler sessionHandler) route {
 	return route{pattern, staffAuth, sameOrigin(a.guarded(a.StaffOrigin, staffLimit, false, signedIn(a.staffSession, handler)))}
+}
+
+// partnerRead / partnerWrite serve the partner portal, authenticated by the
+// partner bearer session (not a donor or staff cookie — P-5). Writes take the
+// account rate budget and admit the public origin the portal is served from.
+func (a *api) partnerRead(pattern string, handler sessionHandler) route {
+	return route{pattern, noAuth, signedIn(partnerSession, handler)}
+}
+
+func (a *api) partnerWrite(pattern string, handler sessionHandler) route {
+	return route{pattern, noAuth, a.guarded(a.Origin, accountLimit, false, signedIn(partnerSession, handler))}
 }
 
 // sameOrigin refuses a request the browser reports, in Sec-Fetch-Site, as
