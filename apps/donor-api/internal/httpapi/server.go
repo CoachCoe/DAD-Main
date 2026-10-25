@@ -61,6 +61,12 @@ type Services struct {
 	TodayInitiative TodayInitiativeSource
 	Badges          BadgeSource
 	Network         NetworkSource
+	Events          EventSource
+	EventRead       EventReadSource
+	Reservations    ReservationSource
+	// EventCheckInSecret is the HMAC key for QR check-in tokens (E-8); empty
+	// disables check-in.
+	EventCheckInSecret string
 }
 
 type api struct {

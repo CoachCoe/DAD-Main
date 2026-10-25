@@ -63,20 +63,44 @@ func TestEvaluateLiveRuleBoundaries(t *testing.T) {
 }
 
 func TestInertBadgesNeverEarned(t *testing.T) {
-	// Even with every signal maxed, the Phase 4/6 badges have no signal and must
-	// never be awarded by Evaluate.
+	// Even with every shipped signal maxed, the Phase 6 team badges have no
+	// signal and must never be awarded by Evaluate.
 	top := 1
 	rank := 1
 	all := Signals{
 		FirstGiftMade: true, FoundingQualified: true, StreakDays: 100000,
 		ComebackReached30: true, RaisedAmount: true, ConvertedReferrals: 1000,
 		HasIRLReferral: true, DistinctInitiatives: 1000, NationalTopPercent: &top, CityRank: &rank,
+		VolunteerOptIn: true, EventCheckins: 1000,
 	}
 	got := Evaluate(all)
-	for _, code := range []string{"V", "SU", "V3", "V10", "TP", "WT"} {
+	for _, code := range []string{"TP", "WT"} {
 		if got[code] {
 			t.Errorf("inert badge %q was earned", code)
 		}
+	}
+}
+
+// TestVolunteerBadgesEarnFromSignals covers Phase 4.5: opting in earns
+// Volunteer, and checked-in events earn Showed Up / Volunteer ×3 / ×10 at their
+// thresholds.
+func TestVolunteerBadgesEarnFromSignals(t *testing.T) {
+	// Opt-in alone earns V but none of the check-in badges.
+	got := Evaluate(Signals{VolunteerOptIn: true})
+	if !got["V"] || got["SU"] || got["V3"] || got["V10"] {
+		t.Fatalf("opt-in only: %v", keys(got))
+	}
+	// One check-in earns SU.
+	got = Evaluate(Signals{VolunteerOptIn: true, EventCheckins: 1})
+	if !got["SU"] || got["V3"] {
+		t.Fatalf("one check-in: %v", keys(got))
+	}
+	// Three earn V3, ten earn V10.
+	if got = Evaluate(Signals{EventCheckins: 3}); !got["V3"] || got["V10"] {
+		t.Fatalf("three check-ins: %v", keys(got))
+	}
+	if got = Evaluate(Signals{EventCheckins: 10}); !got["V10"] {
+		t.Fatalf("ten check-ins: %v", keys(got))
 	}
 }
 

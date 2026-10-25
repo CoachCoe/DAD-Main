@@ -44,10 +44,10 @@ var Catalog = []Badge{
 	{Code: "REF12", Title: "Brought 12 In", Live: true},
 	{Code: "TC", Title: "Team Captain", Perk: PerkTeamCaptain, Live: true},
 	{Code: "IRL", Title: "IRL", Live: true},
-	{Code: "V", Title: "Volunteer", Live: false},        // Phase 4: volunteer opt-in
-	{Code: "SU", Title: "Showed Up", Live: false},       // Phase 4: event check-in
-	{Code: "V3", Title: "Volunteer ×3", Live: false},    // Phase 4
-	{Code: "V10", Title: "Volunteer ×10", Live: false},  // Phase 4
+	{Code: "V", Title: "Volunteer", Live: true},         // Phase 4.5: volunteer opt-in
+	{Code: "SU", Title: "Showed Up", Live: true},        // Phase 4.5: event check-in
+	{Code: "V3", Title: "Volunteer ×3", Live: true},     // Phase 4.5
+	{Code: "V10", Title: "Volunteer ×10", Live: true},   // Phase 4.5
 	{Code: "INIT7", Title: "7 Initiatives", Live: true}, // A-4 distinct-initiative exposures
 	{Code: "CITY50", Title: "Top 50 City", Live: true},  // 3.3 rankings
 	{Code: "NAT2", Title: "Top 2%", Live: true},         // 3.3 rankings
@@ -67,6 +67,35 @@ var byCode = func() map[string]Badge {
 // Lookup returns the catalog badge for a code.
 func Lookup(code string) (Badge, bool) { b, ok := byCode[code]; return b, ok }
 
+// CodesForPerk returns the badge codes that carry a given perk. Used by the
+// invite-only event gate (E-5): a donor "holds" the perk when they hold any of
+// these badges. Returns nil for PerkNone or an unknown perk.
+func CodesForPerk(perk Perk) []string {
+	if perk == PerkNone {
+		return nil
+	}
+	var codes []string
+	for _, b := range Catalog {
+		if b.Perk == perk {
+			codes = append(codes, b.Code)
+		}
+	}
+	return codes
+}
+
+// HoldsPerk reports whether any of the donor's earned badge codes carries perk.
+func HoldsPerk(earned map[string]bool, perk Perk) bool {
+	if perk == PerkNone {
+		return false
+	}
+	for _, code := range CodesForPerk(perk) {
+		if earned[code] {
+			return true
+		}
+	}
+	return false
+}
+
 // Signals is the donor's current earning state, assembled by the store from the
 // projection, the streak ladder, the initiative-exposure ledger and the ranking
 // rollup. A signal whose source phase has not shipped is simply zero/false, so
@@ -82,6 +111,8 @@ type Signals struct {
 	DistinctInitiatives int64 // distinct initiatives funded/shown (A-4)
 	NationalTopPercent  *int  // national percentile rank (1 = top 1%); nil if unranked
 	CityRank            *int  // rank within their city; nil if unranked
+	VolunteerOptIn      bool  // opted in as a volunteer (E-1)
+	EventCheckins       int64 // events the donor has checked in to (E-8)
 }
 
 // milestoneDays maps the streak-day badges to their thresholds.
@@ -132,6 +163,19 @@ func Evaluate(s Signals) map[string]bool {
 	}
 	if s.CityRank != nil && *s.CityRank <= 50 {
 		earned["CITY50"] = true
+	}
+	// Volunteer badges (E-1/E-8): opting in earns Volunteer; each checked-in
+	// event counts toward Showed Up (1), Volunteer ×3 (3) and Volunteer ×10 (10).
+	if s.VolunteerOptIn {
+		earned["V"] = true
+	}
+	for _, r := range []struct {
+		code string
+		n    int64
+	}{{"SU", 1}, {"V3", 3}, {"V10", 10}} {
+		if s.EventCheckins >= r.n {
+			earned[r.code] = true
+		}
 	}
 	// Drop any code that is not a Live catalog badge (defensive — none of the
 	// above are inert, but this keeps Evaluate honest if the catalog changes).

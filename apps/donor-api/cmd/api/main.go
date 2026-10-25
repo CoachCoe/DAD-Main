@@ -180,6 +180,9 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.Content = store.ContentReader{DB: pool}
 	services.InitiativeRead = store.InitiativeReader{DB: pool}
 	services.TodayInitiative = store.DonorInitiativeService{DB: pool}
+	services.EventRead = store.EventReader{DB: pool, SupportEmail: getenv("DONOR_SUPPORT_EMAIL")}
+	services.Reservations = store.ReservationService{DB: pool, CheckInSecret: getenv("DONOR_EVENT_CHECKIN_SECRET")}
+	services.EventCheckInSecret = getenv("DONOR_EVENT_CHECKIN_SECRET")
 	services.Partner = store.PartnerService{DB: pool}
 	services.Dashboard = store.DashboardReader{DB: pool}
 	services.Account = store.AccountService{DB: pool}
@@ -230,6 +233,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.Initiatives = store.InitiativeService{Staff: staff}
 		services.Badges = store.BadgeService{DB: pool, Staff: staff}
 		services.Network = store.NetworkService{DB: pool}
+		services.Events = store.EventService{Staff: staff}
 	}
 	return services, pool.Close, nil
 }

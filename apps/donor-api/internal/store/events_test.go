@@ -1,0 +1,572 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"dad/donor-api/internal/dbroles"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func cleanEvents(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM donor_events")
+	})
+}
+
+// eventInput builds a valid staff event input starting at +days days, in the
+// given city/zip, of the given type.
+func eventInput(slug, city, zip, kind string, startIn time.Duration) EventInput {
+	start := time.Now().UTC().Add(startIn)
+	return EventInput{
+		Slug: slug, Title: "Event " + slug, Type: kind,
+		Description: "A gathering.", Venue: "Community Hall", Address: "1 Main St",
+		City: city, Zip: zip,
+		StartsAt: start.Format(time.RFC3339),
+		EndsAt:   start.Add(2 * time.Hour).Format(time.RFC3339),
+		Capacity: 20,
+	}
+}
+
+func TestEventDraftPublishAndValidation(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	_, support := staffFixture(t, pool, "SUPPORT")
+	s := EventService{Staff: &StaffService{DB: api}}
+
+	// A non-publisher role cannot create events.
+	if _, err := s.Create(ctx, support, eventInput("water-cleanup", "SF", "94103", "VOLUNTEER", 48*time.Hour)); !errors.Is(
+		err,
+		ErrStaffForbidden,
+	) {
+		t.Fatalf("SUPPORT created an event: %v", err)
+	}
+
+	// Bad slug, bad type, and ends-before-starts are each refused.
+	for name, in := range map[string]EventInput{
+		"bad slug": eventInput("Bad Slug!", "SF", "94103", "VOLUNTEER", 48*time.Hour),
+		"bad type": eventInput("x", "SF", "94103", "PARTY", 48*time.Hour),
+	} {
+		if _, err := s.Create(ctx, adminToken, in); !errors.Is(err, ErrStaffInput) {
+			t.Fatalf("%s accepted: %v", name, err)
+		}
+	}
+	backwards := eventInput("backwards", "SF", "94103", "VOLUNTEER", 48*time.Hour)
+	backwards.EndsAt = backwards.StartsAt
+	if _, err := s.Create(ctx, adminToken, backwards); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("ends==starts accepted: %v", err)
+	}
+
+	// Create a DRAFT, confirm it is not donor-visible, then publish it.
+	id, err := s.Create(ctx, adminToken, eventInput("water-cleanup", "SF", "94103", "VOLUNTEER", 48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := EventReader{DB: pool}
+	if _, err := reader.Detail(ctx, id); !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("draft event was donor-visible: %v", err)
+	}
+	if err := s.Publish(ctx, adminToken, id); err != nil {
+		t.Fatal(err)
+	}
+	view, err := reader.Detail(ctx, id)
+	if err != nil || view.Title != "Event water-cleanup" || view.Capacity != 20 {
+		t.Fatalf("published detail: %+v %v", view, err)
+	}
+}
+
+func TestUpcomingEventsNearDonor(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	s := EventService{Staff: &StaffService{DB: api}}
+	reader := EventReader{DB: pool}
+
+	// A donor in San Francisco, ZIP 94103 (SCF 941).
+	donorID, donorToken := signedInDonor(t, pool)
+	if _, err := pool.Exec(ctx, "UPDATE donors SET city=$2, zip=$3 WHERE id=$1", donorID, "San Francisco", "94103"); err != nil {
+		t.Fatal(err)
+	}
+
+	publish := func(in EventInput) pgtype.UUID {
+		id, err := s.Create(ctx, adminToken, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Publish(ctx, adminToken, id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+
+	// Matches by city label (different ZIP region).
+	cityMatch := publish(eventInput("city-match", "San Francisco", "90001", "VOLUNTEER", 24*time.Hour))
+	// Matches by ZIP-3 region 941 (different/empty city).
+	zipMatch := publish(eventInput("zip-match", "Daly City", "94105", "COMMUNITY", 72*time.Hour))
+	// Far away: different city AND different ZIP region -> excluded.
+	publish(eventInput("far", "Chicago", "60601", "VOLUNTEER", 24*time.Hour))
+	// INVITE_ONLY -> never in the open near-city list even when local.
+	publish(eventInput("invite", "San Francisco", "94103", "INVITE_ONLY", 24*time.Hour))
+	// In the past -> excluded (upcoming only).
+	publish(eventInput("past", "San Francisco", "94103", "VOLUNTEER", -24*time.Hour))
+	// A DRAFT local event (created, not published) -> excluded.
+	if _, err := s.Create(ctx, adminToken, eventInput("draft-local", "San Francisco", "94103", "VOLUNTEER", 24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	views, err := reader.NearDonor(ctx, donorToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, v := range views {
+		got[v.ID] = true
+	}
+	if len(views) != 2 || !got[cityMatch.String()] || !got[zipMatch.String()] {
+		t.Fatalf("near-donor list = %d events %+v; want city-match + zip-match only", len(views), views)
+	}
+	// Soonest first: city-match (+24h) before zip-match (+72h).
+	if views[0].ID != cityMatch.String() {
+		t.Fatalf("not soonest-first: %+v", views)
+	}
+
+	// A donor with neither city nor ZIP matches nothing.
+	otherID, otherToken := signedInDonor(t, pool)
+	if _, err := pool.Exec(ctx, "UPDATE donors SET city=NULL, zip=NULL WHERE id=$1", otherID); err != nil {
+		t.Fatal(err)
+	}
+	empty, err := reader.NearDonor(ctx, otherToken)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("cityless/zipless donor saw %d events: %v", len(empty), err)
+	}
+}
+
+// TestReservationCapacityAndWaitlistPromotion covers E-4/E-9: reserving within
+// capacity books a seat, reserving a full event waitlists, cancelling a seat
+// promotes the waitlist head (FIFO) and queues a push, and cancelling a
+// waitlisted spot promotes no one. Re-reserving is idempotent.
+func TestReservationCapacityAndWaitlistPromotion(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	res := ReservationService{DB: pool}
+
+	// A published event with capacity 1 starting in the future.
+	in := eventInput("gala", "San Francisco", "94103", "COMMUNITY", 48*time.Hour)
+	in.Capacity = 1
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+
+	d1, t1 := signedInDonor(t, pool)
+	d2, t2 := signedInDonor(t, pool)
+	d3, t3 := signedInDonor(t, pool)
+	for _, id := range []pgtype.UUID{d1, d2, d3} {
+		pushCleanupDonor(t, pool, id)
+	}
+
+	// d1 reserves the only seat; re-reserving is idempotent.
+	if r, err := res.Reserve(ctx, t1, eventID); err != nil || r.Status != reservationReserved {
+		t.Fatalf("d1 reserve: %+v %v", r, err)
+	}
+	if r, err := res.Reserve(ctx, t1, eventID); err != nil || r.Status != reservationReserved {
+		t.Fatalf("d1 re-reserve not idempotent: %+v %v", r, err)
+	}
+	// d2 then d3 are waitlisted (full), d2 ahead of d3.
+	if r, err := res.Reserve(ctx, t2, eventID); err != nil || r.Status != reservationWaitlisted {
+		t.Fatalf("d2 reserve: %+v %v", r, err)
+	}
+	if r, err := res.Reserve(ctx, t3, eventID); err != nil || r.Status != reservationWaitlisted {
+		t.Fatalf("d3 reserve: %+v %v", r, err)
+	}
+
+	// d1 cancels -> the head of the waitlist (d2) is promoted and gets a push.
+	if r, err := res.Cancel(ctx, t1, eventID); err != nil || r.Status != reservationCancelled {
+		t.Fatalf("d1 cancel: %+v %v", r, err)
+	}
+	var d2status string
+	if err := pool.QueryRow(ctx, "SELECT status FROM donor_event_reservations WHERE event_id=$1 AND donor_id=$2", eventID, d2).Scan(&d2status); err != nil ||
+		d2status != reservationReserved {
+		t.Fatalf("d2 not promoted: %q %v", d2status, err)
+	}
+	var pushCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE donor_id=$1 AND category=$2", d2, eventPromotedCategory).Scan(&pushCount); err != nil ||
+		pushCount != 1 {
+		t.Fatalf("d2 promotion push: count=%d %v", pushCount, err)
+	}
+
+	// d2 (now RESERVED) cancels -> d3 (last on the waitlist) is promoted, so
+	// exactly one RESERVED remains.
+	if _, err := res.Cancel(ctx, t2, eventID); err != nil {
+		t.Fatal(err)
+	}
+	var reservedNow int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_event_reservations WHERE event_id=$1 AND status='RESERVED'", eventID).Scan(&reservedNow); err != nil ||
+		reservedNow != 1 {
+		t.Fatalf("expected exactly one RESERVED after the chain: %d %v", reservedNow, err)
+	}
+}
+
+// pushCleanupDonor removes a donor's queued push notifications after the test
+// (they reference the donor, not the cascaded event).
+func pushCleanupDonor(t *testing.T, pool *pgxpool.Pool, donor pgtype.UUID) {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM donor_push_notifications WHERE donor_id=$1", donor)
+	})
+}
+
+// TestReservationClosedAfterStart covers E-9: no reserve once the event has
+// started.
+func TestReservationClosedAfterStart(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	res := ReservationService{DB: pool}
+
+	in := eventInput("ongoing", "San Francisco", "94103", "VOLUNTEER", -1*time.Hour)
+	in.EndsAt = time.Now().UTC().Add(1 * time.Hour).Format(time.RFC3339)
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	_, tok := signedInDonor(t, pool)
+	if _, err := res.Reserve(ctx, tok, eventID); !errors.Is(err, ErrReservationClosed) {
+		t.Fatalf("reserve after start accepted: %v", err)
+	}
+}
+
+// TestInviteOnlyGating covers E-5: an INVITE_ONLY event is visible only to a
+// donor who holds the qualifying badge perk or is on the admin guest list; it
+// never appears in the open near-city list or the anonymous detail; a
+// perk-unlocked view carries the "Invitation earned at ..." note.
+func TestInviteOnlyGating(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	reader := EventReader{DB: pool}
+
+	// A Founding Donor Dinner: INVITE_ONLY, gated on the FOUNDING_EVENTS perk.
+	in := eventInput("founding-dinner", "San Francisco", "94103", "INVITE_ONLY", 72*time.Hour)
+	in.QualifyingPerk = "FOUNDING_EVENTS"
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+
+	// A perk-qualified event must not require a city match, so set up a donor
+	// with the Founding Donor badge ("F" carries FOUNDING_EVENTS).
+	founder, founderTok := signedInDonor(t, pool)
+	if _, err := pool.Exec(ctx, "UPDATE donors SET city=$2, zip=$3 WHERE id=$1", founder, "San Francisco", "94103"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, "INSERT INTO donor_badges (donor_id, code, source, earned_at) VALUES ($1,'F','AUTO',now())", founder); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM donor_badges WHERE donor_id=$1", founder) })
+
+	// A plain donor (no badge, not a guest).
+	plain, plainTok := signedInDonor(t, pool)
+	if _, err := pool.Exec(ctx, "UPDATE donors SET city=$2, zip=$3 WHERE id=$1", plain, "San Francisco", "94103"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The open near-city list never contains the invite-only event, for either.
+	for _, tok := range []string{founderTok, plainTok} {
+		near, err := reader.NearDonor(ctx, tok)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range near {
+			if v.ID == eventID.String() {
+				t.Fatalf("invite-only event leaked into the open near-city list")
+			}
+		}
+	}
+	// The anonymous detail reads as not found.
+	if _, err := reader.Detail(ctx, eventID); !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("invite-only detail visible anonymously: %v", err)
+	}
+
+	// The founder sees it via the perk, with the invitation note.
+	fList, err := reader.InviteOnlyEvents(ctx, founderTok)
+	if err != nil || len(fList) != 1 || fList[0].ID != eventID.String() || fList[0].InvitationNote == nil {
+		t.Fatalf("founder invite-only list: %+v %v", fList, err)
+	}
+	// The plain donor sees nothing.
+	pList, err := reader.InviteOnlyEvents(ctx, plainTok)
+	if err != nil || len(pList) != 0 {
+		t.Fatalf("plain donor saw %d invite-only events: %v", len(pList), err)
+	}
+	// The plain donor's gated detail is not found.
+	if _, err := reader.DetailForDonor(ctx, plainTok, eventID); !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("plain donor saw invite-only detail: %v", err)
+	}
+
+	// Add the plain donor to the guest list -> they can now see it (no note,
+	// since it is a guest-list grant, not a perk).
+	if err := events.AddGuest(ctx, adminToken, eventID, plain); err != nil {
+		t.Fatal(err)
+	}
+	gList, err := reader.InviteOnlyEvents(ctx, plainTok)
+	if err != nil || len(gList) != 1 || gList[0].ID != eventID.String() || gList[0].InvitationNote != nil {
+		t.Fatalf("guest invite-only list: %+v %v", gList, err)
+	}
+
+	// Removing the guest revokes visibility again.
+	if err := events.RemoveGuest(ctx, adminToken, eventID, plain); err != nil {
+		t.Fatal(err)
+	}
+	after, err := reader.InviteOnlyEvents(ctx, plainTok)
+	if err != nil || len(after) != 0 {
+		t.Fatalf("removed guest still saw %d events: %v", len(after), err)
+	}
+}
+
+// TestEventCheckIn covers E-8: a valid QR token during the event window checks
+// in a reserved donor and lights up the volunteer badges; a forged token, a
+// closed window, and a missing reservation are each refused; a second scan is a
+// no-op success.
+func TestEventCheckIn(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	const secret = "test-checkin-secret"
+	res := ReservationService{DB: pool, CheckInSecret: secret}
+
+	// An event happening right now (started an hour ago, ends in an hour).
+	in := eventInput("beach-cleanup", "San Francisco", "94103", "VOLUNTEER", -1*time.Hour)
+	in.EndsAt = time.Now().UTC().Add(1 * time.Hour).Format(time.RFC3339)
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	token := checkInToken(eventID, secret)
+
+	donorID, donorTok := signedInDonor(t, pool)
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM donor_badges WHERE donor_id=$1", donorID) })
+
+	// No reservation yet -> refused.
+	if _, err := res.CheckIn(ctx, donorTok, token); !errors.Is(err, ErrCheckIn) {
+		t.Fatalf("check-in without reservation accepted: %v", err)
+	}
+	// Seed a reservation directly: the donor reserved before the event started
+	// (Reserve itself is correctly closed once an event has begun, E-9).
+	if _, err := pool.Exec(ctx,
+		"INSERT INTO donor_event_reservations (id, event_id, donor_id, status, reserved_at, created_at, updated_at) VALUES (gen_random_uuid(),$1,$2,'RESERVED',now(),now(),now())",
+		eventID, donorID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	// A forged token is refused.
+	if _, err := res.CheckIn(ctx, donorTok, token+"x"); !errors.Is(err, ErrCheckIn) {
+		t.Fatalf("forged token accepted: %v", err)
+	}
+	// Valid check-in.
+	r, err := res.CheckIn(ctx, donorTok, token)
+	if err != nil || !r.CheckedIn || r.AlreadyIn {
+		t.Fatalf("check-in: %+v %v", r, err)
+	}
+	// Second scan is an idempotent no-op success.
+	r, err = res.CheckIn(ctx, donorTok, token)
+	if err != nil || !r.CheckedIn || !r.AlreadyIn {
+		t.Fatalf("second check-in: %+v %v", r, err)
+	}
+
+	// Volunteer stats reflect the check-in (one event, 120 minutes).
+	var evCount, minutes int64
+	if err := pool.QueryRow(ctx,
+		"SELECT count(*), coalesce(sum(EXTRACT(EPOCH FROM (e.ends_at-e.starts_at))/60),0)::bigint FROM donor_event_reservations r JOIN donor_events e ON e.id=r.event_id WHERE r.donor_id=$1 AND r.checked_in_at IS NOT NULL",
+		donorID,
+	).Scan(&evCount, &minutes); err != nil || evCount != 1 || minutes != 120 {
+		t.Fatalf("volunteer stats: events=%d minutes=%d %v", evCount, minutes, err)
+	}
+
+	// A check-in token for a FUTURE event (outside its window) is refused.
+	future := eventInput("future", "San Francisco", "94103", "VOLUNTEER", 48*time.Hour)
+	futureID, err := events.Create(ctx, adminToken, future)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, futureID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := res.Reserve(ctx, donorTok, futureID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := res.CheckIn(ctx, donorTok, checkInToken(futureID, secret)); !errors.Is(err, ErrCheckIn) {
+		t.Fatalf("check-in before window accepted: %v", err)
+	}
+}
+
+// TestCheckInDisabledWithoutSecret covers the unconfigured case.
+func TestCheckInDisabledWithoutSecret(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	res := ReservationService{DB: pool} // no secret
+	_, tok := signedInDonor(t, pool)
+	if _, err := res.CheckIn(ctx, tok, "anything"); !errors.Is(err, ErrCheckInDisabled) {
+		t.Fatalf("check-in without a configured secret: %v", err)
+	}
+}
+
+// TestEventReminderSweep covers E-7: the 24h and 2h sweeps queue one reminder
+// per reserved donor per window, deduped so repeated sweeps do not re-queue,
+// and they do not touch events outside the window or cancelled reservations.
+func TestEventReminderSweep(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	res := ReservationService{DB: pool}
+	rem := EventReminderService{DB: pool}
+
+	// Event in ~90 minutes (inside the 2h window, inside the 24h window).
+	soon := eventInput("soon", "San Francisco", "94103", "VOLUNTEER", 90*time.Minute)
+	soonID, err := events.Create(ctx, adminToken, soon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, soonID); err != nil {
+		t.Fatal(err)
+	}
+	// Event in ~10 days (outside both windows).
+	far := eventInput("far", "San Francisco", "94103", "VOLUNTEER", 240*time.Hour)
+	farID, err := events.Create(ctx, adminToken, far)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, farID); err != nil {
+		t.Fatal(err)
+	}
+
+	reserver, reserverTok := signedInDonor(t, pool)
+	pushCleanupDonor(t, pool, reserver)
+	if _, err := res.Reserve(ctx, reserverTok, soonID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := res.Reserve(ctx, reserverTok, farID); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	n, err := rem.QueueDueReminders(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The soon event is in both the 24h and the 2h window, so two reminders.
+	if n != 2 {
+		t.Fatalf("first sweep queued %d reminders, want 2 (24h + 2h for the soon event)", n)
+	}
+	// A second sweep is idempotent — the dedup keys already exist.
+	if again, err := rem.QueueDueReminders(ctx, now); err != nil || again != 0 {
+		t.Fatalf("second sweep queued %d (want 0): %v", again, err)
+	}
+	// Only EVENT_REMINDER rows for the soon event, none for the far one.
+	var soonCount, farCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE category='EVENT_REMINDER' AND context->>'event_id'=$1", soonID.String()).Scan(&soonCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE category='EVENT_REMINDER' AND context->>'event_id'=$1", farID.String()).Scan(&farCount); err != nil {
+		t.Fatal(err)
+	}
+	if soonCount != 2 || farCount != 0 {
+		t.Fatalf("reminder rows: soon=%d far=%d, want 2 and 0", soonCount, farCount)
+	}
+}
+
+// TestEventICSAndReportIssue covers E-6/E-10: a published event renders a valid
+// VCALENDAR with escaped fields, invite-only/draft events are not downloadable
+// anonymously, and the report-issue mailto is present when a support email is
+// configured.
+func TestEventICSAndReportIssue(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	reader := EventReader{DB: pool, SupportEmail: "help@dad.example"}
+
+	in := eventInput("gala", "San Francisco", "94103", "COMMUNITY", 48*time.Hour)
+	in.Description = "Food, drinks; and fun" // has a semicolon to exercise escaping
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+
+	ics, err := reader.Calendar(ctx, eventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"BEGIN:VCALENDAR", "BEGIN:VEVENT", "UID:" + eventID.String() + "@dad", "SUMMARY:Event gala", "DTSTART:", "DTEND:", "Food\\, drinks\\; and fun", "END:VCALENDAR"} {
+		if !strings.Contains(ics, want) {
+			t.Fatalf("ics missing %q:\n%s", want, ics)
+		}
+	}
+
+	// report_issue_url present on the detail when a support email is set.
+	v, err := reader.Detail(ctx, eventID)
+	if err != nil || v.ReportIssueURL == nil || !strings.HasPrefix(*v.ReportIssueURL, "mailto:help@dad.example") {
+		t.Fatalf("report issue url: %+v %v", v.ReportIssueURL, err)
+	}
+
+	// An invite-only event is not downloadable anonymously.
+	inv := eventInput("secret", "San Francisco", "94103", "INVITE_ONLY", 48*time.Hour)
+	invID, err := events.Create(ctx, adminToken, inv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, invID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.Calendar(ctx, invID); !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("invite-only ics was downloadable: %v", err)
+	}
+
+	// With no support email, report_issue_url is nil.
+	plain := EventReader{DB: pool}
+	if v, err := plain.Detail(ctx, eventID); err != nil || v.ReportIssueURL != nil {
+		t.Fatalf("report url set without support email: %+v %v", v.ReportIssueURL, err)
+	}
+}

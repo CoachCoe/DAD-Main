@@ -66,6 +66,12 @@ func (a *api) routes() []route {
 		a.donorRead("GET /donor/me/today-initiative", a.todayInitiative),
 		a.donorRead("GET /donor/me/badges", a.donorBadges),
 		a.donorRead("GET /donor/me/network", a.donorNetwork),
+		a.donorRead("GET /donor/me/events", a.events),
+		a.donorRead("GET /donor/me/events/invite-only", a.inviteOnlyEvents),
+		a.donorRead("GET /donor/me/events/{event_id}", a.donorEventDetail),
+		a.donorWrite("POST /donor/me/events/{event_id}/reserve", a.reserveEvent),
+		a.donorWrite("POST /donor/me/events/{event_id}/cancel", a.cancelEvent),
+		a.donorWrite("POST /donor/me/events/check-in", a.checkInEvent),
 		a.donorRead("GET /donor/me/sharing", a.sharing),
 		a.donorWrite("POST /donor/me/sharing", a.saveSharing),
 		a.donorRead("GET /donor/me/referral-code.svg", a.referralCode),
@@ -132,7 +138,15 @@ func (a *api) routes() []route {
 		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/metrics/{position}/delete", a.deleteInitiativeMetric),
 		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/spend", a.setInitiativeSpend),
 		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/spend/delete", a.deleteInitiativeSpend),
+		a.staffWrite("POST /donor/staff/events", a.createEvent),
+		a.staffWrite("POST /donor/staff/events/{event_id}", a.updateEvent),
+		a.staffWrite("POST /donor/staff/events/{event_id}/publish", a.publishEvent),
+		a.staffWrite("POST /donor/staff/events/{event_id}/guests/{donor_id}", a.addEventGuest),
+		a.staffWrite("POST /donor/staff/events/{event_id}/guests/{donor_id}/remove", a.removeEventGuest),
+		a.staffWrite("POST /donor/staff/events/{event_id}/check-in-token", a.eventCheckInToken),
 		a.public("GET /initiatives/{initiative_id}/spend", a.initiativeSpend),
+		a.public("GET /events/{event_id}", a.eventDetail),
+		a.public("GET /events/{event_id}/calendar.ics", a.eventCalendar),
 	}
 }
 

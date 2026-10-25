@@ -95,6 +95,37 @@ type DonorEmailChange struct {
 	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
 }
 
+type DonorEvent struct {
+	ID             pgtype.UUID        `json:"id"`
+	Slug           string             `json:"slug"`
+	Title          string             `json:"title"`
+	Type           string             `json:"type"`
+	Description    string             `json:"description"`
+	Venue          string             `json:"venue"`
+	Address        string             `json:"address"`
+	City           string             `json:"city"`
+	Zip            string             `json:"zip"`
+	StartsAt       pgtype.Timestamptz `json:"starts_at"`
+	EndsAt         pgtype.Timestamptz `json:"ends_at"`
+	Capacity       int32              `json:"capacity"`
+	PublishState   string             `json:"publish_state"`
+	PublishedAt    pgtype.Timestamptz `json:"published_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	QualifyingPerk string             `json:"qualifying_perk"`
+}
+
+type DonorEventReservation struct {
+	ID          pgtype.UUID        `json:"id"`
+	EventID     pgtype.UUID        `json:"event_id"`
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	Status      string             `json:"status"`
+	ReservedAt  pgtype.Timestamptz `json:"reserved_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	CheckedInAt pgtype.Timestamptz `json:"checked_in_at"`
+}
+
 type DonorGift struct {
 	DonorID               pgtype.UUID        `json:"donor_id"`
 	CheckoutID            pgtype.UUID        `json:"checkout_id"`
@@ -280,6 +311,8 @@ type DonorPreference struct {
 	PushStreakMilestone   bool               `json:"push_streak_milestone"`
 	RankingsOptedOut      bool               `json:"rankings_opted_out"`
 	NetworkVisible        bool               `json:"network_visible"`
+	Volunteer             bool               `json:"volunteer"`
+	VolunteerInterests    []string           `json:"volunteer_interests"`
 }
 
 type DonorPushNotification struct {
