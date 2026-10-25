@@ -181,8 +181,8 @@ var grants = map[string]map[Role]string{
 	"donor_initiative_exposures": {API: "SELECT, INSERT, UPDATE"},
 	"donor_badges":               {API: "SELECT, INSERT, UPDATE"},
 	"donor_rankings":             {API: "SELECT", ProjectionWorker: "SELECT, INSERT, UPDATE, DELETE"},
-	"donor_events":               {API: "SELECT, INSERT, UPDATE"},
-	"donor_event_reservations":   {API: "SELECT, INSERT, UPDATE"},
+	"donor_events":               {API: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT"},
+	"donor_event_reservations":   {API: "SELECT, INSERT, UPDATE", ProjectionWorker: "SELECT"},
 	"donor_event_guests":         {API: "SELECT, INSERT, DELETE"},
 }
 
