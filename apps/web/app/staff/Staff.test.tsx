@@ -8,7 +8,7 @@ const actor = {
   id: "staff-1",
   email: "s@example.org",
   name: "Sam Support",
-  role: "SUPPORT",
+  role: "OP_PARTNERSHIPS",
   active: true,
   disabled: false,
   permissions: ["donor.read"],
@@ -43,7 +43,7 @@ it("searches by the query in the URL and links each result to its own record", a
 it("does not search before a query is submitted", async () => {
   const fetch = serve(reply(200, { donors: [], next_offset: null }));
   render(<Staff q={null} />);
-  expect(await screen.findByText("Signed in as Sam Support · SUPPORT")).toBeVisible();
+  expect(await screen.findByText("Signed in as Sam Support · OP_PARTNERSHIPS")).toBeVisible();
   expect(fetch.mock.calls.some(([url]) => url.startsWith("/api/donor/staff/donors"))).toBe(false);
   expect(screen.queryByRole("heading", { name: "Donors" })).not.toBeInTheDocument();
 });
@@ -55,19 +55,19 @@ it("says when nothing matches", async () => {
 });
 
 it("lists staff accounts for an administrator without a manual refresh", async () => {
-  const admin = { ...actor, role: "ADMIN", permissions: ["staff.manage"] };
+  const admin = { ...actor, role: "SUPER_ADMIN", permissions: ["staff.manage"] };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) =>
       url.startsWith("/api/donor/staff/me")
         ? reply(200, admin)
         : url.startsWith("/api/donor/staff/accounts")
-          ? reply(200, [{ ...admin, id: "staff-2", name: "Fin Ance", email: "f@example.org", role: "FINANCE" }])
+          ? reply(200, [{ ...admin, id: "staff-2", name: "Fin Ance", email: "f@example.org", role: "SUPER_ADMIN" }])
           : reply(404, {}),
     ),
   );
   render(<Staff q={null} />);
-  expect(await screen.findByText(/Fin Ance · f@example.org · FINANCE · Active/)).toBeVisible();
+  expect(await screen.findByText(/Fin Ance · f@example.org · SUPER_ADMIN · Active/)).toBeVisible();
   expect(screen.queryByRole("button", { name: "Refresh staff accounts" })).not.toBeInTheDocument();
 });
 
@@ -90,14 +90,14 @@ const admin = {
   ...actor,
   id: "staff-admin",
   name: "Ada Admin",
-  role: "ADMIN",
+  role: "SUPER_ADMIN",
   permissions: ["donor.read", "staff.manage"],
 };
 const colleague = {
   id: "staff-2",
   email: "c@example.org",
   name: "Cy Colleague",
-  role: "SUPPORT",
+  role: "OP_PARTNERSHIPS",
   active: true,
   disabled: false,
   permissions: [],
@@ -111,15 +111,15 @@ it("announces each account action by what it did", async () => {
         ? reply(200, admin)
         : url === "/api/donor/staff/accounts"
           ? reply(200, [admin, colleague])
-          : reply(200, { ...colleague, role: "FINANCE" }),
+          : reply(200, { ...colleague, role: "SUPER_ADMIN" }),
     ),
   );
   render(<Staff q={null} />);
   fireEvent.change(await screen.findByRole("combobox", { name: "New role for Cy Colleague" }), {
-    target: { value: "FINANCE" },
+    target: { value: "SUPER_ADMIN" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Confirm role change" }));
-  expect(await screen.findByText("Cy Colleague’s role changed to FINANCE.")).toHaveAttribute("role", "status");
+  expect(await screen.findByText("Cy Colleague’s role changed to SUPER_ADMIN.")).toHaveAttribute("role", "status");
 });
 
 it("says when staff accounts cannot be loaded", async () => {

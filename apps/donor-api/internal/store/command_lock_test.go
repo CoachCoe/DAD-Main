@@ -68,7 +68,7 @@ func whileStalled(t *testing.T, stalled *gate, command func() error, during func
 func TestRecurringCommandsCallProcessorOutsideDonorLock(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
-	_, finance := staffFixture(t, pool, "FINANCE")
+	_, finance := staffFixture(t, pool, "SUPER_ADMIN")
 	ctx := context.Background()
 	for _, c := range []struct {
 		name    string

@@ -17,8 +17,8 @@ func TestStaffResendIsIdempotentLimitedAndAudited(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	support, supportToken := staffFixture(t, pool, "SUPPORT")
-	_, adminToken := staffFixture(t, pool, "ADMIN")
+	support, supportToken := staffFixture(t, pool, "OP_PARTNERSHIPS")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	s := &StaffService{DB: api}
@@ -88,7 +88,7 @@ func TestStaffClaimRequestQueuesLoginEmail(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	support, token := staffFixture(t, pool, "SUPPORT")
+	support, token := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	s := &StaffService{DB: api}
@@ -110,7 +110,7 @@ func TestStaffDonorDetailShowsUncomputedStreakAsUpdating(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	_, token := staffFixture(t, pool, "SUPPORT")
+	_, token := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	id, _ := donor(t, pool)
 	q := queries.New(pool)
 	now := time.Now().UTC()
@@ -142,7 +142,7 @@ func TestStaffActionHistoryPagesNewestFirst(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "SUPPORT")
+	actor, token := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	id, _ := donor(t, pool)
 	t.Cleanup(func() {
 		if _, err := pool.Exec(ctx, "DELETE FROM donor_staff_actions WHERE donor_id=$1", id); err != nil {
@@ -197,9 +197,9 @@ func TestPendingActionIsScopedAndIndependentOfHistoryPages(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "FINANCE")
-	otherActor, otherToken := staffFixture(t, pool, "FINANCE")
-	_, supportToken := staffFixture(t, pool, "SUPPORT")
+	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
+	otherActor, otherToken := staffFixture(t, pool, "SUPER_ADMIN")
+	_, supportToken := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	donorID, _ := donor(t, pool)
 	otherDonor, _ := donor(t, pool)
 	t.Cleanup(func() {

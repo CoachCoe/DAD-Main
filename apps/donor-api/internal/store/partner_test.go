@@ -14,7 +14,7 @@ func TestPartnerInquiryIsIdempotentAndShownToStaff(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	id := testID(t)
-	_, admin := staffFixture(t, pool, "ADMIN")
+	_, admin := staffFixture(t, pool, "SUPER_ADMIN")
 	t.Cleanup(func() { mustExec(t, pool, "DELETE FROM donor_partner_signups WHERE id=$1", id) })
 	inquiry := PartnerRequest{
 		Organization: "Org",

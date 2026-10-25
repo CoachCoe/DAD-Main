@@ -33,7 +33,7 @@ func TestControlCharactersAreRejectedBeforeStorage(t *testing.T) {
 	if err = (PartnerService{DB: s.DB}).Signup(ctx, testID(t), partner); !errors.Is(err, ErrStaffInput) {
 		t.Fatalf("NUL partner message: got %v, want ErrStaffInput", err)
 	}
-	_, support := staffFixture(t, database(t), "SUPPORT")
+	_, support := staffFixture(t, database(t), "OP_PARTNERSHIPS")
 	if _, err = (&StaffService{DB: s.DB}).SearchDonors(ctx, support, "a\x00", 0); !errors.Is(err, ErrStaffInput) {
 		t.Fatalf("NUL search: got %v, want ErrStaffInput", err)
 	}
@@ -42,13 +42,13 @@ func TestControlCharactersAreRejectedBeforeStorage(t *testing.T) {
 func TestDuplicateStaffInviteIsDistinct(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
-	_, admin := staffFixture(t, pool, "ADMIN")
+	_, admin := staffFixture(t, pool, "SUPER_ADMIN")
 	var email string
-	_, other := staffFixture(t, pool, "SUPPORT")
+	_, other := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	if err := pool.QueryRow(context.Background(), "SELECT s.email FROM donor_staff s JOIN donor_staff_sessions x ON x.staff_id=s.id WHERE x.token_hash=$1", HashToken(other)).Scan(&email); err != nil {
 		t.Fatal(err)
 	}
-	_, err := (&StaffService{DB: api}).Invite(context.Background(), admin, email, "Again", "SUPPORT")
+	_, err := (&StaffService{DB: api}).Invite(context.Background(), admin, email, "Again", "OP_PARTNERSHIPS")
 	if !errors.Is(err, ErrStaffExists) || !errors.Is(err, ErrStaffConflict) {
 		t.Fatalf("got %v, want ErrStaffExists", err)
 	}
@@ -59,8 +59,8 @@ func TestDuplicateStaffInviteIsDistinct(t *testing.T) {
 func TestStaffAuthorizationPrecedesPaymentConfiguration(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
-	_, finance := staffFixture(t, pool, "FINANCE")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	_, finance := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	s := StaffFinanceService{Staff: &StaffService{DB: api}}
 	request := StaffFinancialRequest{
 		RequestID: testID(t),

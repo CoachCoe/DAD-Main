@@ -37,7 +37,7 @@ const actor = {
   id: "staff-1",
   email: "f@example.org",
   name: "Fin",
-  role: "FINANCE",
+  role: "SUPER_ADMIN",
   active: true,
   disabled: false,
   permissions: ["donor.read", "gift.refund", "gift.cancel"],

@@ -80,7 +80,7 @@ func TestStaffInvitationsLinkToTheStaffHost(t *testing.T) {
 	const staff = "https://staff.dad.example.org"
 	server := NewServer("", Services{Origin: "https://dad.example.org", StaffOrigin: staff, Staff: &passkeyStub{}})
 	for path, body := range map[string]string{
-		"/donor/staff/accounts":                         `{"email":"new@example.org","name":"New","role":"SUPPORT"}`,
+		"/donor/staff/accounts":                         `{"email":"new@example.org","name":"New","role":"OP_PARTNERSHIPS"}`,
 		"/donor/staff/accounts/" + testID + "/recovery": "",
 	} {
 		r := httptest.NewRequest("POST", path, strings.NewReader(body))

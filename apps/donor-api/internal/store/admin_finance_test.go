@@ -87,8 +87,8 @@ func refundFixture(t *testing.T) (StaffFinanceService, *refundGateway, *workerFi
 func TestStaffRefundLostAcknowledgementPermissionsAndAudit(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	_, finance := staffFixture(t, pool, "FINANCE")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	_, finance := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	s, gateway, f, giftID := refundFixture(t)
 	gateway.loseAcknowledgement = true
 	r := StaffFinancialRequest{
@@ -136,7 +136,7 @@ func TestStaffRefundCallsProcessorOutsideDonorLock(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	_, finance := staffFixture(t, pool, "FINANCE")
+	_, finance := staffFixture(t, pool, "SUPER_ADMIN")
 	f := newWorkerFixture(t, "MONTHLY")
 	checkout := f.checkout(t)
 	f.receive(
@@ -187,7 +187,7 @@ func TestStaffRefundCallsProcessorOutsideDonorLock(t *testing.T) {
 
 func TestStaffRefundRefusesMoreThanTheGiftAndASecondWhileOneIsPending(t *testing.T) {
 	ctx := context.Background()
-	_, finance := staffFixture(t, database(t), "FINANCE")
+	_, finance := staffFixture(t, database(t), "SUPER_ADMIN")
 	s, gateway, f, giftID := refundFixture(t)
 	request := func(amount int64) StaffFinancialRequest {
 		return StaffFinancialRequest{

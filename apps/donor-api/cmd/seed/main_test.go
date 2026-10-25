@@ -172,7 +172,7 @@ func TestGuardRefusesDatabasesThatMayBeLive(t *testing.T) {
 	}
 	for name, insert := range map[string]string{
 		"Stripe event": "INSERT INTO donor_stripe_events(id,stripe_event_id,event_type,occurred_at,data) VALUES(gen_random_uuid(),'evt_live','invoice.paid',now(),'{}')",
-		"staff member": "INSERT INTO donor_staff(id,email,name,role) VALUES(gen_random_uuid(),'admin@example.org','Admin','ADMIN')",
+		"staff member": "INSERT INTO donor_staff(id,email,name,role) VALUES(gen_random_uuid(),'admin@example.org','Admin','SUPER_ADMIN')",
 	} {
 		if _, err := pool.Exec(ctx, insert); err != nil {
 			t.Fatal(err)

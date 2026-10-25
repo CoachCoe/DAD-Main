@@ -34,7 +34,7 @@ func TestPublicContentUsesMigratedSchemaAndOmitsPrivateSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = tx.Exec(ctx, "INSERT INTO donor_staff (id,email,name,role) VALUES ($1,$2,'Fixture staff','ADMIN')", staffID, HashToken(string(staffID.Bytes[:]))+"@example.org"); err != nil {
+	if _, err = tx.Exec(ctx, "INSERT INTO donor_staff (id,email,name,role) VALUES ($1,$2,'Fixture staff','SUPER_ADMIN')", staffID, HashToken(string(staffID.Bytes[:]))+"@example.org"); err != nil {
 		t.Fatal(err)
 	}
 	publicationID, err := NewID()

@@ -43,7 +43,7 @@ func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 				}
 				expire, subject = "UPDATE donor_sessions SET expires_at=now() WHERE donor_id=$1", donorID
 			} else {
-				staffID, staffToken := staffFixture(t, pool, "FINANCE")
+				staffID, staffToken := staffFixture(t, pool, "SUPER_ADMIN")
 				resolve = func(tx pgx.Tx) error {
 					_, _, err := lockStaffDonor(ctx, queries.New(tx), staffToken, "gift.refund", donorID)
 					return err
@@ -123,7 +123,7 @@ func TestProofExpiryIsCheckedAfterWaitingForOwnerLock(t *testing.T) {
 					mustExec(t, lock, "UPDATE donor_login_links SET expires_at=$2 WHERE donor_id=$1", id, time.Now().UTC())
 				}
 			} else {
-				id, _ := staffFixture(t, pool, "SUPPORT")
+				id, _ := staffFixture(t, pool, "OP_PARTNERSHIPS")
 				t.Cleanup(func() {
 					if _, err := pool.Exec(context.Background(), "DELETE FROM donor_staff_invites WHERE staff_id=$1", id); err != nil {
 						t.Error(err)

@@ -46,8 +46,8 @@ func TestSourceUploadsRequireEncryptionKeyButPublishingDoesNot(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "ADMIN")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	restoreContent(t, pool, actor)
 	s := ContentService{Staff: &StaffService{DB: api}}
 	if err := s.AuthorizeSourceUpload(ctx, support); !errors.Is(err, ErrStaffForbidden) {
@@ -92,7 +92,7 @@ func TestSourceStoredBeforeAKeyRotationStaysReadable(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "ADMIN")
+	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
 	restoreContent(t, pool, actor)
 	old := base64.URLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
 	s := ContentService{Staff: &StaffService{DB: api}, EncryptionKeys: keyring(t, old)}
@@ -111,8 +111,8 @@ func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "ADMIN")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	restoreContent(t, pool, actor)
 	s := ContentService{Staff: &StaffService{DB: api}, EncryptionKeys: keyring(t, base64.URLEncoding.EncodeToString(make([]byte, 32)))}
 	data := []byte("Private signed source record")
@@ -170,7 +170,7 @@ func TestPublicationErrorsLocateEachProblem(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "ADMIN")
+	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
 	restoreContent(t, pool, actor)
 	s := ContentService{Staff: &StaffService{DB: api}}
 	source := testID(t)

@@ -38,8 +38,8 @@ func TestEventDraftPublishAndValidation(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanEvents(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	s := EventService{Staff: &StaffService{DB: api}}
 
 	// A non-publisher role cannot create events.
@@ -88,7 +88,7 @@ func TestUpcomingEventsNearDonor(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanEvents(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	s := EventService{Staff: &StaffService{DB: api}}
 	reader := EventReader{DB: pool}
 
@@ -160,7 +160,7 @@ func TestReservationCapacityAndWaitlistPromotion(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanEvents(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	events := EventService{Staff: &StaffService{DB: api}}
 	res := ReservationService{DB: pool}
 
@@ -240,7 +240,7 @@ func TestReservationClosedAfterStart(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanEvents(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	events := EventService{Staff: &StaffService{DB: api}}
 	res := ReservationService{DB: pool}
 
@@ -268,7 +268,7 @@ func TestInviteOnlyGating(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanEvents(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	events := EventService{Staff: &StaffService{DB: api}}
 	reader := EventReader{DB: pool}
 
@@ -361,7 +361,7 @@ func TestEventCheckIn(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanEvents(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	events := EventService{Staff: &StaffService{DB: api}}
 	const secret = "test-checkin-secret"
 	res := ReservationService{DB: pool, CheckInSecret: secret}
@@ -453,7 +453,7 @@ func TestEventReminderSweep(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanEvents(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	events := EventService{Staff: &StaffService{DB: api}}
 	res := ReservationService{DB: pool}
 	rem := EventReminderService{DB: pool}
@@ -521,7 +521,7 @@ func TestEventICSAndReportIssue(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanEvents(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	events := EventService{Staff: &StaffService{DB: api}}
 	reader := EventReader{DB: pool, SupportEmail: "help@dad.example"}
 
