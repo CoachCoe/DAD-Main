@@ -283,3 +283,55 @@ func (s EmployeeService) SetWorkforce(ctx context.Context, token string, portal 
 	})
 	return err
 }
+
+// Adapters bind the extra dependencies (partner portal pool, staff service) so
+// the HTTP layer can take narrow, dependency-free source interfaces.
+
+// EmployeeDonorAdapter is the donor-facing surface.
+type EmployeeDonorAdapter struct{ Emp EmployeeService }
+
+func (a EmployeeDonorAdapter) Enroll(ctx context.Context, token, code string) (string, error) {
+	return a.Emp.Enroll(ctx, token, code)
+}
+func (a EmployeeDonorAdapter) Team(ctx context.Context, token string) (DonorTeam, error) {
+	return a.Emp.Team(ctx, token)
+}
+func (a EmployeeDonorAdapter) JoinTeam(ctx context.Context, token, name string) (string, error) {
+	return a.Emp.JoinTeam(ctx, token, name)
+}
+
+// EmployeePartnerAdapter binds the partner portal (for session auth).
+type EmployeePartnerAdapter struct {
+	Emp    EmployeeService
+	Portal PartnerPortalService
+}
+
+func (a EmployeePartnerAdapter) OurPeople(ctx context.Context, token string) (PartnerOurPeople, error) {
+	return a.Emp.OurPeople(ctx, token, a.Portal)
+}
+func (a EmployeePartnerAdapter) Teams(ctx context.Context, token string) ([]EmployeeTeamRow, error) {
+	return a.Emp.Teams(ctx, token, a.Portal)
+}
+func (a EmployeePartnerAdapter) SetWorkforce(ctx context.Context, token string, size int32) error {
+	return a.Emp.SetWorkforce(ctx, token, a.Portal, size)
+}
+
+// EmployeeStaffAdapter binds the staff service (for partner.manage auth).
+type EmployeeStaffAdapter struct {
+	Emp   EmployeeService
+	Staff *StaffService
+}
+
+func (a EmployeeStaffAdapter) Match(ctx context.Context, token string, partnerID pgtype.UUID, year int32) (MatchStatus, error) {
+	return a.Emp.Match(ctx, a.Staff, token, partnerID, year)
+}
+
+func (a EmployeeStaffAdapter) RecordMatchPayment(
+	ctx context.Context,
+	token string,
+	partnerID pgtype.UUID,
+	year int32,
+	amountMinor int64,
+) error {
+	return a.Emp.RecordMatchPayment(ctx, a.Staff, token, partnerID, year, amountMinor)
+}

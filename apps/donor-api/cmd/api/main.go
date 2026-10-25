@@ -187,6 +187,9 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	portal := store.PartnerPortalService{DB: pool}
 	services.PartnerPortal = store.PartnerDashboardService{Portal: portal}
 	services.PartnerApply = store.PartnerApplicationService{DB: pool}
+	emp := store.EmployeeService{DB: pool}
+	services.EmployeeDonor = store.EmployeeDonorAdapter{Emp: emp}
+	services.EmployeePartner = store.EmployeePartnerAdapter{Emp: emp, Portal: portal}
 	services.Dashboard = store.DashboardReader{DB: pool}
 	services.Account = store.AccountService{DB: pool}
 	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
@@ -238,6 +241,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.Network = store.NetworkService{DB: pool}
 		services.Events = store.EventService{Staff: staff}
 		services.StaffPartner = store.PartnerApplicationService{DB: pool, Staff: staff}
+		services.EmployeeStaff = store.EmployeeStaffAdapter{Emp: store.EmployeeService{DB: pool}, Staff: staff}
 	}
 	return services, pool.Close, nil
 }

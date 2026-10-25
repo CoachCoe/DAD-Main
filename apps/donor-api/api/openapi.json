@@ -8231,6 +8231,599 @@
      }
     }
    }
+  },
+  "/donor/me/employer": {
+   "post": {
+    "operationId": "employeeEnroll",
+    "summary": "Link to an employer by company code",
+    "tags": [
+     "Donor"
+    ],
+    "security": [
+     {
+      "bearerAuth": []
+     },
+     {
+      "cookieAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "browser",
+     "native"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "company_code": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "company_code"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "organization": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "organization"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/me/team": {
+   "get": {
+    "operationId": "employeeTeam",
+    "summary": "The donor's employer and team",
+    "tags": [
+     "Donor"
+    ],
+    "security": [
+     {
+      "bearerAuth": []
+     },
+     {
+      "cookieAuth": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "partner_id": {
+           "type": "string"
+          },
+          "organization": {
+           "type": "string"
+          },
+          "team_id": {
+           "type": "string"
+          },
+          "team_name": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "partner_id",
+          "organization"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   },
+   "post": {
+    "operationId": "employeeJoinTeam",
+    "summary": "Join or create a team",
+    "tags": [
+     "Donor"
+    ],
+    "security": [
+     {
+      "bearerAuth": []
+     },
+     {
+      "cookieAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "browser",
+     "native"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "name": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "name"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "team_id": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "team_id"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/partner/our-people": {
+   "get": {
+    "operationId": "employeeOurPeople",
+    "summary": "Our People aggregate (k-anonymised)",
+    "tags": [
+     "Partner"
+    ],
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "enrolled": {
+           "type": "integer",
+           "format": "int64"
+          },
+          "given_minor": {
+           "type": "integer",
+           "format": "int64"
+          },
+          "avg_streak": {
+           "type": "integer",
+           "format": "int64"
+          },
+          "suppressed": {
+           "type": "boolean"
+          }
+         },
+         "required": [
+          "enrolled",
+          "given_minor",
+          "avg_streak",
+          "suppressed"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/partner/teams": {
+   "get": {
+    "operationId": "employeeTeams",
+    "summary": "Team leaderboard (teams under 5 suppressed)",
+    "tags": [
+     "Partner"
+    ],
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "teams": {
+           "type": "array",
+           "items": {
+            "type": "object",
+            "properties": {
+             "team_id": {
+              "type": "string"
+             },
+             "name": {
+              "type": "string"
+             },
+             "active_givers": {
+              "type": "integer",
+              "format": "int64"
+             },
+             "avg_streak": {
+              "type": "integer",
+              "format": "int64"
+             },
+             "volunteer_minutes": {
+              "type": "integer",
+              "format": "int64"
+             }
+            },
+            "required": [
+             "team_id",
+             "name",
+             "active_givers",
+             "avg_streak",
+             "volunteer_minutes"
+            ],
+            "additionalProperties": false
+           }
+          }
+         },
+         "required": [
+          "teams"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/partner/workforce": {
+   "post": {
+    "operationId": "employeeWorkforce",
+    "summary": "Update workforce size",
+    "tags": [
+     "Partner"
+    ],
+    "security": [],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "workforce_size": {
+          "type": "integer"
+         }
+        },
+        "required": [
+         "workforce_size"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "saved": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "saved"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/staff/partners/{partnerID}/match-status": {
+   "get": {
+    "operationId": "staffPartnerMatchStatus",
+    "summary": "Match owed/paid for a year",
+    "tags": [
+     "Staff"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "partnerID",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     },
+     {
+      "name": "year",
+      "in": "query",
+      "required": true,
+      "schema": {
+       "type": "integer"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "year": {
+           "type": "integer"
+          },
+          "match_rate_bp": {
+           "type": "integer"
+          },
+          "match_cap_minor": {
+           "type": "integer",
+           "format": "int64"
+          },
+          "gifts_minor": {
+           "type": "integer",
+           "format": "int64"
+          },
+          "owed_minor": {
+           "type": "integer",
+           "format": "int64"
+          },
+          "paid_minor": {
+           "type": "integer",
+           "format": "int64"
+          },
+          "outstanding_minor": {
+           "type": "integer",
+           "format": "int64"
+          }
+         },
+         "required": [
+          "year",
+          "match_rate_bp",
+          "match_cap_minor",
+          "gifts_minor",
+          "owed_minor",
+          "paid_minor",
+          "outstanding_minor"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/staff/partners/{partnerID}/match-payment": {
+   "post": {
+    "operationId": "staffPartnerMatchPayment",
+    "summary": "Record an offline match payment",
+    "tags": [
+     "Staff"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "parameters": [
+     {
+      "name": "partnerID",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "year": {
+          "type": "integer"
+         },
+         "amount_minor": {
+          "type": "integer",
+          "format": "int64"
+         }
+        },
+        "required": [
+         "year",
+         "amount_minor"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "recorded": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "recorded"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
   }
  },
  "components": {

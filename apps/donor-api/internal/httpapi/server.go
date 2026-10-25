@@ -42,6 +42,10 @@ type Services struct {
 	PartnerApply  PartnerApplySource
 	PartnerPortal PartnerPortalSource
 	StaffPartner  StaffPartnerSource
+	// Employee giving (Phase 6).
+	EmployeeDonor   EmployeeDonorSource
+	EmployeePartner EmployeePartnerSource
+	EmployeeStaff   EmployeeStaffSource
 
 	Account         AccountSource
 	EmailConfigured bool

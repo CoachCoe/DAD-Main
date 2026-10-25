@@ -89,8 +89,8 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	if ov.DeployedPercent != 33 { // 50000/150000
 		t.Fatalf("deployed %% wrong: %d", ov.DeployedPercent)
 	}
-	if ov.OurPeopleAvailable {
-		t.Fatal("Our People tile must be unavailable in Phase 5")
+	if !ov.OurPeopleAvailable {
+		t.Fatal("Our People tile must be available from Phase 6")
 	}
 
 	inits, err := dash.Initiatives(ctx, adminSession)
