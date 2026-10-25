@@ -8,6 +8,9 @@ permissions:
   contents: read
 jobs:
   contract:
+    # Fork safety (public repo): run self-hosted only for pushes and same-repo
+    # PRs, never a fork's PR.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, dad, linux]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -22,6 +25,7 @@ jobs:
           path: ${{ runner.temp }}/foundation/
           if-no-files-found: error
   swift-compatibility:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, dad, macos]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
