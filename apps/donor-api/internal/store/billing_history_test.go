@@ -94,8 +94,8 @@ func TestBillingHistoryExportsVerifiedFactsWithFinancialPermission(t *testing.T)
 	start := time.Now().UTC().Add(-24 * time.Hour)
 	f.receiveAt(t, "invoice.payment_failed", invoice(checkout.CheckoutID, "in_export_"+f.donorID.String(), start, false), start)
 	f.process(t)
-	_, finance := staffFixture(t, f.db, "FINANCE")
-	_, support := staffFixture(t, f.db, "SUPPORT")
+	_, finance := staffFixture(t, f.db, "SUPER_ADMIN")
+	_, support := staffFixture(t, f.db, "OP_PARTNERSHIPS")
 	s := &StaffService{DB: f.service.DB}
 	if err := s.Export(ctx, support, "billing-history", io.Discard); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatalf("support exported billing history: %v", err)

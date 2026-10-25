@@ -2416,7 +2416,7 @@ export interface components {
             email: string;
             name: string;
             /** @enum {string} */
-            role: "ADMIN" | "FINANCE" | "SUPPORT";
+            role: "SUPER_ADMIN" | "OP_PARTNERSHIPS" | "OP_GROWTH" | "OP_IMPACT";
             disabled: boolean;
             active: boolean;
             permissions: string[];
@@ -4633,7 +4633,7 @@ export interface operations {
                     email: string;
                     name: string;
                     /** @enum {string} */
-                    role: "ADMIN" | "FINANCE" | "SUPPORT";
+                    role: "SUPER_ADMIN" | "OP_PARTNERSHIPS" | "OP_GROWTH" | "OP_IMPACT";
                 };
             };
         };
@@ -4737,7 +4737,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    role: "ADMIN" | "FINANCE" | "SUPPORT";
+                    role: "SUPER_ADMIN" | "OP_PARTNERSHIPS" | "OP_GROWTH" | "OP_IMPACT";
                 };
             };
         };

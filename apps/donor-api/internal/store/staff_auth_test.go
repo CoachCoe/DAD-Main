@@ -113,7 +113,7 @@ func TestStaffPasskeyActivationSignsInOnceAndSignInIsSingleUse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	s := staffService(t, dbroles.API)
-	id, invite := invitedStaff(t, pool, "SUPPORT")
+	id, invite := invitedStaff(t, pool, "OP_PARTNERSHIPS")
 	invitation, err := s.BeginActivation(ctx, invite)
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +208,7 @@ func TestStaffSignInRejectsForgedOrUnusableAssertions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	s := staffService(t, dbroles.API)
-	id, key := activatedStaff(t, pool, s, "SUPPORT")
+	id, key := activatedStaff(t, pool, s, "OP_PARTNERSHIPS")
 	for range 2 {
 		if _, err := signIn(t, s, key); err != nil {
 			t.Fatal(err)
@@ -274,7 +274,7 @@ func TestStaffActivationCountsAttemptsAndRejectsForgedAttestations(t *testing.T)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	s := staffService(t, dbroles.API)
-	id, invite := invitedStaff(t, pool, "FINANCE")
+	id, invite := invitedStaff(t, pool, "SUPER_ADMIN")
 	for _, forge := range []func(*authenticator){
 		func(a *authenticator) { a.origin = "https://donors.example.org" },
 		func(a *authenticator) { a.rpID = "example.org" },
@@ -312,7 +312,7 @@ func TestStaffActivationCountsAttemptsAndRejectsForgedAttestations(t *testing.T)
 func TestStaffSyncedPasskeySignsInWithACounterOfZero(t *testing.T) {
 	pool := database(t)
 	s := staffService(t, dbroles.API)
-	id, invite := invitedStaff(t, pool, "SUPPORT")
+	id, invite := invitedStaff(t, pool, "OP_PARTNERSHIPS")
 	key := newAuthenticator(t, staffTestOrigin, staffTestRPID)
 	key.step = 0
 	if _, err := activate(t, s, invite, key); err != nil {
@@ -338,8 +338,8 @@ func TestStaffActivationRefusesAPasskeyRegisteredToAnotherAccount(t *testing.T) 
 	pool := database(t)
 	ctx := context.Background()
 	s := staffService(t, dbroles.API)
-	owner, key := activatedStaff(t, pool, s, "ADMIN")
-	other, invite := invitedStaff(t, pool, "SUPPORT")
+	owner, key := activatedStaff(t, pool, s, "SUPER_ADMIN")
+	other, invite := invitedStaff(t, pool, "OP_PARTNERSHIPS")
 	reused := *key
 	if _, err := activate(t, s, invite, &reused); !errors.Is(err, ErrStaffDenied) {
 		t.Fatal("one passkey registered to two accounts", err)
@@ -365,7 +365,7 @@ func TestStaffActivationRefusesAPasskeyRegisteredToAnotherAccount(t *testing.T) 
 func TestStaffPasskeyKeepsOnlyKnownTransports(t *testing.T) {
 	pool := database(t)
 	s := staffService(t, dbroles.API)
-	id, invite := invitedStaff(t, pool, "SUPPORT")
+	id, invite := invitedStaff(t, pool, "OP_PARTNERSHIPS")
 	key := newAuthenticator(t, staffTestOrigin, staffTestRPID)
 	key.transports = []string{"internal", strings.Repeat("x", 64), "usb", "cable"}
 	if _, err := activate(t, s, invite, key); err != nil {
@@ -385,8 +385,8 @@ func TestStaffCeremoniesAnswerOnlyTheirOwnKind(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	s := staffService(t, dbroles.API)
-	_, signer := activatedStaff(t, pool, s, "SUPPORT")
-	id, invite := invitedStaff(t, pool, "SUPPORT")
+	_, signer := activatedStaff(t, pool, s, "OP_PARTNERSHIPS")
+	id, invite := invitedStaff(t, pool, "OP_PARTNERSHIPS")
 	invitation, err := s.BeginActivation(ctx, invite)
 	if err != nil {
 		t.Fatal(err)
@@ -414,7 +414,7 @@ func TestStaffActivationRefusesADisabledAccount(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	s := staffService(t, dbroles.API)
-	id, invite := invitedStaff(t, pool, "FINANCE")
+	id, invite := invitedStaff(t, pool, "SUPER_ADMIN")
 	invitation, err := s.BeginActivation(ctx, invite)
 	if err != nil {
 		t.Fatal(err)
@@ -440,7 +440,7 @@ func TestStaffCeremoniesAreSweptOnceExpired(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	s := staffService(t, dbroles.API)
-	_, invite := invitedStaff(t, pool, "SUPPORT")
+	_, invite := invitedStaff(t, pool, "OP_PARTNERSHIPS")
 	for _, begin := range []func() error{
 		func() error { _, err := s.BeginSignIn(ctx); return err },
 		func() error { _, err := s.BeginActivation(ctx, invite); return err },

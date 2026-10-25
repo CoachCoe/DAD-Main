@@ -85,7 +85,7 @@ it("forwards only the allowlisted request headers", async () => {
         authorization: "Bearer stolen",
         "x-dad-client": "native",
         "x-forwarded-host": "evil.example",
-        "x-staff-role": "ADMIN",
+        "x-staff-role": "SUPER_ADMIN",
         forwarded: "for=1.2.3.4",
         host: "evil.example",
       },

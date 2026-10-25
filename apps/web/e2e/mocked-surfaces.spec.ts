@@ -91,7 +91,7 @@ test("a staff page past sign-in is accessible", async ({ page }) => {
         id: "staff-1",
         email: "admin@example.org",
         name: "Ada Admin",
-        role: "ADMIN",
+        role: "SUPER_ADMIN",
         active: true,
         disabled: false,
         permissions: ["data.export", "content.publish", "audit.read", "gift.refund", "gift.cancel", "staff.manage"],
@@ -99,7 +99,7 @@ test("a staff page past sign-in is accessible", async ({ page }) => {
     }),
   );
   await page.goto(staffURL("/staff"));
-  await expect(page.getByText("Signed in as Ada Admin · ADMIN")).toBeVisible();
+  await expect(page.getByText("Signed in as Ada Admin · SUPER_ADMIN")).toBeVisible();
   await expect(page.getByRole("button", { name: "Search donors" })).toBeVisible();
   await expectAccessible(page);
   expect(errors).toEqual([]);
@@ -146,7 +146,7 @@ async function mockStaffDonor(page: Page) {
           id: "staff-1",
           email: "finance@example.org",
           name: "Fin Ance",
-          role: "FINANCE",
+          role: "SUPER_ADMIN",
           active: true,
           disabled: false,
           permissions: ["gift.refund", "gift.cancel"],

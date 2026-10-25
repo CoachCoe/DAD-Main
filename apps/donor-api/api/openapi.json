@@ -3251,9 +3251,10 @@
                   "role": {
                     "type": "string",
                     "enum": [
-                      "ADMIN",
-                      "FINANCE",
-                      "SUPPORT"
+                      "SUPER_ADMIN",
+                      "OP_PARTNERSHIPS",
+                      "OP_GROWTH",
+                      "OP_IMPACT"
                     ]
                   }
                 },
@@ -3489,9 +3490,10 @@
                   "role": {
                     "type": "string",
                     "enum": [
-                      "ADMIN",
-                      "FINANCE",
-                      "SUPPORT"
+                      "SUPER_ADMIN",
+                      "OP_PARTNERSHIPS",
+                      "OP_GROWTH",
+                      "OP_IMPACT"
                     ]
                   }
                 },
@@ -8512,9 +8514,10 @@
           "role": {
             "type": "string",
             "enum": [
-              "ADMIN",
-              "FINANCE",
-              "SUPPORT"
+              "SUPER_ADMIN",
+              "OP_PARTNERSHIPS",
+              "OP_GROWTH",
+              "OP_IMPACT"
             ]
           },
           "disabled": {

@@ -28,8 +28,8 @@ func TestBadgesAutoEarnPermanenceAndAdminGrantRevoke(t *testing.T) {
 	ctx := context.Background()
 	donorID, donorToken := signedInDonor(t, pool)
 	b := BadgeService{DB: pool, Staff: &StaffService{DB: as(t, dbroles.API)}}
-	_, adminToken := staffFixture(t, pool, "ADMIN")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 
 	// With no projection/signals, only badges with no requirement are earned
 	// (none) — the catalog still returns all 24 as views.

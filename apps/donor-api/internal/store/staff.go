@@ -28,12 +28,28 @@ var (
 	ErrStaffExists = fmt.Errorf("%w: a staff account with this email already exists", ErrStaffConflict)
 )
 
-// rolePermissions lists each role's named permissions, sorted. Each role adds
-// to the one before it.
+// rolePermissions lists each role's named permissions, sorted (PRD §8). The
+// additive SUPPORT ⊂ FINANCE ⊂ ADMIN ladder is replaced by a super admin plus
+// three area operators:
+//
+//   - SUPER_ADMIN does everything, including the three super-admin-only powers
+//     §8 reserves: refunds (gift.*), manual badge grants (badge.manage) and
+//     admin management (staff.manage), plus donors & money (donor.read,
+//     data.export) and audit.
+//   - Operators can act only in their area and never hold those reserved
+//     powers: OP_PARTNERSHIPS runs partner approvals/links/matching/users
+//     (partner.*) and reads donors to link them; OP_GROWTH runs events and
+//     check-ins (content.publish is the event publish permission's shared
+//     gate — see note below); OP_IMPACT enters initiative metrics and spend.
+//
+// Events and initiatives both publish through the "content.publish" permission
+// today, so Growth and Impact-Ops share it; the finer split (event.* vs
+// initiative.*) is a later refinement and does not change who §8 lets act.
+//
+// partner.* are defined now though the /partner/* and partner-admin routes land
+// in Phase 5 PR-B, so the role model is complete and PR-B only references them.
 var rolePermissions = map[string][]string{
-	"SUPPORT": {"donor.read", "message.resend"},
-	"FINANCE": {"data.export", "donor.read", "gift.cancel", "gift.refund", "message.resend"},
-	"ADMIN": {
+	"SUPER_ADMIN": {
 		"audit.read",
 		"badge.manage",
 		"content.publish",
@@ -42,11 +58,19 @@ var rolePermissions = map[string][]string{
 		"gift.cancel",
 		"gift.refund",
 		"message.resend",
+		"partner.manage",
 		"staff.manage",
 	},
+	"OP_PARTNERSHIPS": {"audit.read", "donor.read", "message.resend", "partner.manage"},
+	"OP_GROWTH":       {"content.publish"},
+	"OP_IMPACT":       {"content.publish"},
 }
 
 func staffPermissions(role string) []string { return rolePermissions[role] }
+
+// superAdminRole is the role that holds the §8 super-admin-only powers; the
+// "do not strand the org without an admin manager" guards key on it.
+const superAdminRole = "SUPER_ADMIN"
 
 type StaffView struct {
 	ID          string   `json:"id"`

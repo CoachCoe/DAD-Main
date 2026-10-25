@@ -38,7 +38,7 @@ func staffFixture(t *testing.T, pool *pgxpool.Pool, role string) (pgtype.UUID, s
 func TestStaffWriteHoldsActorLockAndRechecksRevocation(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
-	id, token := staffFixture(t, pool, "ADMIN")
+	id, token := staffFixture(t, pool, "SUPER_ADMIN")
 	s := &StaffService{DB: api}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -73,14 +73,33 @@ func TestStaffWriteHoldsActorLockAndRechecksRevocation(t *testing.T) {
 func TestStaffPermissionMatrixAndExpiredSessions(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	for _, role := range []string{"SUPPORT", "FINANCE", "ADMIN"} {
+
+	// Every permission any role carries, plus one that no role has, so the
+	// matrix also proves unknown permissions are denied.
+	allPermissions := []string{
+		"donor.read", "message.resend", "gift.refund", "gift.cancel", "data.export",
+		"staff.manage", "content.publish", "audit.read", "badge.manage", "partner.manage",
+		"nonexistent.permission",
+	}
+	// super-admin-only powers (PRD §8): no operator may ever hold these.
+	superAdminOnly := map[string]bool{
+		"gift.refund": true, "gift.cancel": true, "data.export": true,
+		"badge.manage": true, "staff.manage": true,
+	}
+
+	for _, role := range []string{"SUPER_ADMIN", "OP_PARTNERSHIPS", "OP_GROWTH", "OP_IMPACT"} {
 		id, token := staffFixture(t, pool, role)
-		for _, permission := range []string{"donor.read", "message.resend", "gift.refund", "gift.cancel", "data.export", "staff.manage", "content.publish", "audit.read"} {
-			allowed := role == "ADMIN" || permission == "donor.read" || permission == "message.resend" ||
-				(role == "FINANCE" && (permission == "gift.refund" || permission == "gift.cancel" || permission == "data.export"))
+		held := staffPermissions(role)
+		for _, permission := range allPermissions {
+			// Authoritative source of truth: the role's own permission set.
+			allowed := slices.Contains(held, permission)
+			// §8 invariant: an operator never holds a super-admin-only power.
+			if role != superAdminRole && superAdminOnly[permission] && allowed {
+				t.Fatalf("%s must not hold super-admin-only permission %s", role, permission)
+			}
 			_, err := requireStaff(ctx, queries.New(pool), token, permission, time.Now())
 			if (allowed && err != nil) || (!allowed && !errors.Is(err, ErrStaffForbidden)) {
-				t.Fatalf("%s / %s: %v", role, permission, err)
+				t.Fatalf("%s / %s: allowed=%v err=%v", role, permission, allowed, err)
 			}
 		}
 		if _, err := requireStaff(ctx, queries.New(pool), token, "donor.read", time.Now().Add(2*time.Hour)); !errors.Is(
@@ -102,12 +121,12 @@ func TestRecoveryReplacesPasskeysAndRevokesSessions(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	s := staffService(t, dbroles.API)
-	_, adminKey := activatedStaff(t, pool, s, "ADMIN")
+	_, adminKey := activatedStaff(t, pool, s, "SUPER_ADMIN")
 	admin, err := signIn(t, s, adminKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, targetKey := activatedStaff(t, pool, s, "ADMIN")
+	target, targetKey := activatedStaff(t, pool, s, "SUPER_ADMIN")
 	session, err := signIn(t, s, targetKey)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +171,7 @@ func TestRecoveryReplacesPasskeysAndRevokesSessions(t *testing.T) {
 func TestAdministratorInvitesStaffWhoAreInactiveUntilTheyEnrol(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	_, admin := staffFixture(t, pool, "ADMIN")
+	_, admin := staffFixture(t, pool, "SUPER_ADMIN")
 	email := testID(t).String() + "@example.org"
 	t.Cleanup(func() {
 		for _, sql := range []string{
@@ -165,7 +184,7 @@ func TestAdministratorInvitesStaffWhoAreInactiveUntilTheyEnrol(t *testing.T) {
 		}
 	})
 	s := staffService(t, dbroles.API)
-	token, err := s.Invite(ctx, admin, email, "New Person", "SUPPORT")
+	token, err := s.Invite(ctx, admin, email, "New Person", "OP_PARTNERSHIPS")
 	if err != nil || token == "" {
 		t.Fatalf("invitation: %v", err)
 	}
@@ -174,7 +193,7 @@ func TestAdministratorInvitesStaffWhoAreInactiveUntilTheyEnrol(t *testing.T) {
 		t.Fatal(err)
 	}
 	invited := slices.IndexFunc(accounts, func(a StaffView) bool { return a.Email == email })
-	if invited < 0 || accounts[invited].Active || accounts[invited].Role != "SUPPORT" {
+	if invited < 0 || accounts[invited].Active || accounts[invited].Role != "OP_PARTNERSHIPS" {
 		t.Fatalf("invited account missing or active: %+v", accounts)
 	}
 	if _, err = s.BeginActivation(ctx, token); err != nil {
@@ -187,13 +206,13 @@ func TestBreakGlassRecoveryReplacesOnlyAnEnabledAdministratorsPasskeys(t *testin
 	ctx := context.Background()
 	s := staffService(t, dbroles.API)
 	operator := staffService(t, dbroles.StaffCLI)
-	admin, key := activatedStaff(t, pool, s, "ADMIN")
+	admin, key := activatedStaff(t, pool, s, "SUPER_ADMIN")
 	session, err := signIn(t, s, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	support, _ := invitedStaff(t, pool, "SUPPORT")
-	disabled, _ := activatedStaff(t, pool, s, "ADMIN")
+	support, _ := invitedStaff(t, pool, "OP_PARTNERSHIPS")
+	disabled, _ := activatedStaff(t, pool, s, "SUPER_ADMIN")
 	mustExec(t, pool, "UPDATE donor_staff SET disabled=true WHERE id=$1", disabled)
 	for _, other := range []string{support.String() + "@example.org", disabled.String() + "@example.org", "nobody@example.org"} {
 		if _, err := operator.Recover(ctx, other); !errors.Is(err, pgx.ErrNoRows) {

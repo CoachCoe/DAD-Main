@@ -375,8 +375,8 @@ func TestRecurringCommandReadsProcessorOutsideDonorLock(t *testing.T) {
 func TestViewsServeSyncedStateWithoutCallingProcessor(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
-	_, finance := staffFixture(t, pool, "FINANCE")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	_, finance := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	r := newRecurringFixture(t)
 	ctx := context.Background()
 	r.receive(t, "invoice.payment_succeeded", invoice(r.checkout, "in_stored_"+r.donorID.String(), r.start, true))
@@ -708,8 +708,8 @@ func TestStaffCancellationIsAuditedWithReasonAndOutcome(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	// Staff outlive the fixture's staff actions, so they are created first.
-	_, finance := staffFixture(t, pool, "FINANCE")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	_, finance := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	r := newRecurringFixture(t)
 	ctx := context.Background()
 	s := StaffFinanceService{Staff: &StaffService{DB: api}, Gateway: r.sub, Origin: "https://donor.example.org"}
@@ -794,7 +794,7 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			pool := database(t)
 			api := as(t, dbroles.API)
-			actor, finance := staffFixture(t, pool, "FINANCE")
+			actor, finance := staffFixture(t, pool, "SUPER_ADMIN")
 			r := newRecurringFixture(t)
 			ctx := context.Background()
 			r.receive(t, "invoice.payment_succeeded", invoice(r.checkout, "in_quote_"+r.donorID.String(), r.start, true))
@@ -910,7 +910,7 @@ func TestStaffRefundRetrySettlesLostOutcome(t *testing.T) {
 func TestGiftListsAndStaffDetailShowRefundsAndSubscription(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
-	_, support := staffFixture(t, pool, "SUPPORT")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	r := newRecurringFixture(t)
 	ctx := context.Background()
 	r.receive(t, "invoice.payment_succeeded", invoice(r.checkout, "in_detail_"+r.donorID.String(), r.start, true))

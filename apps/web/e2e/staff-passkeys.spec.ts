@@ -24,7 +24,7 @@ test("an invited administrator creates a passkey, then signs out and back in wit
   await expectAccessible(page);
   await page.getByRole("button", { name: "Create a passkey" }).click();
   await expect(page).toHaveURL(staffURL("/staff"));
-  await expect(page.getByText("Signed in as E2E Administrator · ADMIN")).toBeVisible();
+  await expect(page.getByText("Signed in as E2E Administrator · SUPER_ADMIN")).toBeVisible();
 
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("link", { name: "Staff sign-in" })).toBeFocused();
@@ -35,7 +35,7 @@ test("an invited administrator creates a passkey, then signs out and back in wit
   await expectAccessible(page);
   await page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await expect(page).toHaveURL(staffURL("/staff"));
-  await expect(page.getByText("Signed in as E2E Administrator · ADMIN")).toBeVisible();
+  await expect(page.getByText("Signed in as E2E Administrator · SUPER_ADMIN")).toBeVisible();
 
   // An audited download starts from the back office itself, never from another host.
   await page.getByRole("link", { name: "Exports and enrolment queue" }).click();

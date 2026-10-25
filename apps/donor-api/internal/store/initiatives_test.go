@@ -50,8 +50,8 @@ func TestInitiativeDraftPublishLifecycleAndMetricVerificationGate(t *testing.T) 
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanInitiatives(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	s := InitiativeService{Staff: &StaffService{DB: api}}
 
 	// A non-publisher role cannot create initiatives.
@@ -161,7 +161,7 @@ func TestInitiativeSpendByCategoryTotalsAndPublishedOnlyRead(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanInitiatives(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	s := InitiativeService{Staff: &StaffService{DB: api}}
 	reader := InitiativeReader{DB: pool}
 
@@ -251,7 +251,7 @@ func TestDailyRotationDeterministicAndExposureLedger(t *testing.T) {
 	api := as(t, dbroles.API)
 	ctx := context.Background()
 	cleanInitiatives(t, pool)
-	_, adminToken := staffFixture(t, pool, "ADMIN")
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	s := InitiativeService{Staff: &StaffService{DB: api}}
 	rotation := DonorInitiativeService{DB: pool}
 

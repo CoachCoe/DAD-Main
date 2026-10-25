@@ -56,7 +56,17 @@ func (a *api) staff() service {
 	return service{a.Staff != nil, staffUnavailable, readTimeout, staffStatus}
 }
 
-func validRole(role string) bool { return role == "ADMIN" || role == "FINANCE" || role == "SUPPORT" }
+// validRole gates the role a staff invite or role-change may set (PRD §8). The
+// bootstrap super admin is created out-of-band (StaffService.Bootstrap), so a
+// super admin can be assigned here too when promoting an operator.
+func validRole(role string) bool {
+	switch role {
+	case "SUPER_ADMIN", "OP_PARTNERSHIPS", "OP_GROWTH", "OP_IMPACT":
+		return true
+	default:
+		return false
+	}
+}
 
 func (a *api) invitationURL(token string) string {
 	return a.StaffOrigin + "/staff/activate#token=" + token

@@ -171,7 +171,7 @@ func seed(t *testing.T, pool *pgxpool.Pool, keys credentials.Keyring, logins int
 		f["donor_email_changes"][id] = plaintext
 	}
 	staff := newID(t)
-	if _, err := pool.Exec(ctx, "INSERT INTO donor_staff (id,email,name,role) VALUES ($1,'admin@example.org','Admin','ADMIN')", staff); err != nil {
+	if _, err := pool.Exec(ctx, "INSERT INTO donor_staff (id,email,name,role) VALUES ($1,'admin@example.org','Admin','SUPER_ADMIN')", staff); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 2 {

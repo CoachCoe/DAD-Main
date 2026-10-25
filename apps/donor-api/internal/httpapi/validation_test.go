@@ -54,7 +54,7 @@ func TestHandlersValidateInputBeforeCallingServices(t *testing.T) {
 		{"POST", "/donor/staff/activate", `{"ceremony":"` + strings.Repeat("c", 43) + `","credential":{"id":"\u0000"}}`, false, 422},
 		{"POST", "/donor/staff/accounts", `{"email":"staff@example.org","name":"Sam","role":"OWNER"}`, false, 422},
 		{"POST", "/donor/staff/accounts/not-a-uuid/disable", "", false, 404},
-		{"POST", "/donor/staff/accounts/" + testID + "/role", `{"role":"ADMIN"}`, false, 503},
+		{"POST", "/donor/staff/accounts/" + testID + "/role", `{"role":"SUPER_ADMIN"}`, false, 503},
 		{"POST", "/donor/staff/accounts/" + testID + "/role", `{"role":"OWNER"}`, false, 422},
 		{"GET", "/donor/staff/donors?offset=x", "", false, 422},
 		{"GET", "/donor/staff/donors?q=" + strings.Repeat("q", 321), "", false, 422},
