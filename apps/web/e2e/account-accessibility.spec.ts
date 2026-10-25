@@ -320,7 +320,9 @@ const partnerPortal: Record<string, unknown> = {
   "/donor/partner/users": { users: [{ id: "u1", email: "a@delta.test", name: "Ana", role: "ADMIN" }] },
   "/donor/partner/exports": { exports: [] },
   "/donor/partner/our-people": { enrolled: 8, given_minor: 80000, avg_streak: 12, suppressed: false },
-  "/donor/partner/teams": { teams: [] },
+  "/donor/partner/teams": {
+    teams: [{ team_id: "t1", name: "Team A", active_givers: 6, avg_streak: 9, volunteer_minutes: 300 }],
+  },
 };
 
 test("authenticated accessible surface: /partner", async ({ page }) => {
