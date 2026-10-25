@@ -185,7 +185,7 @@ func (q *Queries) InsertPublication(ctx context.Context, arg InsertPublicationPa
 }
 
 const partnerSignupByID = `-- name: PartnerSignupByID :one
-SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at FROM donor_partner_signups WHERE id=$1
+SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at, approved_at, partner_type, workforce_size, match_rate_bp, match_cap_minor, company_code, logo_url, description FROM donor_partner_signups WHERE id=$1
 `
 
 func (q *Queries) PartnerSignupByID(ctx context.Context, id pgtype.UUID) (DonorPartnerSignup, error) {
@@ -201,6 +201,14 @@ func (q *Queries) PartnerSignupByID(ctx context.Context, id pgtype.UUID) (DonorP
 		&i.ConsentVersion,
 		&i.ID,
 		&i.CreatedAt,
+		&i.ApprovedAt,
+		&i.PartnerType,
+		&i.WorkforceSize,
+		&i.MatchRateBp,
+		&i.MatchCapMinor,
+		&i.CompanyCode,
+		&i.LogoUrl,
+		&i.Description,
 	)
 	return i, err
 }
