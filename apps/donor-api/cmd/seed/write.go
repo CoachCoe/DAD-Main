@@ -12,6 +12,7 @@ import (
 	"iter"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -105,9 +106,19 @@ func (p *population) refunds(yield func(*gift) bool) {
 // unique hash.
 func (p *population) tables() []table {
 	return []table{
-		{"donors", "id email claimed_at public_name referral_code created_at", func(emit func(...any)) {
+		{"donors", "id email claimed_at public_name referral_code city zip timezone created_at", func(emit func(...any)) {
 			for _, d := range p.donors {
-				emit(d.id, d.email, timeOrNull(d.claimedAt), textOrNull(d.publicName), textOrNull(d.code), d.createdAt)
+				emit(
+					d.id,
+					d.email,
+					timeOrNull(d.claimedAt),
+					textOrNull(d.publicName),
+					textOrNull(d.code),
+					textOrNull(d.city),
+					textOrNull(d.zip),
+					textOrNull(d.timezone),
+					d.createdAt,
+				)
 			}
 		}},
 		{"donor_preferences", "id donor_id version referral_emails marketing_emails created_at", func(emit func(...any)) {
@@ -291,6 +302,137 @@ func (p *population) tables() []table {
 				emit(derived(d.id, 3), d.id, p.now, p.now)
 			}
 		}},
+		{
+			"donor_partner_signups",
+			"id organization name email website message request_hash consent_version approved_at partner_type workforce_size match_rate_bp match_cap_minor company_code created_at",
+			func(emit func(...any)) {
+				for _, pt := range p.partners {
+					emit(
+						pt.id,
+						pt.name,
+						"Partner Admin",
+						fmt.Sprintf("partner-%08d@%s", pt.num, emailDomain),
+						"https://example.invalid",
+						"",
+						hex.EncodeToString(pt.id.Bytes[:]),
+						"r1-partner-v1",
+						pt.approvedAt,
+						"COMPANY",
+						int32(pt.workforce),
+						int32(pt.matchRateBP),
+						pt.matchCap,
+						pt.companyCode,
+						pt.approvedAt,
+					)
+				}
+			},
+		},
+		{"donor_partner_teams", "id partner_id name created_at", func(emit func(...any)) {
+			for _, pt := range p.partners {
+				for _, tm := range pt.teams {
+					emit(tm.id, pt.id, tm.name, pt.approvedAt)
+				}
+			}
+		}},
+		{"donor_partner_employees", "donor_id partner_id team_id enrolled_at", func(emit func(...any)) {
+			for _, pt := range p.partners {
+				for _, e := range pt.employees {
+					var teamID pgtype.UUID
+					if e.team != nil {
+						teamID = e.team.id
+					}
+					emit(e.donor.id, pt.id, teamID, e.enrolledAt)
+				}
+			}
+		}},
+		{
+			"donor_initiatives",
+			"id slug title summary type location region counties started_on status committed_minor partner_signup_id publish_state published_at created_at",
+			func(emit func(...any)) {
+				for _, in := range p.initiatives {
+					var partnerID pgtype.UUID
+					if in.partner != nil {
+						partnerID = in.partner.id
+					}
+					published := in.startedOn.Add(day)
+					emit(
+						in.id,
+						in.slug,
+						fmt.Sprintf("Initiative %d", in.index),
+						"A seeded initiative for load testing.",
+						"PROGRAM",
+						"Statewide",
+						"Region "+strconv.Itoa(in.index%10),
+						pgtype.FlatArray[string]{"County " + strconv.Itoa(in.index%20)},
+						in.startedOn,
+						"ACTIVE",
+						in.committed,
+						partnerID,
+						"PUBLISHED",
+						published,
+						in.startedOn,
+					)
+				}
+			},
+		},
+		{
+			"donor_initiative_metrics",
+			"id initiative_id position label value unit verification_note verified_on publish_state created_at",
+			func(emit func(...any)) {
+				for _, in := range p.initiatives {
+					for _, m := range in.metrics {
+						emit(
+							m.id,
+							in.id,
+							int32(m.pos),
+							m.label,
+							m.value,
+							m.unit,
+							"Verified from seeded operational data.",
+							pgtype.Date{Time: in.startedOn.Add(day), Valid: true},
+							"PUBLISHED",
+							in.startedOn.Add(day),
+						)
+					}
+				}
+			},
+		},
+		{
+			"donor_events",
+			"id slug title type description venue address city zip starts_at ends_at capacity publish_state published_at created_at",
+			func(emit func(...any)) {
+				for _, ev := range p.events {
+					emit(
+						ev.id,
+						ev.slug,
+						fmt.Sprintf("Event %d", ev.index),
+						ev.kind,
+						"A seeded event for load testing.",
+						"Community Hall",
+						"100 Main St",
+						ev.city,
+						ev.zip,
+						ev.startsAt,
+						ev.endsAt,
+						int32(ev.capacity),
+						"PUBLISHED",
+						ev.publishedAt,
+						ev.publishedAt,
+					)
+				}
+			},
+		},
+		{
+			"donor_event_reservations",
+			"id event_id donor_id status reserved_at checked_in_at created_at",
+			func(emit func(...any)) {
+				for _, ev := range p.events {
+					for _, r := range ev.reservations {
+						emit(r.id, ev.id, r.donor.id, r.status, r.reservedAt, timeOrNull(r.checkedIn), r.reservedAt)
+					}
+				}
+			},
+		},
 	}
 }
 
@@ -366,10 +508,12 @@ FROM donors d WHERE d.id=m.donor_id AND d.email LIKE '%@`+emailDomain+`' AND m.c
 }
 
 // fixture is what the load generator needs: donor sessions and referral codes
-// weighted by how often each code would be visited.
+// weighted by how often each code would be visited, plus upcoming published
+// event ids for the event-day scenarios (detail reads and reservations).
 type fixture struct {
 	Sessions      []string `json:"sessions"`
 	ReferralCodes []string `json:"referral_codes"`
+	EventIDs      []string `json:"event_ids,omitempty"`
 }
 
 // sessions signs in n claimed donors, favouring active referrers, whose
@@ -429,11 +573,25 @@ func (p *population) writeFixture(ctx context.Context, pool *pgxpool.Pool, n int
 	if err != nil {
 		return 0, err
 	}
-	f := fixture{Sessions: make([]string, len(sessions)), ReferralCodes: p.referralCodes(fixtureCodes)}
+	f := fixture{Sessions: make([]string, len(sessions)), ReferralCodes: p.referralCodes(fixtureCodes), EventIDs: p.eventIDs()}
 	for i, s := range sessions {
 		f.Sessions[i] = s.token
 	}
 	return len(sessions), json.NewEncoder(w).Encode(f)
+}
+
+// eventIDs are the upcoming, publicly-visible events the load mix reads and
+// reserves: the event-day spike lands on events a donor can still act on.
+// INVITE_ONLY events are left out — their public detail answers 404 and a
+// donor without the perk cannot reserve them — as are past events.
+func (p *population) eventIDs() []string {
+	var ids []string
+	for _, ev := range p.events {
+		if ev.kind != "INVITE_ONLY" && ev.endsAt.After(p.now) {
+			ids = append(ids, ev.id.String())
+		}
+	}
+	return ids
 }
 
 // referralCodes draws n codes in proportion to sharer influence, so popular

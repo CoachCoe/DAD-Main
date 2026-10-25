@@ -206,3 +206,133 @@ func TestReferralCodesFollowInfluence(t *testing.T) {
 		t.Fatalf("codes do not follow influence: %d codes, %d distinct, top sharer %d", len(codes), len(visits), visits[top.code])
 	}
 }
+
+// TestEngagementLayerKeepsItsConstraints checks the partners/employees/events/
+// reservations the engagement layer adds satisfy the schema and domain rules
+// the Phase 4–6 reads depend on.
+func TestEngagementLayerKeepsItsConstraints(t *testing.T) {
+	pop := generate(20000, 0, 7, asOf)
+	if len(pop.partners) != partnerCount || len(pop.initiatives) != initiativeCount || len(pop.events) != eventCount {
+		t.Fatalf("engagement sizes: %d partners, %d initiatives, %d events", len(pop.partners), len(pop.initiatives), len(pop.events))
+	}
+
+	ids := map[[16]byte]bool{}
+	codes := map[string]bool{}
+	unique := func(id [16]byte) {
+		if ids[id] {
+			t.Fatalf("duplicate engagement identifier %x", id)
+		}
+		ids[id] = true
+	}
+
+	oneEmployer := map[[16]byte]bool{} // a donor belongs to at most one partner
+	var employees, onTeam int
+	for _, p := range pop.partners {
+		unique(p.id.Bytes)
+		if p.companyCode == "" || codes[p.companyCode] || p.workforce < 0 || p.matchRateBP < 0 || p.matchCap < 0 {
+			t.Fatalf("partner %d breaks a signup constraint", p.index)
+		}
+		codes[p.companyCode] = true
+		if (p.matchRateBP == 0) != (p.matchCap == 0) {
+			t.Fatalf("partner %d has a match rate/cap mismatch", p.index)
+		}
+		teamIDs := map[[16]byte]bool{}
+		for _, tm := range p.teams {
+			unique(tm.id.Bytes)
+			teamIDs[tm.id.Bytes] = true
+		}
+		for _, e := range p.employees {
+			if e.donor.claimedAt.IsZero() {
+				t.Fatalf("an unclaimed donor was linked to partner %d", p.index)
+			}
+			if oneEmployer[e.donor.id.Bytes] {
+				t.Fatalf("donor %d is linked to two partners", e.donor.index)
+			}
+			oneEmployer[e.donor.id.Bytes] = true
+			if e.team != nil {
+				if !teamIDs[e.team.id.Bytes] {
+					t.Fatalf("employee of partner %d is on another partner's team", p.index)
+				}
+				onTeam++
+			}
+			if e.enrolledAt.Before(e.donor.claimedAt) || e.enrolledAt.After(pop.now) {
+				t.Fatalf("employee enrolment for donor %d is out of range", e.donor.index)
+			}
+			employees++
+		}
+	}
+	if employees == 0 || onTeam == 0 {
+		t.Fatalf("no employees (%d) or none on a team (%d)", employees, onTeam)
+	}
+
+	var publishedMetrics int
+	for _, in := range pop.initiatives {
+		unique(in.id.Bytes)
+		if len(in.metrics) < 2 || len(in.metrics) > 5 || in.committed < 0 {
+			t.Fatalf("initiative %d breaks a metric-count or committed constraint", in.index)
+		}
+		for pos, m := range in.metrics {
+			unique(m.id.Bytes)
+			if m.pos != pos || m.pos < 0 || m.pos >= 6 {
+				t.Fatalf("initiative %d metric position %d is out of range", in.index, m.pos)
+			}
+			publishedMetrics++
+		}
+	}
+	if publishedMetrics == 0 {
+		t.Fatal("no published initiative metrics")
+	}
+
+	var reservations, waitlisted, checkedIn, pastEvents, upcoming int
+	for _, ev := range pop.events {
+		unique(ev.id.Bytes)
+		if !ev.endsAt.After(ev.startsAt) || ev.capacity < 0 || ev.publishedAt.After(pop.now) {
+			t.Fatalf("event %d breaks a window/capacity/publish constraint", ev.index)
+		}
+		if ev.endsAt.After(pop.now) {
+			upcoming++
+		} else {
+			pastEvents++
+		}
+		donors := map[[16]byte]bool{}
+		for _, r := range ev.reservations {
+			unique(r.id.Bytes)
+			if donors[r.donor.id.Bytes] {
+				t.Fatalf("donor %d has two reservations at event %d", r.donor.index, ev.index)
+			}
+			donors[r.donor.id.Bytes] = true
+			if r.status != "RESERVED" && r.status != "WAITLISTED" {
+				t.Fatalf("event %d reservation has status %q", ev.index, r.status)
+			}
+			if r.status == "WAITLISTED" {
+				waitlisted++
+				if ev.capacity == 0 {
+					t.Fatalf("event %d has an uncapped waitlist", ev.index)
+				}
+			}
+			if !r.checkedIn.IsZero() {
+				checkedIn++
+				if r.status != "RESERVED" || ev.endsAt.After(pop.now) {
+					t.Fatalf("event %d has a check-in that is not a finished reservation", ev.index)
+				}
+				if r.checkedIn.Before(ev.startsAt) || r.checkedIn.After(ev.endsAt) {
+					t.Fatalf("event %d check-in is outside the event window", ev.index)
+				}
+			}
+			reservations++
+		}
+	}
+	if reservations == 0 || waitlisted == 0 || checkedIn == 0 || pastEvents == 0 || upcoming == 0 {
+		t.Fatalf(
+			"missing engagement edge cases: %d reservations, %d waitlisted, %d checked in, %d past, %d upcoming events",
+			reservations, waitlisted, checkedIn, pastEvents, upcoming,
+		)
+	}
+
+	// Determinism: the same seed reproduces the engagement layer.
+	other := generate(20000, 0, 7, asOf)
+	if len(other.partners) != len(pop.partners) || other.partners[0].id != pop.partners[0].id ||
+		len(other.events[0].reservations) != len(pop.events[0].reservations) {
+		t.Fatal("engagement layer is not reproducible from the seed")
+	}
+}
