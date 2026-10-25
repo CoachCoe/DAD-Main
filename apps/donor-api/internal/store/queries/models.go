@@ -249,6 +249,25 @@ type DonorOidcIdentity struct {
 	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
 }
 
+type DonorPartnerApplication struct {
+	ID                pgtype.UUID        `json:"id"`
+	Organization      string             `json:"organization"`
+	Website           string             `json:"website"`
+	Type              string             `json:"type"`
+	ContactName       string             `json:"contact_name"`
+	Title             string             `json:"title"`
+	WorkEmail         string             `json:"work_email"`
+	Phone             string             `json:"phone"`
+	WorkforceSize     int32              `json:"workforce_size"`
+	Status            string             `json:"status"`
+	DecidedBy         pgtype.UUID        `json:"decided_by"`
+	DecidedAt         pgtype.Timestamptz `json:"decided_at"`
+	DecisionReason    string             `json:"decision_reason"`
+	ApprovedPartnerID pgtype.UUID        `json:"approved_partner_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DonorPartnerSignup struct {
 	Organization   string             `json:"organization"`
 	Name           string             `json:"name"`
@@ -259,6 +278,28 @@ type DonorPartnerSignup struct {
 	ConsentVersion string             `json:"consent_version"`
 	ID             pgtype.UUID        `json:"id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
+	PartnerType    string             `json:"partner_type"`
+	WorkforceSize  int32              `json:"workforce_size"`
+	MatchRateBp    int32              `json:"match_rate_bp"`
+	MatchCapMinor  int64              `json:"match_cap_minor"`
+	CompanyCode    pgtype.Text        `json:"company_code"`
+	LogoUrl        string             `json:"logo_url"`
+	Description    string             `json:"description"`
+}
+
+type DonorPartnerUser struct {
+	ID              pgtype.UUID        `json:"id"`
+	PartnerID       pgtype.UUID        `json:"partner_id"`
+	Email           string             `json:"email"`
+	Name            string             `json:"name"`
+	Role            string             `json:"role"`
+	InvitedBy       pgtype.UUID        `json:"invited_by"`
+	AcceptedAt      pgtype.Timestamptz `json:"accepted_at"`
+	Disabled        bool               `json:"disabled"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	InviteTokenHash pgtype.Text        `json:"invite_token_hash"`
+	InviteExpiresAt pgtype.Timestamptz `json:"invite_expires_at"`
 }
 
 type DonorPasskey struct {

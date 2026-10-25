@@ -31,6 +31,7 @@ const (
 const (
 	donorCookie    = "dad_donor_session"
 	staffCookie    = "dad_staff_session"
+	partnerCookie  = "dad_partner_session"
 	referralCookie = "dad_referral"
 	companyCookie  = "dad_company"
 )
