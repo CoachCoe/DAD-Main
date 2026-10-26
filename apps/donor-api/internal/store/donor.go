@@ -43,6 +43,10 @@ func page[T any](rows []T, offset int64) ([]T, *int64) {
 
 var ErrPreferenceConflict = errors.New("preferences changed; refresh before saving")
 
+// checkoutSettleMargin allows for the completion event of a checkout paid just
+// before it expired to arrive and be processed.
+const checkoutSettleMargin = time.Hour
+
 // ErrGivingActive refuses an account deletion while a monthly gift would keep
 // charging the card of a donor whose account no longer exists.
 var ErrGivingActive = errors.New("cancel monthly giving before deleting the account")
@@ -341,7 +345,7 @@ func (s DonorService) SaveProfile(ctx context.Context, token string, in ProfileU
 func (s DonorService) DeleteAccount(ctx context.Context, token string) error {
 	_, err := donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (struct{}, error) {
 		q := queries.New(tx)
-		if renewing, err := givingRenews(ctx, q, d.ID); err != nil || renewing {
+		if renewing, err := givingRenews(ctx, q, d.ID, now); err != nil || renewing {
 			if err == nil {
 				err = ErrGivingActive
 			}
@@ -381,15 +385,18 @@ func (s DonorService) DeleteAccount(ctx context.Context, token string) error {
 }
 
 // givingRenews reports whether the donor's latest monthly gift will charge
-// again: its subscription is live and not scheduled to stop, or checkout has
-// finished but the subscription has not been synced yet.
-func givingRenews(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (bool, error) {
+// again: its subscription is live and not scheduled to stop, checkout has
+// finished but the subscription has not been synced yet, or a checkout is
+// still open and could yet complete.
+func givingRenews(ctx context.Context, q *queries.Queries, donor pgtype.UUID, now time.Time) (bool, error) {
 	attempt, row, err := syncedSubscription(ctx, q, donor)
 	if err != nil {
 		return false, err
 	}
 	if row == nil {
-		return attempt.StripeSubscriptionID.Valid || attempt.Status == "COMPLETE", nil
+		open := (attempt.Status == "PENDING" || attempt.Status == "OPEN") &&
+			now.Before(attempt.CreatedAt.Time.Add(checkoutLifetime+checkoutSettleMargin))
+		return attempt.StripeSubscriptionID.Valid || attempt.Status == "COMPLETE" || open, nil
 	}
 	return !terminalSubscription(row.Status) && !row.StopsAt.Valid, nil
 }

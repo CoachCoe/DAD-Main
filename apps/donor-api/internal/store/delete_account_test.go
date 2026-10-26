@@ -212,3 +212,27 @@ func TestDeleteAccountRefusedWhileGivingRenews(t *testing.T) {
 		t.Fatalf("delete once the gift is cancelled at period end: %v", err)
 	}
 }
+
+// TestDeleteAccountWaitsForAnOpenCheckout keeps a checkout paid after the
+// account was deleted from starting a subscription nobody can stop.
+func TestDeleteAccountWaitsForAnOpenCheckout(t *testing.T) {
+	s, token, id := donorServiceFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	checkout, attempt := mustNewID(t), mustNewID(t)
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_stripe_checkouts WHERE id=$1", attempt)
+		cleanExec(t, "DELETE FROM donor_checkouts WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_deletions WHERE donor_id=$1", id)
+	})
+	mustExec(t, pool, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES($1,$2,3000,'MONTHLY')", checkout, id)
+	mustExec(t, pool, "INSERT INTO donor_stripe_checkouts(id,checkout_id,request_hash,request_params,status) VALUES($1,$2,$3,'{}','OPEN')",
+		attempt, checkout, attempt.String())
+	if err := s.DeleteAccount(ctx, token); !errors.Is(err, ErrGivingActive) {
+		t.Fatalf("delete during an open checkout: %v", err)
+	}
+	mustExec(t, pool, "UPDATE donor_stripe_checkouts SET created_at=now()-interval '3 hours' WHERE id=$1", attempt)
+	if err := s.DeleteAccount(ctx, token); err != nil {
+		t.Fatalf("delete once the checkout has long expired: %v", err)
+	}
+}
