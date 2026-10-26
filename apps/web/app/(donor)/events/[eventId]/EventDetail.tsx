@@ -65,6 +65,8 @@ export default function EventDetail({ event: id }: { event: string }) {
 
   const event = data?.event;
   const started = event ? new Date(event.starts_at).getTime() <= Date.now() : false;
+  const opensLater = Boolean(event?.booking_opens_at && new Date(event.booking_opens_at).getTime() > Date.now());
+  const canReserve = !opensLater || Boolean(event?.early_booking);
   return (
     <Page eyebrow="Event" title={event?.title ?? "Event"}>
       {event && (
@@ -83,6 +85,12 @@ export default function EventDetail({ event: id }: { event: string }) {
           </p>
           {event.invitation_note && <p className="note">{event.invitation_note}</p>}
           {!event.cancelled && <p>{placeSummary(event)}</p>}
+          {!event.cancelled && !started && opensLater && event.booking_opens_at && (
+            <p className="note">
+              {event.early_booking ? "As a Team Captain, you can reserve now, before booking opens on " : "Booking opens "}
+              <time dateTime={event.booking_opens_at}>{formatDateTime(event.booking_opens_at)}</time>.
+            </p>
+          )}
           {!event.cancelled && !started && data.signedIn && (
             <p>
               {event.reservation_status ? (
@@ -90,9 +98,11 @@ export default function EventDetail({ event: id }: { event: string }) {
                   {event.reservation_status === "RESERVED" ? "Cancel my spot" : "Leave the waitlist"}
                 </button>
               ) : (
-                <button type="button" className="button" disabled={busy} onClick={() => act("reserve")}>
-                  {event.spots_left === 0 ? "Join the waitlist" : "Reserve a spot"}
-                </button>
+                canReserve && (
+                  <button type="button" className="button" disabled={busy} onClick={() => act("reserve")}>
+                    {event.spots_left === 0 ? "Join the waitlist" : "Reserve a spot"}
+                  </button>
+                )
               )}
             </p>
           )}

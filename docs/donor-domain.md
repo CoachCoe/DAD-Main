@@ -127,6 +127,10 @@ not checkout start or webhook arrival. Claiming after cutoff is allowed. The bad
 permanent, including after refunds/cancellation. Changing the cutoff requires a product
 decision; existing awards remain permanent.
 
+Team Captains reserve event places 48 hours early (B-3). Staff may set when an event's
+booking opens; until then only a Team Captain can reserve, from 48 hours before it. An
+event with no opening time opens to everyone when it is published.
+
 ## Staff and messages
 
 A super administrator holds every staff power: donors and money (search, refunds,

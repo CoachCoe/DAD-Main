@@ -24,6 +24,7 @@ const event = {
   ends_at: "2026-11-07T19:00:00Z",
   capacity: 20,
   qualifying_perk: "",
+  booking_opens_at: "",
   publish_state: "PUBLISHED",
   cancelled_at: null,
   reserved: 1,
@@ -90,7 +91,11 @@ it("validates the editor form", () => {
     form.set(name, value);
   expect(eventInput(form)).toBe("The event must end after it starts.");
   form.set("ends_at", "2026-11-07T12:00");
-  expect(eventInput(form)).toMatchObject({ capacity: 0, qualifying_perk: "" });
+  expect(eventInput(form)).toMatchObject({ capacity: 0, qualifying_perk: "", booking_opens_at: "" });
+  form.set("booking_opens_at", "2026-11-07T11:00");
+  expect(eventInput(form)).toBe("Booking must open before the event starts.");
+  form.set("booking_opens_at", "2026-11-05T09:00");
+  expect(eventInput(form)).toMatchObject({ booking_opens_at: instant("2026-11-05T09:00") });
 });
 
 it("checks an attendee in by hand and cancels the event", async () => {

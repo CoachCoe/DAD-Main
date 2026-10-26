@@ -48,6 +48,9 @@ type EventInput struct {
 	// QualifyingPerk gates an INVITE_ONLY event (E-5): the badge perk that
 	// unlocks it (e.g. "FOUNDING_EVENTS"), or empty for guest-list-only.
 	QualifyingPerk string `json:"qualifying_perk"`
+	// BookingOpensAt is when reservations open to everyone (RFC3339), or empty
+	// for when the event is published. Team Captains may book 48 hours earlier.
+	BookingOpensAt string `json:"booking_opens_at"`
 }
 
 // validate checks an event input, returning ErrStaffInput on any problem. The
@@ -95,6 +98,14 @@ func (in EventInput) validate(now time.Time) (queries.InsertEventParams, error) 
 	if !ends.After(starts) {
 		return params, ErrStaffInput
 	}
+	var opens pgtype.Timestamptz
+	if in.BookingOpensAt != "" {
+		at, err := time.Parse(time.RFC3339, in.BookingOpensAt)
+		if err != nil || !at.Before(starts) {
+			return params, ErrStaffInput
+		}
+		opens = timestamp(at.UTC())
+	}
 	// qualifying_perk, when set, must be a known badge perk and only makes
 	// sense on an INVITE_ONLY event.
 	if in.QualifyingPerk != "" {
@@ -106,7 +117,7 @@ func (in EventInput) validate(now time.Time) (queries.InsertEventParams, error) 
 		Slug: in.Slug, Title: in.Title, Type: in.Type, Description: in.Description,
 		Venue: in.Venue, Address: in.Address, City: in.City, Zip: in.Zip,
 		StartsAt: timestamp(starts.UTC()), EndsAt: timestamp(ends.UTC()),
-		Capacity: in.Capacity, QualifyingPerk: in.QualifyingPerk, CreatedAt: timestamp(now),
+		Capacity: in.Capacity, QualifyingPerk: in.QualifyingPerk, CreatedAt: timestamp(now), BookingOpensAt: opens,
 	}
 	return params, nil
 }
@@ -161,7 +172,7 @@ func (s EventService) Update(ctx context.Context, token string, id pgtype.UUID, 
 				ID: id, Title: params.Title, Type: params.Type, Description: params.Description,
 				Venue: params.Venue, Address: params.Address, City: params.City, Zip: params.Zip,
 				StartsAt: params.StartsAt, EndsAt: params.EndsAt, Capacity: params.Capacity,
-				QualifyingPerk: params.QualifyingPerk, UpdatedAt: timestamp(now),
+				QualifyingPerk: params.QualifyingPerk, UpdatedAt: timestamp(now), BookingOpensAt: params.BookingOpensAt,
 			}); err != nil {
 				return struct{}{}, err
 			}
@@ -306,6 +317,12 @@ type EventView struct {
 	// (E-10); nil when no support email is configured.
 	ReportIssueURL *string `json:"report_issue_url"`
 	Cancelled      bool    `json:"cancelled"`
+	// BookingOpensAt is when reservations open to everyone; nil once the event
+	// is published without a later opening.
+	BookingOpensAt *time.Time `json:"booking_opens_at"`
+	// EarlyBooking is true while the signed-in donor, a Team Captain, may
+	// reserve before booking opens to everyone (B-3).
+	EarlyBooking bool `json:"early_booking"`
 }
 
 func eventView(e queries.DonorEvent) EventView {
@@ -313,7 +330,37 @@ func eventView(e queries.DonorEvent) EventView {
 		ID: e.ID.String(), Slug: e.Slug, Title: e.Title, Type: e.Type, Description: e.Description,
 		Venue: e.Venue, Address: e.Address, City: e.City,
 		StartsAt: e.StartsAt.Time, EndsAt: e.EndsAt.Time, Capacity: e.Capacity, Cancelled: e.CancelledAt.Valid,
+		BookingOpensAt: timePointer(e.BookingOpensAt),
 	}
+}
+
+// earlyBookingLead is how long before booking opens a Team Captain may
+// reserve (PRD B-3).
+const earlyBookingLead = 48 * time.Hour
+
+// ErrBookingNotOpen is returned when a donor reserves before booking opens to
+// them.
+var ErrBookingNotOpen = errors.New("booking for this event has not opened yet")
+
+// bookingOpen reports whether donor may reserve e at now, and whether that is
+// only because they hold the Team Captain perk.
+func bookingOpen(ctx context.Context, q *queries.Queries, donor pgtype.UUID, e queries.DonorEvent, now time.Time) (bool, bool, error) {
+	if !e.BookingOpensAt.Valid || !now.Before(e.BookingOpensAt.Time) {
+		return true, false, nil
+	}
+	if now.Before(e.BookingOpensAt.Time.Add(-earlyBookingLead)) {
+		return false, false, nil
+	}
+	codes, err := q.DonorEarnedBadgeCodes(ctx, donor)
+	if err != nil {
+		return false, false, err
+	}
+	earned := make(map[string]bool, len(codes))
+	for _, c := range codes {
+		earned[c] = true
+	}
+	captain := badges.HoldsPerk(earned, badges.PerkTeamCaptain)
+	return captain, captain, nil
 }
 
 // spotsLeft is capacity minus RESERVED count, floored at 0; nil when uncapped.
@@ -635,6 +682,9 @@ func (r EventReader) DetailForDonor(ctx context.Context, token string, id pgtype
 		if byPerk {
 			v.InvitationNote = invitationNote(e.QualifyingPerk)
 		}
+		if _, v.EarlyBooking, err = bookingOpen(ctx, q, d.ID, e, time.Now().UTC()); err != nil {
+			return EventView{}, err
+		}
 		if res, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: id, DonorID: d.ID}); err == nil &&
 			res.Status != reservationCancelled {
 			s := res.Status
@@ -709,6 +759,11 @@ func (s ReservationService) Reserve(ctx context.Context, token string, eventID p
 			if !ok {
 				return ReservationResult{}, ErrEventNotFound
 			}
+		}
+		if open, _, err := bookingOpen(ctx, q, d.ID, event, now); err != nil {
+			return ReservationResult{}, err
+		} else if !open {
+			return ReservationResult{}, ErrBookingNotOpen
 		}
 		// An existing active reservation is returned unchanged (idempotent).
 		existing, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: eventID, DonorID: d.ID})

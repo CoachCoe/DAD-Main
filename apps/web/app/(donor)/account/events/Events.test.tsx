@@ -21,6 +21,8 @@ const base = {
   invitation_note: null,
   report_issue_url: null,
   cancelled: false,
+  booking_opens_at: null,
+  early_booking: false,
 };
 
 it("summarizes the donor's place or the room left", () => {

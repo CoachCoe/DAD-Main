@@ -816,3 +816,63 @@ func TestPublishAlertsNearbyVolunteers(t *testing.T) {
 		t.Fatalf("an alert after opting out: %q; want opted_out", got)
 	}
 }
+
+// TestTeamCaptainsBookEarly covers B-3: before booking opens, only a Team
+// Captain can reserve, and only from 48 hours before it.
+func TestTeamCaptainsBookEarly(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	reader := EventReader{DB: pool}
+	res := ReservationService{DB: api}
+	captain, captainToken := signedInDonor(t, pool)
+	mustExec(t, pool, "INSERT INTO donor_badges (donor_id, code, source, earned_at) VALUES ($1,'TC','AUTO',now())", captain)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_badges WHERE donor_id=$1", captain) })
+	_, plainToken := signedInDonor(t, pool)
+
+	publish := func(slug string, opensIn time.Duration) pgtype.UUID {
+		t.Helper()
+		in := eventInput(slug, "Reno", "89501", "VOLUNTEER", 10*24*time.Hour)
+		in.BookingOpensAt = time.Now().UTC().Add(opensIn).Format(time.RFC3339)
+		id, err := events.Create(ctx, adminToken, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := events.Publish(ctx, adminToken, id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	soon := publish("captains-first", 24*time.Hour)
+	later := publish("opens-next-week", 5*24*time.Hour)
+	open := publish("already-open", -time.Hour)
+
+	if _, err := res.Reserve(ctx, plainToken, soon); !errors.Is(err, ErrBookingNotOpen) {
+		t.Fatalf("a donor reserved before booking opened: %v", err)
+	}
+	if _, err := res.Reserve(ctx, captainToken, later); !errors.Is(err, ErrBookingNotOpen) {
+		t.Fatalf("a captain reserved more than 48 hours early: %v", err)
+	}
+	view, err := reader.DetailForDonor(ctx, captainToken, soon)
+	if err != nil || !view.EarlyBooking || view.BookingOpensAt == nil {
+		t.Fatalf("captain's view inside the window: early=%v opens=%v err=%v", view.EarlyBooking, view.BookingOpensAt, err)
+	}
+	if got, err := res.Reserve(ctx, captainToken, soon); err != nil || got.Status != reservationReserved {
+		t.Fatalf("captain inside the 48-hour window: %+v %v", got, err)
+	}
+	if view, err = reader.DetailForDonor(ctx, plainToken, soon); err != nil || view.EarlyBooking {
+		t.Fatalf("a non-captain was offered early booking: %v %v", view.EarlyBooking, err)
+	}
+	if got, err := res.Reserve(ctx, plainToken, open); err != nil || got.Status != reservationReserved {
+		t.Fatalf("anyone after booking opened: %+v %v", got, err)
+	}
+
+	backwards := eventInput("opens-after-start", "Reno", "89501", "VOLUNTEER", 24*time.Hour)
+	backwards.BookingOpensAt = time.Now().UTC().Add(48 * time.Hour).Format(time.RFC3339)
+	if _, err := events.Create(ctx, adminToken, backwards); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("booking opening after the start: %v; want ErrStaffInput", err)
+	}
+}

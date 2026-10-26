@@ -21,6 +21,8 @@ const event = {
   invitation_note: null,
   report_issue_url: "mailto:help@example.org",
   cancelled: false,
+  booking_opens_at: null,
+  early_booking: false,
 };
 
 it("lets a signed-in donor join the waitlist of a full event", async () => {
@@ -64,4 +66,24 @@ it("explains a cancelled event", async () => {
   expect(await screen.findByText(/This event has been cancelled/)).toBeVisible();
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
   expect(screen.queryByRole("link", { name: "Add to calendar" })).not.toBeInTheDocument();
+});
+
+it("waits for booking to open, except for a Team Captain's early window", async () => {
+  const opening = { ...event, spots_left: 5, booking_opens_at: "2099-11-01T17:00:00Z" };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(Response.json(opening))),
+  );
+  const { unmount } = render(<EventDetail event="e-1" />);
+  expect(await screen.findByText(/^Booking opens/)).toBeVisible();
+  expect(screen.queryByRole("button", { name: "Reserve a spot" })).not.toBeInTheDocument();
+  unmount();
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(Response.json({ ...opening, early_booking: true }))),
+  );
+  render(<EventDetail event="e-1" />);
+  expect(await screen.findByText(/As a Team Captain, you can reserve now/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Reserve a spot" })).toBeEnabled();
 });

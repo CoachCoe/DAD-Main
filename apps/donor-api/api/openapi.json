@@ -6858,7 +6858,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "Refused with 409 once the event has started or been cancelled, or before booking opens to this donor: Team Captains may reserve from 48 hours before booking_opens_at, everyone else from it."
    }
   },
   "/donor/me/events/{event_id}/cancel": {
@@ -13372,6 +13373,22 @@
      "cancelled": {
       "type": "boolean",
       "description": "The event was cancelled; it can no longer be reserved and every place was released."
+     },
+     "booking_opens_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "When reservations open to everyone; null when they opened at publication."
+     },
+     "early_booking": {
+      "type": "boolean",
+      "description": "True while the signed-in donor, a Team Captain, may reserve before booking opens to everyone (B-3). Always false on the public read."
      }
     },
     "required": [
@@ -13390,7 +13407,9 @@
      "reservation_status",
      "invitation_note",
      "report_issue_url",
-     "cancelled"
+     "cancelled",
+     "booking_opens_at",
+     "early_booking"
     ],
     "additionalProperties": false
    },
@@ -13487,6 +13506,10 @@
        "TEAM_CAPTAIN"
       ],
       "description": "Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event."
+     },
+     "booking_opens_at": {
+      "type": "string",
+      "description": "When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3)."
      }
     },
     "additionalProperties": false
@@ -14379,6 +14402,10 @@
       ],
       "description": "Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event."
      },
+     "booking_opens_at": {
+      "type": "string",
+      "description": "When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3)."
+     },
      "id": {
       "type": "string",
       "format": "uuid"
@@ -14430,6 +14457,7 @@
      "ends_at",
      "capacity",
      "qualifying_perk",
+     "booking_opens_at",
      "id",
      "publish_state",
      "cancelled_at",
@@ -14564,6 +14592,10 @@
       ],
       "description": "Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event."
      },
+     "booking_opens_at": {
+      "type": "string",
+      "description": "When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3)."
+     },
      "id": {
       "type": "string",
       "format": "uuid"
@@ -14621,6 +14653,7 @@
      "ends_at",
      "capacity",
      "qualifying_perk",
+     "booking_opens_at",
      "id",
      "publish_state",
      "cancelled_at",

@@ -43,6 +43,10 @@ export function eventInput(form: FormData): Input | string {
   if (ends <= starts) return "The event must end after it starts.";
   const capacity = field(form, "capacity");
   if (!/^\d+$/.test(capacity)) return "Enter the capacity as a whole number, or 0 for no limit.";
+  const opensField = field(form, "booking_opens_at");
+  const opens = opensField ? instant(opensField) : "";
+  if (opens === null) return "Enter when booking opens, or leave it empty.";
+  if (opens && opens >= starts) return "Booking must open before the event starts.";
   const type = field(form, "type") as Input["type"];
   return {
     slug: field(form, "slug"),
@@ -57,6 +61,7 @@ export function eventInput(form: FormData): Input | string {
     ends_at: ends,
     capacity: Number(capacity),
     qualifying_perk: type === "INVITE_ONLY" ? (field(form, "perk") as Perk) : "",
+    booking_opens_at: opens,
   };
 }
 
@@ -147,7 +152,7 @@ export default function EventEditor({ event }: { event: string | null }) {
               {detail.cancelled_at && ` ${formatDateTime(detail.cancelled_at)}`}
             </p>
           )}
-          <form onSubmit={save} key={detail ? `${detail.id}-${detail.starts_at}-${detail.capacity}` : "new"}>
+          <form onSubmit={save} key={detail ? `${detail.id}-${detail.starts_at}-${detail.capacity}-${detail.booking_opens_at}` : "new"}>
             <fieldset disabled={cancelled}>
               <label>
                 Slug
@@ -213,6 +218,19 @@ export default function EventEditor({ event }: { event: string | null }) {
                   required
                 />
               </label>
+              <label>
+                Booking opens (optional)
+                <input
+                  name="booking_opens_at"
+                  type="datetime-local"
+                  defaultValue={detail?.booking_opens_at ? localInput(detail.booking_opens_at) : undefined}
+                  aria-describedby="booking-opens-help"
+                />
+              </label>
+              <p className="note" id="booking-opens-help">
+                Leave empty to open booking when the event is published. Team Captains can reserve 48 hours before
+                booking opens.
+              </p>
               <label>
                 Capacity (0 for no limit)
                 <input name="capacity" inputMode="numeric" defaultValue={detail?.capacity ?? 0} required />

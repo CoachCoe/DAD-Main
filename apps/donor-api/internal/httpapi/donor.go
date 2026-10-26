@@ -78,6 +78,8 @@ func donorStatus(err error) (int, string) {
 		return http.StatusConflict, "This event has been cancelled"
 	case errors.Is(err, store.ErrReservationClosed):
 		return http.StatusConflict, "This event has already started"
+	case errors.Is(err, store.ErrBookingNotOpen):
+		return http.StatusConflict, "Booking for this event has not opened yet"
 	case errors.Is(err, store.ErrCheckIn):
 		return http.StatusUnprocessableEntity, "Check-in is not valid for this event right now"
 	case errors.Is(err, store.ErrCheckInDisabled):

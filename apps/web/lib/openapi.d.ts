@@ -1807,7 +1807,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reserve a spot (or join the waitlist) at an event (E-4) */
+        /**
+         * Reserve a spot (or join the waitlist) at an event (E-4)
+         * @description Refused with 409 once the event has started or been cancelled, or before booking opens to this donor: Team Captains may reserve from 48 hours before booking_opens_at, everyone else from it.
+         */
         post: operations["reserveEvent"];
         delete?: never;
         options?: never;
@@ -3562,6 +3565,10 @@ export interface components {
             report_issue_url: string | null;
             /** @description The event was cancelled; it can no longer be reserved and every place was released. */
             cancelled: boolean;
+            /** @description When reservations open to everyone; null when they opened at publication. */
+            booking_opens_at: string | null;
+            /** @description True while the signed-in donor, a Team Captain, may reserve before booking opens to everyone (B-3). Always false on the public read. */
+            early_booking: boolean;
         };
         /** @description The outcome of a reserve or cancel (E-4). */
         ReservationResult: {
@@ -3596,6 +3603,8 @@ export interface components {
              * @enum {string}
              */
             qualifying_perk?: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
+            /** @description When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3). */
+            booking_opens_at?: string;
         };
         ReportMetric: {
             /** @description Whether the server can compute this metric. */
@@ -3884,6 +3893,8 @@ export interface components {
              * @enum {string}
              */
             qualifying_perk: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
+            /** @description When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3). */
+            booking_opens_at: string;
             /** Format: uuid */
             id: string;
             /** @enum {string} */
@@ -3936,6 +3947,8 @@ export interface components {
              * @enum {string}
              */
             qualifying_perk: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
+            /** @description When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3). */
+            booking_opens_at: string;
             /** Format: uuid */
             id: string;
             /** @enum {string} */
