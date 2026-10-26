@@ -109,6 +109,15 @@ func (q *Queries) DeleteDonorPreferences(ctx context.Context, donorID pgtype.UUI
 	return err
 }
 
+const deleteEmployeeLink = `-- name: DeleteEmployeeLink :exec
+DELETE FROM donor_partner_employees WHERE donor_id = $1
+`
+
+func (q *Queries) DeleteEmployeeLink(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteEmployeeLink, donorID)
+	return err
+}
+
 const deletePhoneCode = `-- name: DeletePhoneCode :exec
 DELETE FROM donor_phone_codes WHERE phone=$1
 `
@@ -521,6 +530,28 @@ func (q *Queries) SaveSharing(ctx context.Context, arg SaveSharingParams) (Donor
 		&i.CompanyCode,
 	)
 	return i, err
+}
+
+const scrubDonorEmailChanges = `-- name: ScrubDonorEmailChanges :exec
+UPDATE donor_email_changes SET
+	old_email = 'deleted-old-' || id::text || '@deleted.invalid',
+	new_email = 'deleted-new-' || id::text || '@deleted.invalid',
+	encrypted_token = NULL
+WHERE donor_id = $1
+`
+
+func (q *Queries) ScrubDonorEmailChanges(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, scrubDonorEmailChanges, donorID)
+	return err
+}
+
+const scrubDonorSessionDevices = `-- name: ScrubDonorSessionDevices :exec
+UPDATE donor_sessions SET device_name = NULL WHERE donor_id = $1
+`
+
+func (q *Queries) ScrubDonorSessionDevices(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, scrubDonorSessionDevices, donorID)
+	return err
 }
 
 const touchOIDCIdentity = `-- name: TouchOIDCIdentity :exec

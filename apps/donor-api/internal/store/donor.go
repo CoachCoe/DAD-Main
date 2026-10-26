@@ -271,30 +271,32 @@ func (s DonorService) SaveProfile(ctx context.Context, token string, in ProfileU
 }
 
 // DeleteAccount erases the signed-in donor's personal data (PRD §6.12). It
-// anonymises the donor row and removes personal satellites — passkeys, OIDC
-// identities, preferences, login links, email-change tokens, and all sessions
-// (which also clears push tokens) — while retaining the financial ledger
-// (gifts, checkouts, billing periods, refunds), which is required for legal and
-// tax records and carries no personal data of its own. The erasure is recorded
-// in donor_deletions, a durable audit that outlives the scrub. The donor is
-// signed out everywhere as part of the deletion, so no session survives it.
+// anonymises the donor row and removes personal satellites: passkeys, OIDC
+// identities, preferences, login links, the addresses of email changes, the
+// device names of sessions, which are all revoked, and the employer link. It
+// gives up the donor's places at upcoming events, so the waitlist moves up. The
+// financial ledger (gifts, checkouts, billing periods, refunds) is retained for
+// legal and tax records and carries no personal data of its own. The erasure
+// is recorded in donor_deletions, which outlives the scrub.
 func (s DonorService) DeleteAccount(ctx context.Context, token string) error {
 	_, err := donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (struct{}, error) {
 		q := queries.New(tx)
 		if err := q.RecordDonorDeletion(ctx, queries.RecordDonorDeletionParams{DonorID: d.ID, DeletedAt: timestamp(now)}); err != nil {
 			return struct{}{}, err
 		}
+		if err := releaseEventPlaces(ctx, q, d.ID, now); err != nil {
+			return struct{}{}, err
+		}
 		if _, err := q.DeleteAllDonorPasskeys(ctx, d.ID); err != nil {
 			return struct{}{}, err
 		}
-		if err := q.DeleteDonorOIDCIdentities(ctx, d.ID); err != nil {
-			return struct{}{}, err
-		}
-		if err := q.DeleteDonorPreferences(ctx, d.ID); err != nil {
-			return struct{}{}, err
-		}
-		if err := q.CancelEmailChanges(ctx, d.ID); err != nil {
-			return struct{}{}, err
+		for _, scrub := range []func(context.Context, pgtype.UUID) error{
+			q.DeleteDonorOIDCIdentities, q.DeleteDonorPreferences, q.CancelEmailChanges,
+			q.ScrubDonorEmailChanges, q.DeleteEmployeeLink,
+		} {
+			if err := scrub(ctx, d.ID); err != nil {
+				return struct{}{}, err
+			}
 		}
 		if err := q.ConsumeDonorLinks(ctx, queries.ConsumeDonorLinksParams{DonorID: d.ID, ConsumedAt: timestamp(now)}); err != nil {
 			return struct{}{}, err
@@ -302,11 +304,41 @@ func (s DonorService) DeleteAccount(ctx context.Context, token string) error {
 		if err := q.RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: d.ID, RevokedAt: timestamp(now)}); err != nil {
 			return struct{}{}, err
 		}
+		if err := q.ScrubDonorSessionDevices(ctx, d.ID); err != nil {
+			return struct{}{}, err
+		}
 		// Scrub the donor row last, so a failure above leaves the account intact
 		// and retryable rather than half-erased.
 		return struct{}{}, q.AnonymizeDonor(ctx, d.ID)
 	})
 	return err
+}
+
+// releaseEventPlaces cancels a donor's reservations at upcoming events and
+// fills each seat it frees from the waitlist. Events are locked in id order,
+// so concurrent releases cannot deadlock.
+func releaseEventPlaces(ctx context.Context, q *queries.Queries, donor pgtype.UUID, now time.Time) error {
+	places, err := q.DonorUpcomingReservations(ctx, queries.DonorUpcomingReservationsParams{DonorID: donor, AsOf: timestamp(now)})
+	if err != nil {
+		return err
+	}
+	for _, place := range places {
+		event, err := q.LockEvent(ctx, place.EventID)
+		if err != nil {
+			return err
+		}
+		if err = q.SetReservationStatus(ctx, queries.SetReservationStatusParams{
+			EventID: place.EventID, DonorID: donor, Status: reservationCancelled, UpdatedAt: timestamp(now),
+		}); err != nil {
+			return err
+		}
+		if place.Status == reservationReserved {
+			if err = fillSeats(ctx, q, event, now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // sharing offers referral links only once the donor has chosen a public name.

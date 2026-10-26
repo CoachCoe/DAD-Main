@@ -146,6 +146,19 @@ DELETE FROM donor_oidc_identities WHERE donor_id=$1;
 -- name: DeleteDonorPreferences :exec
 DELETE FROM donor_preferences WHERE donor_id=$1;
 
+-- name: ScrubDonorEmailChanges :exec
+UPDATE donor_email_changes SET
+	old_email = 'deleted-old-' || id::text || '@deleted.invalid',
+	new_email = 'deleted-new-' || id::text || '@deleted.invalid',
+	encrypted_token = NULL
+WHERE donor_id = $1;
+
+-- name: ScrubDonorSessionDevices :exec
+UPDATE donor_sessions SET device_name = NULL WHERE donor_id = $1;
+
+-- name: DeleteEmployeeLink :exec
+DELETE FROM donor_partner_employees WHERE donor_id = $1;
+
 -- name: RecordDonorDeletion :exec
 INSERT INTO donor_deletions (donor_id, deleted_at) VALUES ($1, $2)
 ON CONFLICT (donor_id) DO NOTHING;

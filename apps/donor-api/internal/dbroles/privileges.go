@@ -194,7 +194,7 @@ var grants = map[string]map[Role]string{
 		MessageWorker:    "SELECT, INSERT, UPDATE",
 		Monitor:          "SELECT (attempts, available_at, completed_at)",
 	},
-	"donor_partner_employees":      {API: "SELECT, INSERT, UPDATE", StripeWorker: "SELECT", ProjectionWorker: "SELECT"},
+	"donor_partner_employees":      {API: "SELECT, INSERT, UPDATE, DELETE", StripeWorker: "SELECT", ProjectionWorker: "SELECT"},
 	"donor_partner_teams":          {API: "SELECT, INSERT"},
 	"donor_partner_match_payments": {API: "SELECT, INSERT"},
 	"donor_content_sources":        {API: "SELECT, INSERT", Rekey: "SELECT (id, encrypted_data), UPDATE (encrypted_data)"},

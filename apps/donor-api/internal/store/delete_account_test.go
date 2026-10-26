@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/store/queries"
 )
 
@@ -46,6 +48,40 @@ func TestDeleteAccountErasesPersonalDataAndKeepsLedger(t *testing.T) {
 		pool.Exec(ctx, "DELETE FROM donor_deletions WHERE donor_id=$1", id)
 	})
 
+	// An email change, an app session naming its device, an employer, and the
+	// only seat at an event someone else is waiting for.
+	changeID := mustNewID(t)
+	mustExec(t, pool, `INSERT INTO donor_email_changes (id, donor_id, old_email, new_email, stage, token_hash, expires_at)
+		VALUES ($1, $2, 'old@example.org', 'new@example.org', 'COMPLETED', $3, now())`, changeID, id, HashToken(changeID.String()))
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_email_changes WHERE donor_id=$1", id) })
+	mustExec(t, pool, `INSERT INTO donor_sessions (id, donor_id, token_hash, expires_at, client, device_name, platform,
+			refresh_family_hash, refresh_hash, refresh_expires_at)
+		VALUES ($1, $2, $3, now() + interval '1 day', 'APP', 'Dana''s iPhone', 'IOS', $4, $5, now() + interval '1 day')`,
+		mustNewID(t), id, HashToken("app-"+id.String()), HashToken("family-"+id.String()), HashToken("refresh-"+id.String()))
+	partnerID := approvedPartner(t, pool, "Epsilon Co", "EPSILON", 0, 0)
+	mustExec(t, pool, "INSERT INTO donor_partner_employees (donor_id, partner_id) VALUES ($1, $2)", id, partnerID)
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+	seat := eventInput("one-seat", "San Francisco", "94103", "VOLUNTEER", 48*time.Hour)
+	seat.Capacity = 1
+	eventID, err := events.Create(ctx, adminToken, seat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	reservations := ReservationService{DB: as(t, dbroles.API)}
+	waiting, waitingToken := signedInDonor(t, pool)
+	pushCleanupDonor(t, pool, waiting)
+	if r, err := reservations.Reserve(ctx, token, eventID); err != nil || r.Status != reservationReserved {
+		t.Fatalf("reserve: %+v %v", r, err)
+	}
+	if r, err := reservations.Reserve(ctx, waitingToken, eventID); err != nil || r.Status != reservationWaitlisted {
+		t.Fatalf("waitlist: %+v %v", r, err)
+	}
+
 	if err := s.DeleteAccount(ctx, token); err != nil {
 		t.Fatal(err)
 	}
@@ -79,6 +115,27 @@ func TestDeleteAccountErasesPersonalDataAndKeepsLedger(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_oidc_identities WHERE donor_id=$1", id).Scan(&oidcCount); err != nil ||
 		oidcCount != 0 {
 		t.Errorf("oidc identities = %d, err %v; want 0", oidcCount, err)
+	}
+
+	var oldEmail, newEmail string
+	if err := pool.QueryRow(ctx, "SELECT old_email, new_email FROM donor_email_changes WHERE id=$1", changeID).
+		Scan(&oldEmail, &newEmail); err != nil || strings.Contains(oldEmail+newEmail, "example.org") {
+		t.Errorf("email change kept addresses %q, %q (%v)", oldEmail, newEmail, err)
+	}
+	var devices int
+	if err := pool.QueryRow(ctx, "SELECT count(device_name) FROM donor_sessions WHERE donor_id=$1", id).Scan(&devices); err != nil ||
+		devices != 0 {
+		t.Errorf("sessions kept %d device names (%v)", devices, err)
+	}
+	var employers int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_partner_employees WHERE donor_id=$1", id).Scan(&employers); err != nil ||
+		employers != 0 {
+		t.Errorf("employer link kept (%d, %v)", employers, err)
+	}
+	var waitingStatus string
+	if err := pool.QueryRow(ctx, "SELECT status FROM donor_event_reservations WHERE event_id=$1 AND donor_id=$2", eventID, waiting).
+		Scan(&waitingStatus); err != nil || waitingStatus != reservationReserved {
+		t.Errorf("the waitlisted donor is %q (%v) after the seat holder deleted their account", waitingStatus, err)
 	}
 
 	// The gift ledger is retained.
