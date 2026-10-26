@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"math/big"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -204,12 +205,19 @@ func calendarYear(year int) (time.Time, time.Time) {
 
 // matchOwed is a year's gifts times the match rate, capped (EM-6). A cap of
 // zero means no cap.
-func matchOwed(giftsMinor int64, rateBP int32, capMinor int64) int64 {
-	owed := giftsMinor * int64(rateBP) / 10000
-	if capMinor > 0 {
-		owed = min(owed, capMinor)
+func matchOwed(giftsMinor int64, rateBP int32, capMinor int64) (int64, error) {
+	if giftsMinor < 0 || rateBP < 0 || capMinor < 0 {
+		return 0, errors.New("invalid matching terms or gifts")
 	}
-	return owed
+	owed := new(big.Int).Mul(big.NewInt(giftsMinor), big.NewInt(int64(rateBP)))
+	owed.Quo(owed, big.NewInt(10000))
+	if capMinor > 0 && owed.Cmp(big.NewInt(capMinor)) > 0 {
+		return capMinor, nil
+	}
+	if !owed.IsInt64() {
+		return 0, errors.New("matching amount exceeds supported range")
+	}
+	return owed.Int64(), nil
 }
 
 // OurPeople returns the calling partner's Our People totals (P-13). Any
@@ -227,9 +235,13 @@ func (s EmployeeService) OurPeople(ctx context.Context, token string) (PartnerOu
 		if row.Enrolled < minimumGroup {
 			return PartnerOurPeople{WorkforceSize: row.WorkforceSize, Suppressed: true}, nil
 		}
+		matched, err := matchOwed(row.YearGivenMinor, row.MatchRateBp, row.MatchCapMinor)
+		if err != nil {
+			return PartnerOurPeople{}, err
+		}
 		return PartnerOurPeople{
 			Enrolled: row.Enrolled, WorkforceSize: row.WorkforceSize, GivenMinor: row.GivenMinor,
-			MatchedMinor:  matchOwed(row.YearGivenMinor, row.MatchRateBp, row.MatchCapMinor),
+			MatchedMinor:  matched,
 			AvgStreakDays: row.AvgStreakDays, VolunteerMinutes: row.VolunteerMinutes, Teams: row.Teams,
 		}, nil
 	})
@@ -281,7 +293,10 @@ func (s EmployeeService) Match(ctx context.Context, token string, partnerID pgty
 		if err != nil {
 			return MatchStatus{}, err
 		}
-		owed := matchOwed(gifts, terms.MatchRateBp, terms.MatchCapMinor)
+		owed, err := matchOwed(gifts, terms.MatchRateBp, terms.MatchCapMinor)
+		if err != nil {
+			return MatchStatus{}, err
+		}
 		outstanding := max(owed-paid, 0)
 		return MatchStatus{
 			Year: year, RateBP: terms.MatchRateBp, CapMinor: terms.MatchCapMinor,

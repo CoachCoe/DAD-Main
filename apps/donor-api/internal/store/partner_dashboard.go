@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/bits"
 	"strconv"
 	"time"
 
@@ -107,10 +108,15 @@ func partnerOverview(actor PartnerActor, t queries.PartnerOverviewTotalsRow) Par
 
 // percent is part as a whole percentage of whole, at most 100.
 func percent(part, whole int64) int {
-	if whole <= 0 {
+	if whole <= 0 || part <= 0 {
 		return 0
 	}
-	return int(min(part*100/whole, 100))
+	if part >= whole {
+		return 100
+	}
+	hi, lo := bits.Mul64(uint64(part), 100)
+	value, _ := bits.Div64(hi, lo, uint64(whole))
+	return int(value)
 }
 
 // Overview computes the header tiles for the calling partner.
