@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"regexp"
+	"sync"
 	"time"
 
 	"dad/donor-api/internal/identity"
@@ -33,17 +35,21 @@ var phonePatternStore = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
 const (
 	phoneCodeTTL      = 10 * time.Minute
 	phoneCodeMaxTries = 5
+	phoneSendTimeout  = 15 * time.Second
 )
 
 // PhoneService runs phone/SMS sign-in. Sender is nil when SMS is unconfigured.
 type PhoneService struct {
 	DB     *pgxpool.Pool
 	Sender sms.Sender
+	// sends, when set, tracks background sends so tests can wait for them.
+	sends *sync.WaitGroup
 }
 
 // BeginSignIn sends a fresh one-time code to phone. An unknown or malformed
 // phone is not an error (the response never reveals whether an account exists);
-// a code is only stored and sent for a phone that matches an account.
+// a code is only stored and sent for a phone that matches an account, and a
+// failed send is reported to operators, not the caller.
 func (s PhoneService) BeginSignIn(ctx context.Context, phone string) error {
 	if s.Sender == nil {
 		return ErrSignInUnavailable
@@ -73,7 +79,23 @@ func (s PhoneService) BeginSignIn(ctx context.Context, phone string) error {
 	if !sent {
 		return nil
 	}
-	return s.Sender.Send(ctx, phone, fmt.Sprintf("Your DAD sign-in code is %s. It expires in 10 minutes.", code))
+	// The send runs after the response so that neither its outcome nor its
+	// latency tells the caller whether the number has an account.
+	message := fmt.Sprintf("Your DAD sign-in code is %s. It expires in 10 minutes.", code)
+	send, cancel := context.WithTimeout(context.WithoutCancel(ctx), phoneSendTimeout)
+	if s.sends != nil {
+		s.sends.Add(1)
+	}
+	go func() {
+		defer cancel()
+		if s.sends != nil {
+			defer s.sends.Done()
+		}
+		if err := s.Sender.Send(send, phone, message); err != nil {
+			slog.Warn("sign-in code not sent", "cause", err.Error())
+		}
+	}()
+	return nil
 }
 
 // FinishSignIn verifies the code for phone and issues a session for client.

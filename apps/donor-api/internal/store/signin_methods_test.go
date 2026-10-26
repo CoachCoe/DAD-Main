@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,7 +24,8 @@ func TestPhoneSignIn(t *testing.T) {
 	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_phone_codes WHERE phone=$1", phone) })
 
 	sender := &sms.StubSender{}
-	svc := PhoneService{DB: api, Sender: sender}
+	sends := &sync.WaitGroup{}
+	svc := PhoneService{DB: api, Sender: sender, sends: sends}
 
 	// Unconfigured service refuses.
 	if err := (PhoneService{DB: api}).BeginSignIn(ctx, phone); !errors.Is(err, ErrSignInUnavailable) {
@@ -34,6 +36,7 @@ func TestPhoneSignIn(t *testing.T) {
 	if err := svc.BeginSignIn(ctx, phone); err != nil {
 		t.Fatal(err)
 	}
+	sends.Wait()
 	msg, ok := sender.Last(phone)
 	if !ok {
 		t.Fatal("no code sent")
@@ -68,6 +71,7 @@ func TestPhoneSignIn(t *testing.T) {
 	if err := svc.BeginSignIn(ctx, "+19998887777"); err != nil {
 		t.Fatal(err)
 	}
+	sends.Wait()
 	if _, ok := sender.Last("+19998887777"); ok {
 		t.Fatal("code sent to a phone with no account")
 	}
@@ -157,4 +161,27 @@ func TestOIDCProviderOutageIsNotABadToken(t *testing.T) {
 	if !errors.Is(err, oidc.ErrKeys) || errors.Is(err, ErrSignInCode) {
 		t.Fatalf("SignIn during a provider outage = %v; want ErrKeys", err)
 	}
+}
+
+type failingSender struct{}
+
+func (failingSender) Send(context.Context, string, string) error { return sms.ErrUnavailable }
+
+// TestPhoneSignInHidesAFailedSend keeps a gateway outage from revealing which
+// numbers have accounts: a known number answers like an unknown one.
+func TestPhoneSignInHidesAFailedSend(t *testing.T) {
+	pool := database(t)
+	id, _ := donor(t, pool)
+	ctx := context.Background()
+	phone := "+14155550124"
+	mustExec(t, pool, "UPDATE donors SET phone=$2 WHERE id=$1", id, phone)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone) })
+	sends := &sync.WaitGroup{}
+	svc := PhoneService{DB: as(t, dbroles.API), Sender: failingSender{}, sends: sends}
+	for _, number := range []string{phone, "+19998887776"} {
+		if err := svc.BeginSignIn(ctx, number); err != nil {
+			t.Errorf("BeginSignIn(%s) = %v; want the same success for every number", number, err)
+		}
+	}
+	sends.Wait()
 }
