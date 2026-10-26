@@ -13254,13 +13254,31 @@
       "type": "integer",
       "format": "int64",
       "description": "Cents recovered against the failed-period cohort."
+     },
+     "available": {
+      "type": "boolean",
+      "description": "False when source facts cannot establish the requested metric."
+     },
+     "reason": {
+      "type": "string"
+     },
+     "missing_history": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "recovered_within_grace": {
+      "type": "integer",
+      "format": "int64"
      }
     },
     "required": [
      "failed_periods",
      "lost_minor",
      "recovered_periods",
-     "recovered_minor"
+     "recovered_minor",
+     "available",
+     "missing_history",
+     "recovered_within_grace"
     ],
     "additionalProperties": false
    },
@@ -13282,15 +13300,31 @@
      "retained_m6": {
       "type": "integer",
       "format": "int64"
+     },
+     "available": {
+      "type": "boolean",
+      "description": "False when source facts cannot establish the requested metric."
+     },
+     "reason": {
+      "type": "string"
+     },
+     "milestones": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/ReportRetentionMilestone"
+      }
      }
     },
     "required": [
      "reached_m3",
      "retained_m3",
      "reached_m6",
-     "retained_m6"
+     "retained_m6",
+     "available",
+     "milestones"
     ],
-    "additionalProperties": false
+    "additionalProperties": false,
+    "description": "Historical first-recurring-gift cohort survival at 30, 90, 180 and 365 local calendar days. Legacy M3/M6 fields alias 90/180-day eligible and retained counts. Unknown history is explicit."
    },
    "ReportTimeToFirstGift": {
     "type": "object",
@@ -13302,13 +13336,22 @@
      "median_seconds": {
       "type": "integer",
       "format": "int64"
+     },
+     "available": {
+      "type": "boolean",
+      "description": "False when source facts cannot establish the requested metric."
+     },
+     "reason": {
+      "type": "string"
      }
     },
     "required": [
      "sample",
-     "median_seconds"
+     "median_seconds",
+     "available"
     ],
-    "additionalProperties": false
+    "additionalProperties": false,
+    "description": "Landing-to-first-gift timing. Unavailable until consented landing-to-checkout linkage exists; account creation is never substituted."
    },
    "Report": {
     "type": "object",
@@ -14266,6 +14309,34 @@
      "events_volunteered"
     ],
     "additionalProperties": false
+   },
+   "ReportRetentionMilestone": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "days": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "eligible": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "retained": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "unknown": {
+      "type": "integer",
+      "format": "int64"
+     }
+    },
+    "required": [
+     "days",
+     "eligible",
+     "retained",
+     "unknown"
+    ]
    }
   }
  }

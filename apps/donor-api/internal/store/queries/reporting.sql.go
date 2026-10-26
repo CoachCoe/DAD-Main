@@ -145,67 +145,86 @@ func (q *Queries) ReportGiftMix(ctx context.Context, arg ReportGiftMixParams) ([
 }
 
 const reportInvoluntaryChurn = `-- name: ReportInvoluntaryChurn :one
-WITH failed AS (
-	SELECT bp.id, bp.due_at, c.amount_minor AS scheduled_minor,
-		EXISTS(SELECT 1 FROM donor_gifts g WHERE g.period_id = bp.id) AS recovered,
-		coalesce((SELECT sum(g.amount_minor) FROM donor_gifts g WHERE g.period_id = bp.id), 0)::bigint AS recovered_minor
-	FROM donor_billing_periods bp
-	JOIN donor_checkouts c ON c.id = bp.checkout_id
-	WHERE bp.status = 'FAILED'
-		AND bp.due_at >= $1 AND bp.due_at < $2
-		AND bp.due_at + INTERVAL '7 days' <= $3
+WITH failures AS (
+  SELECT DISTINCT ON (o.period_id) o.period_id, o.amount_minor
+  FROM donor_billing_observations o JOIN donor_billing_periods p ON p.id=o.period_id
+  WHERE o.status='FAILED' AND o.billing_reason='subscription_cycle'
+    AND o.occurred_at < $1::timestamptz
+    AND p.due_at >= $2::timestamptz AND p.due_at < $3::timestamptz
+  ORDER BY o.period_id,o.occurred_at,o.id
+), periods AS (
+  SELECT f.period_id, f.amount_minor, p.due_at, paid.paid_at, paid.amount_minor AS paid_minor
+  FROM failures f JOIN donor_billing_periods p ON p.id=f.period_id
+  LEFT JOIN LATERAL (SELECT g.paid_at,g.amount_minor FROM donor_gifts g WHERE g.period_id=p.id
+    AND g.paid_at < $1::timestamptz ORDER BY g.paid_at,g.stripe_object_id LIMIT 1) paid ON true
 )
-SELECT
-	count(*)::bigint AS failed_periods,
-	coalesce(sum(CASE WHEN NOT recovered THEN scheduled_minor ELSE 0 END), 0)::bigint AS lost_minor,
-	count(*) FILTER (WHERE recovered)::bigint AS recovered_periods,
-	coalesce(sum(recovered_minor), 0)::bigint AS recovered_minor
-FROM failed
+SELECT count(*)::bigint AS failed_periods,
+  coalesce(sum(amount_minor) FILTER (WHERE due_at+interval '7 days' <= $1::timestamptz
+    AND (paid_at IS NULL OR paid_at >= due_at+interval '7 days')),0)::bigint AS lost_minor,
+  count(*) FILTER (WHERE paid_at IS NOT NULL)::bigint AS recovered_periods,
+  coalesce(sum(paid_minor),0)::bigint AS recovered_minor,
+  count(*) FILTER (WHERE paid_at < due_at+interval '7 days')::bigint AS recovered_within_grace,
+  count(*) FILTER (WHERE paid_minor IS NOT NULL AND paid_minor<>amount_minor)::bigint AS inconsistent_periods,
+  (SELECT count(*) FROM donor_billing_periods p WHERE p.due_at >= $2::timestamptz
+    AND p.due_at < $3::timestamptz AND p.status IN ('PAID','FAILED')
+    AND NOT EXISTS(SELECT 1 FROM donor_billing_observations o WHERE o.period_id=p.id
+      AND o.occurred_at < $1::timestamptz))::bigint AS missing_history
+FROM periods
 `
 
 type ReportInvoluntaryChurnParams struct {
-	DueAt   pgtype.Timestamptz `json:"due_at"`
-	DueAt_2 pgtype.Timestamptz `json:"due_at_2"`
-	DueAt_3 pgtype.Timestamptz `json:"due_at_3"`
+	Cutoff  pgtype.Timestamptz `json:"cutoff"`
+	StartAt pgtype.Timestamptz `json:"start_at"`
+	EndAt   pgtype.Timestamptz `json:"end_at"`
 }
 
 type ReportInvoluntaryChurnRow struct {
-	FailedPeriods    int64 `json:"failed_periods"`
-	LostMinor        int64 `json:"lost_minor"`
-	RecoveredPeriods int64 `json:"recovered_periods"`
-	RecoveredMinor   int64 `json:"recovered_minor"`
+	FailedPeriods        int64 `json:"failed_periods"`
+	LostMinor            int64 `json:"lost_minor"`
+	RecoveredPeriods     int64 `json:"recovered_periods"`
+	RecoveredMinor       int64 `json:"recovered_minor"`
+	RecoveredWithinGrace int64 `json:"recovered_within_grace"`
+	InconsistentPeriods  int64 `json:"inconsistent_periods"`
+	MissingHistory       int64 `json:"missing_history"`
 }
 
-// Involuntary churn/recovery from billing periods. A FAILED period whose retry
-// deadline (due_at + 7 days, matching the streak grace rule) has passed by the
-// observation cutoff ($3) is lost value, using the period's scheduled gift
-// amount once. A verified gift collected for that same period (period_id) is
-// recovered value. Cohort is failed periods whose due_at falls in [start, end).
-// Each period counts once; amounts are never multiplied by retry/webhook count.
 func (q *Queries) ReportInvoluntaryChurn(ctx context.Context, arg ReportInvoluntaryChurnParams) (ReportInvoluntaryChurnRow, error) {
-	row := q.db.QueryRow(ctx, reportInvoluntaryChurn, arg.DueAt, arg.DueAt_2, arg.DueAt_3)
+	row := q.db.QueryRow(ctx, reportInvoluntaryChurn, arg.Cutoff, arg.StartAt, arg.EndAt)
 	var i ReportInvoluntaryChurnRow
 	err := row.Scan(
 		&i.FailedPeriods,
 		&i.LostMinor,
 		&i.RecoveredPeriods,
 		&i.RecoveredMinor,
+		&i.RecoveredWithinGrace,
+		&i.InconsistentPeriods,
+		&i.MissingHistory,
 	)
 	return i, err
 }
 
 const reportReferralDollars = `-- name: ReportReferralDollars :one
-SELECT
-	coalesce(sum(net_minor) FILTER (WHERE referral_kind = 'LINK'), 0)::bigint AS link_minor,
-	coalesce(sum(net_minor) FILTER (WHERE referral_kind = 'IRL'), 0)::bigint AS irl_minor
-FROM donor_metric_projections
-WHERE referrer_id IS NOT NULL
-	AND created_at >= $1 AND created_at < $2
+WITH first_gifts AS (
+  SELECT DISTINCT ON (donor_id) donor_id,paid_at,referrer_id,referral_kind
+  FROM donor_gifts WHERE paid_at < $1::timestamptz
+  ORDER BY donor_id,paid_at,stripe_object_id
+), net AS (
+  SELECT f.referral_kind,g.amount_minor-coalesce((SELECT sum(r.amount_minor) FROM donor_refunds r WHERE r.gift_id=g.id
+    AND coalesce((SELECT o.status FROM donor_refund_observations o WHERE o.refund_id=r.id
+      AND o.observed_at < $1::timestamptz ORDER BY o.observed_at DESC,o.id DESC LIMIT 1),
+      CASE WHEN r.observed_at < $1::timestamptz THEN r.status END)='SUCCEEDED'),0) AS amount
+  FROM first_gifts f JOIN donor_gifts g ON g.donor_id=f.donor_id
+  WHERE f.referrer_id IS NOT NULL AND f.paid_at >= $2::timestamptz
+    AND f.paid_at < $3::timestamptz AND g.paid_at < $1::timestamptz
+)
+SELECT coalesce(sum(amount) FILTER(WHERE referral_kind='LINK'),0)::bigint AS link_minor,
+  coalesce(sum(amount) FILTER(WHERE referral_kind='IRL'),0)::bigint AS irl_minor FROM net
 `
 
 type ReportReferralDollarsParams struct {
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	Cutoff  pgtype.Timestamptz `json:"cutoff"`
+	StartAt pgtype.Timestamptz `json:"start_at"`
+	EndAt   pgtype.Timestamptz `json:"end_at"`
 }
 
 type ReportReferralDollarsRow struct {
@@ -213,109 +232,106 @@ type ReportReferralDollarsRow struct {
 	IrlMinor  int64 `json:"irl_minor"`
 }
 
-// Actual collected referred gifts less successful refunds, direct-only, split
-// LINK/IRL. net_minor on the referred row is already net of refunds (CHECK
-// >= 0), so summing it over referred rows in the period gives realized referral
-// dollars without re-joining refunds.
 func (q *Queries) ReportReferralDollars(ctx context.Context, arg ReportReferralDollarsParams) (ReportReferralDollarsRow, error) {
-	row := q.db.QueryRow(ctx, reportReferralDollars, arg.CreatedAt, arg.CreatedAt_2)
+	row := q.db.QueryRow(ctx, reportReferralDollars, arg.Cutoff, arg.StartAt, arg.EndAt)
 	var i ReportReferralDollarsRow
 	err := row.Scan(&i.LinkMinor, &i.IrlMinor)
 	return i, err
 }
 
-const reportRetention = `-- name: ReportRetention :one
-SELECT
-	count(*) FILTER (WHERE best_streak >= 3)::bigint AS reached_m3,
-	count(*) FILTER (WHERE current_streak >= 3)::bigint AS retained_m3,
-	count(*) FILTER (WHERE best_streak >= 6)::bigint AS reached_m6,
-	count(*) FILTER (WHERE current_streak >= 6)::bigint AS retained_m6
-FROM donor_metric_projections
-WHERE streak_since IS NOT NULL
-	AND streak_since >= $1 AND streak_since < $2
+const reportRetention = `-- name: ReportRetention :many
+SELECT days,count(*)::bigint AS eligible,
+  count(*) FILTER (WHERE retained)::bigint AS retained,
+  count(*) FILTER (WHERE retained IS NULL)::bigint AS unknown
+FROM donor_retention_milestones
+WHERE cohort_at >= $1::timestamptz AND cohort_at < $2::timestamptz
+  AND checkpoint_at <= $3::timestamptz
+GROUP BY days ORDER BY days
 `
 
 type ReportRetentionParams struct {
-	StreakSince   pgtype.Timestamptz `json:"streak_since"`
-	StreakSince_2 pgtype.Timestamptz `json:"streak_since_2"`
+	StartAt pgtype.Timestamptz `json:"start_at"`
+	EndAt   pgtype.Timestamptz `json:"end_at"`
+	Cutoff  pgtype.Timestamptz `json:"cutoff"`
 }
 
 type ReportRetentionRow struct {
-	ReachedM3  int64 `json:"reached_m3"`
-	RetainedM3 int64 `json:"retained_m3"`
-	ReachedM6  int64 `json:"reached_m6"`
-	RetainedM6 int64 `json:"retained_m6"`
+	Days     int32 `json:"days"`
+	Eligible int64 `json:"eligible"`
+	Retained int64 `json:"retained"`
+	Unknown  int64 `json:"unknown"`
 }
 
-// Month-three and month-six retention from the current projection streak. A
-// donor counts toward a milestone's denominator when their best_streak shows
-// they reached it; current_streak >= milestone counts toward the numerator.
-// Scoped to donors who began a recurring streak (streak_since) in the period.
-// Caveat echoed by the service: current snapshots approximate historical
-// retention; the streak projection is the authoritative within-R1 source.
-func (q *Queries) ReportRetention(ctx context.Context, arg ReportRetentionParams) (ReportRetentionRow, error) {
-	row := q.db.QueryRow(ctx, reportRetention, arg.StreakSince, arg.StreakSince_2)
-	var i ReportRetentionRow
-	err := row.Scan(
-		&i.ReachedM3,
-		&i.RetainedM3,
-		&i.ReachedM6,
-		&i.RetainedM6,
-	)
-	return i, err
+func (q *Queries) ReportRetention(ctx context.Context, arg ReportRetentionParams) ([]ReportRetentionRow, error) {
+	rows, err := q.db.Query(ctx, reportRetention, arg.StartAt, arg.EndAt, arg.Cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportRetentionRow{}
+	for rows.Next() {
+		var i ReportRetentionRow
+		if err := rows.Scan(
+			&i.Days,
+			&i.Eligible,
+			&i.Retained,
+			&i.Unknown,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const reportTimeToFirstGift = `-- name: ReportTimeToFirstGift :one
-SELECT
-	count(*)::bigint AS sample,
-	coalesce(
-		percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (g.paid_at - d.created_at))),
-		0
-	)::bigint AS median_seconds
-FROM donor_metric_projections p
-JOIN donor_gifts g ON g.stripe_object_id = p.first_gift_id
-JOIN donors d ON d.id = p.donor_id
-WHERE p.first_gift_id IS NOT NULL
-	AND g.paid_at >= $1 AND g.paid_at < $2
-	AND g.paid_at >= d.created_at
+const reportRetentionMissing = `-- name: ReportRetentionMissing :one
+SELECT EXISTS(SELECT 1 FROM donor_gifts g WHERE g.frequency='MONTHLY'
+  AND g.paid_at >= $1 AND g.paid_at < $2 AND NOT EXISTS (
+    SELECT 1 FROM donor_retention_milestones r WHERE r.donor_id=g.donor_id))
 `
 
-type ReportTimeToFirstGiftParams struct {
+type ReportRetentionMissingParams struct {
 	PaidAt   pgtype.Timestamptz `json:"paid_at"`
 	PaidAt_2 pgtype.Timestamptz `json:"paid_at_2"`
 }
 
-type ReportTimeToFirstGiftRow struct {
-	Sample        int64 `json:"sample"`
-	MedianSeconds int64 `json:"median_seconds"`
-}
-
-// Median elapsed seconds from a donor's account creation to their verified
-// first collection, over donors whose first gift was collected in the period.
-// sample is the number of such donors; the service reports it so the median
-// carries its sample size. (Landing-journey start is a browser fact that is not
-// collected; account creation is the earliest committed server anchor.)
-func (q *Queries) ReportTimeToFirstGift(ctx context.Context, arg ReportTimeToFirstGiftParams) (ReportTimeToFirstGiftRow, error) {
-	row := q.db.QueryRow(ctx, reportTimeToFirstGift, arg.PaidAt, arg.PaidAt_2)
-	var i ReportTimeToFirstGiftRow
-	err := row.Scan(&i.Sample, &i.MedianSeconds)
-	return i, err
+func (q *Queries) ReportRetentionMissing(ctx context.Context, arg ReportRetentionMissingParams) (bool, error) {
+	row := q.db.QueryRow(ctx, reportRetentionMissing, arg.PaidAt, arg.PaidAt_2)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const reportViralCoefficient = `-- name: ReportViralCoefficient :one
-SELECT
-	count(DISTINCT referrer.donor_id)::bigint AS cohort,
-	coalesce(sum(CASE WHEN referred.first_gift_id IS NOT NULL THEN 1 ELSE 0 END), 0)::bigint AS gross_conversions,
-	coalesce(sum(CASE WHEN referred.net_minor > 0 THEN 1 ELSE 0 END), 0)::bigint AS qualified_conversions
-FROM donor_metric_projections referred
-JOIN donor_metric_projections referrer ON referrer.donor_id = referred.referrer_id
-WHERE referred.referrer_id IS NOT NULL
-	AND referred.created_at >= $1 AND referred.created_at < $2
+WITH first_gifts AS MATERIALIZED (
+  SELECT DISTINCT ON (donor_id) donor_id, paid_at, referrer_id
+  FROM donor_gifts WHERE paid_at < $1::timestamptz
+  ORDER BY donor_id, paid_at, stripe_object_id
+), cohort AS (
+  SELECT donor_id FROM first_gifts WHERE paid_at >= $2::timestamptz
+    AND paid_at < $3::timestamptz
+), conversions AS (
+  SELECT f.donor_id FROM first_gifts f JOIN cohort c ON c.donor_id=f.referrer_id
+)
+SELECT (SELECT count(*) FROM cohort)::bigint AS cohort,
+  count(*)::bigint AS gross_conversions,
+  count(*) FILTER (WHERE EXISTS (
+    SELECT 1 FROM donor_gifts g WHERE g.donor_id=conversions.donor_id AND g.paid_at < $1::timestamptz
+    AND g.amount_minor > coalesce((SELECT sum(r.amount_minor) FROM donor_refunds r WHERE r.gift_id=g.id
+      AND coalesce((SELECT o.status FROM donor_refund_observations o WHERE o.refund_id=r.id
+        AND o.observed_at < $1::timestamptz ORDER BY o.observed_at DESC,o.id DESC LIMIT 1),
+        CASE WHEN r.observed_at < $1::timestamptz THEN r.status END)='SUCCEEDED'),0)
+  ))::bigint AS qualified_conversions
+FROM conversions
 `
 
 type ReportViralCoefficientParams struct {
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	CreatedAt_2 pgtype.Timestamptz `json:"created_at_2"`
+	Cutoff  pgtype.Timestamptz `json:"cutoff"`
+	StartAt pgtype.Timestamptz `json:"start_at"`
+	EndAt   pgtype.Timestamptz `json:"end_at"`
 }
 
 type ReportViralCoefficientRow struct {
@@ -324,14 +340,8 @@ type ReportViralCoefficientRow struct {
 	QualifiedConversions int64 `json:"qualified_conversions"`
 }
 
-// Converting direct referrals credited to referrers, over the donors who
-// referred in the period. Gross counts every attributed referral (first_gift
-// present); qualified counts only those still net-positive after refunds — the
-// two measures are reported separately so refunds cannot silently rewrite
-// acquisition. cohort is the number of donors who have at least one referral.
-// No second-level credit: a referred donor's own referrals are not counted here.
 func (q *Queries) ReportViralCoefficient(ctx context.Context, arg ReportViralCoefficientParams) (ReportViralCoefficientRow, error) {
-	row := q.db.QueryRow(ctx, reportViralCoefficient, arg.CreatedAt, arg.CreatedAt_2)
+	row := q.db.QueryRow(ctx, reportViralCoefficient, arg.Cutoff, arg.StartAt, arg.EndAt)
 	var i ReportViralCoefficientRow
 	err := row.Scan(&i.Cohort, &i.GrossConversions, &i.QualifiedConversions)
 	return i, err

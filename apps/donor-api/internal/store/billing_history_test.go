@@ -9,6 +9,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"dad/donor-api/internal/store/queries"
 )
 
 func TestBillingHistoryPreservesFailuresRecoveryAndReplay(t *testing.T) {
@@ -82,6 +84,14 @@ func TestBillingHistoryPreservesFailuresRecoveryAndReplay(t *testing.T) {
 			}
 			if err := rows.Err(); err != nil || !slices.Equal(statuses, []string{"FAILED", "FAILED", "PAID"}) {
 				t.Fatalf("history lost or duplicated: %v %v", statuses, err)
+			}
+			rows.Close()
+			churn, err := queries.New(f.service.DB).
+				ReportInvoluntaryChurn(ctx, queries.ReportInvoluntaryChurnParams{StartAt: timestamp(start), EndAt: timestamp(start.Add(24 * time.Hour)), Cutoff: timestamp(time.Now().UTC())})
+			if err != nil || churn.FailedPeriods != 1 || churn.LostMinor != 3000 || churn.RecoveredPeriods != 1 ||
+				churn.RecoveredMinor != 3000 ||
+				churn.RecoveredWithinGrace != 0 {
+				t.Fatalf("late recovery must retain its failure, once, in either delivery order: %+v %v", churn, err)
 			}
 		})
 	}

@@ -97,6 +97,11 @@ var grants = map[string]map[Role]string{
 		ReconcileJob:     "SELECT",
 	},
 	"donor_billing_observations": {API: "SELECT", StripeWorker: "SELECT, INSERT", ReconcileJob: "SELECT"},
+	"donor_retention_milestones": {
+		API:              "SELECT, INSERT, UPDATE",
+		StripeWorker:     "SELECT, INSERT, UPDATE",
+		ProjectionWorker: "SELECT, INSERT, UPDATE",
+	},
 	"donor_refunds": {
 		API:              "SELECT, INSERT, UPDATE",
 		StripeWorker:     "SELECT, INSERT, UPDATE",

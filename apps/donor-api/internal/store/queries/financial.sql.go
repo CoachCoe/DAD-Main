@@ -484,6 +484,34 @@ func (q *Queries) SaveProjection(ctx context.Context, arg SaveProjectionParams) 
 	return err
 }
 
+const saveRetentionMilestone = `-- name: SaveRetentionMilestone :exec
+INSERT INTO donor_retention_milestones(donor_id,days,cohort_at,checkpoint_at,retained,computed_at)
+VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT(donor_id,days) DO UPDATE SET cohort_at=EXCLUDED.cohort_at,
+checkpoint_at=EXCLUDED.checkpoint_at,retained=EXCLUDED.retained,computed_at=EXCLUDED.computed_at
+`
+
+type SaveRetentionMilestoneParams struct {
+	DonorID      pgtype.UUID        `json:"donor_id"`
+	Days         int32              `json:"days"`
+	CohortAt     pgtype.Timestamptz `json:"cohort_at"`
+	CheckpointAt pgtype.Timestamptz `json:"checkpoint_at"`
+	Retained     pgtype.Bool        `json:"retained"`
+	ComputedAt   pgtype.Timestamptz `json:"computed_at"`
+}
+
+func (q *Queries) SaveRetentionMilestone(ctx context.Context, arg SaveRetentionMilestoneParams) error {
+	_, err := q.db.Exec(ctx, saveRetentionMilestone,
+		arg.DonorID,
+		arg.Days,
+		arg.CohortAt,
+		arg.CheckpointAt,
+		arg.Retained,
+		arg.ComputedAt,
+	)
+	return err
+}
+
 const stoppedPeriods = `-- name: StoppedPeriods :many
 SELECT stops_at FROM donor_subscriptions WHERE donor_id=$1 AND stops_at IS NOT NULL
 `

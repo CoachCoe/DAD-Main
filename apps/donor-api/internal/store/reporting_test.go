@@ -122,6 +122,21 @@ func seedFailedPeriod(t *testing.T, pool *pgxpool.Pool, donorID pgtype.UUID, sch
 		dueAt,
 		dueAt.Add(28*24*time.Hour),
 	)
+	eventID := testID(t)
+	mustExec(t, pool, `INSERT INTO donor_stripe_events(id,stripe_event_id,event_type,occurred_at,data)
+		VALUES($1,$2,'invoice.payment_failed',$3,'{}')`, eventID, "evt_rep_"+eventID.String(), dueAt)
+	mustExec(
+		t,
+		pool,
+		`INSERT INTO donor_billing_observations(id,period_id,source_event_id,status,amount_minor,currency,billing_reason,occurred_at,event_created_at,recorded_at)
+		VALUES($1,$2,$3,'FAILED',$4,'USD','subscription_cycle',$5,$5,$5)`,
+		testID(t),
+		period,
+		eventID,
+		scheduledMinor,
+		dueAt,
+	)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_stripe_events WHERE id=$1", eventID) })
 	if recovered {
 		mustExec(
 			t,
@@ -141,6 +156,7 @@ func seedFailedPeriod(t *testing.T, pool *pgxpool.Pool, donorID pgtype.UUID, sch
 		ctx := context.Background()
 		for _, sql := range []string{
 			"DELETE FROM donor_gifts WHERE checkout_id=$1",
+			"DELETE FROM donor_billing_observations WHERE period_id IN (SELECT id FROM donor_billing_periods WHERE checkout_id=$1)",
 			"DELETE FROM donor_billing_periods WHERE checkout_id=$1",
 			"DELETE FROM donor_checkouts WHERE id=$1",
 		} {
@@ -177,6 +193,11 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 	referredB, _ := donor(t, pool)
 	bFirst := seedGift(t, pool, referredB, "pi_rep_b_first", 2000, "MONTHLY", repAt, &referrer, "IRL")
 	repSeedProjection(t, pool, referredB, &referrer, "IRL", bFirst, 0, nil, 1, 0, &repAt)
+	mustExec(t, pool, `INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at)
+		SELECT gen_random_uuid(),id,'re_rep_'||id::text,2000,'USD','SUCCEEDED',$2 FROM donor_gifts WHERE stripe_object_id=$1`, bFirst, repAt.Add(time.Hour))
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_refunds WHERE gift_id IN (SELECT id FROM donor_gifts WHERE stripe_object_id=$1)", bFirst)
+	})
 
 	// A DIRECT donor (no referrer), MONTHLY first gift 4000, reached m3 but lapsed.
 	direct, _ := donor(t, pool)
@@ -238,8 +259,8 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 	// Viral: cohort = 1 referrer; gross = 2 (A + B have first_gift_id);
 	// qualified = 1 (only A has net>0).
 	v := report.ViralCoefficient
-	if v.Cohort != 1 || v.GrossConversions != 2 || v.QualifiedConversions != 1 {
-		t.Errorf("viral: got cohort=%d gross=%d qualified=%d, want 1/2/1", v.Cohort, v.GrossConversions, v.QualifiedConversions)
+	if v.Cohort != 5 || v.GrossConversions != 2 || v.QualifiedConversions != 1 {
+		t.Errorf("viral: got cohort=%d gross=%d qualified=%d, want 5/2/1", v.Cohort, v.GrossConversions, v.QualifiedConversions)
 	}
 
 	// Referral dollars: LINK = 3000 (A), IRL = 0 (B refunded to net 0).
@@ -255,19 +276,11 @@ func TestReportNumbersMatchSeededFacts(t *testing.T) {
 			c.FailedPeriods, c.LostMinor, c.RecoveredPeriods, c.RecoveredMinor)
 	}
 
-	// Retention: reached_m3 = referrer(6)+A(3)+direct(3) = 3; retained_m3 =
-	// referrer(6)+A(3) = 2 (direct lapsed to 0). reached_m6 = referrer(6) = 1;
-	// retained_m6 = referrer(6) = 1.
-	r := report.Retention
-	if r.ReachedM3 != 3 || r.RetainedM3 != 2 || r.ReachedM6 != 1 || r.RetainedM6 != 1 {
-		t.Errorf("retention: got m3 %d/%d m6 %d/%d, want 3/2 1/1", r.ReachedM3, r.RetainedM3, r.ReachedM6, r.RetainedM6)
+	if report.Retention.Available || report.Retention.Reason == "" || report.Retention.ReachedM3 != 0 {
+		t.Errorf("unbackfilled retention must be unavailable, got %+v", report.Retention)
 	}
-
-	// Time to first gift: 5 donors have a first gift in the window (referrer, A,
-	// B, direct, and... only 4 have a projection first_gift; churnDonor has no
-	// projection). sample = 4.
-	if report.TimeToFirstGift.Sample != 4 {
-		t.Errorf("ttfg sample: got %d, want 4", report.TimeToFirstGift.Sample)
+	if report.TimeToFirstGift.Available || report.TimeToFirstGift.Reason == "" || report.TimeToFirstGift.Sample != 0 {
+		t.Errorf("account creation must not masquerade as landing time: %+v", report.TimeToFirstGift)
 	}
 
 	// Seven-day share rate is browser-dependent: must be unavailable, not zero.

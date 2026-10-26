@@ -94,3 +94,8 @@ AND EXISTS(SELECT 1 FROM donor_gifts g WHERE g.checkout_id=c.id))::boolean;
 INSERT INTO donor_referral_corrections
     (donor_id,old_first_gift_id,new_first_gift_id,old_referrer_id,new_referrer_id,old_kind,new_kind,recorded_at,rules_version)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);
+-- name: SaveRetentionMilestone :exec
+INSERT INTO donor_retention_milestones(donor_id,days,cohort_at,checkpoint_at,retained,computed_at)
+VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT(donor_id,days) DO UPDATE SET cohort_at=EXCLUDED.cohort_at,
+checkpoint_at=EXCLUDED.checkpoint_at,retained=EXCLUDED.retained,computed_at=EXCLUDED.computed_at;

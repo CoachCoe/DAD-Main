@@ -49,88 +49,81 @@ WHERE g.paid_at >= $1 AND g.paid_at < $2
 GROUP BY g.frequency;
 
 -- name: ReportViralCoefficient :one
--- Converting direct referrals credited to referrers, over the donors who
--- referred in the period. Gross counts every attributed referral (first_gift
--- present); qualified counts only those still net-positive after refunds — the
--- two measures are reported separately so refunds cannot silently rewrite
--- acquisition. cohort is the number of donors who have at least one referral.
--- No second-level credit: a referred donor's own referrals are not counted here.
-SELECT
-	count(DISTINCT referrer.donor_id)::bigint AS cohort,
-	coalesce(sum(CASE WHEN referred.first_gift_id IS NOT NULL THEN 1 ELSE 0 END), 0)::bigint AS gross_conversions,
-	coalesce(sum(CASE WHEN referred.net_minor > 0 THEN 1 ELSE 0 END), 0)::bigint AS qualified_conversions
-FROM donor_metric_projections referred
-JOIN donor_metric_projections referrer ON referrer.donor_id = referred.referrer_id
-WHERE referred.referrer_id IS NOT NULL
-	AND referred.created_at >= $1 AND referred.created_at < $2;
+WITH first_gifts AS MATERIALIZED (
+  SELECT DISTINCT ON (donor_id) donor_id, paid_at, referrer_id
+  FROM donor_gifts WHERE paid_at < sqlc.arg(cutoff)::timestamptz
+  ORDER BY donor_id, paid_at, stripe_object_id
+), cohort AS (
+  SELECT donor_id FROM first_gifts WHERE paid_at >= sqlc.arg(start_at)::timestamptz
+    AND paid_at < sqlc.arg(end_at)::timestamptz
+), conversions AS (
+  SELECT f.donor_id FROM first_gifts f JOIN cohort c ON c.donor_id=f.referrer_id
+)
+SELECT (SELECT count(*) FROM cohort)::bigint AS cohort,
+  count(*)::bigint AS gross_conversions,
+  count(*) FILTER (WHERE EXISTS (
+    SELECT 1 FROM donor_gifts g WHERE g.donor_id=conversions.donor_id AND g.paid_at < sqlc.arg(cutoff)::timestamptz
+    AND g.amount_minor > coalesce((SELECT sum(r.amount_minor) FROM donor_refunds r WHERE r.gift_id=g.id
+      AND coalesce((SELECT o.status FROM donor_refund_observations o WHERE o.refund_id=r.id
+        AND o.observed_at < sqlc.arg(cutoff)::timestamptz ORDER BY o.observed_at DESC,o.id DESC LIMIT 1),
+        CASE WHEN r.observed_at < sqlc.arg(cutoff)::timestamptz THEN r.status END)='SUCCEEDED'),0)
+  ))::bigint AS qualified_conversions
+FROM conversions;
 
 -- name: ReportReferralDollars :one
--- Actual collected referred gifts less successful refunds, direct-only, split
--- LINK/IRL. net_minor on the referred row is already net of refunds (CHECK
--- >= 0), so summing it over referred rows in the period gives realized referral
--- dollars without re-joining refunds.
-SELECT
-	coalesce(sum(net_minor) FILTER (WHERE referral_kind = 'LINK'), 0)::bigint AS link_minor,
-	coalesce(sum(net_minor) FILTER (WHERE referral_kind = 'IRL'), 0)::bigint AS irl_minor
-FROM donor_metric_projections
-WHERE referrer_id IS NOT NULL
-	AND created_at >= $1 AND created_at < $2;
+WITH first_gifts AS (
+  SELECT DISTINCT ON (donor_id) donor_id,paid_at,referrer_id,referral_kind
+  FROM donor_gifts WHERE paid_at < sqlc.arg(cutoff)::timestamptz
+  ORDER BY donor_id,paid_at,stripe_object_id
+), net AS (
+  SELECT f.referral_kind,g.amount_minor-coalesce((SELECT sum(r.amount_minor) FROM donor_refunds r WHERE r.gift_id=g.id
+    AND coalesce((SELECT o.status FROM donor_refund_observations o WHERE o.refund_id=r.id
+      AND o.observed_at < sqlc.arg(cutoff)::timestamptz ORDER BY o.observed_at DESC,o.id DESC LIMIT 1),
+      CASE WHEN r.observed_at < sqlc.arg(cutoff)::timestamptz THEN r.status END)='SUCCEEDED'),0) AS amount
+  FROM first_gifts f JOIN donor_gifts g ON g.donor_id=f.donor_id
+  WHERE f.referrer_id IS NOT NULL AND f.paid_at >= sqlc.arg(start_at)::timestamptz
+    AND f.paid_at < sqlc.arg(end_at)::timestamptz AND g.paid_at < sqlc.arg(cutoff)::timestamptz
+)
+SELECT coalesce(sum(amount) FILTER(WHERE referral_kind='LINK'),0)::bigint AS link_minor,
+  coalesce(sum(amount) FILTER(WHERE referral_kind='IRL'),0)::bigint AS irl_minor FROM net;
 
 -- name: ReportInvoluntaryChurn :one
--- Involuntary churn/recovery from billing periods. A FAILED period whose retry
--- deadline (due_at + 7 days, matching the streak grace rule) has passed by the
--- observation cutoff ($3) is lost value, using the period's scheduled gift
--- amount once. A verified gift collected for that same period (period_id) is
--- recovered value. Cohort is failed periods whose due_at falls in [start, end).
--- Each period counts once; amounts are never multiplied by retry/webhook count.
-WITH failed AS (
-	SELECT bp.id, bp.due_at, c.amount_minor AS scheduled_minor,
-		EXISTS(SELECT 1 FROM donor_gifts g WHERE g.period_id = bp.id) AS recovered,
-		coalesce((SELECT sum(g.amount_minor) FROM donor_gifts g WHERE g.period_id = bp.id), 0)::bigint AS recovered_minor
-	FROM donor_billing_periods bp
-	JOIN donor_checkouts c ON c.id = bp.checkout_id
-	WHERE bp.status = 'FAILED'
-		AND bp.due_at >= $1 AND bp.due_at < $2
-		AND bp.due_at + INTERVAL '7 days' <= $3
+WITH failures AS (
+  SELECT DISTINCT ON (o.period_id) o.period_id, o.amount_minor
+  FROM donor_billing_observations o JOIN donor_billing_periods p ON p.id=o.period_id
+  WHERE o.status='FAILED' AND o.billing_reason='subscription_cycle'
+    AND o.occurred_at < sqlc.arg(cutoff)::timestamptz
+    AND p.due_at >= sqlc.arg(start_at)::timestamptz AND p.due_at < sqlc.arg(end_at)::timestamptz
+  ORDER BY o.period_id,o.occurred_at,o.id
+), periods AS (
+  SELECT f.*, p.due_at, paid.paid_at, paid.amount_minor AS paid_minor
+  FROM failures f JOIN donor_billing_periods p ON p.id=f.period_id
+  LEFT JOIN LATERAL (SELECT g.paid_at,g.amount_minor FROM donor_gifts g WHERE g.period_id=p.id
+    AND g.paid_at < sqlc.arg(cutoff)::timestamptz ORDER BY g.paid_at,g.stripe_object_id LIMIT 1) paid ON true
 )
-SELECT
-	count(*)::bigint AS failed_periods,
-	coalesce(sum(CASE WHEN NOT recovered THEN scheduled_minor ELSE 0 END), 0)::bigint AS lost_minor,
-	count(*) FILTER (WHERE recovered)::bigint AS recovered_periods,
-	coalesce(sum(recovered_minor), 0)::bigint AS recovered_minor
-FROM failed;
+SELECT count(*)::bigint AS failed_periods,
+  coalesce(sum(amount_minor) FILTER (WHERE due_at+interval '7 days' <= sqlc.arg(cutoff)::timestamptz
+    AND (paid_at IS NULL OR paid_at >= due_at+interval '7 days')),0)::bigint AS lost_minor,
+  count(*) FILTER (WHERE paid_at IS NOT NULL)::bigint AS recovered_periods,
+  coalesce(sum(paid_minor),0)::bigint AS recovered_minor,
+  count(*) FILTER (WHERE paid_at < due_at+interval '7 days')::bigint AS recovered_within_grace,
+  count(*) FILTER (WHERE paid_minor IS NOT NULL AND paid_minor<>amount_minor)::bigint AS inconsistent_periods,
+  (SELECT count(*) FROM donor_billing_periods p WHERE p.due_at >= sqlc.arg(start_at)::timestamptz
+    AND p.due_at < sqlc.arg(end_at)::timestamptz AND p.status IN ('PAID','FAILED')
+    AND NOT EXISTS(SELECT 1 FROM donor_billing_observations o WHERE o.period_id=p.id
+      AND o.occurred_at < sqlc.arg(cutoff)::timestamptz))::bigint AS missing_history
+FROM periods;
 
--- name: ReportTimeToFirstGift :one
--- Median elapsed seconds from a donor's account creation to their verified
--- first collection, over donors whose first gift was collected in the period.
--- sample is the number of such donors; the service reports it so the median
--- carries its sample size. (Landing-journey start is a browser fact that is not
--- collected; account creation is the earliest committed server anchor.)
-SELECT
-	count(*)::bigint AS sample,
-	coalesce(
-		percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (g.paid_at - d.created_at))),
-		0
-	)::bigint AS median_seconds
-FROM donor_metric_projections p
-JOIN donor_gifts g ON g.stripe_object_id = p.first_gift_id
-JOIN donors d ON d.id = p.donor_id
-WHERE p.first_gift_id IS NOT NULL
-	AND g.paid_at >= $1 AND g.paid_at < $2
-	AND g.paid_at >= d.created_at;
+-- name: ReportRetention :many
+SELECT days,count(*)::bigint AS eligible,
+  count(*) FILTER (WHERE retained)::bigint AS retained,
+  count(*) FILTER (WHERE retained IS NULL)::bigint AS unknown
+FROM donor_retention_milestones
+WHERE cohort_at >= sqlc.arg(start_at)::timestamptz AND cohort_at < sqlc.arg(end_at)::timestamptz
+  AND checkpoint_at <= sqlc.arg(cutoff)::timestamptz
+GROUP BY days ORDER BY days;
 
--- name: ReportRetention :one
--- Month-three and month-six retention from the current projection streak. A
--- donor counts toward a milestone's denominator when their best_streak shows
--- they reached it; current_streak >= milestone counts toward the numerator.
--- Scoped to donors who began a recurring streak (streak_since) in the period.
--- Caveat echoed by the service: current snapshots approximate historical
--- retention; the streak projection is the authoritative within-R1 source.
-SELECT
-	count(*) FILTER (WHERE best_streak >= 3)::bigint AS reached_m3,
-	count(*) FILTER (WHERE current_streak >= 3)::bigint AS retained_m3,
-	count(*) FILTER (WHERE best_streak >= 6)::bigint AS reached_m6,
-	count(*) FILTER (WHERE current_streak >= 6)::bigint AS retained_m6
-FROM donor_metric_projections
-WHERE streak_since IS NOT NULL
-	AND streak_since >= $1 AND streak_since < $2;
+-- name: ReportRetentionMissing :one
+SELECT EXISTS(SELECT 1 FROM donor_gifts g WHERE g.frequency='MONTHLY'
+  AND g.paid_at >= $1 AND g.paid_at < $2 AND NOT EXISTS (
+    SELECT 1 FROM donor_retention_milestones r WHERE r.donor_id=g.donor_id));

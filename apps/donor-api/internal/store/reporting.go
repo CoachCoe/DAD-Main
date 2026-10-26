@@ -56,7 +56,7 @@ type GiftMix struct {
 }
 
 // ViralCoefficient reports gross and currently-qualified conversions over the
-// referring cohort separately, so refund behaviour cannot silently rewrite the
+// first-gift donor cohort separately, so refund behaviour cannot silently rewrite the
 // acquisition number. The ratio is left to the reader (cohort may be zero).
 type ViralCoefficient struct {
 	Cohort               int64 `json:"cohort"`
@@ -67,26 +67,40 @@ type ViralCoefficient struct {
 // InvoluntaryChurn is the lost scheduled value from failed renewals past the
 // retry deadline, with the recovered count/value against that same cohort.
 type InvoluntaryChurn struct {
-	FailedPeriods    int64 `json:"failed_periods"`
-	LostMinor        int64 `json:"lost_minor"`
-	RecoveredPeriods int64 `json:"recovered_periods"`
-	RecoveredMinor   int64 `json:"recovered_minor"`
+	Available            bool   `json:"available"`
+	Reason               string `json:"reason,omitempty"`
+	MissingHistory       int64  `json:"missing_history"`
+	RecoveredWithinGrace int64  `json:"recovered_within_grace"`
+	FailedPeriods        int64  `json:"failed_periods"`
+	LostMinor            int64  `json:"lost_minor"`
+	RecoveredPeriods     int64  `json:"recovered_periods"`
+	RecoveredMinor       int64  `json:"recovered_minor"`
 }
 
-// Retention is the month-three / month-six recurring retention: donors who
-// reached a milestone (best streak) and those still at it (current streak).
+// Retention is historical survival, with M3/M6 retained as aliases for 90/180 days.
 type Retention struct {
-	ReachedM3  int64 `json:"reached_m3"`
-	RetainedM3 int64 `json:"retained_m3"`
-	ReachedM6  int64 `json:"reached_m6"`
-	RetainedM6 int64 `json:"retained_m6"`
+	Available  bool                 `json:"available"`
+	Reason     string               `json:"reason,omitempty"`
+	Milestones []RetentionMilestone `json:"milestones"`
+	ReachedM3  int64                `json:"reached_m3"`
+	RetainedM3 int64                `json:"retained_m3"`
+	ReachedM6  int64                `json:"reached_m6"`
+	RetainedM6 int64                `json:"retained_m6"`
 }
 
-// TimeToFirstGift is the median seconds from account creation to first verified
-// collection, with the sample size so the median carries its denominator.
+type RetentionMilestone struct {
+	Days     int32 `json:"days"`
+	Eligible int64 `json:"eligible"`
+	Retained int64 `json:"retained"`
+	Unknown  int64 `json:"unknown"`
+}
+
+// TimeToFirstGift is unavailable until landing linkage is collected.
 type TimeToFirstGift struct {
-	Sample        int64 `json:"sample"`
-	MedianSeconds int64 `json:"median_seconds"`
+	Available     bool   `json:"available"`
+	Reason        string `json:"reason,omitempty"`
+	Sample        int64  `json:"sample"`
+	MedianSeconds int64  `json:"median_seconds"`
 }
 
 // Report is the §4 success-metrics snapshot over a half-open [start, end)
@@ -127,8 +141,11 @@ func (s *ReportingService) Report(ctx context.Context, token string, start, end 
 		return Report{}, ErrStaffInput
 	}
 	start, end = start.UTC(), end.UTC()
-	return staffRead(ctx, s.Staff, token, reportReadPermission, func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (Report, error) {
+	return transact(ctx, s.Staff.DB, readSnapshot, func(tx pgx.Tx) (Report, error) {
 		q := queries.New(tx)
+		if _, err := requireStaff(ctx, q, token, reportReadPermission, time.Now().UTC()); err != nil {
+			return Report{}, err
+		}
 		startTS, endTS := timestamp(start), timestamp(end)
 		report := Report{
 			PeriodStart:       start,
@@ -137,6 +154,9 @@ func (s *ReportingService) Report(ctx context.Context, token string, start, end 
 			Timezone:          "UTC",
 			CoverageNote:      coverageNote,
 			SevenDayShareRate: Metric{Available: false, Reason: shareProxyUnavailable},
+			TimeToFirstGift: TimeToFirstGift{
+				Reason: "Landing-to-account linkage is not collected; account creation is not a landing timestamp.",
+			},
 		}
 
 		founding, err := q.ReportFoundingDonors(
@@ -172,7 +192,7 @@ func (s *ReportingService) Report(ctx context.Context, token string, start, end 
 			report.GiftMix = append(report.GiftMix, GiftMix{Frequency: row.Frequency, Gifts: row.Gifts, CollectedMinor: row.CollectedMinor})
 		}
 
-		viral, err := q.ReportViralCoefficient(ctx, queries.ReportViralCoefficientParams{CreatedAt: startTS, CreatedAt_2: endTS})
+		viral, err := q.ReportViralCoefficient(ctx, queries.ReportViralCoefficientParams{StartAt: startTS, EndAt: endTS, Cutoff: endTS})
 		if err != nil {
 			return Report{}, err
 		}
@@ -182,39 +202,55 @@ func (s *ReportingService) Report(ctx context.Context, token string, start, end 
 			QualifiedConversions: viral.QualifiedConversions,
 		}
 
-		dollars, err := q.ReportReferralDollars(ctx, queries.ReportReferralDollarsParams{CreatedAt: startTS, CreatedAt_2: endTS})
+		dollars, err := q.ReportReferralDollars(ctx, queries.ReportReferralDollarsParams{StartAt: startTS, EndAt: endTS, Cutoff: endTS})
 		if err != nil {
 			return Report{}, err
 		}
 		report.ReferralLinkMinor = dollars.LinkMinor
 		report.ReferralIRLMinor = dollars.IrlMinor
 
-		churn, err := q.ReportInvoluntaryChurn(ctx, queries.ReportInvoluntaryChurnParams{DueAt: startTS, DueAt_2: endTS, DueAt_3: endTS})
+		churn, err := q.ReportInvoluntaryChurn(ctx, queries.ReportInvoluntaryChurnParams{StartAt: startTS, EndAt: endTS, Cutoff: endTS})
 		if err != nil {
 			return Report{}, err
 		}
 		report.InvoluntaryChurn = InvoluntaryChurn{
-			FailedPeriods:    churn.FailedPeriods,
-			LostMinor:        churn.LostMinor,
-			RecoveredPeriods: churn.RecoveredPeriods,
-			RecoveredMinor:   churn.RecoveredMinor,
+			Available:            churn.MissingHistory == 0 && churn.InconsistentPeriods == 0,
+			MissingHistory:       churn.MissingHistory,
+			RecoveredWithinGrace: churn.RecoveredWithinGrace,
+			FailedPeriods:        churn.FailedPeriods,
+			LostMinor:            churn.LostMinor,
+			RecoveredPeriods:     churn.RecoveredPeriods,
+			RecoveredMinor:       churn.RecoveredMinor,
+		}
+		if !report.InvoluntaryChurn.Available {
+			report.InvoluntaryChurn.Reason = "Billing history is missing or contains inconsistent invoice amounts; totals cover verified observations only."
 		}
 
-		ttfg, err := q.ReportTimeToFirstGift(ctx, queries.ReportTimeToFirstGiftParams{PaidAt: startTS, PaidAt_2: endTS})
+		retention, err := q.ReportRetention(ctx, queries.ReportRetentionParams{StartAt: startTS, EndAt: endTS, Cutoff: endTS})
 		if err != nil {
 			return Report{}, err
 		}
-		report.TimeToFirstGift = TimeToFirstGift{Sample: ttfg.Sample, MedianSeconds: ttfg.MedianSeconds}
-
-		retention, err := q.ReportRetention(ctx, queries.ReportRetentionParams{StreakSince: startTS, StreakSince_2: endTS})
+		missing, err := q.ReportRetentionMissing(ctx, queries.ReportRetentionMissingParams{PaidAt: startTS, PaidAt_2: endTS})
 		if err != nil {
 			return Report{}, err
 		}
-		report.Retention = Retention{
-			ReachedM3:  retention.ReachedM3,
-			RetainedM3: retention.RetainedM3,
-			ReachedM6:  retention.ReachedM6,
-			RetainedM6: retention.RetainedM6,
+		report.Retention = Retention{Available: !missing, Milestones: []RetentionMilestone{}}
+		for _, row := range retention {
+			report.Retention.Milestones = append(report.Retention.Milestones, RetentionMilestone{
+				Days: row.Days, Eligible: row.Eligible, Retained: row.Retained, Unknown: row.Unknown,
+			})
+			if row.Unknown > 0 {
+				report.Retention.Available = false
+			}
+			switch row.Days {
+			case 90:
+				report.Retention.ReachedM3, report.Retention.RetainedM3 = row.Eligible, row.Retained
+			case 180:
+				report.Retention.ReachedM6, report.Retention.RetainedM6 = row.Eligible, row.Retained
+			}
+		}
+		if !report.Retention.Available {
+			report.Retention.Reason = "Historical survival is incomplete; run the projections worker to backfill milestones. Unknown outcomes are excluded from retained totals."
 		}
 
 		return report, nil

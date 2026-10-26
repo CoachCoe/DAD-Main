@@ -235,8 +235,8 @@ type projection struct {
 	zone        *time.Location
 }
 
-// Version 7 awards ranking recognition from current local-day streaks.
-const projectionRules = 7
+// Version 8 materializes historical survival at the four R1 milestones.
+const projectionRules = 8
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a
@@ -298,6 +298,9 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 	}
 	stops, err := renewalStops(ctx, q, id)
 	if err != nil {
+		return projection{SaveProjectionParams: out}, err
+	}
+	if err = saveRetention(ctx, q, id, h, observations, stops, zone, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
 	best, err := historicalBest(ctx, id, h, observations, now, int64(out.BestStreak), stops)

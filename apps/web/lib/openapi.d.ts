@@ -3591,7 +3591,15 @@ export interface components {
              * @description Cents recovered against the failed-period cohort.
              */
             recovered_minor: number;
+            /** @description False when source facts cannot establish the requested metric. */
+            available: boolean;
+            reason?: string;
+            /** Format: int64 */
+            missing_history: number;
+            /** Format: int64 */
+            recovered_within_grace: number;
         };
+        /** @description Historical first-recurring-gift cohort survival at 30, 90, 180 and 365 local calendar days. Legacy M3/M6 fields alias 90/180-day eligible and retained counts. Unknown history is explicit. */
         ReportRetention: {
             /** Format: int64 */
             reached_m3: number;
@@ -3601,12 +3609,20 @@ export interface components {
             reached_m6: number;
             /** Format: int64 */
             retained_m6: number;
+            /** @description False when source facts cannot establish the requested metric. */
+            available: boolean;
+            reason?: string;
+            milestones: components["schemas"]["ReportRetentionMilestone"][];
         };
+        /** @description Landing-to-first-gift timing. Unavailable until consented landing-to-checkout linkage exists; account creation is never substituted. */
         ReportTimeToFirstGift: {
             /** Format: int64 */
             sample: number;
             /** Format: int64 */
             median_seconds: number;
+            /** @description False when source facts cannot establish the requested metric. */
+            available: boolean;
+            reason?: string;
         };
         Report: {
             /**
@@ -3886,6 +3902,16 @@ export interface components {
              * @description Events the donor checked in at.
              */
             events_volunteered: number;
+        };
+        ReportRetentionMilestone: {
+            /** Format: int32 */
+            days: number;
+            /** Format: int64 */
+            eligible: number;
+            /** Format: int64 */
+            retained: number;
+            /** Format: int64 */
+            unknown: number;
         };
     };
     responses: {
