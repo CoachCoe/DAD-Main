@@ -120,6 +120,10 @@ A streak milestone is reached at 7, 30, 100, 365, 500, 1,000, 1,095, and 1,460 d
 then every further 365 days. Each milestone is congratulated once per streak run, which
 is identified by its first current day; a streak that resets and is rebuilt is a new run.
 
+Content staff may change the words on a badge (its title and how-to-earn text) and on each
+named streak milestone's notification; the yearly milestones after 1,460 days use the
+standard wording. Earning rules and thresholds are not editable, and every change is audited.
+
 Any successful first gift before 2027-01-01 00:00 America/New_York earns Founding Donor
 status. Website-waitlist sign-ups and earlier website donors (D-6) are not yet imported, so
 they hold no grant until that migration runs. Use the processor's successful-payment timestamp,

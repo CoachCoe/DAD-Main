@@ -2573,6 +2573,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/staff/content/wording": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Badge and milestone wording */
+        get: operations["recognitionWording"];
+        put?: never;
+        /**
+         * Change a badge's or milestone's wording
+         * @description Replaces the words only; how badges and milestones are earned does not change. An empty title and text restore the default.
+         */
+        post: operations["setRecognitionWording"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3991,6 +4012,19 @@ export interface components {
             retained: number;
             /** Format: int64 */
             unknown: number;
+        };
+        WordingEntry: {
+            key: string;
+            title: string;
+            text: string;
+            default_title: string;
+            default_text: string;
+            custom: boolean;
+        };
+        /** @description Badge and streak-milestone wording. A badge's text is the rule shown while it is unearned; a milestone's is its notification body. */
+        RecognitionWording: {
+            badges: components["schemas"]["WordingEntry"][];
+            milestones: components["schemas"]["WordingEntry"][];
         };
     };
     responses: {
@@ -8911,6 +8945,68 @@ export interface operations {
                 "application/json": {
                     /** @description Base64 PNG/JPEG, at most 256 KiB and 512 by 512 pixels. Empty explicitly removes the logo. Stored as PNG without metadata. */
                     data_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        saved: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    recognitionWording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecognitionWording"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    setRecognitionWording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "BADGE" | "MILESTONE";
+                    /** @description Badge code, or a milestone's day count */
+                    key: string;
+                    title: string;
+                    text: string;
                 };
             };
         };

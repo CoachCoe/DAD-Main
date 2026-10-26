@@ -63,6 +63,7 @@ type Services struct {
 	StaffFinance    StaffFinanceSource
 	Exports         ExportSource
 	ContentAdmin    ContentAdminSource
+	Wording         WordingSource
 	Initiatives     InitiativeSource
 	InitiativeRead  InitiativeReadSource
 	TodayInitiative TodayInitiativeSource

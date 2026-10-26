@@ -95,7 +95,8 @@ export default function Content() {
   return (
     <Page wide eyebrow="Staff" back={{ href: "/staff", label: "Staff back office" }} title="Spreadsheet publication">
       <p>
-        <Link href="/staff/exports">Exports</Link>
+        <Link href="/staff/exports">Exports</Link> ·{" "}
+        <Link href="/staff/content/wording">Badge and milestone wording</Link>
       </p>
       <p>
         Edit approved content in the source spreadsheet, then import its CSV export. This publishes one complete

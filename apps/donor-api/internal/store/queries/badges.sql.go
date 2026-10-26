@@ -139,6 +139,22 @@ func (q *Queries) GrantBadge(ctx context.Context, arg GrantBadgeParams) error {
 	return err
 }
 
+const milestoneWording = `-- name: MilestoneWording :one
+SELECT title,body FROM donor_recognition_wording WHERE kind='MILESTONE' AND key=$1
+`
+
+type MilestoneWordingRow struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+func (q *Queries) MilestoneWording(ctx context.Context, key string) (MilestoneWordingRow, error) {
+	row := q.db.QueryRow(ctx, milestoneWording, key)
+	var i MilestoneWordingRow
+	err := row.Scan(&i.Title, &i.Body)
+	return i, err
+}
+
 const queueBadgePush = `-- name: QueueBadgePush :exec
 INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
 SELECT gen_random_uuid(),$1::uuid,'BADGE_EARNED',
@@ -170,6 +186,56 @@ func (q *Queries) QueueBadgePush(ctx context.Context, arg QueueBadgePushParams) 
 	return err
 }
 
+const recognitionWording = `-- name: RecognitionWording :many
+SELECT kind,key,title,body FROM donor_recognition_wording WHERE kind=$1
+`
+
+type RecognitionWordingRow struct {
+	Kind  string `json:"kind"`
+	Key   string `json:"key"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+func (q *Queries) RecognitionWording(ctx context.Context, kind string) ([]RecognitionWordingRow, error) {
+	rows, err := q.db.Query(ctx, recognitionWording, kind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RecognitionWordingRow{}
+	for rows.Next() {
+		var i RecognitionWordingRow
+		if err := rows.Scan(
+			&i.Kind,
+			&i.Key,
+			&i.Title,
+			&i.Body,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const resetRecognitionWording = `-- name: ResetRecognitionWording :exec
+DELETE FROM donor_recognition_wording WHERE kind=$1 AND key=$2
+`
+
+type ResetRecognitionWordingParams struct {
+	Kind string `json:"kind"`
+	Key  string `json:"key"`
+}
+
+func (q *Queries) ResetRecognitionWording(ctx context.Context, arg ResetRecognitionWordingParams) error {
+	_, err := q.db.Exec(ctx, resetRecognitionWording, arg.Kind, arg.Key)
+	return err
+}
+
 const revokeBadge = `-- name: RevokeBadge :exec
 UPDATE donor_badges SET revoked_at=$3 WHERE donor_id=$1 AND code=$2
 `
@@ -183,5 +249,31 @@ type RevokeBadgeParams struct {
 // Admin revoke (B-4): tombstone the row rather than delete it, for audit.
 func (q *Queries) RevokeBadge(ctx context.Context, arg RevokeBadgeParams) error {
 	_, err := q.db.Exec(ctx, revokeBadge, arg.DonorID, arg.Code, arg.RevokedAt)
+	return err
+}
+
+const setRecognitionWording = `-- name: SetRecognitionWording :exec
+INSERT INTO donor_recognition_wording(kind,key,title,body,actor_id,updated_at) VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT(kind,key) DO UPDATE SET title=EXCLUDED.title,body=EXCLUDED.body,actor_id=EXCLUDED.actor_id,updated_at=EXCLUDED.updated_at
+`
+
+type SetRecognitionWordingParams struct {
+	Kind      string             `json:"kind"`
+	Key       string             `json:"key"`
+	Title     string             `json:"title"`
+	Body      string             `json:"body"`
+	ActorID   pgtype.UUID        `json:"actor_id"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) SetRecognitionWording(ctx context.Context, arg SetRecognitionWordingParams) error {
+	_, err := q.db.Exec(ctx, setRecognitionWording,
+		arg.Kind,
+		arg.Key,
+		arg.Title,
+		arg.Body,
+		arg.ActorID,
+		arg.UpdatedAt,
+	)
 	return err
 }

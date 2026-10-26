@@ -93,7 +93,10 @@ export default function Staff({ q }: { q: string | null }) {
                 <Link href="/staff/exports">Exports and enrolment queue</Link>
               )}
               {actor.permissions.includes("content.publish") && (
-                <Link href="/staff/content">Publish spreadsheet content</Link>
+                <>
+                  <Link href="/staff/content">Publish spreadsheet content</Link>
+                  <Link href="/staff/content/wording">Badge and milestone wording</Link>
+                </>
               )}
               {actor.permissions.includes("initiative.manage") && <Link href="/staff/initiatives">Initiatives</Link>}
               {actor.permissions.includes("event.manage") && <Link href="/staff/events">Events</Link>}

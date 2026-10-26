@@ -250,6 +250,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.Staff, services.Admin, services.Exports = staff, staff, staff
 		services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
 		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKeys: contentKeys}
+		services.Wording = store.WordingService{Staff: staff}
 		services.Initiatives = store.InitiativeService{Staff: staff}
 		services.Events = store.EventService{Staff: staff}
 		services.Reporting = &store.ReportingService{Staff: staff}

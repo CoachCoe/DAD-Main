@@ -53,3 +53,16 @@ SELECT EXISTS (
 -- name: DonorFirstGiftAt :one
 -- When the donor first gave, to tell a restarted run from their first (Comeback).
 SELECT min(paid_at)::timestamptz AS first_paid_at FROM donor_gifts WHERE donor_id=$1;
+
+-- name: RecognitionWording :many
+SELECT kind,key,title,body FROM donor_recognition_wording WHERE kind=$1;
+
+-- name: SetRecognitionWording :exec
+INSERT INTO donor_recognition_wording(kind,key,title,body,actor_id,updated_at) VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT(kind,key) DO UPDATE SET title=EXCLUDED.title,body=EXCLUDED.body,actor_id=EXCLUDED.actor_id,updated_at=EXCLUDED.updated_at;
+
+-- name: ResetRecognitionWording :exec
+DELETE FROM donor_recognition_wording WHERE kind=$1 AND key=$2;
+
+-- name: MilestoneWording :one
+SELECT title,body FROM donor_recognition_wording WHERE kind='MILESTONE' AND key=$1;

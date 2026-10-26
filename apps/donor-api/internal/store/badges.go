@@ -141,8 +141,12 @@ func (b BadgeService) Badges(ctx context.Context, token string) ([]BadgeView, er
 			at := r.EarnedAt.Time
 			earned[r.Code] = &at
 		}
-		views := make([]BadgeView, 0, len(badges.Catalog))
-		for _, cat := range badges.Catalog {
+		catalog, err := badgeWording(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		views := make([]BadgeView, 0, len(catalog))
+		for _, cat := range catalog {
 			v := BadgeView{Code: cat.Code, Title: cat.Title, Rule: cat.Rule, Perk: string(cat.Perk)}
 			if at, ok := earned[cat.Code]; ok {
 				v.Earned = true

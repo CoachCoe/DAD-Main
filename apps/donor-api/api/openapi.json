@@ -10300,6 +10300,133 @@
     },
     "description": "Shown on the partner dashboard and included in new PDF reports. Partner administrators only; viewers get 403."
    }
+  },
+  "/donor/staff/content/wording": {
+   "get": {
+    "operationId": "recognitionWording",
+    "summary": "Badge and milestone wording",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RecognitionWording"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   },
+   "post": {
+    "operationId": "setRecognitionWording",
+    "summary": "Change a badge's or milestone's wording",
+    "description": "Replaces the words only; how badges and milestones are earned does not change. An empty title and text restore the default.",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "kind": {
+          "type": "string",
+          "enum": [
+           "BADGE",
+           "MILESTONE"
+          ]
+         },
+         "key": {
+          "type": "string",
+          "description": "Badge code, or a milestone's day count"
+         },
+         "title": {
+          "type": "string",
+          "maxLength": 60
+         },
+         "text": {
+          "type": "string",
+          "maxLength": 200
+         }
+        },
+        "required": [
+         "kind",
+         "key",
+         "title",
+         "text"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "saved": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "saved"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
   }
  },
  "components": {
@@ -14731,6 +14858,61 @@
      "retained",
      "unknown"
     ]
+   },
+   "WordingEntry": {
+    "type": "object",
+    "properties": {
+     "key": {
+      "type": "string"
+     },
+     "title": {
+      "type": "string"
+     },
+     "text": {
+      "type": "string"
+     },
+     "default_title": {
+      "type": "string"
+     },
+     "default_text": {
+      "type": "string"
+     },
+     "custom": {
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "key",
+     "title",
+     "text",
+     "default_title",
+     "default_text",
+     "custom"
+    ],
+    "additionalProperties": false
+   },
+   "RecognitionWording": {
+    "type": "object",
+    "description": "Badge and streak-milestone wording. A badge's text is the rule shown while it is unearned; a milestone's is its notification body.",
+    "properties": {
+     "badges": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/WordingEntry"
+      }
+     },
+     "milestones": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/WordingEntry"
+      }
+     }
+    },
+    "required": [
+     "badges",
+     "milestones"
+    ],
+    "additionalProperties": false
    }
   }
  }

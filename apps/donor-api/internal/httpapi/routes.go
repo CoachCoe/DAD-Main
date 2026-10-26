@@ -132,6 +132,7 @@ func (a *api) routes() []route {
 		a.staffRead("GET /donor/staff/exports/{file}", a.export),
 
 		a.staffRead("GET /donor/staff/content", a.contentInventory),
+		a.staffRead("GET /donor/staff/content/wording", a.recognitionWording),
 		a.partnerRead("GET /donor/partner/overview", a.partnerOverview),
 		a.partnerRead("GET /donor/partner/initiatives", a.partnerInitiatives),
 		a.partnerRead("GET /donor/partner/spend", a.partnerSpend),
@@ -165,6 +166,7 @@ func (a *api) routes() []route {
 		a.staffWrite("POST /donor/staff/content/sources", a.uploadSource),
 		a.staffRead("GET /donor/staff/content/sources/{source_id}", a.downloadSource),
 		a.staffWrite("POST /donor/staff/content/publish", a.publish),
+		a.staffWrite("POST /donor/staff/content/wording", a.setRecognitionWording),
 
 		a.staffRead("GET /donor/staff/initiatives", a.staffInitiatives),
 		a.staffWrite("POST /donor/staff/initiatives", a.createInitiative),

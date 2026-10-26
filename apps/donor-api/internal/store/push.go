@@ -5,7 +5,6 @@ import (
 	"errors"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -337,15 +336,7 @@ func pushContent(job queries.DonorPushNotification) (push.Notification, error) {
 		if err != nil || !recognition.LadderMilestone(days) {
 			return n, payments.ErrFacts
 		}
-		length, span := strconv.FormatInt(days, 10)+"-day", strconv.FormatInt(days, 10)+" days"
-		if years := days / 365; days%365 == 0 {
-			length, span = strconv.FormatInt(years, 10)+"-year", strconv.FormatInt(years, 10)+" years"
-			if years == 1 {
-				span = "a year"
-			}
-		}
-		n.Title = "Your " + length + " giving streak"
-		n.Body = "You have kept your giving streak going for " + span + ". Thank you for showing up every day."
+		n.Title, n.Body = milestoneWording(days)
 	case "EVENT_PROMOTED":
 		n.Title = "A spot opened up"
 		n.Body = "You are off the waitlist — your spot at an upcoming event is confirmed. Open the app for details."
@@ -458,6 +449,9 @@ func (w PushWorker) claim(ctx context.Context, now time.Time) (*pushJob, bool, e
 		var note push.Notification
 		if err == nil && reason == "" {
 			note, err = pushContent(row)
+			if err == nil && row.Category == "STREAK_MILESTONE" {
+				err = customMilestone(ctx, q, row, &note)
+			}
 		}
 		if err != nil {
 			if !messageDataError(err) {
