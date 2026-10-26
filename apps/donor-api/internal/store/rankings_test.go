@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"testing"
+
+	"dad/donor-api/internal/dbroles"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -62,9 +64,24 @@ func TestRankingRefreshPercentileCityRankAndOptOut(t *testing.T) {
 	// An opted-out donor with the highest streak must be excluded entirely.
 	optedOut := rankDonor(t, pool, 9999, base, "Austin", true)
 
-	svc := RankingService{DB: pool}
+	cleanup(t, "DELETE FROM donor_badges WHERE code IN ('NAT2','CITY50')")
+	svc := RankingService{DB: as(t, dbroles.ProjectionWorker)}
 	if err := svc.Refresh(ctx, now); err != nil {
 		t.Fatal(err)
+	}
+	held := func(id pgtype.UUID) string {
+		t.Helper()
+		var codes string
+		if err := pool.QueryRow(ctx, "SELECT coalesce(string_agg(code, ',' ORDER BY code), '') FROM donor_badges WHERE donor_id=$1", id).Scan(&codes); err != nil {
+			t.Fatal(err)
+		}
+		return codes
+	}
+	if got := held(top); got != "CITY50,NAT2" {
+		t.Fatalf("top donor holds %q after the rollup, want Top 50 City and Top 2%%", got)
+	}
+	if got := held(optedOut); got != "" {
+		t.Fatalf("opted-out donor earned ranking badges %q", got)
 	}
 
 	cityRank := func(id pgtype.UUID) int {

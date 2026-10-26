@@ -15,44 +15,44 @@ const (
 	PerkTeamCaptain     Perk = "TEAM_CAPTAIN"
 )
 
-// Badge is one catalog entry. Code is the stable identifier stored in the
-// earn-state and emitted to clients; Title and Perk are display/entitlement
-// data. Live is false for a badge whose earning signal does not exist yet
-// (volunteer check-ins, teams — Phases 4 and 6): it stays in the catalog, shows
-// as unearned, and the engine never awards it until its phase lands.
+// Badge is one catalog entry. Code is the stable identifier stored in the earn
+// state and sent to clients; Rule is how it is earned, shown on an unearned
+// badge (B-1). Live is false for a badge the engine does not award itself.
 type Badge struct {
 	Code  string
 	Title string
+	Rule  string
 	Perk  Perk
 	Live  bool
 }
 
-// Catalog is the 24 approved badges in Appendix A order. Codes match the PRD.
+// Catalog is the 24 approved badges in Appendix A order. Codes are ASCII forms
+// of the appendix's, which reuses "7" and uses symbols.
 var Catalog = []Badge{
-	{Code: "F", Title: "Founding Donor", Perk: PerkFoundingEvents, Live: true},
-	{Code: "1D", Title: "First Day", Live: true},
-	{Code: "7", Title: "One Week", Live: true},
-	{Code: "30", Title: "One Month", Live: true},
-	{Code: "100", Title: "Hundred", Live: true},
-	{Code: "Y1", Title: "One Year", Live: true},
-	{Code: "1K", Title: "1,000 Days", Perk: PerkMilestoneEvents, Live: true},
-	{Code: "Y3", Title: "Three Years", Live: true},
-	{Code: "CB", Title: "Comeback", Live: true},
-	{Code: "UP", Title: "Level Up", Live: true},
-	{Code: "REF1", Title: "First Referral", Live: true},
-	{Code: "REF3", Title: "Brought 3 In", Live: true},
-	{Code: "REF12", Title: "Brought 12 In", Live: true},
-	{Code: "TC", Title: "Team Captain", Perk: PerkTeamCaptain, Live: true},
-	{Code: "IRL", Title: "IRL", Live: true},
-	{Code: "V", Title: "Volunteer", Live: true},         // Phase 4.5: volunteer opt-in
-	{Code: "SU", Title: "Showed Up", Live: true},        // Phase 4.5: event check-in
-	{Code: "V3", Title: "Volunteer ×3", Live: true},     // Phase 4.5
-	{Code: "V10", Title: "Volunteer ×10", Live: true},   // Phase 4.5
-	{Code: "INIT7", Title: "7 Initiatives", Live: true}, // A-4 distinct-initiative exposures
-	{Code: "CITY50", Title: "Top 50 City", Live: true},  // 3.3 rankings
-	{Code: "NAT2", Title: "Top 2%", Live: true},         // 3.3 rankings
-	{Code: "TP", Title: "Team Player", Live: false},     // Phase 6: teams
-	{Code: "WT", Title: "Winning Team", Live: false},    // Phase 6: team leaderboard
+	{"F", "Founding Donor", "Start a monthly gift before January 2027, or join the website waitlist", PerkFoundingEvents, true},
+	{"1D", "First Day", "Complete your first gift", PerkNone, true},
+	{"7", "One Week", "Reach a 7-day streak", PerkNone, true},
+	{"30", "One Month", "Reach a 30-day streak", PerkNone, true},
+	{"100", "Hundred", "Reach a 100-day streak", PerkNone, true},
+	{"Y1", "One Year", "Reach a 365-day streak", PerkNone, true},
+	{"1K", "1,000 Days", "Reach a 1,000-day streak", PerkMilestoneEvents, true},
+	{"Y3", "Three Years", "Reach a 1,095-day streak", PerkNone, true},
+	{"CB", "Comeback", "Restart giving after a lapse and reach 30 days", PerkNone, true},
+	{"UP", "Level Up", "Raise your daily amount", PerkNone, true},
+	{"REF1", "First Referral", "Someone you invited completes a gift", PerkNone, true},
+	{"REF3", "Brought 3 In", "Three people you invited complete a gift", PerkNone, true},
+	{"REF12", "Brought 12 In", "Twelve people you invited complete a gift", PerkNone, true},
+	{"TC", "Team Captain", "Twenty people you invited complete a gift", PerkTeamCaptain, true},
+	{"IRL", "IRL", "Someone joins by scanning your IRL code", PerkNone, true},
+	{"V", "Volunteer", "Opt in as a volunteer", PerkNone, true},
+	{"SU", "Showed Up", "Check in at your first event", PerkNone, true},
+	{"V3", "Volunteer ×3", "Check in at 3 events", PerkNone, true},
+	{"V10", "Volunteer ×10", "Check in at 10 events", PerkNone, true},
+	{"INIT7", "7 Initiatives", "Fund 7 different initiatives", PerkNone, true},
+	{"CITY50", "Top 50 City", "Rank in the top 50 in your city", PerkNone, true},
+	{"NAT2", "Top 2%", "Rank in the top 2% nationally by streak", PerkNone, true},
+	{"TP", "Team Player", "Join a company team", PerkNone, true},
+	{"WT", "Winning Team", "Your team finishes a month at #1 on your company leaderboard", PerkNone, false},
 }
 
 // byCode indexes the catalog for O(1) lookup.
@@ -96,10 +96,7 @@ func HoldsPerk(earned map[string]bool, perk Perk) bool {
 	return false
 }
 
-// Signals is the donor's current earning state, assembled by the store from the
-// projection, the streak ladder, the initiative-exposure ledger and the ranking
-// rollup. A signal whose source phase has not shipped is simply zero/false, so
-// the inert badges never qualify.
+// Signals is the donor's current earning state, assembled by the store.
 type Signals struct {
 	FirstGiftMade       bool  // completed a first gift
 	FoundingQualified   bool  // first gift before the Founding cutoff / waitlist
@@ -113,18 +110,18 @@ type Signals struct {
 	CityRank            *int  // rank within their city; nil if unranked
 	VolunteerOptIn      bool  // opted in as a volunteer (E-1)
 	EventCheckins       int64 // events the donor has checked in to (E-8)
+	JoinedTeam          bool  // on a company team (EM-4)
 }
 
-// milestoneDays maps the streak-day badges to their thresholds.
+// streakDayBadges maps the streak-day badges to their thresholds.
 var streakDayBadges = []struct {
 	code string
 	days int64
 }{{"7", 7}, {"30", 30}, {"100", 100}, {"Y1", 365}, {"1K", 1000}, {"Y3", 1095}}
 
-// Evaluate returns the set of badge codes the donor currently qualifies for,
-// considering only Live badges with available signals. It is monotonic in the
-// sense the caller relies on: it reports current qualification; the store then
-// unions this with the permanent earn-state so a badge never un-earns (PRD B-2).
+// Evaluate returns the Live badges the donor currently qualifies for. The
+// store keeps every badge ever earned, so one that no longer qualifies stays
+// earned (B-2).
 func Evaluate(s Signals) map[string]bool {
 	earned := map[string]bool{}
 	if s.FoundingQualified {
@@ -164,8 +161,6 @@ func Evaluate(s Signals) map[string]bool {
 	if s.CityRank != nil && *s.CityRank <= 50 {
 		earned["CITY50"] = true
 	}
-	// Volunteer badges (E-1/E-8): opting in earns Volunteer; each checked-in
-	// event counts toward Showed Up (1), Volunteer ×3 (3) and Volunteer ×10 (10).
 	if s.VolunteerOptIn {
 		earned["V"] = true
 	}
@@ -177,8 +172,9 @@ func Evaluate(s Signals) map[string]bool {
 			earned[r.code] = true
 		}
 	}
-	// Drop any code that is not a Live catalog badge (defensive — none of the
-	// above are inert, but this keeps Evaluate honest if the catalog changes).
+	if s.JoinedTeam {
+		earned["TP"] = true
+	}
 	for code := range earned {
 		if b, ok := byCode[code]; !ok || !b.Live {
 			delete(earned, code)

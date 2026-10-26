@@ -51,3 +51,26 @@ FROM donor_rankings WHERE donor_id = $1;
 -- The most recent ranking computation time, or NULL if never computed. Used to
 -- throttle the global refresh to a periodic cadence inside the projections worker.
 SELECT MAX(computed_at)::timestamptz AS last FROM donor_rankings;
+
+-- name: AwardRankingBadges :exec
+-- Top 2% and Top 50 City for every donor the rollup just ranked into them,
+-- queueing the badge-earned push for each new one, in one pass.
+WITH qualifying AS (
+  SELECT donor_id, 'NAT2'::varchar AS code FROM donor_rankings
+  WHERE computed_at = sqlc.arg(computed_at)::timestamptz AND national_percentile <= 2
+  UNION ALL
+  SELECT donor_id, 'CITY50'::varchar FROM donor_rankings
+  WHERE computed_at = sqlc.arg(computed_at)::timestamptz AND city_rank <= 50
+), earned AS (
+  INSERT INTO donor_badges (donor_id, code, source, earned_at)
+  SELECT donor_id, code, 'AUTO', sqlc.arg(computed_at)::timestamptz FROM qualifying
+  ON CONFLICT (donor_id, code) DO NOTHING
+  RETURNING donor_id, code
+)
+INSERT INTO donor_push_notifications (id, donor_id, category, dedup_key, context, available_at, expires_at)
+SELECT gen_random_uuid(), e.donor_id, 'BADGE_EARNED', 'push:badge:' || e.donor_id::text || ':' || e.code,
+  json_build_object('code', e.code), sqlc.arg(computed_at)::timestamptz, sqlc.arg(expires_at)::timestamptz
+FROM earned e
+WHERE EXISTS (SELECT 1 FROM donor_sessions s WHERE s.donor_id = e.donor_id AND s.push_token IS NOT NULL
+  AND coalesce(s.refresh_expires_at, s.expires_at) > sqlc.arg(computed_at)::timestamptz)
+ON CONFLICT (dedup_key) DO NOTHING;

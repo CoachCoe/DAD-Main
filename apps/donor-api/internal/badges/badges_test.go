@@ -62,28 +62,37 @@ func TestEvaluateLiveRuleBoundaries(t *testing.T) {
 	}
 }
 
-func TestInertBadgesNeverEarned(t *testing.T) {
-	// Even with every shipped signal maxed, the Phase 6 team badges have no
-	// signal and must never be awarded by Evaluate.
+func TestWinningTeamIsNotAwardedFromSignals(t *testing.T) {
 	top := 1
 	rank := 1
 	all := Signals{
 		FirstGiftMade: true, FoundingQualified: true, StreakDays: 100000,
 		ComebackReached30: true, RaisedAmount: true, ConvertedReferrals: 1000,
 		HasIRLReferral: true, DistinctInitiatives: 1000, NationalTopPercent: &top, CityRank: &rank,
-		VolunteerOptIn: true, EventCheckins: 1000,
+		VolunteerOptIn: true, EventCheckins: 1000, JoinedTeam: true,
 	}
 	got := Evaluate(all)
-	for _, code := range []string{"TP", "WT"} {
-		if got[code] {
-			t.Errorf("inert badge %q was earned", code)
+	if got["WT"] || len(got) != len(Catalog)-1 {
+		t.Fatalf("every badge but Winning Team should be earned, got %d: %v", len(got), got)
+	}
+}
+
+func TestJoiningATeamEarnsTeamPlayer(t *testing.T) {
+	if Evaluate(Signals{})["TP"] || !Evaluate(Signals{JoinedTeam: true})["TP"] {
+		t.Fatal("Team Player follows joining a company team")
+	}
+}
+
+func TestEveryBadgeStatesHowToEarnIt(t *testing.T) {
+	for _, b := range Catalog {
+		if b.Rule == "" || b.Title == "" {
+			t.Errorf("badge %s has no title or rule", b.Code)
 		}
 	}
 }
 
-// TestVolunteerBadgesEarnFromSignals covers Phase 4.5: opting in earns
-// Volunteer, and checked-in events earn Showed Up / Volunteer ×3 / ×10 at their
-// thresholds.
+// Opting in earns Volunteer, and checked-in events earn Showed Up, Volunteer ×3
+// and Volunteer ×10 at their thresholds.
 func TestVolunteerBadgesEarnFromSignals(t *testing.T) {
 	// Opt-in alone earns V but none of the check-in badges.
 	got := Evaluate(Signals{VolunteerOptIn: true})

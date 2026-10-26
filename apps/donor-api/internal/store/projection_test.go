@@ -167,7 +167,7 @@ func TestSharedReferralScenariosAgainstSQLAggregate(t *testing.T) {
 			actAs(t, tx, dbroles.API)
 			for _, name := range names {
 				want := expected[name]
-				board, err := dashboard(ctx, h.q, h.donors[name], c.AsOf)
+				board, err := dashboard(ctx, h.q, queries.Donor{ID: h.donors[name]}, c.AsOf)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -216,7 +216,7 @@ FROM donor_metric_projections WHERE referrer_id=$1`, referrer).Scan(&got.Link, &
 // role sees them, failing if the referrals are withheld.
 func dashboardTotals(t *testing.T, tx pgx.Tx, id pgtype.UUID, now time.Time) referralTotals {
 	t.Helper()
-	board, err := dashboard(context.Background(), queries.New(tx), id, now)
+	board, err := dashboard(context.Background(), queries.New(tx), queries.Donor{ID: id}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -878,11 +878,16 @@ func TestProjectionWaitsForItsNextBoundaryAndSummarizesAtNewYear(t *testing.T) {
 		}
 	}
 	summer := paid.Add(time.Hour)
-	// The next refresh is the sooner of the donor's refresh cadence and the next
-	// real boundary (this period's end); whichever is nearer.
+	// The next refresh is the nearest of the donor's refresh cadence, this
+	// period's end, and the next streak milestone: seven days, reached at
+	// midnight in the donor's zone (New York without a ZIP).
 	wantNext := summer.Add(refreshCap(donor))
 	if periodEnd.Before(wantNext) {
 		wantNext = periodEnd
+	}
+	sevenDays := recognition.Streak{Since: &paid}.Reaches(7, recognition.NewYork)
+	if sevenDays.Before(wantNext) {
+		wantNext = sevenDays
 	}
 	if p, err := projectFacts(ctx, h.q, donor, summer); err != nil || !p.NextRefreshAt.Time.Equal(wantNext) ||
 		p.RulesVersion != projectionRules {

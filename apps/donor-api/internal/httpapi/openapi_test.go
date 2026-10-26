@@ -236,6 +236,9 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/partner/overview":                                store.PartnerOverview{},
 		"GET /donor/partner/our-people":                              store.PartnerOurPeople{},
 		"GET /donor/me/team":                                         store.DonorTeam{},
+		"GET /donor/me/badges": struct {
+			Badges []store.BadgeView `json:"badges"`
+		}{},
 		"GET /donor/partner/initiatives": struct {
 			Initiatives []store.PartnerInitiative `json:"initiatives"`
 		}{},

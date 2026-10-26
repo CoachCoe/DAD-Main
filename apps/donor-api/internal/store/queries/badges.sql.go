@@ -69,6 +69,18 @@ func (q *Queries) DonorBadges(ctx context.Context, donorID pgtype.UUID) ([]Donor
 	return items, nil
 }
 
+const donorFirstGiftAt = `-- name: DonorFirstGiftAt :one
+SELECT min(paid_at)::timestamptz AS first_paid_at FROM donor_gifts WHERE donor_id=$1
+`
+
+// When the donor first gave, to tell a restarted run from their first (Comeback).
+func (q *Queries) DonorFirstGiftAt(ctx context.Context, donorID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, donorFirstGiftAt, donorID)
+	var first_paid_at pgtype.Timestamptz
+	err := row.Scan(&first_paid_at)
+	return first_paid_at, err
+}
+
 const donorRaisedAmount = `-- name: DonorRaisedAmount :one
 SELECT EXISTS (
   SELECT 1 FROM donor_amount_changes

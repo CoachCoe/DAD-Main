@@ -44,7 +44,10 @@ func refreshProjection(ctx context.Context, tx pgx.Tx, id pgtype.UUID, now time.
 	if err = q.QueueFinancialIntents(ctx, queries.QueueFinancialIntentsParams{DonorID: id, AsOf: timestamp(now)}); err != nil {
 		return result, err
 	}
-	return result, queuePushIntents(ctx, q, result, now)
+	if err = queuePushIntents(ctx, q, result, now); err != nil {
+		return result, err
+	}
+	return result, awardBadges(ctx, q, result.donor, now)
 }
 
 func seedProjection(ctx context.Context, q *queries.Queries, donor pgtype.UUID, now time.Time) error {

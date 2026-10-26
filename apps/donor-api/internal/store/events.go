@@ -896,7 +896,7 @@ func (s ReservationService) CheckIn(ctx context.Context, sessionToken, qrToken s
 		}); err != nil {
 			return CheckInResult{}, err
 		}
-		return CheckInResult{EventID: eventID.String(), CheckedIn: true}, nil
+		return CheckInResult{EventID: eventID.String(), CheckedIn: true}, awardBadges(ctx, q, d, now)
 	})
 }
 

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -321,8 +322,8 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 			}
 		}
 	}
-	intents := pushIntents(t, tx, h.donor("alice"))
-	if len(intents) != 1 || intents[0].Category != "REFERRAL_CONVERTED" ||
+	intents := intentsOf(t, tx, h.donor("alice"), "REFERRAL_CONVERTED")
+	if len(intents) != 1 ||
 		intents[0].DedupKey != "push:referral:"+h.donor("ben").String()+":"+h.donor("alice").String()+":IRL" ||
 		!intents[0].ExpiresAt.Time.Equal(paid.Add(pushLifetime)) {
 		t.Fatalf("intents %+v, want one conversion notice", intents)
@@ -334,6 +335,13 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 	if err != nil || note.Body != "Someone you invited through an IRL Referral just made their first test gift." ||
 		note.Path != "/account/dashboard" {
 		t.Fatalf("content %+v %v", note, err)
+	}
+	var earned []string
+	for _, n := range intentsOf(t, tx, h.donor("alice"), "BADGE_EARNED") {
+		earned = append(earned, n.DedupKey[strings.LastIndex(n.DedupKey, ":")+1:])
+	}
+	if slices.Sort(earned); !slices.Equal(earned, []string{"IRL", "REF1"}) {
+		t.Fatalf("referrer earned %v with the conversion, want First Referral and IRL", earned)
 	}
 	if len(pushIntents(t, tx, h.donor("cara"))) != 0 || len(pushIntents(t, tx, h.donor("ben"))) != 0 {
 		t.Fatal("pushes queued for donors without devices")
@@ -348,7 +356,51 @@ func TestReferralConversionQueuesOneGenericPushWithTheGift(t *testing.T) {
 	}
 }
 
-func TestStreakPushesFollowTheProjection(t *testing.T) {
+// intentsOf returns the donor's queued notifications of one category.
+func intentsOf(t *testing.T, db queries.DBTX, donor pgtype.UUID, category string) []queries.DonorPushNotification {
+	t.Helper()
+	var out []queries.DonorPushNotification
+	for _, n := range pushIntents(t, db, donor) {
+		if n.Category == category {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// A streak milestone is announced on the day it is reached (S-3): a run that
+// began 100 local days ago reached its 100-day milestone at today's midnight.
+func TestStreakMilestonePushFollowsTheProjection(t *testing.T) {
+	f := newWorkerFixture(t, "MONTHLY")
+	pushCleanup(t, f.db, f.donorID)
+	result := f.checkout(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	appDevice(t, f.service.DB, f.donorID, push.Android, androidToken, now.Add(time.Hour))
+	today := now.In(recognition.NewYork)
+	start := time.Date(today.Year(), today.Month(), today.Day()-100, 0, 1, 0, 0, recognition.NewYork).UTC()
+	for i := range 4 {
+		f.receive(
+			t,
+			"invoice.payment_succeeded",
+			invoice(result.CheckoutID, "in_"+result.CheckoutID+"_"+string(rune('a'+i)), start.Add(time.Duration(i)*30*24*time.Hour), true),
+		)
+		f.process(t)
+	}
+	intents := intentsOf(t, f.service.DB, f.donorID, "STREAK_MILESTONE")
+	if len(intents) != 1 || !strings.HasSuffix(intents[0].DedupKey, ":100") || !strings.Contains(intents[0].DedupKey, f.donorID.String()) {
+		t.Fatalf("intents %+v, want the 100-day milestone", intents)
+	}
+	note, err := pushContent(intents[0])
+	if err != nil || note.Title != "Your 100-day giving streak" {
+		t.Fatalf("content %+v %v", note, err)
+	}
+	if badges := intentsOf(t, f.service.DB, f.donorID, "BADGE_EARNED"); len(badges) == 0 {
+		t.Fatal("the projection earned no badge pushes for a 100-day streak")
+	}
+}
+
+// A failed renewal puts the streak at risk, announced once for that period.
+func TestStreakAtRiskPushFollowsTheProjection(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	pushCleanup(t, f.db, f.donorID)
 	result := f.checkout(t)
@@ -364,17 +416,6 @@ func TestStreakPushesFollowTheProjection(t *testing.T) {
 		)
 		f.process(t)
 	}
-	intents := pushIntents(t, f.service.DB, f.donorID)
-	if len(intents) != 1 || intents[0].Category != "STREAK_MILESTONE" || !strings.HasSuffix(intents[0].DedupKey, ":3") ||
-		!strings.Contains(intents[0].DedupKey, f.donorID.String()) {
-		t.Fatalf("intents %+v, want the three-month milestone", intents)
-	}
-	note, err := pushContent(intents[0])
-	if err != nil || note.Title != "3 months in a row" {
-		t.Fatalf("content %+v %v", note, err)
-	}
-
-	// The next renewal fails: the streak is at risk, announced once for that period.
 	f.receive(t, "invoice.payment_failed", invoice(result.CheckoutID, "in_"+result.CheckoutID+"_d", start.Add(90*24*time.Hour), false))
 	f.process(t)
 	tx, err := as(t, dbroles.ProjectionWorker).Begin(ctx)
@@ -382,20 +423,21 @@ func TestStreakPushesFollowTheProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err = refreshProjection(ctx, tx, f.donorID, now.Add(time.Hour)); err != nil {
+		_ = tx.Rollback(ctx)
 		t.Fatal(err)
 	}
 	if err = tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	intents = pushIntents(t, f.service.DB, f.donorID)
 	var period string
 	if err = f.db.QueryRow(ctx, "SELECT id::text FROM donor_billing_periods WHERE donor_id=$1 AND status='FAILED'", f.donorID).Scan(&period); err != nil {
 		t.Fatal(err)
 	}
-	if len(intents) != 2 || intents[0].Category != "STREAK_AT_RISK" || intents[0].DedupKey != "push:streak-at-risk:"+period {
+	intents := intentsOf(t, f.service.DB, f.donorID, "STREAK_AT_RISK")
+	if len(intents) != 1 || intents[0].DedupKey != "push:streak-at-risk:"+period {
 		t.Fatalf("intents %+v, want one at-risk notice for the failed period", intents)
 	}
-	note, err = pushContent(intents[0])
+	note, err := pushContent(intents[0])
 	if err != nil || note.Path != "/account/payment-method" {
 		t.Fatalf("content %+v %v", note, err)
 	}
@@ -427,8 +469,8 @@ type pushFixture struct {
 	now    time.Time
 }
 
-// newPushFixture queues a three-month milestone for a donor with a current
-// three-month streak, available at now.
+// newPushFixture queues a 30-day milestone for a donor whose current streak is
+// 31 days long, available at now.
 func newPushFixture(t *testing.T) *pushFixture {
 	t.Helper()
 	pool := database(t)
@@ -438,15 +480,16 @@ func newPushFixture(t *testing.T) *pushFixture {
 	mustExec(
 		t,
 		pool,
-		"INSERT INTO donor_metric_projections(id,donor_id,current_streak,best_streak,computed_at,next_refresh_at) VALUES($1,$2,3,3,$3,$4)",
+		"INSERT INTO donor_metric_projections(id,donor_id,current_streak,best_streak,computed_at,next_refresh_at,streak_since) VALUES($1,$2,2,2,$3,$4,$5)",
 		testID(t),
 		id,
 		now,
 		now.Add(time.Hour),
+		now.Add(-31*24*time.Hour),
 	)
 	intent := testID(t)
 	mustExec(t, pool, `INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
-VALUES($1,$2,'STREAK_MILESTONE',$3,'{"months":3}',$4,$5)`, intent, id, "push:test:"+intent.String(), now, now.Add(pushLifetime))
+VALUES($1,$2,'STREAK_MILESTONE',$3,'{"days":30}',$4,$5)`, intent, id, "push:test:"+intent.String(), now, now.Add(pushLifetime))
 	return &pushFixture{pool, id, intent, now}
 }
 
@@ -558,7 +601,7 @@ func TestPushRechecksItsCircumstancesAtDelivery(t *testing.T) {
 		}, 0, "opted_out"},
 		{"expired", func(*testing.T, *pushFixture) {}, pushLifetime, "expired"},
 		{"streak ended", func(t *testing.T, f *pushFixture) {
-			mustExec(t, f.pool, "UPDATE donor_metric_projections SET current_streak=0 WHERE donor_id=$1", f.donor)
+			mustExec(t, f.pool, "UPDATE donor_metric_projections SET current_streak=0,streak_since=NULL WHERE donor_id=$1", f.donor)
 		}, 0, "streak_ended"},
 		{"signed out", func(t *testing.T, f *pushFixture) {
 			mustExec(t, f.pool, "UPDATE donor_sessions SET revoked_at=now(),push_token=NULL,push_environment=NULL WHERE donor_id=$1", f.donor)

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"dad/donor-api/internal/badges"
@@ -12,33 +13,32 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// BadgeService is the donor-facing badge read and the staff grant/revoke
-// (PRD §6.9). Earning is automatic and permanent: a read re-evaluates current
-// qualification from the donor's signals, records any newly-earned badge, and
-// returns the union with the stored earn-state so a badge never un-earns (B-2).
+// BadgeService is the donor-facing badge read and the staff grant and revoke
+// (PRD §6.9).
 type BadgeService struct {
 	DB    *pgxpool.Pool
 	Staff *StaffService
 }
 
-// BadgeView is one badge's state for a donor: its catalog identity and whether
-// this donor has earned it (earned badges show in color, unearned greyed — B-1).
+// BadgeView is one badge's state for a donor: its catalog identity, how it is
+// earned, and whether this donor has (earned badges show in color, unearned
+// greyed with their rule, B-1).
 type BadgeView struct {
 	Code     string     `json:"code"`
 	Title    string     `json:"title"`
+	Rule     string     `json:"rule"`
 	Perk     string     `json:"perk"`
 	Earned   bool       `json:"earned"`
 	EarnedAt *time.Time `json:"earned_at,omitempty"`
 }
 
-// signalsFor assembles the donor's current earning signals from the projection,
-// the initiative-exposure ledger and the amount-change history. Ranking signals
-// (national %, city rank) are filled once the ranking rollup (3.3) is wired;
-// until then they are nil and the ranking badges simply do not auto-earn.
-func signalsFor(ctx context.Context, q *queries.Queries, donorID pgtype.UUID, now time.Time) (badges.Signals, error) {
+// signalsFor assembles the donor's current earning signals: the projection,
+// the initiative exposures, amount changes, the ranking rollup, volunteering
+// and their company team.
+func signalsFor(ctx context.Context, q *queries.Queries, donor queries.Donor, now time.Time) (badges.Signals, error) {
 	var s badges.Signals
-	proj, err := q.Projection(ctx, donorID)
-	if err != nil && err != pgx.ErrNoRows {
+	proj, err := q.Projection(ctx, donor.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return s, err
 	}
 	if err == nil {
@@ -46,30 +46,25 @@ func signalsFor(ctx context.Context, q *queries.Queries, donorID pgtype.UUID, no
 		s.FoundingQualified = proj.FoundingAwardedAt.Valid
 		s.ConvertedReferrals = proj.ReferredLinkCount + proj.ReferredIrlCount
 		s.HasIRLReferral = proj.ReferredIrlCount > 0
-		var since *time.Time
 		if proj.StreakSince.Valid {
-			since = &proj.StreakSince.Time
-		}
-		s.StreakDays = (recognition.Streak{Since: since}).Ladder(now).Days
-		// Comeback: a prior run lapsed (best exceeds the current run) and the
-		// current run has climbed back to 30 days.
-		if proj.CurrentStreak.Valid && proj.BestStreak > proj.CurrentStreak.Int32 && s.StreakDays >= 30 {
-			s.ComebackReached30 = true
+			since := proj.StreakSince.Time
+			s.StreakDays = recognition.Streak{Since: &since}.Ladder(now, recognition.Zone(donor.Timezone.String)).Days
+			first, err := q.DonorFirstGiftAt(ctx, donor.ID)
+			if err != nil {
+				return s, err
+			}
+			// A run whose first period came due after the donor's first gift is
+			// a restart: an earlier run ended before it began.
+			s.ComebackReached30 = first.Valid && first.Time.Before(since) && s.StreakDays >= 30
 		}
 	}
-	shown, err := q.DistinctInitiativeExposures(ctx, donorID)
-	if err != nil {
+	if s.DistinctInitiatives, err = q.DistinctInitiativeExposures(ctx, donor.ID); err != nil {
 		return s, err
 	}
-	s.DistinctInitiatives = shown
-	raised, err := q.DonorRaisedAmount(ctx, donorID)
-	if err != nil {
+	if s.RaisedAmount, err = q.DonorRaisedAmount(ctx, donor.ID); err != nil {
 		return s, err
 	}
-	s.RaisedAmount = raised
-	// Ranking badges (Top 2% / Top 50 City) draw from the periodic rollup; an
-	// unranked donor simply does not earn them.
-	rank, err := ForDonor(ctx, q, donorID)
+	rank, err := ForDonor(ctx, q, donor.ID)
 	if err != nil {
 		return s, err
 	}
@@ -78,48 +73,61 @@ func signalsFor(ctx context.Context, q *queries.Queries, donorID pgtype.UUID, no
 		s.NationalTopPercent = &pct
 		s.CityRank = rank.CityRank
 	}
-	// Volunteer signals (Phase 4.5): the opt-in from preferences lights the
-	// Volunteer badge; checked-in events drive Showed Up / Volunteer ×N.
-	pref, err := readPreferences(ctx, q, donorID)
+	pref, err := readPreferences(ctx, q, donor.ID)
 	if err != nil {
 		return s, err
 	}
 	s.VolunteerOptIn = pref.Volunteer
-	vol, err := q.DonorVolunteerStats(ctx, donorID)
+	vol, err := q.DonorVolunteerStats(ctx, donor.ID)
 	if err != nil {
 		return s, err
 	}
 	s.EventCheckins = vol.Events
+	link, err := q.EmployeeLink(ctx, donor.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return s, err
+	}
+	s.JoinedTeam = err == nil && link.TeamID.Valid
 	return s, nil
 }
 
-// Badges returns every catalog badge with this donor's earned state, recording
-// any newly-earned badge first. The read holds the donor lock so the earn write
-// is serialized with other changes to the donor's facts.
+// awardBadges records every badge the donor now qualifies for and queues the
+// badge-earned push for each new one (§6.11). It runs wherever a donor's facts
+// change, so earning does not wait for the donor to look: perks such as
+// invite-only events depend on it (B-3). Earned badges stay earned (B-2).
+func awardBadges(ctx context.Context, q *queries.Queries, donor queries.Donor, now time.Time) error {
+	signals, err := signalsFor(ctx, q, donor, now)
+	if err != nil {
+		return err
+	}
+	for code := range badges.Evaluate(signals) {
+		if err := earnBadge(ctx, q, donor.ID, code, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// earnBadge records one auto-earned badge, queueing its push if it is new. The
+// push is deduped per badge, so retrying after a crash between the two is safe.
+func earnBadge(ctx context.Context, q *queries.Queries, donor pgtype.UUID, code string, now time.Time) error {
+	earned, err := q.EarnBadge(ctx, queries.EarnBadgeParams{DonorID: donor, Code: code, EarnedAt: timestamp(now)})
+	if err != nil || earned == 0 {
+		return err
+	}
+	return q.QueueBadgePush(ctx, queries.QueueBadgePushParams{
+		DonorID: donor, Code: code, AsOf: timestamp(now), ExpiresAt: timestamp(now.Add(pushLifetime)),
+	})
+}
+
+// Badges returns every catalog badge with this donor's earned state and its
+// rule, so an unearned badge can show how to earn it (B-1). It brings the earn
+// state up to date first, under the donor lock.
 func (b BadgeService) Badges(ctx context.Context, token string) ([]BadgeView, error) {
 	return donorWrite(ctx, b.DB, donorOwner(token), func(tx pgx.Tx, donor queries.Donor, now time.Time) ([]BadgeView, error) {
 		q := queries.New(tx)
-		signals, err := signalsFor(ctx, q, donor.ID, now)
-		if err != nil {
+		if err := awardBadges(ctx, q, donor, now); err != nil {
 			return nil, err
-		}
-		qualifies := badges.Evaluate(signals)
-		for code := range qualifies {
-			earned, err := q.EarnBadge(ctx, queries.EarnBadgeParams{DonorID: donor.ID, Code: code, EarnedAt: timestamp(now)})
-			if err != nil {
-				return nil, err
-			}
-			// Fire the badge-earned push (§6.11) only for a genuinely new earn;
-			// re-evaluating an already-earned badge affects no rows. The intent
-			// is itself deduped per (donor, badge), so a crash between the earn
-			// and the queue is safe to retry.
-			if earned > 0 {
-				if err := q.QueueBadgePush(ctx, queries.QueueBadgePushParams{
-					DonorID: donor.ID, Code: code, AsOf: timestamp(now), ExpiresAt: timestamp(now.Add(pushLifetime)),
-				}); err != nil {
-					return nil, err
-				}
-			}
 		}
 		rows, err := q.DonorBadges(ctx, donor.ID)
 		if err != nil {
@@ -127,7 +135,7 @@ func (b BadgeService) Badges(ctx context.Context, token string) ([]BadgeView, er
 		}
 		earned := map[string]*time.Time{}
 		for _, r := range rows {
-			if r.RevokedAt.Valid { // a revoked badge reads as unearned (B-4)
+			if r.RevokedAt.Valid {
 				continue
 			}
 			at := r.EarnedAt.Time
@@ -135,7 +143,7 @@ func (b BadgeService) Badges(ctx context.Context, token string) ([]BadgeView, er
 		}
 		views := make([]BadgeView, 0, len(badges.Catalog))
 		for _, cat := range badges.Catalog {
-			v := BadgeView{Code: cat.Code, Title: cat.Title, Perk: string(cat.Perk)}
+			v := BadgeView{Code: cat.Code, Title: cat.Title, Rule: cat.Rule, Perk: string(cat.Perk)}
 			if at, ok := earned[cat.Code]; ok {
 				v.Earned = true
 				v.EarnedAt = at

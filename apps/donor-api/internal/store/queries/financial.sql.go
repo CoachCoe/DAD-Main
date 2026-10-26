@@ -11,13 +11,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const applyReferralDelta = `-- name: ApplyReferralDelta :exec
+const applyReferralDelta = `-- name: ApplyReferralDelta :one
 UPDATE donor_metric_projections SET
 referred_link_count=referred_link_count+$2,
 referred_irl_count=referred_irl_count+$3,
 referred_link_minor=referred_link_minor+$4,
 referred_irl_minor=referred_irl_minor+$5
 WHERE donor_id=$1
+RETURNING referred_link_count, referred_irl_count
 `
 
 type ApplyReferralDeltaParams struct {
@@ -28,16 +29,23 @@ type ApplyReferralDeltaParams struct {
 	ReferredIrlMinor  int64       `json:"referred_irl_minor"`
 }
 
+type ApplyReferralDeltaRow struct {
+	ReferredLinkCount int64 `json:"referred_link_count"`
+	ReferredIrlCount  int64 `json:"referred_irl_count"`
+}
+
 // The caller ensures the target row exists before applying the delta.
-func (q *Queries) ApplyReferralDelta(ctx context.Context, arg ApplyReferralDeltaParams) error {
-	_, err := q.db.Exec(ctx, applyReferralDelta,
+func (q *Queries) ApplyReferralDelta(ctx context.Context, arg ApplyReferralDeltaParams) (ApplyReferralDeltaRow, error) {
+	row := q.db.QueryRow(ctx, applyReferralDelta,
 		arg.DonorID,
 		arg.ReferredLinkCount,
 		arg.ReferredIrlCount,
 		arg.ReferredLinkMinor,
 		arg.ReferredIrlMinor,
 	)
-	return err
+	var i ApplyReferralDeltaRow
+	err := row.Scan(&i.ReferredLinkCount, &i.ReferredIrlCount)
+	return i, err
 }
 
 const giftHistory = `-- name: GiftHistory :many

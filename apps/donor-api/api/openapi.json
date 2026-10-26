@@ -6858,7 +6858,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "All 24 badges in catalog order with the donor's earned state. Earned badges show in color; an unearned one shows greyed with its `rule` (B-1). Badges are earned when the donor's facts change and stay earned (B-2)."
    }
   },
   "/donor/staff/donors/{donor_id}/badges/grant": {
@@ -12050,6 +12051,10 @@
      "title": {
       "type": "string"
      },
+     "rule": {
+      "type": "string",
+      "description": "How the badge is earned, shown on an unearned badge (B-1)."
+     },
      "perk": {
       "type": "string"
      },
@@ -12067,6 +12072,7 @@
     "required": [
      "code",
      "title",
+     "rule",
      "perk",
      "earned"
     ],

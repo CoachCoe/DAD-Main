@@ -59,7 +59,7 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 		owner,
 	)
 	q := queries.New(tx)
-	result, err := dashboard(ctx, q, owner, now)
+	result, err := dashboard(ctx, q, queries.Donor{ID: owner}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 	} {
 		mustExec(t, tx, "SAVEPOINT invalid_projection")
 		mustExec(t, tx, "UPDATE donor_metric_projections SET "+modification+" WHERE donor_id=$1", first)
-		result, err = dashboard(ctx, q, owner, now)
+		result, err = dashboard(ctx, q, queries.Donor{ID: owner}, now)
 		if err != nil || result.Referrals != nil {
 			t.Fatal("incomplete aggregate exposed", modification, result, err)
 		}
@@ -111,7 +111,7 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 			int64(math.MaxInt64),
 			owner,
 		)
-		result, err = dashboard(ctx, q, owner, now)
+		result, err = dashboard(ctx, q, queries.Donor{ID: owner}, now)
 		if err != nil || result.Referrals != nil {
 			t.Fatal("overflowing aggregate exposed", result, err)
 		}
@@ -172,7 +172,7 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 		owner,
 	)
 	q := queries.New(tx)
-	if result, err := dashboard(ctx, q, owner, now); err != nil || result.Referrals != nil {
+	if result, err := dashboard(ctx, q, queries.Donor{ID: owner}, now); err != nil || result.Referrals != nil {
 		t.Fatalf("totals shown while a referred gift awaits projection: %+v %v", result.Referrals, err)
 	}
 	mustExec(
@@ -187,7 +187,7 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 	// production; this test drives the referred rows by direct SQL, so set the
 	// owner's totals to what that projection would write (Link 1, 3000).
 	mustExec(t, tx, "UPDATE donor_metric_projections SET referred_link_count=1,referred_link_minor=3000 WHERE donor_id=$1", owner)
-	result, err := dashboard(ctx, q, owner, now)
+	result, err := dashboard(ctx, q, queries.Donor{ID: owner}, now)
 	if err != nil || result.Referrals == nil || result.Referrals.Link != 1 || result.Referrals.TotalMinor != 3000 {
 		t.Fatalf("an unpaid referred checkout held back the totals: %+v %v", result.Referrals, err)
 	}

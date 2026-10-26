@@ -43,7 +43,7 @@ WITH projection AS (
     UNION ALL
     SELECT sqlc.arg(donor_id)::uuid,'STREAK_MILESTONE',
         'push:streak-milestone:'||sqlc.arg(donor_id)::text||':'||floor(extract(epoch FROM sqlc.narg(run_started_at)::timestamptz))::bigint::text||':'||sqlc.narg(milestone)::integer::text,
-        json_build_object('months',sqlc.narg(milestone)::integer)
+        json_build_object('days',sqlc.narg(milestone)::integer)
     WHERE sqlc.narg(milestone)::integer IS NOT NULL AND sqlc.narg(run_started_at)::timestamptz IS NOT NULL
 )
 INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)

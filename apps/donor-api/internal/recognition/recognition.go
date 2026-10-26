@@ -392,19 +392,15 @@ func countStreak(
 	return result
 }
 
-// Milestone reports whether a run of months consecutive monthly gifts earns a
-// congratulation: three and six months, a year, and every year after. The
-// product requirements name streak milestones without defining them, so this
-// set is a product judgment.
-func Milestone(months int64) bool {
-	return months == 3 || months == 6 || (months >= 12 && months%12 == 0)
-}
-
-// LadderMilestones are the streak-card milestones in DAYS (PRD S-3): a fixed
-// early set, then every additional 365 days. Monthly billing makes the count a
-// display of days since the current run began — days accrue fast enough for the
-// ladder to be climbable, where counting monthly periods would stall it.
+// LadderMilestones are the streak milestones in days (PRD S-3): a fixed early
+// set, then every 365 days after the last.
 var LadderMilestones = []int64{7, 30, 100, 365, 500, 1000, 1095, 1460}
+
+// LadderMilestone reports whether a run of days is a streak milestone (S-3).
+func LadderMilestone(days int64) bool {
+	last := LadderMilestones[len(LadderMilestones)-1]
+	return slices.Contains(LadderMilestones, days) || (days > last && (days-last)%365 == 0)
+}
 
 // ladderBarDays is the width of the streak card's segmented bar (PRD S-2).
 const ladderBarDays = 30
@@ -449,21 +445,18 @@ func lastLadderMilestone(days int64) int64 {
 	return reached
 }
 
-// Ladder derives the streak card from a streak and the moment it is read. Days
-// is the whole days from the run's start (Since) to asOf; a streak with no run
+// Ladder derives the streak card from a streak and the moment it is read.
+// Days counts the midnights in zone, the donor's own, since the run began, so
+// a streak grows by one at local midnight (§10 Time). A streak with no run
 // shows zero days, no reached milestone, the first milestone as next, and an
-// empty bar. The bar marks, for each of the last 30 days ending at asOf,
-// whether the streak was already running on that day.
-func (s Streak) Ladder(asOf time.Time) StreakLadder {
+// empty bar. The bar marks, for each of the last 30 days ending today, whether
+// the streak was already running on that day.
+func (s Streak) Ladder(asOf time.Time, zone *time.Location) StreakLadder {
 	if s.Since == nil {
 		next := LadderMilestones[0]
 		return StreakLadder{NextMilestone: &next, DaysToNext: &next, Bar: make([]bool, ladderBarDays)}
 	}
-	start := utc(*s.Since)
-	days := int64(utc(asOf).Sub(start).Hours() / 24)
-	if days < 0 {
-		days = 0
-	}
+	days := max(civilDay(asOf, zone)-civilDay(*s.Since, zone), 0)
 	ladder := StreakLadder{Days: days, LastMilestone: lastLadderMilestone(days)}
 	if next, ok := nextLadderMilestone(days); ok {
 		toNext := next - days
@@ -473,9 +466,33 @@ func (s Streak) Ladder(asOf time.Time) StreakLadder {
 	bar := make([]bool, ladderBarDays)
 	for i := range bar {
 		// bar[ladderBarDays-1] is today; bar[0] is 29 days ago.
-		dayOffset := int64(ladderBarDays - 1 - i)
-		bar[i] = days >= dayOffset
+		bar[i] = days >= int64(ladderBarDays-1-i)
 	}
 	ladder.Bar = bar
 	return ladder
+}
+
+// Reaches is the local midnight in zone at which the run is days long.
+func (s Streak) Reaches(days int64, zone *time.Location) time.Time {
+	start := s.Since.In(zone)
+	return time.Date(start.Year(), start.Month(), start.Day()+int(days), 0, 0, 0, 0, zone)
+}
+
+// civilDay numbers t's calendar date in zone.
+func civilDay(t time.Time, zone *time.Location) int64 {
+	local := t.In(zone)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC).Unix() / 86400
+}
+
+// Zone is the IANA zone a donor's streak and daily rotation roll over in,
+// New York when their ZIP gives none.
+func Zone(name string) *time.Location {
+	if name == "" {
+		return NewYork
+	}
+	zone, err := time.LoadLocation(name)
+	if err != nil {
+		return NewYork
+	}
+	return zone
 }

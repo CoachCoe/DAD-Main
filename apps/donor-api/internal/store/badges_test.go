@@ -3,11 +3,12 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"dad/donor-api/internal/dbroles"
-	"github.com/jackc/pgx/v5"
+	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -117,4 +118,91 @@ func seedBadgeProjection(t *testing.T, pool *pgxpool.Pool, donorID pgtype.UUID, 
 	}
 }
 
-var _ = pgx.ErrNoRows
+// Badges are earned when the donor's facts change, not when they open the
+// badges page, so a perk works on its own: a Founding Donor whose projection
+// is refreshed can see the invite-only Founding Donor Dinner straight away
+// (B-3, E-5).
+func TestBadgesEarnWithoutVisitingTheBadgesPage(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+	in := eventInput("founders-dinner", "San Francisco", "94103", "INVITE_ONLY", 48*time.Hour)
+	in.QualifyingPerk = "FOUNDING_EVENTS"
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	f := newWorkerFixture(t, "MONTHLY")
+	pushCleanup(t, f.db, f.donorID)
+	cleanup(t, "DELETE FROM donor_badges WHERE donor_id=$1", f.donorID)
+	checkout := f.checkout(t)
+	f.receive(
+		t,
+		"invoice.payment_succeeded",
+		invoice(checkout.CheckoutID, "in_founder_"+f.donorID.String(), time.Now().Add(-time.Hour), true),
+	)
+	f.process(t)
+	var held []string
+	rows, err := pool.Query(ctx, "SELECT code FROM donor_badges WHERE donor_id=$1 ORDER BY code", f.donorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, code)
+	}
+	if strings.Join(held, ",") != "1D,F" {
+		t.Fatalf("after the first gift the donor holds %v, want First Day and Founding Donor", held)
+	}
+	visible, err := EventReader{DB: as(t, dbroles.API)}.InviteOnlyEvents(ctx, sessionFor(t, pool, f.donorID))
+	if err != nil || len(visible) != 1 || visible[0].ID != eventID.String() {
+		t.Fatalf("Founding Donor cannot see the founders' dinner: %+v %v", visible, err)
+	}
+}
+
+// Comeback needs an earlier run: a first streak reaching 30 days is not one.
+func TestComebackNeedsAnEarlierRun(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	donorID, _ := signedInDonor(t, pool)
+	seedBadgeProjection(t, pool, donorID, now)
+	mustExec(t, pool, "UPDATE donor_metric_projections SET streak_since=$2, best_streak=1, current_streak=1 WHERE donor_id=$1",
+		donorID, now.Add(-40*24*time.Hour))
+	checkout := testID(t)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_checkouts (id, donor_id, amount_minor, frequency) VALUES ($1,$2,3000,'MONTHLY')",
+		checkout,
+		donorID,
+	)
+	cleanup(t, "DELETE FROM donor_checkouts WHERE donor_id=$1", donorID)
+	gift := func(paid time.Time) {
+		id := testID(t)
+		mustExec(t, pool, `INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at)
+			VALUES ($1,$2,$3,$4,3000,'USD','MONTHLY',$5)`, id, donorID, checkout, "pi_"+id.String(), paid)
+	}
+	cleanup(t, "DELETE FROM donor_gifts WHERE donor_id=$1", donorID)
+	gift(now.Add(-40 * 24 * time.Hour))
+	donor, err := queries.New(pool).LockDonor(ctx, donorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signals, err := signalsFor(ctx, queries.New(pool), donor, now)
+	if err != nil || signals.ComebackReached30 {
+		t.Fatalf("a first run counted as a comeback: %+v %v", signals, err)
+	}
+	gift(now.Add(-200 * 24 * time.Hour))
+	if signals, err = signalsFor(ctx, queries.New(pool), donor, now); err != nil || !signals.ComebackReached30 {
+		t.Fatalf("a restarted 40-day run is not a comeback: %+v %v", signals, err)
+	}
+}

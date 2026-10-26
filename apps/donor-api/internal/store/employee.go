@@ -144,7 +144,7 @@ func (s EmployeeService) JoinTeam(ctx context.Context, token, name string) (stri
 	if n := utf8.RuneCountInString(name); n == 0 || n > 80 || !plainText(name, false) {
 		return "", ErrTeam
 	}
-	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, _ time.Time) (string, error) {
+	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (string, error) {
 		q := queries.New(tx)
 		link, err := q.EmployeeLink(ctx, d.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -160,7 +160,7 @@ func (s EmployeeService) JoinTeam(ctx context.Context, token, name string) (stri
 		if err = q.SetEmployeeTeam(ctx, queries.SetEmployeeTeamParams{DonorID: d.ID, TeamID: teamID}); err != nil {
 			return "", err
 		}
-		return teamID.String(), nil
+		return teamID.String(), awardBadges(ctx, q, d, now)
 	})
 }
 

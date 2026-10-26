@@ -53,14 +53,15 @@ coalesce(sum(net_minor) FILTER (WHERE referral_kind='LINK'),0)::bigint AS link_m
 coalesce(sum(net_minor) FILTER (WHERE referral_kind='IRL'),0)::bigint AS irl_minor
 FROM donor_metric_projections WHERE referrer_id=$1;
 
--- name: ApplyReferralDelta :exec
+-- name: ApplyReferralDelta :one
 -- The caller ensures the target row exists before applying the delta.
 UPDATE donor_metric_projections SET
 referred_link_count=referred_link_count+$2,
 referred_irl_count=referred_irl_count+$3,
 referred_link_minor=referred_link_minor+$4,
 referred_irl_minor=referred_irl_minor+$5
-WHERE donor_id=$1;
+WHERE donor_id=$1
+RETURNING referred_link_count, referred_irl_count;
 
 -- name: ReferralTotals :one
 -- The totals are maintained incrementally on the referrer's own row (see

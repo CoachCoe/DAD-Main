@@ -167,8 +167,8 @@ func TestCorrectedReferralNoticesRespectLegacyDedupAndCurrentRelationship(t *tes
 			count != want {
 			t.Fatalf("email count %d, want %d: %v", count, want, err)
 		}
-		if got := len(pushIntents(t, tx, owner)); got != want {
-			t.Fatalf("push count %d, want %d", got, want)
+		if got := len(intentsOf(t, tx, owner, "REFERRAL_CONVERTED")); got != want {
+			t.Fatalf("referral push count %d, want %d", got, want)
 		}
 	}
 	assertCount(alice, 1)

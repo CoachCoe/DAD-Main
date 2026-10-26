@@ -103,14 +103,14 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 			g.referrer,
 		)
 	}
-	preparing, err := dashboard(ctx, q, referrerID, now)
+	preparing, err := dashboard(ctx, q, queries.Donor{ID: referrerID}, now)
 	if err != nil || preparing.State != "preparing" {
 		t.Fatalf("missing projection: %v %v", preparing, err)
 	}
 	if _, err = projectFacts(ctx, q, referrerID, now); err != nil {
 		t.Fatal(err)
 	}
-	missing, err := dashboard(ctx, q, referrerID, now)
+	missing, err := dashboard(ctx, q, queries.Donor{ID: referrerID}, now)
 	if err != nil || missing.Referrals != nil {
 		t.Fatal("missing referred history shown as zero")
 	}
@@ -122,7 +122,7 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 		!initial.FoundingAwardedAt.Valid {
 		t.Fatalf("wrong initial projection: %+v %v", initial, err)
 	}
-	view, err := dashboard(ctx, q, referrerID, now)
+	view, err := dashboard(ctx, q, queries.Donor{ID: referrerID}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 		!refunded.FoundingAwardedAt.Time.Equal(initial.FoundingAwardedAt.Time) {
 		t.Fatalf("wrong refunded projection: %+v %v", refunded, err)
 	}
-	stale, err := dashboard(ctx, q, referrerID, now.Add(maxRefreshInterval))
+	stale, err := dashboard(ctx, q, queries.Donor{ID: referrerID}, now.Add(maxRefreshInterval))
 	if err != nil || stale.Referrals != nil || stale.Streak != nil {
 		t.Fatal("stale values exposed")
 	}

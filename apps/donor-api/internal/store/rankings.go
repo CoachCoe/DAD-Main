@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// RankingService owns the periodic ranking rollup (PRD §6.4, Phase 3.3). Refresh
+// RankingService owns the periodic ranking rollup (PRD §6.8). Refresh
 // recomputes the whole population in one set-based pass on a schedule; the donor
 // read is a single-row lookup. This keeps ranking off the per-request path at 1M
 // donors (risk #6).
@@ -25,18 +25,22 @@ type Ranking struct {
 	ComputedAt         time.Time `json:"computed_at"`
 }
 
-// Refresh recomputes every eligible donor's rank and prunes donors who dropped
-// out of the population (opted out, lapsed, disabled) since the last run. It
-// runs in one transaction so readers never see a half-rebuilt snapshot.
+// Refresh recomputes every eligible donor's rank, prunes donors who dropped out
+// of the population (opted out, lapsed, disabled) since the last run, and
+// awards the ranking badges. It runs in one transaction so readers never see a
+// half-rebuilt snapshot.
 func (s RankingService) Refresh(ctx context.Context, now time.Time) error {
 	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
 		if err := q.RefreshRankings(ctx, timestamp(now)); err != nil {
 			return err
 		}
-		// Rows not touched by this refresh (older computed_at) are no longer
-		// eligible; drop them so a lapsed/opted-out donor stops being ranked.
-		return q.PruneStaleRankings(ctx, timestamp(now))
+		if err := q.PruneStaleRankings(ctx, timestamp(now)); err != nil {
+			return err
+		}
+		return q.AwardRankingBadges(ctx, queries.AwardRankingBadgesParams{
+			ComputedAt: timestamp(now), ExpiresAt: timestamp(now.Add(pushLifetime)),
+		})
 	})
 }
 

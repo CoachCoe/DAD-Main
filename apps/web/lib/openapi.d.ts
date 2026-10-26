@@ -1869,7 +1869,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The donor's badge wall */
+        /**
+         * The donor's badge wall
+         * @description All 24 badges in catalog order with the donor's earned state. Earned badges show in color; an unearned one shows greyed with its `rule` (B-1). Badges are earned when the donor's facts change and stay earned (B-2).
+         */
         get: operations["donorBadges"];
         put?: never;
         post?: never;
@@ -3281,6 +3284,8 @@ export interface components {
         BadgeView: {
             code: string;
             title: string;
+            /** @description How the badge is earned, shown on an unearned badge (B-1). */
+            rule: string;
             perk: string;
             earned: boolean;
             /** Format: date-time */

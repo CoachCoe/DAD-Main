@@ -154,7 +154,7 @@ func (s DonorService) Profile(ctx context.Context, token string) (Profile, error
 // SavePreferences replaces the donor's notification choices if pref.Version
 // is still current, and records the consent change.
 func (s DonorService) SavePreferences(ctx context.Context, token string, pref Preferences) (Profile, error) {
-	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, _ time.Time) (Profile, error) {
+	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (Profile, error) {
 		q := queries.New(tx)
 		current, err := readProfile(ctx, q, d)
 		if err != nil {
@@ -194,6 +194,11 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, pref Pr
 			Volunteer: pgtype.Bool{Bool: pref.Volunteer, Valid: true}, VolunteerInterests: interests,
 		}); err != nil {
 			return Profile{}, err
+		}
+		if pref.Volunteer && !current.Volunteer {
+			if err = awardBadges(ctx, q, d, now); err != nil {
+				return Profile{}, err
+			}
 		}
 		return readProfile(ctx, q, d)
 	})

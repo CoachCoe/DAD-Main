@@ -10,7 +10,6 @@ import (
 	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -68,7 +67,8 @@ func (d DonorDashboard) MarshalJSON() ([]byte, error) {
 
 // dashboard reads the donor's projections, which must come from one snapshot:
 // a worker may update several of them while the three queries run.
-func dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (DonorDashboard, error) {
+func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now time.Time) (DonorDashboard, error) {
+	id := donor.ID
 	row, err := q.Projection(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DonorDashboard{Mode: "test", State: "preparing"}, nil
@@ -104,12 +104,11 @@ func dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time
 		if row.GraceEndsAt.Valid {
 			result.Streak.GraceEndsAt = &row.GraceEndsAt.Time
 		}
-		// The day-based ladder derives from the run's start date (streak_since).
 		var since *time.Time
 		if row.StreakSince.Valid {
 			since = &row.StreakSince.Time
 		}
-		ladder := (recognition.Streak{Since: since}).Ladder(now)
+		ladder := recognition.Streak{Since: since}.Ladder(now, recognition.Zone(donor.Timezone.String))
 		result.Streak.Ladder = &ladder
 	}
 	// Rank line under the streak (S-4): the donor's own position only.
@@ -133,6 +132,6 @@ type DashboardReader struct{ DB *pgxpool.Pool }
 
 func (reader DashboardReader) DonorDashboard(ctx context.Context, token string) (DonorDashboard, error) {
 	return donorRead(ctx, reader.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (DonorDashboard, error) {
-		return dashboard(ctx, q, d.ID, now)
+		return dashboard(ctx, q, d, now)
 	})
 }

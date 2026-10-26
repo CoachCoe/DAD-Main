@@ -49,3 +49,7 @@ SELECT EXISTS (
   SELECT 1 FROM donor_amount_changes
   WHERE donor_id=$1 AND confirmed_at IS NOT NULL AND amount_minor > previous_minor
 )::boolean AS raised;
+
+-- name: DonorFirstGiftAt :one
+-- When the donor first gave, to tell a restarted run from their first (Comeback).
+SELECT min(paid_at)::timestamptz AS first_paid_at FROM donor_gifts WHERE donor_id=$1;

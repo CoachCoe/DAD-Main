@@ -132,12 +132,7 @@ func (s DonorInitiativeService) Today(ctx context.Context, token string) (TodayI
 			if len(actives) == 0 {
 				return TodayInitiative{}, ErrNoInitiativeToday
 			}
-			zone := recognition.NewYork
-			if donor.Timezone.Valid {
-				if loc, err := time.LoadLocation(donor.Timezone.String); err == nil {
-					zone = loc
-				}
-			}
+			zone := recognition.Zone(donor.Timezone.String)
 			localDate := now.In(zone).Format(time.DateOnly)
 			chosen := actives[rotationIndex(donor.ID, localDate, len(actives))]
 

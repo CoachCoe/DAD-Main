@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"dad/donor-api/internal/badges"
 	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
@@ -230,6 +231,8 @@ func replayBest(
 type projection struct {
 	queries.SaveProjectionParams
 	streakSince *time.Time
+	donor       queries.Donor
+	zone        *time.Location
 }
 
 // Version 6 attributes conversions to the earliest verified successful payment.
@@ -261,9 +264,11 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		NextRefreshAt: timestamp(now.Add(refreshCap(id))),
 		RulesVersion:  projectionRules,
 	}
-	if _, err := q.LockDonor(ctx, id); err != nil {
+	donor, err := q.LockDonor(ctx, id)
+	if err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
+	zone := recognition.Zone(donor.Timezone.String)
 	if err := seedProjection(ctx, q, id, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
@@ -332,7 +337,7 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 			out.CurrentMonthlyMinor = latestMonthlyMinor(h.Gifts)
 		}
 	}
-	out.NextRefreshAt = nextRefresh(out, h, refundBoundaries, stops, now)
+	out.NextRefreshAt = nextRefresh(out, h, refundBoundaries, stops, now, zone)
 	if err = recomputeReferredTotals(ctx, q, id, &out); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
@@ -350,7 +355,7 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 			return projection{SaveProjectionParams: out}, err
 		}
 	}
-	return projection{out, streak.Since}, q.SaveProjection(ctx, out)
+	return projection{out, streak.Since, donor, zone}, q.SaveProjection(ctx, out)
 }
 
 // recomputeReferredTotals reconciles the locked row with committed referred
@@ -395,7 +400,8 @@ func referralContribution(referrer pgtype.UUID, kind pgtype.Text, net pgtype.Int
 	return linkCount, irlCount, linkMinor, irlMinor
 }
 
-// applyReferralDelta transfers contributions atomically with the projection.
+// applyReferralDelta transfers contributions atomically with the projection,
+// and awards the referrer the referral badges their new counts reach.
 func applyReferralDelta(
 	ctx context.Context,
 	q *queries.Queries,
@@ -428,22 +434,40 @@ func applyReferralDelta(
 		if err := seedProjection(ctx, q, id, now); err != nil {
 			return err
 		}
-		if err := q.ApplyReferralDelta(ctx, d); err != nil {
+		counts, err := q.ApplyReferralDelta(ctx, d)
+		if err != nil {
 			return err
+		}
+		referrals := badges.Signals{
+			ConvertedReferrals: counts.ReferredLinkCount + counts.ReferredIrlCount,
+			HasIRLReferral:     counts.ReferredIrlCount > 0,
+		}
+		for code := range badges.Evaluate(referrals) {
+			if err := earnBadge(ctx, q, id, code, now); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
 // nextRefresh is the earliest moment after now at which the projection can
-// change without new facts arriving, and at most its default refresh time.
+// change without new facts arriving, and at most its default refresh time. The
+// next streak milestone is one, so its badge and notice arrive on the day.
 func nextRefresh(
 	out queries.SaveProjectionParams,
 	h history,
 	refundBoundaries, stops []time.Time,
 	now time.Time,
+	zone *time.Location,
 ) pgtype.Timestamptz {
 	boundaries := slices.Concat(refundBoundaries, stops)
+	if out.StreakSince.Valid {
+		run := recognition.Streak{Since: &out.StreakSince.Time}
+		if next := run.Ladder(now, zone).NextMilestone; next != nil {
+			boundaries = append(boundaries, run.Reaches(*next, zone))
+		}
+	}
 	for _, p := range h.Periods {
 		boundaries = append(boundaries, p.DueAt, p.EndsAt, p.EndsAt.Add(recognition.Grace))
 	}

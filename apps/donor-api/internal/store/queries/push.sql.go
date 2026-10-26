@@ -187,7 +187,7 @@ WITH projection AS (
     UNION ALL
     SELECT $3::uuid,'STREAK_MILESTONE',
         'push:streak-milestone:'||$3::text||':'||floor(extract(epoch FROM $5::timestamptz))::bigint::text||':'||$6::integer::text,
-        json_build_object('months',$6::integer)
+        json_build_object('days',$6::integer)
     WHERE $6::integer IS NOT NULL AND $5::timestamptz IS NOT NULL
 )
 INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)

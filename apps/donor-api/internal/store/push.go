@@ -129,9 +129,12 @@ func queuePushIntents(ctx context.Context, q *queries.Queries, p projection, now
 		ExpiresAt:   timestamp(now.Add(pushLifetime)),
 		RecentSince: timestamp(now.Add(-pushLifetime)),
 	}
-	if p.CurrentStreak.Valid && p.streakSince != nil && recognition.Milestone(int64(p.CurrentStreak.Int32)) {
-		params.Milestone = pgtype.Int4{Int32: p.CurrentStreak.Int32, Valid: true}
-		params.RunStartedAt = timestamp(*p.streakSince)
+	if p.CurrentStreak.Valid && p.streakSince != nil {
+		run := recognition.Streak{Since: p.streakSince}
+		if reached := run.Ladder(now, p.zone).LastMilestone; reached > 0 && now.Sub(run.Reaches(reached, p.zone)) < pushLifetime {
+			params.Milestone = pgtype.Int4{Int32: int32(reached), Valid: true}
+			params.RunStartedAt = timestamp(*p.streakSince)
+		}
 	}
 	return q.QueuePushIntents(ctx, params)
 }
@@ -176,15 +179,19 @@ func pushSuppression(
 		if !pref.PushStreakMilestone {
 			return "opted_out", nil
 		}
-		months, err := data.Int("months")
+		days, err := data.Int("days")
 		if err != nil {
-			return "", payments.ErrFacts
+			return "superseded", nil
 		}
 		current, err := q.Projection(ctx, donor.ID)
 		if err != nil {
 			return "", err
 		}
-		if int64(current.CurrentStreak.Int32) < months {
+		if !current.StreakSince.Valid {
+			return "streak_ended", nil
+		}
+		run := recognition.Streak{Since: &current.StreakSince.Time}
+		if run.Ladder(now, recognition.Zone(donor.Timezone.String)).Days < days {
 			return "streak_ended", nil
 		}
 		return "", nil
@@ -264,18 +271,19 @@ func pushContent(job queries.DonorPushNotification) (push.Notification, error) {
 		n.Title, n.Path = "Your giving streak is at risk", paymentMethodPath
 		n.Body = "Your monthly test payment was declined. Update your payment method to keep your streak going."
 	case "STREAK_MILESTONE":
-		months, err := data.Int("months")
-		if err != nil || !recognition.Milestone(months) {
+		days, err := data.Int("days")
+		if err != nil || !recognition.LadderMilestone(days) {
 			return n, payments.ErrFacts
 		}
-		span := strconv.FormatInt(months, 10) + " months"
-		if months == 12 {
-			span = "1 year"
-		} else if months > 12 {
-			span = strconv.FormatInt(months/12, 10) + " years"
+		length, span := strconv.FormatInt(days, 10)+"-day", strconv.FormatInt(days, 10)+" days"
+		if years := days / 365; days%365 == 0 {
+			length, span = strconv.FormatInt(years, 10)+"-year", strconv.FormatInt(years, 10)+" years"
+			if years == 1 {
+				span = "a year"
+			}
 		}
-		n.Title = span + " in a row"
-		n.Body = "You have given every month for " + span + ". Thank you for keeping your test gifts going."
+		n.Title = "Your " + length + " giving streak"
+		n.Body = "You have kept your giving streak going for " + span + ". Thank you for showing up every day."
 	case "EVENT_PROMOTED":
 		n.Title = "A spot opened up"
 		n.Body = "You are off the waitlist — your spot at an upcoming event is confirmed. Open the app for details."
