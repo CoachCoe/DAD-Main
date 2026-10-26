@@ -8,7 +8,6 @@ import (
 
 	"dad/donor-api/internal/analytics"
 	"dad/donor-api/internal/store/queries"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -42,7 +41,7 @@ func validSource(s string) bool { return s == "WEB" || s == "IOS" || s == "ANDRO
 // events to that donor, and an empty or invalid token records them anonymously
 // (an event before sign-in is expected and must not be rejected). The batch is
 // validated in full before any insert, so an invalid event rejects the whole
-// batch.
+// batch, and stored in one COPY, so it is all stored or none of it is.
 func (s AnalyticsService) Record(ctx context.Context, source, token string, events []Event) error {
 	if !validSource(source) {
 		return ErrAnalytics
@@ -64,7 +63,7 @@ func (s AnalyticsService) Record(ctx context.Context, source, token string, even
 		}
 	}
 
-	rows := make([]queries.InsertAnalyticsEventParams, 0, len(events))
+	rows := make([]queries.InsertAnalyticsEventsParams, 0, len(events))
 	for _, e := range events {
 		if !analytics.Known(e.Name) {
 			return ErrAnalytics
@@ -89,18 +88,11 @@ func (s AnalyticsService) Record(ctx context.Context, source, token string, even
 		if err != nil {
 			return err
 		}
-		rows = append(rows, queries.InsertAnalyticsEventParams{
+		rows = append(rows, queries.InsertAnalyticsEventsParams{
 			ID: id, Name: e.Name, DonorID: donor, Source: source,
 			Properties: payload, OccurredAt: timestamp(e.OccurredAt),
 		})
 	}
-	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
-		q := queries.New(tx)
-		for _, row := range rows {
-			if err := q.InsertAnalyticsEvent(ctx, row); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	_, err := queries.New(s.DB).InsertAnalyticsEvents(ctx, rows)
+	return err
 }
