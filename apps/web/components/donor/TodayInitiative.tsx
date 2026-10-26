@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, failureMessage, type Schema } from "@/lib/api";
 import { formatDate } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
@@ -54,8 +54,14 @@ function Spend({ initiative }: { initiative: string }) {
 }
 
 /** "Today your $1 funded": the donor's initiative of the day (A-1 to A-3). */
-export function TodayInitiative() {
+export function TodayInitiative({ onShown }: { onShown?: (distinctShown: number) => void }) {
   const { resource, data } = useApiResource<Schema<"TodayInitiative">>("/donor/me/today-initiative");
+  // Showing this card records the exposure, so its running count is ahead of
+  // the dashboard's, which was read a moment earlier (A-4).
+  const shown = data?.distinct_shown;
+  useEffect(() => {
+    if (resource.state === "ready" && typeof shown === "number") onShown?.(shown);
+  }, [resource.state, shown, onShown]);
   if (resource.state !== "ready" || !data) return null;
   return (
     <article className="metric" aria-labelledby="today-initiative">

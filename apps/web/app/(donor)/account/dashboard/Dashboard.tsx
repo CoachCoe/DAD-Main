@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
@@ -40,6 +41,7 @@ function LoadingMetric({
 
 export default function Dashboard() {
   const { resource, data, failed, reload } = useApiResource<Schema<"DonorDashboard">>("/donor/me/dashboard");
+  const [shownInitiatives, setShownInitiatives] = useState(0);
   const messages = resourceMessages(resource, {
     loading: "Loading your dashboard…",
     failure: "Your dashboard could not be loaded right now. Please retry in a moment.",
@@ -119,7 +121,7 @@ export default function Dashboard() {
                 </article>
                 <article className="metric">
                   <h2>Initiatives funded</h2>
-                  <p className="metricValue">{data.impact.initiatives_funded}</p>
+                  <p className="metricValue">{Math.max(data.impact.initiatives_funded, shownInitiatives)}</p>
                   <p>Initiatives your daily gift has gone to.</p>
                 </article>
                 <article className="metric">
@@ -127,7 +129,7 @@ export default function Dashboard() {
                   <p className="metricValue">{data.impact.events_volunteered}</p>
                   <p>Events you checked in at.</p>
                 </article>
-                <TodayInitiative />
+                <TodayInitiative onShown={setShownInitiatives} />
               </div>
               <div className="metrics pair">
                 <article className="metric">

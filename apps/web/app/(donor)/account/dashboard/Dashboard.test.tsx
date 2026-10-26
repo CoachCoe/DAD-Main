@@ -104,6 +104,14 @@ it("shows the five elements with separate channels and collected-dollar breakdow
   expect(screen.queryByText(/Combined referrals/i)).not.toBeInTheDocument();
 });
 
+it("counts today's initiative as funded once its card has loaded", async () => {
+  respond(data, { ...today, distinct_shown: 6 });
+  render(<DashboardPage />);
+  const funded = (await screen.findByRole("heading", { name: "Initiatives funded" })).closest("article");
+  if (!funded) throw new Error("Missing initiatives funded card");
+  await waitFor(() => expect(within(funded).getByText("6")).toBeVisible());
+});
+
 it("shows the badge only when earned, and otherwise explains how it is earned", async () => {
   respond({ ...data, founding_donor: false });
   render(<DashboardPage />);
