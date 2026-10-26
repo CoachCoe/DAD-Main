@@ -117,6 +117,34 @@ func TestEquivalentTimezoneFactsDeduplicateWithoutChangingInput(t *testing.T) {
 	}
 }
 
+// Multiple SUCCEEDED partial refunds on one gift accumulate; a second that
+// would drive the net negative is rejected (the cumulative over-refund guard),
+// rather than silently producing a negative or zero net.
+func TestNetGiftsCumulativePartialRefunds(t *testing.T) {
+	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	later := now.Add(time.Hour)
+	gift := Gift{ID: "g", DonorID: "ben", Amount: 3000, PaidAt: now, Frequency: "ONE_TIME", Currency: "USD"}
+
+	// Two partials summing within the gift (2000 + 500 of 3000): net = 500.
+	withinBudget := []Refund{
+		{ID: "r1", GiftID: "g", Amount: 2000, Status: "SUCCEEDED", UpdatedAt: later, Currency: "USD"},
+		{ID: "r2", GiftID: "g", Amount: 500, Status: "SUCCEEDED", UpdatedAt: later, Currency: "USD"},
+	}
+	net, err := NetGifts([]Gift{gift}, withinBudget, later)
+	if err != nil || net["g"] != 500 {
+		t.Fatalf("two partials within budget: net=%v err=%v, want net 500", net, err)
+	}
+
+	// Two partials whose sum exceeds the gift (2000 + 2000 of 3000): rejected.
+	overBudget := []Refund{
+		{ID: "r1", GiftID: "g", Amount: 2000, Status: "SUCCEEDED", UpdatedAt: later, Currency: "USD"},
+		{ID: "r2", GiftID: "g", Amount: 2000, Status: "SUCCEEDED", UpdatedAt: later, Currency: "USD"},
+	}
+	if _, err := NetGifts([]Gift{gift}, overBudget, later); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("cumulative over-refund: got %v, want ErrInvalid", err)
+	}
+}
+
 func TestFirstPaymentTimestampTiesUseStableObjectID(t *testing.T) {
 	now := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 	a := Gift{

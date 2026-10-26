@@ -95,3 +95,43 @@ func TestZoneFallsBackToNewYork(t *testing.T) {
 		t.Fatal("zone fallback")
 	}
 }
+
+// A streak counts calendar days in the donor's zone, so the two days a year a
+// local day is not 24h long (DST spring-forward 23h, fall-back 25h) must still
+// each count as exactly one day — no off-by-one in streak length (and hence
+// milestone/badge timing) across the transition.
+func TestStreakDaysCountCalendarDaysAcrossDST(t *testing.T) {
+	ny := Zone("America/New_York")
+
+	// Spring-forward: 2026-03-08 skips 02:00–03:00 (a 23-hour civil day).
+	springSince := time.Date(2026, 3, 6, 10, 0, 0, 0, ny)
+	spring := Streak{Since: &springSince}
+	for _, c := range []struct {
+		at   time.Time
+		days int64
+	}{
+		{time.Date(2026, 3, 7, 12, 0, 0, 0, ny), 1}, // one midnight crossed
+		{time.Date(2026, 3, 8, 12, 0, 0, 0, ny), 2}, // the 23h DST day still counts as one
+		{time.Date(2026, 3, 9, 12, 0, 0, 0, ny), 3}, // day after the transition
+	} {
+		if got := spring.Ladder(c.at, ny).Days; got != c.days {
+			t.Errorf("spring-forward at %s: %d days, want %d", c.at, got, c.days)
+		}
+	}
+
+	// Fall-back: 2026-11-01 repeats 01:00–02:00 (a 25-hour civil day).
+	fallSince := time.Date(2026, 10, 30, 10, 0, 0, 0, ny)
+	fall := Streak{Since: &fallSince}
+	for _, c := range []struct {
+		at   time.Time
+		days int64
+	}{
+		{time.Date(2026, 10, 31, 12, 0, 0, 0, ny), 1},
+		{time.Date(2026, 11, 1, 12, 0, 0, 0, ny), 2}, // the 25h DST day still counts as one
+		{time.Date(2026, 11, 2, 12, 0, 0, 0, ny), 3},
+	} {
+		if got := fall.Ladder(c.at, ny).Days; got != c.days {
+			t.Errorf("fall-back at %s: %d days, want %d", c.at, got, c.days)
+		}
+	}
+}

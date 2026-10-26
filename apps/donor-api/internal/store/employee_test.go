@@ -33,7 +33,13 @@ func TestMatchOwed(t *testing.T) {
 		{name: "negative rate", giftsMinor: 1, rateBP: -1, capMinor: 0, wantErrContains: "invalid"},
 		{name: "negative cap", giftsMinor: 1, rateBP: 1, capMinor: -1, wantErrContains: "invalid"},
 		// MaxInt64 * MaxInt32 / 10000 vastly exceeds int64 with no cap to clamp it.
-		{name: "overflow uncapped", giftsMinor: math.MaxInt64, rateBP: math.MaxInt32, capMinor: 0, wantErrContains: "exceeds supported range"},
+		{
+			name:            "overflow uncapped",
+			giftsMinor:      math.MaxInt64,
+			rateBP:          math.MaxInt32,
+			capMinor:        0,
+			wantErrContains: "exceeds supported range",
+		},
 		// A cap clamps before the overflow guard is reached, so the same inputs succeed.
 		{name: "overflow but capped", giftsMinor: math.MaxInt64, rateBP: math.MaxInt32, capMinor: 5000, want: 5000},
 	}
