@@ -75,8 +75,8 @@ func (reader InitiativeReader) Spend(ctx context.Context, id pgtype.UUID) (Initi
 // headline metrics the app shows (PRD §8).
 const maxShownHeadlineMetrics = 4
 
-// DonorInitiativeService is the signed-in donor's view of the daily rotation
-// (Phase 2.4). It holds the donor's pool so it can record an exposure.
+// DonorInitiativeService is the signed-in donor's view of the daily rotation.
+// It holds the donor's pool so it can record an exposure.
 type DonorInitiativeService struct{ DB *pgxpool.Pool }
 
 // TodayMetric is one shown headline metric of the day's initiative.
@@ -103,16 +103,23 @@ type TodayInitiative struct {
 // It wraps pgx.ErrNoRows so the HTTP layer maps it to 404 like any empty read.
 var ErrNoInitiativeToday = fmt.Errorf("no initiative to show today: %w", pgx.ErrNoRows)
 
-// rotationIndex picks a stable slot in [0,n) from the donor id and local date.
-// It is a pure function — the same donor sees the same initiative all day and a
-// different one as the date rolls over at donor-local midnight — so the choice
-// never needs to be stored.
-func rotationIndex(donorID pgtype.UUID, localDate string, n int) int {
+// rotationIndex is the donor's slot in [0,n) on a local calendar day: each
+// donor starts at their own offset and steps one initiative a day, so over any
+// n consecutive days they see every active initiative once (A-1), while donors
+// see different initiatives on the same day.
+func rotationIndex(donorID pgtype.UUID, day int64, n int) int {
 	if n <= 0 {
 		return 0
 	}
-	sum := sha256.Sum256(append(donorID.Bytes[:], localDate...))
-	return int(binary.BigEndian.Uint64(sum[:8]) % uint64(n))
+	sum := sha256.Sum256(donorID.Bytes[:])
+	offset := binary.BigEndian.Uint64(sum[:8]) % uint64(n)
+	return int((offset + uint64(day)%uint64(n)) % uint64(n))
+}
+
+// localDay numbers t's calendar date in zone.
+func localDay(t time.Time, zone *time.Location) int64 {
+	local := t.In(zone)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC).Unix() / 86400
 }
 
 // Today returns the donor's initiative of the day and records the exposure.
@@ -133,8 +140,7 @@ func (s DonorInitiativeService) Today(ctx context.Context, token string) (TodayI
 				return TodayInitiative{}, ErrNoInitiativeToday
 			}
 			zone := recognition.Zone(donor.Timezone.String)
-			localDate := now.In(zone).Format(time.DateOnly)
-			chosen := actives[rotationIndex(donor.ID, localDate, len(actives))]
+			chosen := actives[rotationIndex(donor.ID, localDay(now, zone), len(actives))]
 
 			day := pgtype.Date{Time: now.In(zone), Valid: true}
 			if err = q.RecordInitiativeExposure(ctx, queries.RecordInitiativeExposureParams{

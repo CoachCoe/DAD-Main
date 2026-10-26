@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/recognition"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -330,5 +331,32 @@ func TestDailyRotationDeterministicAndExposureLedger(t *testing.T) {
 	}
 	if len(seen) < 2 {
 		t.Fatalf("rotation appears constant across donors: only %d distinct", len(seen))
+	}
+}
+
+// Every donor sees each active initiative in turn (A-1): over any n
+// consecutive days their picks are a permutation of the n initiatives.
+func TestRotationShowsEveryInitiativeInTurn(t *testing.T) {
+	for range 20 {
+		donor := testID(t)
+		for _, n := range []int{1, 2, 3, 7} {
+			for start := int64(20000); start < 20000+int64(n); start++ {
+				seen := map[int]bool{}
+				for day := start; day < start+int64(n); day++ {
+					seen[rotationIndex(donor, day, n)] = true
+				}
+				if len(seen) != n {
+					t.Fatalf("donor %s saw %d of %d initiatives over %d days from day %d", donor, len(seen), n, n, start)
+				}
+			}
+		}
+	}
+}
+
+func TestLocalDayRollsOverAtLocalMidnight(t *testing.T) {
+	ny := recognition.NewYork
+	late := time.Date(2026, 6, 1, 23, 30, 0, 0, ny)
+	if localDay(late, ny)+1 != localDay(late.Add(time.Hour), ny) || localDay(late, ny) == localDay(late, time.UTC) {
+		t.Fatal("the rotation day follows the donor's zone")
 	}
 }
