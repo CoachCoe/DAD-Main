@@ -235,8 +235,8 @@ type projection struct {
 	zone        *time.Location
 }
 
-// Version 9 queues gift-processed pushes and both recovery reminders.
-const projectionRules = 9
+// Version 10 awards Founding Donor to holders of a website waitlist grant (D-6).
+const projectionRules = 10
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a
@@ -292,7 +292,7 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 	refunds, refundBoundaries := refundsAsOf(h.Refunds, observations, now)
 	claimed := false
 	if !out.FoundingAwardedAt.Valid {
-		if claimed, err = q.FoundingClaimed(ctx, queries.FoundingClaimedParams{ID: id, ExpiresAt: timestamp(now)}); err != nil {
+		if claimed, err = q.FoundingClaimed(ctx, id); err != nil {
 			return projection{SaveProjectionParams: out}, err
 		}
 	}

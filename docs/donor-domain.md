@@ -129,7 +129,7 @@ status. Use the processor's successful-payment timestamp, not checkout start or 
 arrival. Website-waitlist sign-ups and earlier website donors (D-6) are Founding Donors too:
 staff import their addresses with sign-up dates before the cutoff, and a donor whose email
 matches earns the badge at their next update, without needing a gift before the cutoff. Only
-a hash of each imported address is kept, and the claims are deleted 90 days after the cutoff. Claiming after cutoff is allowed. The badge is
+a keyed hash of each imported address is kept, and the claims are deleted 90 days after the cutoff. Claiming after cutoff is allowed. The badge is
 permanent, including after refunds/cancellation. Changing the cutoff requires a product
 decision; existing awards remain permanent.
 

@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/hex"
 	"errors"
@@ -21,6 +23,8 @@ import (
 // FoundingClaimExpiry is when waitlist claims (D-6) stop being honoured.
 var FoundingClaimExpiry = recognition.FoundingCutoff.AddDate(0, 0, 90)
 
+var ErrFoundingClaimsUnconfigured = errors.New("founding claims are not configured")
+
 const (
 	maxFoundingClaimBytes = 4 << 20
 	maxFoundingClaimRows  = 50000
@@ -28,17 +32,56 @@ const (
 	foundingClaimSheet    = "claims"
 )
 
+// FoundingClaimKey keys the stored hash of each waitlist address, so the
+// hashes cannot be reversed by hashing guessed addresses.
+type FoundingClaimKey []byte
+
+// ParseFoundingClaimKey reads a base64url-encoded 32-byte key.
+func ParseFoundingClaimKey(value string) (FoundingClaimKey, error) {
+	key, err := base64.URLEncoding.DecodeString(value)
+	if err != nil || len(key) != 32 {
+		return nil, errors.New("must be 32 random bytes, base64url-encoded")
+	}
+	return key, nil
+}
+
+// hash is the stored form of a normalized address.
+func (k FoundingClaimKey) hash(email string) string {
+	mac := hmac.New(sha256.New, k)
+	mac.Write([]byte(email))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// grant records Founding Donor for a donor whose address has an unexpired
+// claim. Without a key no claims can have been imported.
+func (k FoundingClaimKey) grant(ctx context.Context, q *queries.Queries, donor pgtype.UUID, email string, now time.Time) error {
+	if len(k) == 0 {
+		return nil
+	}
+	return q.GrantFoundingClaim(ctx, queries.GrantFoundingClaimParams{DonorID: donor, EmailHash: k.hash(email), Now: timestamp(now)})
+}
+
 // FoundingClaimService imports website waitlist sign-ups and earlier website
 // donors so their accounts earn Founding Donor (D-6).
-type FoundingClaimService struct{ Staff *StaffService }
+type FoundingClaimService struct {
+	Staff *StaffService
+	Key   FoundingClaimKey
+}
 
 type FoundingClaimImport struct {
 	Rows int `json:"rows"`
 }
 
+// Authorize also refuses when no key is configured, so the caller can reject
+// an import before reading its body.
 func (s FoundingClaimService) Authorize(ctx context.Context, token string) error {
-	_, err := requireStaff(ctx, queries.New(s.Staff.DB), token, "badge.manage", time.Now().UTC())
-	return err
+	if _, err := requireStaff(ctx, queries.New(s.Staff.DB), token, "badge.manage", time.Now().UTC()); err != nil {
+		return err
+	}
+	if len(s.Key) == 0 {
+		return ErrFoundingClaimsUnconfigured
+	}
+	return nil
 }
 
 type foundingClaim struct {
@@ -47,20 +90,24 @@ type foundingClaim struct {
 }
 
 // Import records each row of a CSV with the columns email, signed_up_on
-// (YYYY-MM-DD) and source (WAITLIST or WEBSITE_DONOR). Only a hash of each
-// address is stored. It refuses the whole sheet if any row is invalid.
+// (YYYY-MM-DD) and source (WAITLIST or WEBSITE_DONOR), and grants Founding
+// Donor to the donors who already hold those addresses. Only a keyed hash of
+// each address is stored. It refuses the whole sheet if any row is invalid.
 func (s FoundingClaimService) Import(ctx context.Context, token, sheet string) (FoundingClaimImport, error) {
+	if len(s.Key) == 0 {
+		return FoundingClaimImport{}, ErrFoundingClaimsUnconfigured
+	}
 	now := time.Now().UTC()
 	problems := &PublicationError{}
 	claims := parseFoundingClaims(problems, sheet, now)
 	if len(problems.Problems) > 0 {
 		return FoundingClaimImport{}, problems
 	}
-	hashes := make([]string, 0, len(claims))
-	for hash := range claims {
-		hashes = append(hashes, hash)
+	emails := make([]string, 0, len(claims))
+	for email := range claims {
+		emails = append(emails, email)
 	}
-	slices.Sort(hashes)
+	slices.Sort(emails)
 	return staffWrite(
 		ctx,
 		s.Staff,
@@ -68,19 +115,23 @@ func (s FoundingClaimService) Import(ctx context.Context, token, sheet string) (
 		"badge.manage",
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (FoundingClaimImport, error) {
 			q := queries.New(tx)
-			for chunk := range slices.Chunk(hashes, foundingClaimChunk) {
+			for chunk := range slices.Chunk(emails, foundingClaimChunk) {
 				params := queries.ImportFoundingClaimsParams{
-					Hashes:     chunk,
+					Hashes:     make([]string, len(chunk)),
 					Dates:      make([]pgtype.Date, len(chunk)),
 					Sources:    make([]string, len(chunk)),
 					ImportedAt: timestamp(now),
 					ExpiresAt:  timestamp(FoundingClaimExpiry),
 				}
-				for i, hash := range chunk {
-					params.Dates[i] = pgtype.Date{Time: claims[hash].signedUp, Valid: true}
-					params.Sources[i] = claims[hash].source
+				for i, email := range chunk {
+					params.Hashes[i] = s.Key.hash(email)
+					params.Dates[i] = pgtype.Date{Time: claims[email].signedUp, Valid: true}
+					params.Sources[i] = claims[email].source
 				}
 				if _, err := q.ImportFoundingClaims(ctx, params); err != nil {
+					return FoundingClaimImport{}, err
+				}
+				if err := q.GrantFoundingClaimsByEmail(ctx, queries.GrantFoundingClaimsByEmailParams{Emails: chunk, Now: timestamp(now)}); err != nil {
 					return FoundingClaimImport{}, err
 				}
 			}
@@ -90,6 +141,8 @@ func (s FoundingClaimService) Import(ctx context.Context, token, sheet string) (
 	)
 }
 
+// parseFoundingClaims returns the sheet's claims by normalized address, each
+// address keeping its earliest sign-up.
 func parseFoundingClaims(problems *PublicationError, sheet string, now time.Time) map[string]foundingClaim {
 	if !now.Before(FoundingClaimExpiry) {
 		problems.add(foundingClaimSheet, 0, "", "claims_expired")
@@ -144,16 +197,8 @@ func parseFoundingClaims(problems *PublicationError, sheet string, now time.Time
 		if len(problems.Problems) > 0 {
 			continue
 		}
-		hash := FoundingEmailHash(email)
-		if held, ok := claims[hash]; !ok || signedUp.Before(held.signedUp) {
-			claims[hash] = foundingClaim{signedUp: signedUp, source: source}
+		if held, ok := claims[email]; !ok || signedUp.Before(held.signedUp) {
+			claims[email] = foundingClaim{signedUp: signedUp, source: source}
 		}
 	}
-}
-
-// FoundingEmailHash is the stored form of a normalized address. It matches
-// the database's encode(sha256(lower(email)), 'hex').
-func FoundingEmailHash(email string) string {
-	digest := sha256.Sum256([]byte(strings.ToLower(email)))
-	return hex.EncodeToString(digest[:])
 }

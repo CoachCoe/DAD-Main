@@ -101,12 +101,22 @@ ON CONFLICT(donor_id,days) DO UPDATE SET cohort_at=EXCLUDED.cohort_at,
 checkpoint_at=EXCLUDED.checkpoint_at,retained=EXCLUDED.retained,computed_at=EXCLUDED.computed_at;
 
 -- name: FoundingClaimed :one
--- Whether the donor's email matches an unexpired waitlist claim (D-6).
-SELECT EXISTS(
-  SELECT 1 FROM donors d JOIN donor_founding_claims c
-    ON c.email_hash = encode(sha256(convert_to(lower(d.email), 'UTF8')), 'hex')
-  WHERE d.id = $1 AND c.expires_at > $2
-)::bool;
+-- Whether the donor holds a waitlist grant (D-6).
+SELECT EXISTS(SELECT 1 FROM donor_founding_grants WHERE donor_id = $1)::bool;
+
+-- name: GrantFoundingClaim :exec
+-- Grants the donor Founding Donor if their address hash has an unexpired claim.
+INSERT INTO donor_founding_grants (donor_id, granted_at)
+SELECT sqlc.arg(donor_id)::uuid, sqlc.arg(now)::timestamptz
+WHERE EXISTS(SELECT 1 FROM donor_founding_claims
+             WHERE email_hash = sqlc.arg(email_hash)::text AND expires_at > sqlc.arg(now)::timestamptz)
+ON CONFLICT (donor_id) DO NOTHING;
+
+-- name: GrantFoundingClaimsByEmail :exec
+-- Grants Founding Donor to the donors who already hold imported addresses.
+INSERT INTO donor_founding_grants (donor_id, granted_at)
+SELECT id, sqlc.arg(now)::timestamptz FROM donors WHERE email = ANY(sqlc.arg(emails)::text[])
+ON CONFLICT (donor_id) DO NOTHING;
 
 -- name: ImportFoundingClaims :execrows
 -- An address listed more than once keeps its earliest sign-up.

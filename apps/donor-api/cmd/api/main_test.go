@@ -57,6 +57,7 @@ func TestConfigureRejectsInvalidEnvironmentBeforeTheDatabase(t *testing.T) {
 		{"local staff on the public host", map[string]string{"DONOR_STAFF_ORIGIN": "http://localhost:3001"}},
 		{"content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "short"}},
 		{"retired content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=,short"}},
+		{"short waitlist key", map[string]string{"DONOR_FOUNDING_CLAIM_KEY": "c2hvcnQ="}},
 		{"partial SMTP", map[string]string{"DONOR_SMTP_HOST": "smtp.example.org"}},
 		{"partial APNs", map[string]string{"DONOR_PUSH_APNS_TEAM_ID": "TEAM123456"}},
 		{"unreadable FCM key", map[string]string{"DONOR_PUSH_FCM_KEY_FILE": "/nonexistent/firebase.json"}},

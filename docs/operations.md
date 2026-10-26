@@ -106,7 +106,8 @@ through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is inte
 unconfigured. Readiness is not payment-provider acceptance or live-release authorization.
 
 Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURED`,
-`EMAIL_UNCONFIGURED`, `SOURCE_STORAGE_UNCONFIGURED`, or `PUSH_UNCONFIGURED`) and are not logged as errors; a
+`EMAIL_UNCONFIGURED`, `SOURCE_STORAGE_UNCONFIGURED`, `PUSH_UNCONFIGURED`, or
+`FOUNDING_CLAIMS_UNCONFIGURED`) and are not logged as errors; a
 503 without a code is a transient failure and is logged.
 
 ### Upgrading an existing deployment
@@ -678,10 +679,16 @@ email,signed_up_on,source
 ```
 
 `signed_up_on` is a YYYY-MM-DD date before 2027-01-01 and `source` is `WAITLIST` or
-`WEBSITE_DONOR`. Any invalid row refuses the whole file. The API stores only the SHA-256 of
-each lower-cased address; delete the source file once imported. Re-importing is safe and
-keeps each address's earliest sign-up. The projections worker deletes the claims 90 days
-after the Founding cutoff.
+`WEBSITE_DONOR`. Any invalid row refuses the whole file. The API stores only an
+HMAC-SHA256 of each lower-cased address under `DONOR_FOUNDING_CLAIM_KEY`, so the stored
+hashes cannot be matched against guessed addresses without the key; delete the source file
+once imported. Generate the key with `openssl rand -base64 32 | tr '+/' '-_'` and set it on
+the API only; without it the import answers 503 `FOUNDING_CLAIMS_UNCONFIGURED`. A donor is
+granted the badge when the import finds their address, when they first give as a guest
+under it, or when they change their email to it. Grants survive a key change, but claims
+not yet granted no longer match under a new key, so re-import the file after changing it.
+Re-importing is safe and keeps each address's earliest sign-up. The projections worker
+deletes the claims 90 days after the Founding cutoff.
 
 The enrolment CSV has headers only until R2. Keep exports private and apply an approved
 retention policy. Sensitive source documents have separate authenticated downloads.
@@ -857,8 +864,9 @@ newest first: the first key encrypts everything written, and any key in the list
 decrypts. A single key is a list of one. The API and workers refuse to start if any key
 in a list is malformed. Session, link, and referral-visitor lookups use unkeyed SHA-256
 hashes of random tokens, so no stored hash depends on these keys and rotation re-hashes
-nothing. Wallet signing keys and staff passkeys are not data-encryption keys and are not
-rotated this way.
+nothing. `DONOR_FOUNDING_CLAIM_KEY` is not an encryption key and `rekey` does not
+handle it; see [staff and content](#staff-and-content) for changing it. Wallet signing
+keys and staff passkeys are not data-encryption keys and are not rotated this way.
 
 `rekey --key email` (or `content`) re-encrypts every token of that setting still on a
 later key under the first key. It reads each table in id order in pages of `--batch`

@@ -37,6 +37,7 @@ function render(overrides = {}) {
     DONOR_PUSH_APNS_TOPIC: "org.example.fixture",
     DONOR_PUSH_FCM_KEY_FILE: "/run/private/fcm.json",
     DONOR_EVENT_CHECKIN_SECRET: "canary-checkin",
+    DONOR_FOUNDING_CLAIM_KEY: "canary-founding",
     DONOR_SMS_AUTH_TOKEN: "canary-sms",
     UNRELATED_SECRET: "must-never-reach-a-process",
     ...overrides,
@@ -80,6 +81,7 @@ test("rendered deployment gives each process only its credential capabilities", 
   const api = services.api.environment;
   assert.equal(api.STRIPE_SECRET_KEY, "canary-stripe");
   assert.equal(api.DONOR_EMAIL_ENCRYPTION_KEY, "canary-email");
+  assert.equal(api.DONOR_FOUNDING_CLAIM_KEY, "canary-founding");
   assert.equal(api.DONOR_SMTP_PASSWORD, undefined);
   assert.equal(api.DONOR_SMTP_USERNAME, undefined);
   assert.equal(api.DONOR_PUSH_APNS_KEY_FILE, undefined);
@@ -95,6 +97,7 @@ test("rendered deployment gives each process only its credential capabilities", 
       "DONOR_CONTENT_ENCRYPTION_KEY",
       "DONOR_SMS_AUTH_TOKEN",
       "DONOR_EVENT_CHECKIN_SECRET",
+      "DONOR_FOUNDING_CLAIM_KEY",
       "DONOR_PUSH_APNS_KEY_FILE",
       "DONOR_PUSH_FCM_KEY_FILE",
     ])

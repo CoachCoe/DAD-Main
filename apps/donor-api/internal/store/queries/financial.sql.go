@@ -49,21 +49,12 @@ func (q *Queries) ApplyReferralDelta(ctx context.Context, arg ApplyReferralDelta
 }
 
 const foundingClaimed = `-- name: FoundingClaimed :one
-SELECT EXISTS(
-  SELECT 1 FROM donors d JOIN donor_founding_claims c
-    ON c.email_hash = encode(sha256(convert_to(lower(d.email), 'UTF8')), 'hex')
-  WHERE d.id = $1 AND c.expires_at > $2
-)::bool
+SELECT EXISTS(SELECT 1 FROM donor_founding_grants WHERE donor_id = $1)::bool
 `
 
-type FoundingClaimedParams struct {
-	ID        pgtype.UUID        `json:"id"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
-}
-
-// Whether the donor's email matches an unexpired waitlist claim (D-6).
-func (q *Queries) FoundingClaimed(ctx context.Context, arg FoundingClaimedParams) (bool, error) {
-	row := q.db.QueryRow(ctx, foundingClaimed, arg.ID, arg.ExpiresAt)
+// Whether the donor holds a waitlist grant (D-6).
+func (q *Queries) FoundingClaimed(ctx context.Context, donorID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, foundingClaimed, donorID)
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -117,6 +108,43 @@ func (q *Queries) GiftHistory(ctx context.Context, donorID pgtype.UUID) ([]GiftH
 		return nil, err
 	}
 	return items, nil
+}
+
+const grantFoundingClaim = `-- name: GrantFoundingClaim :exec
+INSERT INTO donor_founding_grants (donor_id, granted_at)
+SELECT $1::uuid, $2::timestamptz
+WHERE EXISTS(SELECT 1 FROM donor_founding_claims
+             WHERE email_hash = $3::text AND expires_at > $2::timestamptz)
+ON CONFLICT (donor_id) DO NOTHING
+`
+
+type GrantFoundingClaimParams struct {
+	DonorID   pgtype.UUID        `json:"donor_id"`
+	Now       pgtype.Timestamptz `json:"now"`
+	EmailHash string             `json:"email_hash"`
+}
+
+// Grants the donor Founding Donor if their address hash has an unexpired claim.
+func (q *Queries) GrantFoundingClaim(ctx context.Context, arg GrantFoundingClaimParams) error {
+	_, err := q.db.Exec(ctx, grantFoundingClaim, arg.DonorID, arg.Now, arg.EmailHash)
+	return err
+}
+
+const grantFoundingClaimsByEmail = `-- name: GrantFoundingClaimsByEmail :exec
+INSERT INTO donor_founding_grants (donor_id, granted_at)
+SELECT id, $1::timestamptz FROM donors WHERE email = ANY($2::text[])
+ON CONFLICT (donor_id) DO NOTHING
+`
+
+type GrantFoundingClaimsByEmailParams struct {
+	Now    pgtype.Timestamptz `json:"now"`
+	Emails []string           `json:"emails"`
+}
+
+// Grants Founding Donor to the donors who already hold imported addresses.
+func (q *Queries) GrantFoundingClaimsByEmail(ctx context.Context, arg GrantFoundingClaimsByEmailParams) error {
+	_, err := q.db.Exec(ctx, grantFoundingClaimsByEmail, arg.Now, arg.Emails)
+	return err
 }
 
 const importFoundingClaims = `-- name: ImportFoundingClaims :execrows

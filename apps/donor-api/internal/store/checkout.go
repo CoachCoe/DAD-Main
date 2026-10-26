@@ -21,6 +21,8 @@ type CheckoutService struct {
 	DB      *pgxpool.Pool
 	Gateway payments.CheckoutGateway
 	Origin  string
+	// FoundingClaims matches a giver's address to the website waitlist (D-6).
+	FoundingClaims FoundingClaimKey
 }
 
 // BeginCheckout returns a hosted checkout for a guest gift. The attempt and
@@ -93,20 +95,21 @@ func (s CheckoutService) prepare(
 	now time.Time,
 ) (queries.DonorStripeCheckout, error) {
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (queries.DonorStripeCheckout, error) {
-		return prepareAttempt(ctx, queries.New(tx), site, request, digest, now)
+		return prepareAttempt(ctx, queries.New(tx), s.FoundingClaims, site, request, digest, now)
 	})
 }
 
 func prepareAttempt(
 	ctx context.Context,
 	q *queries.Queries,
+	claims FoundingClaimKey,
 	site publicSite,
 	request payments.CheckoutRequest,
 	digest string,
 	now time.Time,
 ) (queries.DonorStripeCheckout, error) {
 	empty := queries.DonorStripeCheckout{}
-	donor, err := lockGuest(ctx, q, request.Email, now)
+	donor, err := lockGuest(ctx, q, claims, request.Email, now)
 	if err != nil {
 		return empty, err
 	}
@@ -156,8 +159,9 @@ func prepareAttempt(
 }
 
 // lockGuest returns the donor for email, created as an unclaimed guest if
-// new, locked and with a projection row for the refresh worker to find.
-func lockGuest(ctx context.Context, q *queries.Queries, email string, now time.Time) (queries.Donor, error) {
+// new, locked, granted any waitlist claim on the address, and with a
+// projection row for the refresh worker to find.
+func lockGuest(ctx context.Context, q *queries.Queries, claims FoundingClaimKey, email string, now time.Time) (queries.Donor, error) {
 	id, err := NewID()
 	if err != nil {
 		return queries.Donor{}, err
@@ -177,6 +181,9 @@ func lockGuest(ctx context.Context, q *queries.Queries, email string, now time.T
 	}
 	if donor.Disabled {
 		return queries.Donor{}, ErrDenied
+	}
+	if err = claims.grant(ctx, q, donor.ID, email, now); err != nil {
+		return queries.Donor{}, err
 	}
 	projection, err := NewID()
 	if err != nil {

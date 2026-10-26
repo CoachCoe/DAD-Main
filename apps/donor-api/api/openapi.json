@@ -10440,7 +10440,7 @@
    "post": {
     "operationId": "importFoundingClaims",
     "summary": "Import website waitlist Founding Donor claims",
-    "description": "D-6. `claims_csv` has the header `email,signed_up_on,source`; `signed_up_on` is a date before the Founding cutoff and `source` is WAITLIST or WEBSITE_DONOR. At most 4 MB and 50,000 rows. Only a hash of each address is stored; a donor whose email matches earns Founding Donor at their next update, until 90 days after the cutoff. Importing an address again keeps its earliest sign-up. A refused import answers 422 `{\"detail\":\"The spreadsheet has problems\",\"errors\":[{sheet,row,column,reason}]}` and stores nothing.",
+    "description": "D-6. `claims_csv` has the header `email,signed_up_on,source`; `signed_up_on` is a date before the Founding cutoff and `source` is WAITLIST or WEBSITE_DONOR. At most 4 MB and 50,000 rows. Only an HMAC of each address under `DONOR_FOUNDING_CLAIM_KEY` is stored; without the key the import answers 503 `FOUNDING_CLAIMS_UNCONFIGURED`. A donor is granted Founding Donor when the import finds their address, when they first give as a guest under it, or when they change their email to it, until 90 days after the cutoff. Importing an address again keeps its earliest sign-up. A refused import answers 422 `{\"detail\":\"The spreadsheet has problems\",\"errors\":[{sheet,row,column,reason}]}` and stores nothing.",
     "tags": [
      "Staff"
     ],

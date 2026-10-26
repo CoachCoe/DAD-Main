@@ -149,6 +149,12 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if err = validateStaffOrigin(services.StaffOrigin, services.Origin, getenv); err != nil {
 		return services, release, err
 	}
+	var foundingClaims store.FoundingClaimKey
+	if value := getenv("DONOR_FOUNDING_CLAIM_KEY"); value != "" {
+		if foundingClaims, err = store.ParseFoundingClaimKey(value); err != nil {
+			return services, release, fmt.Errorf("DONOR_FOUNDING_CLAIM_KEY %w", err)
+		}
+	}
 	var contentKeys credentials.Keyring
 	if value := getenv("DONOR_CONTENT_ENCRYPTION_KEY"); value != "" {
 		if contentKeys, err = credentials.ParseKeyring(value); err != nil {
@@ -172,6 +178,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		{"account email (SMTP settings)", email != nil},
 		{"staff back office (DONOR_STAFF_ORIGIN)", services.StaffOrigin != ""},
 		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKeys.Configured()},
+		{"website waitlist Founding Donors (DONOR_FOUNDING_CLAIM_KEY)", len(foundingClaims) > 0},
 		{"iOS app notifications (DONOR_PUSH_PLATFORMS)", slices.Contains(platforms, push.IOS)},
 		{"Android app notifications (DONOR_PUSH_PLATFORMS)", slices.Contains(platforms, push.Android)},
 		{"donor passkeys (a DONOR_PUBLIC_ORIGIN host name, not an IP address)", passkeys},
@@ -231,14 +238,14 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if verifier := oidc.NewVerifier(oidcSettings); verifier != nil {
 		services.OIDCSignIn = store.OIDCService{DB: pool, Verifier: verifier, Settings: oidcSettings}
 	}
-	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
+	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin, FoundingClaims: foundingClaims}
 	services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	services.Push = store.PushService{DB: pool, Platforms: platforms}
 	if webhookSecret != "" {
 		services.Webhook = payments.Receiver{Secret: webhookSecret, Inbox: store.StripeInbox{DB: pool}}
 	}
 	if email != nil {
-		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKeys: email.EncryptionKeys}
+		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKeys: email.EncryptionKeys, FoundingClaims: foundingClaims}
 	}
 	var staff *store.StaffService
 	if services.StaffOrigin != "" {
@@ -251,7 +258,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
 		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKeys: contentKeys}
 		services.Wording = store.WordingService{Staff: staff}
-		services.FoundingClaims = store.FoundingClaimService{Staff: staff}
+		services.FoundingClaims = store.FoundingClaimService{Staff: staff, Key: foundingClaims}
 		services.Initiatives = store.InitiativeService{Staff: staff}
 		services.Events = store.EventService{Staff: staff}
 		services.Reporting = &store.ReportingService{Staff: staff}
