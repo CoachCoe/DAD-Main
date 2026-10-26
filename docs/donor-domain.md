@@ -107,16 +107,19 @@ then every further 365 days. Each milestone is congratulated once per streak run
 is identified by its first current day; a streak that resets and is rebuilt is a new run.
 
 Any successful first gift before 2027-01-01 00:00 America/New_York earns Founding Donor
-status. Website-waitlist grants are also honored. Use the processor's successful-payment timestamp,
+status. Website-waitlist sign-ups and earlier website donors (D-6) are not yet imported, so
+they hold no grant until that migration runs. Use the processor's successful-payment timestamp,
 not checkout start or webhook arrival. Claiming after cutoff is allowed. The badge is
 permanent, including after refunds/cancellation. Changing the cutoff requires a product
 decision; existing awards remain permanent.
 
 ## Staff and messages
 
-Support can search/view donors and resend receipts/claim emails. Finance adds refunds,
-cancellations, and donor/financial exports. Administrator adds staff access management
-and approved content publishing. Require individual staff accounts and passkeys. Enforce
+A super administrator holds every staff power: donors and money (search, refunds,
+cancellations, resent messages, exports), badge grants, content publishing, the audit
+log, and staff access. Partnerships operators manage partner applications and partners,
+Growth operators manage events, and Impact operators manage initiatives; every role reads
+the report. Require individual staff accounts and passkeys. Enforce
 named permissions server-side; audit actor, time, target, and result, with reasons for
 refunds and staff cancellation. No donor impersonation or access to card details.
 
@@ -142,7 +145,8 @@ unconfirmed. They must be verified before live donations.
 
 Go implements the donor API, Stripe inbox, recurring controls, projections, account
 email, notification outbox, staff passkeys and permissions, audited refunds/cancellation,
-exports, private source documents, spreadsheet publication, and partner inquiries.
+exports, private source documents, spreadsheet publication, partner applications, and
+the partner portal.
 TypeScript implements the public, donor, and staff web surfaces. See [architecture](architecture.md)
 and [operations](operations.md) for runtime behavior and instructions.
 

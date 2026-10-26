@@ -12,22 +12,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Path gate (PRD §13 CI cost): the hosted jobs (api, browser, deploy) run on
-  # GitHub-hosted Ubuntu and bill real minutes, unlike the self-hosted jobs. This
-  # job diffs the change and emits booleans so a hosted job runs only when files
-  # it actually tests changed — and ALWAYS when this is a push to main/dev (the
-  # authoritative merge-landing run keeps the full suite). It runs self-hosted,
-  # so the gate itself is free.
-  #
-  # FUTURE (eliminates these hosted minutes entirely): api and browser are on
-  # Linux only because they need Postgres SERVICE CONTAINERS and apt-based
-  # `playwright install --with-deps`, and deploy needs Linux Docker — none of
-  # which the self-hosted macOS runner can do. A self-hosted LINUX runner with
-  # KVM/containers (labelled e.g. [self-hosted, dad, linux, docker]) could host
-  # all three at $0: once such a runner is registered, change their `runs-on`
-  # from `ubuntu-latest` to that label and drop the gate's `if`. That is a
-  # hardware/registration step (like the existing runners); the path gate above
-  # delivers the savings until then.
+  # Path gate: the hosted jobs (api, browser, deploy) run on GitHub-hosted
+  # Ubuntu and bill minutes. This self-hosted job diffs the change and emits
+  # booleans so each hosted job runs only when files it tests changed, and
+  # always on a push to main or dev, which keeps the full suite. Those jobs are
+  # hosted because they need Postgres service containers, `playwright install
+  # --with-deps`, and Docker; a self-hosted runner that provides containers
+  # could take them over by changing their `runs-on` and dropping the gate.
   changes:
     # Fork safety (public repo): self-hosted jobs run only for pushes and
     # same-repo PRs, never a fork's PR — a forked PR must not execute code on

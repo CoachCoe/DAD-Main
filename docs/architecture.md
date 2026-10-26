@@ -24,7 +24,7 @@ map to named permissions checked against current database state.
 ## HTTP contract and native clients
 
 `apps/donor-api/api/openapi.json` (OpenAPI 3.1) is the HTTP contract for the web app and
-the R2 donor apps. Every route is declared once in `internal/httpapi/routes.go` with its
+the native apps. Every route is declared once in `internal/httpapi/routes.go` with its
 authentication and client policy; the `TestContract*` tests fail when routes, security,
 client policy, or JSON shapes drift from the document, including which response fields
 are always present. A response whose fields depend on its state documents each state as
@@ -36,7 +36,7 @@ The web app's request and response types are generated from the contract into
 `apps/web/lib/openapi.d.ts` by pinned openapi-typescript, and pages name them through
 `Schema`, `RequestBody`, and `ResponseBody` in `lib/api.ts` rather than declaring their
 own. `make generate` refreshes the file and `make check-generated` fails CI when it no
-longer matches the contract. The R2 native apps generate their own clients from the same
+longer matches the contract. The native apps generate their own clients from the same
 document.
 
 Staff routes admit mutations only from the staff origin; every other route admits only
@@ -47,12 +47,12 @@ sets the staff cookie. Activation is the same pair under `/donor/staff/activate`
 with the invitation token, and also signs the new staff member in. Options and
 credentials use the WebAuthn JSON forms, with binary fields in base64url.
 
-The R2 app calls the API host directly with a 15-minute bearer access token instead of
+The donor app calls the API host directly with a 15-minute bearer access token instead of
 cookies, and renews it with a rotating refresh token at `POST /donor/refresh`, a route
 that admits only the app (see [security](security.md)). Every sign-in, in a browser or
 the app, is a donor session the donor can list and end through `/donor/me/sessions`,
-which the web profile page shows. Only donor account routes admit the app; giving stays
-on the web.
+which the web profile page shows. Only donor account and partner portal routes admit the
+apps; giving stays on the web.
 Every donor-facing URL is built in `internal/store/links.go`, which is the starting list
 for app/universal links (`/account/claim`, `/account/email-change`,
 `/account/payment-method`, `/r/{code}`).
@@ -150,9 +150,9 @@ before adoption; removal of obsolete deployed data is a separate operational dec
 
 ## Boundaries
 
-Only the donor product, staff operations, marketing content, and partner contact form run
-at R1. The recipient queue/export is inactive. There are no AI, evidence-processing,
-blockchain, recipient eligibility, aid-payment, or partner-portal services.
+The donor product, the partner portal, staff operations, and marketing content run at R1.
+The recipient queue/export is inactive. There are no AI, evidence-processing, blockchain,
+recipient eligibility, or aid-payment services.
 
 This build is test-mode only. Readiness confirms a usable, migrated database; it does not
 certify legal approval, Wallet integration, delivery operations, or production capacity.

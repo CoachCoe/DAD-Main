@@ -1,7 +1,8 @@
 # R1 security controls
 
-Donors authenticate through single-use, 15-minute email proof, or a passkey they added
-while signed in, and hashed, revocable sessions: a 30-day cookie in browsers, a rotating token pair in the app. Staff sign in with individual passkeys (WebAuthn, verified by
+Donors authenticate through single-use, 15-minute email proof, a passkey they added
+while signed in, a one-time SMS code, or Apple or Google sign-in, and hold hashed,
+revocable sessions: a 30-day cookie in browsers, a rotating token pair in the app. Staff sign in with individual passkeys (WebAuthn, verified by
 go-webauthn) and receive eight-hour hashed sessions. Donor and staff cookies are
 separate, HttpOnly, and Secure on HTTPS. Staff cookies use SameSite=Strict; donor cookies
 use Lax. Anonymous login responses do not reveal whether an address exists, and a donor receives at
@@ -51,7 +52,29 @@ remove their passkeys on the profile, where an ID that is not theirs is not foun
 Completing an email change removes every passkey with every session, because the email is
 the account's root credential; signing out everywhere keeps them.
 
-The R2 donor app uses neither cookies nor Origin. It sends `X-DAD-Client: native` on
+Phone sign-in sends a six-digit code to a phone already saved on an account. The code is
+stored hashed, expires after 10 minutes, and allows five attempts; a wrong guess is
+counted in its own committed statement so a failed verification cannot roll the count
+back. Requesting a code answers the same whether or not the number has an account, and
+a wrong, expired, or exhausted code and an unknown number all fail with one message.
+Apple and Google sign-in verify the provider's ID token for its issuer, audience, and
+expiry, then sign in the donor already linked to that subject or, on first use, the donor
+with the token's email, recording the link. A verified identity with no account fails
+like a wrong code; accounts are created only by giving. Both methods stay off until their
+provider is configured. Only recording stubs exist so far (`DONOR_SMS_PROVIDER=stub`,
+`DONOR_OIDC_MODE=stub`): the stub verifier checks an HMAC-signed test token, not a
+provider's signature, so neither method may be enabled in production until a real SMS
+gateway and a JWKS-verifying OIDC verifier replace them.
+
+Partner portal users are separate from donors and staff and cannot give. They sign in
+through emailed single-use links: 15 minutes for a link they request, seven days for an
+approval or invitation. A user holds one live link at a time, and a link replaced before
+delivery is never sent. Requesting a link never reveals whether the address belongs to a
+partner. Sessions last 12 hours, in the `dad_partner_session` cookie or as a bearer token
+in the app, and removing a user revokes their sessions. Administrators alone invite and
+remove users, edit the organization profile, and export reports.
+
+The donor app uses neither cookies nor Origin. It sends `X-DAD-Client: native` on
 every request and authenticates with `Authorization: Bearer <access token>`. A request
 is native only when it has that header and neither an `Origin` nor a `Cookie` header;
 any other request is a browser request, whose Authorization header is ignored and whose
