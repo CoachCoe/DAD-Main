@@ -360,3 +360,40 @@ func TestLocalDayRollsOverAtLocalMidnight(t *testing.T) {
 		t.Fatal("the rotation day follows the donor's zone")
 	}
 }
+
+// TestInitiativePartnerMustBeApproved keeps a contact-form lead, which shares
+// the partner table, from being named as an initiative's partner.
+func TestInitiativePartnerMustBeApproved(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	s := InitiativeService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+	partner := approvedPartner(t, pool, "Wells Inc", "WELLS1", 0, 0)
+	lead := testID(t)
+	mustExec(t, pool, `INSERT INTO donor_partner_signups (id, organization, name, email, website, message, request_hash, consent_version)
+		VALUES ($1,'Lead Org','L','lead@x.test','https://lead.test','',$2,'v1')`, lead, "h-"+lead.String())
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_partner_signups WHERE id=$1", lead) })
+	cleanInitiatives(t, pool)
+
+	withPartner := func(slug string, id pgtype.UUID) InitiativeInput {
+		in := validInitiative(slug)
+		in.PartnerSignupID = id.String()
+		return in
+	}
+	if _, err := s.Create(ctx, adminToken, withPartner("lead-run", lead)); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("an initiative run by a lead: %v; want ErrStaffInput", err)
+	}
+	if _, err := s.Create(ctx, adminToken, withPartner("unknown-run", testID(t))); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("an initiative run by no partner: %v; want ErrStaffInput", err)
+	}
+	id, err := s.Create(ctx, adminToken, withPartner("wells-run", partner))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Update(ctx, adminToken, id, withPartner("wells-run", lead)); !errors.Is(err, ErrStaffInput) {
+		t.Fatalf("moving an initiative to a lead: %v; want ErrStaffInput", err)
+	}
+	if err := s.Update(ctx, adminToken, id, withPartner("wells-run", partner)); err != nil {
+		t.Fatalf("editing an initiative of an approved partner: %v", err)
+	}
+}

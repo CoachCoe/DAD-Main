@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strconv"
 	"time"
@@ -127,6 +128,9 @@ func (s InitiativeService) Create(ctx context.Context, token string, in Initiati
 			}
 			params.ID = id
 			q := queries.New(tx)
+			if err = requireApprovedPartner(ctx, q, params.PartnerSignupID); err != nil {
+				return pgtype.UUID{}, err
+			}
 			if err = q.InsertInitiative(ctx, params); err != nil {
 				return pgtype.UUID{}, err
 			}
@@ -149,6 +153,11 @@ func (s InitiativeService) Update(ctx context.Context, token string, id pgtype.U
 			existing, err := q.InitiativeByID(ctx, id)
 			if err != nil {
 				return struct{}{}, err
+			}
+			if params.PartnerSignupID != existing.PartnerSignupID {
+				if err = requireApprovedPartner(ctx, q, params.PartnerSignupID); err != nil {
+					return struct{}{}, err
+				}
 			}
 			if err = q.UpdateInitiative(ctx, queries.UpdateInitiativeParams{
 				ID: id, Title: params.Title, Summary: params.Summary, Type: params.Type,
@@ -398,5 +407,18 @@ func (s InitiativeService) DeleteSpend(
 				now,
 			)
 		})
+	return err
+}
+
+// requireApprovedPartner refuses a partner that is still a contact-form lead:
+// donor_partner_signups holds both, and only an approved row is a partner org.
+func requireApprovedPartner(ctx context.Context, q *queries.Queries, partner pgtype.UUID) error {
+	if !partner.Valid {
+		return nil
+	}
+	org, err := q.PartnerOrgByID(ctx, partner)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !org.ApprovedAt.Valid) {
+		return ErrStaffInput
+	}
 	return err
 }
