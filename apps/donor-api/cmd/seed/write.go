@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -477,6 +478,11 @@ func refreshProjections(ctx context.Context, pool *pgxpool.Pool, workers int) er
 			for {
 				worked, err := store.RefreshNextProjection(ctx, pool, time.Now().UTC())
 				if err != nil {
+					// pgx can report a write cut short by cancellation as an I/O
+					// timeout, so name the interruption itself.
+					if interrupted := ctx.Err(); interrupted != nil {
+						err = errors.Join(interrupted, err)
+					}
 					once.Do(func() { failure = err; cancel() })
 				}
 				if err != nil || !worked {
