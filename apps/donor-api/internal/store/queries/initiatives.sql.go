@@ -51,7 +51,7 @@ func (q *Queries) DistinctInitiativeExposures(ctx context.Context, donorID pgtyp
 }
 
 const initiativeByID = `-- name: InitiativeByID :one
-SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at, in_rotation FROM donor_initiatives WHERE id=$1
+SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at, in_rotation, board_approval_source_id, board_approved_on FROM donor_initiatives WHERE id=$1
 `
 
 func (q *Queries) InitiativeByID(ctx context.Context, id pgtype.UUID) (DonorInitiative, error) {
@@ -75,6 +75,8 @@ func (q *Queries) InitiativeByID(ctx context.Context, id pgtype.UUID) (DonorInit
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.InRotation,
+		&i.BoardApprovalSourceID,
+		&i.BoardApprovedOn,
 	)
 	return i, err
 }
@@ -162,24 +164,27 @@ func (q *Queries) InitiativeSpendTotal(ctx context.Context, initiativeID pgtype.
 
 const insertInitiative = `-- name: InsertInitiative :exec
 INSERT INTO donor_initiatives
-  (id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, created_at, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13)
+  (id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id,
+   board_approval_source_id, board_approved_on, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15)
 `
 
 type InsertInitiativeParams struct {
-	ID              pgtype.UUID        `json:"id"`
-	Slug            string             `json:"slug"`
-	Title           string             `json:"title"`
-	Summary         string             `json:"summary"`
-	Type            string             `json:"type"`
-	Location        string             `json:"location"`
-	Region          string             `json:"region"`
-	Counties        []string           `json:"counties"`
-	StartedOn       pgtype.Date        `json:"started_on"`
-	Status          string             `json:"status"`
-	CommittedMinor  int64              `json:"committed_minor"`
-	PartnerSignupID pgtype.UUID        `json:"partner_signup_id"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	ID                    pgtype.UUID        `json:"id"`
+	Slug                  string             `json:"slug"`
+	Title                 string             `json:"title"`
+	Summary               string             `json:"summary"`
+	Type                  string             `json:"type"`
+	Location              string             `json:"location"`
+	Region                string             `json:"region"`
+	Counties              []string           `json:"counties"`
+	StartedOn             pgtype.Date        `json:"started_on"`
+	Status                string             `json:"status"`
+	CommittedMinor        int64              `json:"committed_minor"`
+	PartnerSignupID       pgtype.UUID        `json:"partner_signup_id"`
+	BoardApprovalSourceID pgtype.UUID        `json:"board_approval_source_id"`
+	BoardApprovedOn       pgtype.Date        `json:"board_approved_on"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) InsertInitiative(ctx context.Context, arg InsertInitiativeParams) error {
@@ -196,6 +201,8 @@ func (q *Queries) InsertInitiative(ctx context.Context, arg InsertInitiativePara
 		arg.Status,
 		arg.CommittedMinor,
 		arg.PartnerSignupID,
+		arg.BoardApprovalSourceID,
+		arg.BoardApprovedOn,
 		arg.CreatedAt,
 	)
 	return err
@@ -377,7 +384,7 @@ func (q *Queries) RecordInitiativeExposure(ctx context.Context, arg RecordInitia
 }
 
 const rotatableInitiatives = `-- name: RotatableInitiatives :many
-SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at, in_rotation FROM donor_initiatives
+SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at, in_rotation, board_approval_source_id, board_approved_on FROM donor_initiatives
 WHERE publish_state='PUBLISHED' AND status='ACTIVE' AND in_rotation
 ORDER BY started_on, id
 `
@@ -412,6 +419,8 @@ func (q *Queries) RotatableInitiatives(ctx context.Context) ([]DonorInitiative, 
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.InRotation,
+			&i.BoardApprovalSourceID,
+			&i.BoardApprovedOn,
 		); err != nil {
 			return nil, err
 		}
@@ -442,7 +451,7 @@ func (q *Queries) SetInitiativeRotation(ctx context.Context, arg SetInitiativeRo
 }
 
 const staffInitiativesPage = `-- name: StaffInitiativesPage :many
-SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at, in_rotation FROM donor_initiatives
+SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at, in_rotation, board_approval_source_id, board_approved_on FROM donor_initiatives
 ORDER BY created_at DESC, id
 LIMIT 51 OFFSET $1::bigint
 `
@@ -474,6 +483,8 @@ func (q *Queries) StaffInitiativesPage(ctx context.Context, pageOffset int64) ([
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.InRotation,
+			&i.BoardApprovalSourceID,
+			&i.BoardApprovedOn,
 		); err != nil {
 			return nil, err
 		}
@@ -488,23 +499,26 @@ func (q *Queries) StaffInitiativesPage(ctx context.Context, pageOffset int64) ([
 const updateInitiative = `-- name: UpdateInitiative :exec
 UPDATE donor_initiatives
 SET title=$2, summary=$3, type=$4, location=$5, region=$6, counties=$7,
-    started_on=$8, status=$9, committed_minor=$10, partner_signup_id=$11, updated_at=$12
+    started_on=$8, status=$9, committed_minor=$10, partner_signup_id=$11,
+    board_approval_source_id=$12, board_approved_on=$13, updated_at=$14
 WHERE id=$1
 `
 
 type UpdateInitiativeParams struct {
-	ID              pgtype.UUID        `json:"id"`
-	Title           string             `json:"title"`
-	Summary         string             `json:"summary"`
-	Type            string             `json:"type"`
-	Location        string             `json:"location"`
-	Region          string             `json:"region"`
-	Counties        []string           `json:"counties"`
-	StartedOn       pgtype.Date        `json:"started_on"`
-	Status          string             `json:"status"`
-	CommittedMinor  int64              `json:"committed_minor"`
-	PartnerSignupID pgtype.UUID        `json:"partner_signup_id"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID                    pgtype.UUID        `json:"id"`
+	Title                 string             `json:"title"`
+	Summary               string             `json:"summary"`
+	Type                  string             `json:"type"`
+	Location              string             `json:"location"`
+	Region                string             `json:"region"`
+	Counties              []string           `json:"counties"`
+	StartedOn             pgtype.Date        `json:"started_on"`
+	Status                string             `json:"status"`
+	CommittedMinor        int64              `json:"committed_minor"`
+	PartnerSignupID       pgtype.UUID        `json:"partner_signup_id"`
+	BoardApprovalSourceID pgtype.UUID        `json:"board_approval_source_id"`
+	BoardApprovedOn       pgtype.Date        `json:"board_approved_on"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpdateInitiative(ctx context.Context, arg UpdateInitiativeParams) error {
@@ -520,6 +534,8 @@ func (q *Queries) UpdateInitiative(ctx context.Context, arg UpdateInitiativePara
 		arg.Status,
 		arg.CommittedMinor,
 		arg.PartnerSignupID,
+		arg.BoardApprovalSourceID,
+		arg.BoardApprovedOn,
 		arg.UpdatedAt,
 	)
 	return err

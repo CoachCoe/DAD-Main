@@ -38,6 +38,31 @@ func cleanInitiatives(t *testing.T, pool *pgxpool.Pool) {
 	})
 }
 
+// withBoardApproval cites a newly stored source as the initiative's board
+// approval, so it can be published.
+func withBoardApproval(t *testing.T, pool *pgxpool.Pool, in InitiativeInput) InitiativeInput {
+	t.Helper()
+	actor, _ := staffFixture(t, pool, "SUPER_ADMIN")
+	source := testID(t)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_content_sources(id,actor_id,name,sha256,encrypted_data) VALUES($1,$2,'approval.pdf',repeat('0',64),'x')",
+		source,
+		actor,
+	)
+	t.Cleanup(func() {
+		cleanExec(
+			t,
+			"UPDATE donor_initiatives SET board_approval_source_id=NULL, board_approved_on=NULL WHERE board_approval_source_id=$1",
+			source,
+		)
+		cleanExec(t, "DELETE FROM donor_content_sources WHERE id=$1", source)
+	})
+	in.BoardApprovalSourceID, in.BoardApprovedOn = source.String(), "2026-01-15"
+	return in
+}
+
 func validInitiative(slug string) InitiativeInput {
 	return InitiativeInput{
 		Slug: slug, Title: "Clean Water " + slug, Summary: "Wells for rural counties.",
@@ -78,8 +103,34 @@ func TestInitiativeDraftPublishLifecycleAndMetricVerificationGate(t *testing.T) 
 		t.Fatal("duplicate slug accepted")
 	}
 
+	// A draft without a board approval cannot be published.
+	if err := s.Publish(ctx, adminToken, id); !errors.Is(err, ErrBoardApprovalRequired) {
+		t.Fatalf("published without a board approval: %v", err)
+	}
+	for name, in := range map[string]InitiativeInput{
+		"approval without a date": func() InitiativeInput {
+			in := withBoardApproval(t, pool, validInitiative("water-north"))
+			in.BoardApprovedOn = ""
+			return in
+		}(),
+		"approval dated in the future": func() InitiativeInput {
+			in := withBoardApproval(t, pool, validInitiative("water-north"))
+			in.BoardApprovedOn = "2999-01-01"
+			return in
+		}(),
+		"approval citing no stored source": func() InitiativeInput {
+			in := validInitiative("water-north")
+			in.BoardApprovalSourceID, in.BoardApprovedOn = testID(t).String(), "2026-01-15"
+			return in
+		}(),
+	} {
+		if err := s.Update(ctx, adminToken, id, in); !errors.Is(err, ErrStaffInput) {
+			t.Errorf("%s: %v; want ErrStaffInput", name, err)
+		}
+	}
+
 	// Update edits fields while DRAFT.
-	upd := validInitiative("water-north")
+	upd := withBoardApproval(t, pool, validInitiative("water-north"))
 	upd.Status = "COMPLETE"
 	upd.CommittedMinor = 7_500_00
 	if err := s.Update(ctx, adminToken, id, upd); err != nil {
@@ -119,6 +170,11 @@ func TestInitiativeDraftPublishLifecycleAndMetricVerificationGate(t *testing.T) 
 		t.Fatal(err)
 	}
 	assertInitiativeState(t, pool, id, "PUBLISHED")
+	unapproved := upd
+	unapproved.BoardApprovalSourceID, unapproved.BoardApprovedOn = "", ""
+	if err := s.Update(ctx, adminToken, id, unapproved); !errors.Is(err, ErrBoardApprovalRequired) {
+		t.Fatalf("removed a published initiative's board approval: %v", err)
+	}
 
 	// Delete the metric.
 	if err := s.DeleteMetric(ctx, adminToken, id, 0); err != nil {
@@ -166,7 +222,7 @@ func TestInitiativeSpendByCategoryTotalsAndPublishedOnlyRead(t *testing.T) {
 	s := InitiativeService{Staff: &StaffService{DB: api}}
 	reader := InitiativeReader{DB: pool}
 
-	id, err := s.Create(ctx, adminToken, validInitiative("spend-demo"))
+	id, err := s.Create(ctx, adminToken, withBoardApproval(t, pool, validInitiative("spend-demo")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +327,7 @@ func TestDailyRotationDeterministicAndExposureLedger(t *testing.T) {
 
 	// Publish three active initiatives, each with a verified headline metric.
 	for i, slug := range []string{"rot-a", "rot-b", "rot-c"} {
-		id, err := s.Create(ctx, adminToken, validInitiative(slug))
+		id, err := s.Create(ctx, adminToken, withBoardApproval(t, pool, validInitiative(slug)))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -5517,6 +5517,9 @@
      "404": {
       "$ref": "#/components/responses/NotFound"
      },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
      "415": {
       "$ref": "#/components/responses/UnsupportedMediaType"
      },
@@ -5529,7 +5532,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "409 when the edit would remove a published initiative's board approval."
    }
   },
   "/donor/staff/initiatives/{initiative_id}/publish": {
@@ -5580,6 +5584,9 @@
      "404": {
       "$ref": "#/components/responses/NotFound"
      },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
      "422": {
       "$ref": "#/components/responses/Unprocessable"
      },
@@ -5589,7 +5596,8 @@
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
-    }
+    },
+    "description": "409 when the initiative has no board approval."
    }
   },
   "/donor/staff/initiatives/{initiative_id}/metrics/{position}": {
@@ -13052,6 +13060,14 @@
      },
      "partner_signup_id": {
       "type": "string"
+     },
+     "board_approval_source_id": {
+      "type": "string",
+      "description": "The stored content source recording the board's approval, or empty. Set with board_approved_on; publishing requires both."
+     },
+     "board_approved_on": {
+      "type": "string",
+      "description": "The date the board approved it (YYYY-MM-DD, not in the future), or empty."
      }
     },
     "required": [
@@ -13065,7 +13081,9 @@
      "started_on",
      "status",
      "committed_minor",
-     "partner_signup_id"
+     "partner_signup_id",
+     "board_approval_source_id",
+     "board_approved_on"
     ],
     "additionalProperties": false
    },
@@ -14378,6 +14396,14 @@
      "updated_at": {
       "type": "string",
       "format": "date-time"
+     },
+     "board_approval_source_id": {
+      "type": "string",
+      "description": "The stored content source recording the board's approval, or empty. Set with board_approved_on; publishing requires both."
+     },
+     "board_approved_on": {
+      "type": "string",
+      "description": "The date the board approved it (YYYY-MM-DD, not in the future), or empty."
      }
     },
     "required": [
@@ -14396,7 +14422,9 @@
      "publish_state",
      "published_at",
      "in_rotation",
-     "updated_at"
+     "updated_at",
+     "board_approval_source_id",
+     "board_approved_on"
     ],
     "additionalProperties": false
    },
@@ -14559,6 +14587,14 @@
       "items": {
        "$ref": "#/components/schemas/SpendInput"
       }
+     },
+     "board_approval_source_id": {
+      "type": "string",
+      "description": "The stored content source recording the board's approval, or empty. Set with board_approved_on; publishing requires both."
+     },
+     "board_approved_on": {
+      "type": "string",
+      "description": "The date the board approved it (YYYY-MM-DD, not in the future), or empty."
      }
     },
     "required": [
@@ -14579,7 +14615,9 @@
      "in_rotation",
      "updated_at",
      "metrics",
-     "spend"
+     "spend",
+     "board_approval_source_id",
+     "board_approved_on"
     ],
     "additionalProperties": false
    },

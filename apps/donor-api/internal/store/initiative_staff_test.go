@@ -20,11 +20,11 @@ func TestStaffInitiativeReadsAndRotationExclusion(t *testing.T) {
 	rotation := DonorInitiativeService{DB: pool}
 	_, donorToken := signedInDonor(t, pool)
 
-	shown, err := s.Create(ctx, adminToken, validInitiative("rot-shown"))
+	shown, err := s.Create(ctx, adminToken, withBoardApproval(t, pool, validInitiative("rot-shown")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	excluded, err := s.Create(ctx, adminToken, validInitiative("rot-excluded"))
+	excluded, err := s.Create(ctx, adminToken, withBoardApproval(t, pool, validInitiative("rot-excluded")))
 	if err != nil {
 		t.Fatal(err)
 	}

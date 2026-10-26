@@ -650,8 +650,14 @@ metric,value,unit,source_id,illustrative
 Ledger values are nonnegative integers with unit `USD_CENTS`, `PEOPLE`, `INITIATIVES`, or
 `PARTNERS`. Real figures require a source; examples require `illustrative=true`. Supply an
 as-of date (YYYY-MM-DD) and stated update cadence. Invalid publications leave the current
-snapshot intact. Staff are responsible for actual accuracy, and for board approval of an
-initiative before publishing it; uploading a source cannot establish either.
+snapshot intact. Staff are responsible for actual accuracy; uploading a source cannot
+establish it.
+
+Publishing an initiative requires its board approval: the ID of the approval document
+stored here and the date the board approved it. A published initiative's approval can be
+replaced but not removed. Initiatives published before this rule stay published; record
+their approvals when next editing them. Approvals given in the content spreadsheet were
+carried over.
 
 Exports use fixed field allowlists, omit credentials and message bodies, neutralize CSV
 formula prefixes, and audit completion/interruption. Referral rows retain channel.

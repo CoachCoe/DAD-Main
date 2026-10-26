@@ -1445,7 +1445,10 @@ export interface paths {
         /** An initiative with every metric and its spend */
         get: operations["staffInitiative"];
         put?: never;
-        /** Update a draft initiative */
+        /**
+         * Update a draft initiative
+         * @description 409 when the edit would remove a published initiative's board approval.
+         */
         post: operations["updateInitiative"];
         delete?: never;
         options?: never;
@@ -1462,7 +1465,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Publish an initiative */
+        /**
+         * Publish an initiative
+         * @description 409 when the initiative has no board approval.
+         */
         post: operations["publishInitiative"];
         delete?: never;
         options?: never;
@@ -3469,6 +3475,10 @@ export interface components {
             /** Format: int64 */
             committed_minor: number;
             partner_signup_id: string;
+            /** @description The stored content source recording the board's approval, or empty. Set with board_approved_on; publishing requires both. */
+            board_approval_source_id: string;
+            /** @description The date the board approved it (YYYY-MM-DD, not in the future), or empty. */
+            board_approved_on: string;
         };
         MetricInput: {
             position: number;
@@ -3893,6 +3903,10 @@ export interface components {
             in_rotation: boolean;
             /** Format: date-time */
             updated_at: string;
+            /** @description The stored content source recording the board's approval, or empty. Set with board_approved_on; publishing requires both. */
+            board_approval_source_id: string;
+            /** @description The date the board approved it (YYYY-MM-DD, not in the future), or empty. */
+            board_approved_on: string;
         };
         StaffInitiativePage: {
             initiatives: components["schemas"]["StaffInitiative"][];
@@ -3936,6 +3950,10 @@ export interface components {
             updated_at: string;
             metrics: components["schemas"]["StaffInitiativeMetric"][];
             spend: components["schemas"]["SpendInput"][];
+            /** @description The stored content source recording the board's approval, or empty. Set with board_approved_on; publishing requires both. */
+            board_approval_source_id: string;
+            /** @description The date the board approved it (YYYY-MM-DD, not in the future), or empty. */
+            board_approved_on: string;
         };
         /** @description An event as staff manage it, drafts and cancellations included. */
         StaffEvent: {
@@ -6866,6 +6884,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
@@ -6896,6 +6915,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];

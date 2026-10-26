@@ -58,6 +58,8 @@ func staffStatus(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "Invalid request fields"
 	case errors.Is(err, store.ErrStaffExists):
 		return http.StatusConflict, "A staff account with this email already exists"
+	case errors.Is(err, store.ErrBoardApprovalRequired):
+		return http.StatusConflict, "Record the initiative's board approval before publishing it"
 	case errors.Is(err, store.ErrStaffConflict):
 		return http.StatusConflict, "Staff access changed or conflicts with this request"
 	case errors.Is(err, store.EmailRoleError{}):

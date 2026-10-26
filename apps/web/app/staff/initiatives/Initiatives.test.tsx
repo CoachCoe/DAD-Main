@@ -20,6 +20,8 @@ const initiative = {
   status: "ACTIVE",
   committed_minor: 2_500_000,
   partner_signup_id: "",
+  board_approval_source_id: "",
+  board_approved_on: "",
   publish_state: "DRAFT",
   published_at: null,
   in_rotation: true,
@@ -83,6 +85,14 @@ it("reads the editor form into an initiative", () => {
   }))
     form.set(name, value);
   expect(initiativeInput(form)).toMatchObject({ counties: ["Washoe", "Storey"], committed_minor: 2_500_000 });
+  form.set("approval_source", "8f9e0d1c-2b3a-4c5d-8e6f-7a8b9c0d1e2f");
+  form.set("approved_on", "2026-02-03");
+  expect(initiativeInput(form)).toMatchObject({
+    board_approval_source_id: "8f9e0d1c-2b3a-4c5d-8e6f-7a8b9c0d1e2f",
+    board_approved_on: "2026-02-03",
+  });
+  form.set("approved_on", "");
+  expect(initiativeInput(form)).toBe("Enter both the board-approval source ID and the approval date, or neither.");
   form.set("committed", "lots");
   expect(initiativeInput(form)).toBe("Enter the committed amount in dollars.");
 });

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"dad/donor-api/internal/identity"
+	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -41,7 +42,15 @@ type InitiativeInput struct {
 	Status          string   `json:"status"`
 	CommittedMinor  int64    `json:"committed_minor"`
 	PartnerSignupID string   `json:"partner_signup_id"`
+	// The board approval: a stored content source and the date it was given.
+	// Both or neither; publishing requires them.
+	BoardApprovalSourceID string `json:"board_approval_source_id"`
+	BoardApprovedOn       string `json:"board_approved_on"`
 }
+
+// ErrBoardApprovalRequired refuses to publish an initiative, or to remove the
+// approval of a published one, without a recorded board approval.
+var ErrBoardApprovalRequired = errors.New("initiative has no board approval")
 
 // MetricInput is a staff upsert of one headline metric at a position (0-5).
 type MetricInput struct {
@@ -94,23 +103,40 @@ func (in InitiativeInput) validate(now time.Time) (queries.InsertInitiativeParam
 			return params, ErrStaffInput
 		}
 	}
+	var approvalSource pgtype.UUID
+	var approvedOn pgtype.Date
+	if (in.BoardApprovalSourceID == "") != (in.BoardApprovedOn == "") {
+		return params, ErrStaffInput
+	}
+	if in.BoardApprovalSourceID != "" {
+		if approvalSource.Scan(in.BoardApprovalSourceID) != nil || !approvalSource.Valid {
+			return params, ErrStaffInput
+		}
+		day, err := time.Parse(time.DateOnly, in.BoardApprovedOn)
+		if err != nil || in.BoardApprovedOn > now.In(recognition.NewYork).Format(time.DateOnly) {
+			return params, ErrStaffInput
+		}
+		approvedOn = pgtype.Date{Time: day, Valid: true}
+	}
 	counties := in.Counties
 	if counties == nil {
 		counties = []string{}
 	}
 	params = queries.InsertInitiativeParams{
-		Slug:            in.Slug,
-		Title:           in.Title,
-		Summary:         in.Summary,
-		Type:            in.Type,
-		Location:        in.Location,
-		Region:          in.Region,
-		Counties:        counties,
-		StartedOn:       pgtype.Date{Time: started, Valid: true},
-		Status:          in.Status,
-		CommittedMinor:  in.CommittedMinor,
-		PartnerSignupID: partner,
-		CreatedAt:       timestamp(now),
+		Slug:                  in.Slug,
+		Title:                 in.Title,
+		Summary:               in.Summary,
+		Type:                  in.Type,
+		Location:              in.Location,
+		Region:                in.Region,
+		Counties:              counties,
+		StartedOn:             pgtype.Date{Time: started, Valid: true},
+		Status:                in.Status,
+		CommittedMinor:        in.CommittedMinor,
+		PartnerSignupID:       partner,
+		BoardApprovalSourceID: approvalSource,
+		BoardApprovedOn:       approvedOn,
+		CreatedAt:             timestamp(now),
 	}
 	return params, nil
 }
@@ -130,6 +156,9 @@ func (s InitiativeService) Create(ctx context.Context, token string, in Initiati
 			params.ID = id
 			q := queries.New(tx)
 			if err = requireApprovedPartner(ctx, q, params.PartnerSignupID); err != nil {
+				return pgtype.UUID{}, err
+			}
+			if err = requireApprovalSource(ctx, q, params.BoardApprovalSourceID); err != nil {
 				return pgtype.UUID{}, err
 			}
 			if err = q.InsertInitiative(ctx, params); err != nil {
@@ -160,11 +189,19 @@ func (s InitiativeService) Update(ctx context.Context, token string, id pgtype.U
 					return struct{}{}, err
 				}
 			}
+			if existing.PublishState == "PUBLISHED" && existing.BoardApprovalSourceID.Valid && !params.BoardApprovalSourceID.Valid {
+				return struct{}{}, ErrBoardApprovalRequired
+			}
+			if err = requireApprovalSource(ctx, q, params.BoardApprovalSourceID); err != nil {
+				return struct{}{}, err
+			}
 			if err = q.UpdateInitiative(ctx, queries.UpdateInitiativeParams{
 				ID: id, Title: params.Title, Summary: params.Summary, Type: params.Type,
 				Location: params.Location, Region: params.Region, Counties: params.Counties,
 				StartedOn: params.StartedOn, Status: params.Status, CommittedMinor: params.CommittedMinor,
-				PartnerSignupID: params.PartnerSignupID, UpdatedAt: timestamp(now),
+				PartnerSignupID:       params.PartnerSignupID,
+				BoardApprovalSourceID: params.BoardApprovalSourceID, BoardApprovedOn: params.BoardApprovedOn,
+				UpdatedAt: timestamp(now),
 			}); err != nil {
 				return struct{}{}, err
 			}
@@ -188,8 +225,12 @@ func (s InitiativeService) Publish(ctx context.Context, token string, id pgtype.
 	_, err := staffWrite(ctx, s.Staff, token, initiativePermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
-			if _, err := q.InitiativeByID(ctx, id); err != nil {
+			initiative, err := q.InitiativeByID(ctx, id)
+			if err != nil {
 				return struct{}{}, err
+			}
+			if !initiative.BoardApprovalSourceID.Valid {
+				return struct{}{}, ErrBoardApprovalRequired
 			}
 			if err := q.PublishInitiative(ctx, queries.PublishInitiativeParams{ID: id, PublishedAt: timestamp(now)}); err != nil {
 				return struct{}{}, err
@@ -422,4 +463,19 @@ func requireApprovedPartner(ctx context.Context, q *queries.Queries, partner pgt
 		return ErrStaffInput
 	}
 	return err
+}
+
+// requireApprovalSource refuses a board approval citing no stored source.
+func requireApprovalSource(ctx context.Context, q *queries.Queries, source pgtype.UUID) error {
+	if !source.Valid {
+		return nil
+	}
+	found, err := q.ContentSourceIDs(ctx, []pgtype.UUID{source})
+	if err != nil {
+		return err
+	}
+	if len(found) != 1 {
+		return ErrStaffInput
+	}
+	return nil
 }

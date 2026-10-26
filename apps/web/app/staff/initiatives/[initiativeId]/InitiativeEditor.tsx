@@ -24,6 +24,10 @@ const field = (form: FormData, name: string) => String(form.get(name) ?? "").tri
 export function initiativeInput(form: FormData): Input | string {
   const committed = parseDollars(field(form, "committed"));
   if (committed === null) return "Enter the committed amount in dollars.";
+  const approvalSource = field(form, "approval_source");
+  const approvedOn = field(form, "approved_on");
+  if (!approvalSource !== !approvedOn)
+    return "Enter both the board-approval source ID and the approval date, or neither.";
   return {
     slug: field(form, "slug"),
     title: field(form, "title"),
@@ -39,6 +43,8 @@ export function initiativeInput(form: FormData): Input | string {
     status: field(form, "status") === "COMPLETE" ? "COMPLETE" : "ACTIVE",
     committed_minor: committed,
     partner_signup_id: field(form, "partner"),
+    board_approval_source_id: approvalSource,
+    board_approved_on: approvedOn,
   };
 }
 
@@ -215,6 +221,22 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
               Partner ID (optional)
               <input name="partner" defaultValue={detail?.partner_signup_id} />
             </label>
+            <fieldset>
+              <legend>Board approval</legend>
+              <p className="note">Required to publish. Use the ID of the approval document stored under Content.</p>
+              <label>
+                Approval source ID
+                <input
+                  name="approval_source"
+                  pattern="[0-9a-fA-F-]{36}"
+                  defaultValue={detail?.board_approval_source_id}
+                />
+              </label>
+              <label>
+                Approved on
+                <input name="approved_on" type="date" defaultValue={detail?.board_approved_on} />
+              </label>
+            </fieldset>
             <button className="button" type="submit" disabled={busy}>
               {detail ? "Save initiative" : "Create draft"}
             </button>

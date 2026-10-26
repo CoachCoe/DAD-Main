@@ -1,12 +1,14 @@
 -- name: InsertInitiative :exec
 INSERT INTO donor_initiatives
-  (id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, created_at, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13);
+  (id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id,
+   board_approval_source_id, board_approved_on, created_at, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$15);
 
 -- name: UpdateInitiative :exec
 UPDATE donor_initiatives
 SET title=$2, summary=$3, type=$4, location=$5, region=$6, counties=$7,
-    started_on=$8, status=$9, committed_minor=$10, partner_signup_id=$11, updated_at=$12
+    started_on=$8, status=$9, committed_minor=$10, partner_signup_id=$11,
+    board_approval_source_id=$12, board_approved_on=$13, updated_at=$14
 WHERE id=$1;
 
 -- name: PublishInitiative :exec

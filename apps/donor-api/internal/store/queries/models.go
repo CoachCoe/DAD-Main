@@ -165,23 +165,25 @@ type DonorGift struct {
 }
 
 type DonorInitiative struct {
-	ID              pgtype.UUID        `json:"id"`
-	Slug            string             `json:"slug"`
-	Title           string             `json:"title"`
-	Summary         string             `json:"summary"`
-	Type            string             `json:"type"`
-	Location        string             `json:"location"`
-	Region          string             `json:"region"`
-	Counties        []string           `json:"counties"`
-	StartedOn       pgtype.Date        `json:"started_on"`
-	Status          string             `json:"status"`
-	CommittedMinor  int64              `json:"committed_minor"`
-	PartnerSignupID pgtype.UUID        `json:"partner_signup_id"`
-	PublishState    string             `json:"publish_state"`
-	PublishedAt     pgtype.Timestamptz `json:"published_at"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	InRotation      bool               `json:"in_rotation"`
+	ID                    pgtype.UUID        `json:"id"`
+	Slug                  string             `json:"slug"`
+	Title                 string             `json:"title"`
+	Summary               string             `json:"summary"`
+	Type                  string             `json:"type"`
+	Location              string             `json:"location"`
+	Region                string             `json:"region"`
+	Counties              []string           `json:"counties"`
+	StartedOn             pgtype.Date        `json:"started_on"`
+	Status                string             `json:"status"`
+	CommittedMinor        int64              `json:"committed_minor"`
+	PartnerSignupID       pgtype.UUID        `json:"partner_signup_id"`
+	PublishState          string             `json:"publish_state"`
+	PublishedAt           pgtype.Timestamptz `json:"published_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	InRotation            bool               `json:"in_rotation"`
+	BoardApprovalSourceID pgtype.UUID        `json:"board_approval_source_id"`
+	BoardApprovedOn       pgtype.Date        `json:"board_approved_on"`
 }
 
 type DonorInitiativeMetric struct {

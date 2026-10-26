@@ -42,11 +42,16 @@ func staffInitiative(i queries.DonorInitiative) StaffInitiative {
 	if i.PartnerSignupID.Valid {
 		partner = i.PartnerSignupID.String()
 	}
+	approval, approvedOn := "", ""
+	if i.BoardApprovalSourceID.Valid {
+		approval, approvedOn = i.BoardApprovalSourceID.String(), i.BoardApprovedOn.Time.Format(time.DateOnly)
+	}
 	return StaffInitiative{
 		InitiativeInput: InitiativeInput{
 			Slug: i.Slug, Title: i.Title, Summary: i.Summary, Type: i.Type, Location: i.Location, Region: i.Region,
 			Counties: i.Counties, StartedOn: i.StartedOn.Time.Format(time.DateOnly), Status: i.Status,
 			CommittedMinor: i.CommittedMinor, PartnerSignupID: partner,
+			BoardApprovalSourceID: approval, BoardApprovedOn: approvedOn,
 		},
 		ID: i.ID.String(), PublishState: i.PublishState, PublishedAt: i.PublishedAt, InRotation: i.InRotation, UpdatedAt: i.UpdatedAt,
 	}
