@@ -891,91 +891,25 @@ backup scheduling, retention, alerting, and off-host recovery ownership before l
 
 ## Continuous integration
 
-CI runs in GitHub Actions (`.github/workflows/`). The repository is public.
-Some toolchain jobs use **self-hosted runners**, restricted to pushes and
-same-repository pull requests. Jobs requiring Linux containers or a fresh
-credential boundary run on **GitHub-hosted runners**:
+CI runs in GitHub Actions on ephemeral GitHub-hosted runners. Linux jobs use
+`ubuntu-24.04`; Swift compatibility uses `macos-latest`. Fork pull requests run
+ordinary CI without production credentials. Repository environment protections
+continue to govern the separate ATM ledger reader, publisher, and administrative
+jobs. Those jobs accept trusted repository events only and require a
+`github-hosted` OIDC identity.
 
-- `api` and `browser` use Postgres **service containers**, a Linux-only Actions
-  feature.
-- `deploy` runs `docker build` / `docker compose`, which the headless macOS
-  runner service cannot authenticate non-interactively.
-- `cloudflare-ranges.yml` is a weekly schedule that must fire even when no
-  self-hosted machine is online.
-- All `atm.yml` jobs use `ubuntu-24.04`. The ledger's OIDC policy requires
-  `runner_environment=github-hosted`; the publisher must have a fresh runner
-  that has never executed the candidate. Do not move these jobs to persistent
-  self-hosted runners or weaken that policy.
+The main workflow runs Go formatting, vet, race tests, static analysis and
+vulnerability scanning; web lint, unit tests, types and production build; ledger
+checks; generated-code validation; browser journeys in development and production;
+and production image, Compose and ingress checks. Changes to shared scripts,
+contracts, Makefile and Docker inputs trigger their dependent jobs. Pushes to
+`dev` and `main` run the full suite.
 
-The path gate and web/ledger jobs in `ci.yml`, and the
-`contract` + `swift-compatibility` jobs in `mobile-foundation.yml`, run
-self-hosted. The mobile tag publisher also uses a self-hosted runner.
+The mobile workflow validates and bundles the contract, then compiles and tests
+it with the pinned Swift package dependencies. Only matching mobile version tags
+publish a release; pull requests cannot publish artifacts as releases.
 
-### Runner labels
-
-Jobs target runner labels, not a specific machine:
-
-- `[self-hosted, dad, linux]` — pure-toolchain jobs (Go, Node, make, Swift
-  tooling). These need **no Docker**: the `api`/`browser`/`deploy` Docker jobs
-  stay GitHub-hosted (see above). An Apple Silicon macOS host serves this label
-  fine (GitHub label matching is case-insensitive, so the auto-added `macOS`
-  label coexists with an explicit `linux`).
-- `[self-hosted, dad, macos]` — the `swift-compatibility` job only, which compiles
-  the generated Swift contract with Apple tooling and therefore needs macOS.
-
-One macOS host carries **both** labels: register it with `dad`, `macos`, and
-`linux` and it serves every self-hosted job. A separate Linux host can carry
-`dad` + `linux` for the non-Swift jobs — and a Linux host **with Docker** could
-additionally take over the `api`/`browser`/`deploy` jobs (flip their `runs-on`
-back to `[self-hosted, dad, linux]`), which is the path to going fully
-self-hosted.
-
-### Host prerequisites
-
-The runner host must provide the toolchains the self-hosted jobs assume (the
-`setup-go` / `setup-node` steps still download pinned versions, but system tools
-must exist):
-
-- **git**, **bash**, **make**, and the usual build tools.
-- For the `macos` label: a recent **Xcode / Swift toolchain** for `swift test`.
-- **No Docker is required** for the self-hosted jobs — the Docker-dependent
-  jobs (`api`, `browser`, `deploy`) run on GitHub-hosted Linux.
-
-### Registering a runner (operator)
-
-From the repository's **Settings → Actions → Runners → New self-hosted runner**,
-follow GitHub's generated commands (they include a machine-specific registration
-token that only the repo admin can mint). In outline:
-
-```sh
-# In a dedicated working directory on the runner host:
-mkdir actions-runner && cd actions-runner
-# Download + extract the runner package GitHub shows for your OS/arch, then:
-./config.sh --url https://github.com/CoachCoe/DAD-Main \
-  --token <REGISTRATION_TOKEN_FROM_GITHUB> \
-  --labels dad,linux,macos \
-  --name dad-ci-1
-# Run interactively:
-./run.sh
-# Or install as an always-on service:
-./svc.sh install && ./svc.sh start
-```
-
-Adjust `--labels` to what the host can serve (drop `macos` on a Linux host).
-The custom `linux` label currently selects toolchain jobs and does not require Docker.
-The runner then polls GitHub and picks up any
-job whose `runs-on` labels it satisfies.
-
-### Security
-
-The repository is public. Self-hosted jobs refuse fork pull requests; the hosted
-API/browser/deploy jobs currently depend on that restricted path gate and therefore
-also skip fork pull requests. Fork contributors need an approved, isolated hosted
-validation path before their changes can be treated as checked.
-
-Only trusted maintainers may create same-repository pull requests. Persistent
-runners can retain code or credentials between jobs, so keep them isolated from
-production and personal accounts, use minimal permissions, and prefer ephemeral
-runners. Moving ordinary CI to GitHub-hosted runners removes this persistent-host
-trust requirement. ATM's hosted-runner boundary is mandatory regardless of where
-ordinary CI runs.
+Branch protection should require the CI and mobile checks and ATM acceptance.
+A green application test suite alone does not authorize deployment. Retire
+previous persistent self-hosted runners from this repository and revoke any
+credentials stored on those machines through the operator's runner controls.

@@ -12,21 +12,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Path gate: the hosted jobs (api, browser, deploy) run on GitHub-hosted
-  # Ubuntu and bill minutes. This self-hosted job diffs the change and emits
-  # booleans so each hosted job runs only when files it tests changed, and
-  # always on a push to main or dev, which keeps the full suite. Those jobs are
-  # hosted because they need Postgres service containers, `playwright install
-  # --with-deps`, and Docker; a self-hosted runner that provides containers
-  # could take them over by changing their `runs-on` and dropping the gate.
+  # Every PR runs in an ephemeral hosted environment, including fork PRs.
   changes:
-    # Fork safety (public repo): self-hosted jobs run only for pushes and
-    # same-repo PRs, never a fork's PR — a forked PR must not execute code on
-    # the self-hosted runner. GitHub-hosted jobs (api/browser/deploy) run in
-    # GitHub's sandbox and are additionally gated by the repo's "require
-    # approval for fork PRs" setting.
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, dad, linux]
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
@@ -63,7 +51,7 @@ jobs:
             else
               base="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
             fi
-            changed="$(git diff --name-only "$base" HEAD || true)"
+            changed="$(git diff --name-only "$base" HEAD)"
             echo "changed files vs $base:"; echo "$changed"
             match() { echo "$changed" | grep -Eq "$1"; }
             # backend: Go API, its migrations/sqlc/openapi, the web app (api runs
@@ -80,26 +68,20 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   ledger:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, dad, linux]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        # No cache: npm — on a persistent self-hosted runner ~/.npm already
-        # survives between runs, and the setup-node cache-save post-step (tar +
-        # zstdmt of the npm cache) can hang for minutes and blow the job timeout.
         with: { node-version: "24" }
       - run: npm ci
         working-directory: apps/atm-ledger
       - run: make test-ledger lint-ledger
 
   api:
-    # GitHub-hosted: uses a Postgres service container, which is a Linux-only
-    # Actions feature (the self-hosted macOS runner cannot run service containers).
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -131,14 +113,11 @@ jobs:
       - run: make lint-go
 
   web:
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: [self-hosted, dad, linux]
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        # No cache: npm — see the ledger job; the cache-save post-step can hang
-        # on the self-hosted runner and cancel the job at its timeout.
         with: { node-version: "22" }
       - run: npm ci
         working-directory: apps/web
@@ -146,12 +125,9 @@ jobs:
       - run: make lint-web
 
   deploy:
-    # GitHub-hosted: runs `docker build` / `docker compose`. Docker Desktop on the
-    # self-hosted macOS runner cannot authenticate image pulls from its headless
-    # launchd service (no interactive keychain), so this must stay on Linux.
     needs: changes
     if: needs.changes.outputs.deploy == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -170,7 +146,7 @@ jobs:
     # and `playwright install --with-deps` (apt-get, Linux-only).
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       matrix:
