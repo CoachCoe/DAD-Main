@@ -91,7 +91,7 @@ type Preferences struct {
 func defaultPreferences() Preferences {
 	return Preferences{
 		PushReferralConverted: true, PushStreakAtRisk: true, PushStreakMilestone: true,
-		PushStreakLapsed: true, PushBadgeEarned: true,
+		PushStreakLapsed: true, PushBadgeEarned: true, NetworkVisible: true,
 		VolunteerInterests: []string{},
 	}
 }

@@ -73,6 +73,9 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 	_ = referredDonor(t, pool, referrer, true, 2000, "Ada L.", true)
 	_ = referredDonor(t, pool, referrer, true, 3000, "", false)
 	_ = referredDonor(t, pool, referrer, false, 5000, "Lapsed L.", true)
+	// Visibility is opt-out: a referral who never saved a choice is listed.
+	unset := referredDonor(t, pool, referrer, true, 1000, "Una S.", false)
+	mustExec(t, pool, "DELETE FROM donor_preferences WHERE donor_id=$1", unset)
 
 	// buildNetwork is the engine behind NetworkService.Network; drive it
 	// directly against the referrer id (Network() only adds session auth).
@@ -81,19 +84,19 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got.ActiveCount != 2 {
-		t.Fatalf("active_count: got %d want 2 (lapsed excluded)", got.ActiveCount)
+	if got.ActiveCount != 3 {
+		t.Fatalf("active_count: got %d want 3 (lapsed excluded)", got.ActiveCount)
 	}
-	// (2000 + 3000) * 12 = 60000.
-	if got.AnnualizedMinor != 60000 {
-		t.Fatalf("annualized_minor: got %d want 60000", got.AnnualizedMinor)
+	// (2000 + 3000 + 1000) * 12 = 72000.
+	if got.AnnualizedMinor != 72000 {
+		t.Fatalf("annualized_minor: got %d want 72000", got.AnnualizedMinor)
 	}
 	// N-3: only the opted-in active donor is listed by name; the other active
 	// donor (not visible) is counted anonymously. The lapsed donor, though
 	// visible, is inactive so it is neither listed as active nor in the anon
 	// active tail.
-	if len(got.Invitees) != 2 {
-		t.Fatalf("invitees: got %d want 2 (both visible donors, regardless of active)", len(got.Invitees))
+	if len(got.Invitees) != 3 {
+		t.Fatalf("invitees: got %d want 3 (every visible donor, regardless of active)", len(got.Invitees))
 	}
 	var named, namedActive int
 	for _, iv := range got.Invitees {
@@ -104,10 +107,10 @@ func TestNetworkTotalsActiveOnlyAnnualizedAndInviteeVisibility(t *testing.T) {
 			namedActive++
 		}
 	}
-	if named != 2 || namedActive != 1 {
-		t.Fatalf("invitee names: got named=%d active=%d want named=2 active=1", named, namedActive)
+	if named != 3 || namedActive != 2 {
+		t.Fatalf("invitee names: got named=%d active=%d want named=3 active=2", named, namedActive)
 	}
-	// 2 active total - 1 visible-active = 1 anonymous active.
+	// 3 active total - 2 visible-active = 1 anonymous active.
 	if got.AnonymousActive != 1 {
 		t.Fatalf("anonymous_active: got %d want 1", got.AnonymousActive)
 	}

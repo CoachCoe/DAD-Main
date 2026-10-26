@@ -9894,7 +9894,7 @@
      },
      "network_visible": {
       "type": "boolean",
-      "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). Default off."
+      "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). On by default: visibility is opt-out (§10)."
      },
      "volunteer": {
       "type": "boolean",

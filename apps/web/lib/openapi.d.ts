@@ -2550,7 +2550,7 @@ export interface components {
             push_badge_earned: boolean;
             /** @description When true the donor is excluded from national/city rankings and from everyone's ranking denominator. Default off (ranked). */
             rankings_opted_out: boolean;
-            /** @description When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). Default off. */
+            /** @description When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). On by default: visibility is opt-out (§10). */
             network_visible: boolean;
             /** @description When true the donor is in the volunteer pool and receives event alerts (E-1). Default off. */
             volunteer: boolean;
