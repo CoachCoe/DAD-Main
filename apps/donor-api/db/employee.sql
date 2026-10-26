@@ -90,7 +90,7 @@ HAVING count(*) >= sqlc.arg(minimum)::int
 ORDER BY annualized_minor DESC, active_givers DESC, t.name;
 
 -- name: PartnerMatchTerms :one
-SELECT match_rate_bp, match_cap_minor FROM donor_partner_signups WHERE id = $1;
+SELECT match_rate_bp, match_cap_minor FROM donor_partner_signups WHERE id = $1 AND approved_at IS NOT NULL;
 
 -- name: LinkedEmployeeGiftsInYear :one
 -- Linked employees' giving in a calendar year, net of refunds (EM-6). Gifts
@@ -104,10 +104,13 @@ WHERE e.partner_id = $1
   AND g.paid_at >= sqlc.arg(year_start)::timestamptz
   AND g.paid_at <  sqlc.arg(year_end)::timestamptz;
 
--- name: InsertMatchPayment :exec
+-- name: InsertMatchPayment :execrows
 -- Record an offline match payment received (EM-7). No money moves in-app.
 INSERT INTO donor_partner_match_payments (id, partner_id, year, amount_minor, received_at, recorded_by)
-VALUES ($1,$2,$3,$4,$5,$6);
+VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING;
+
+-- name: MatchPaymentMatches :one
+SELECT EXISTS(SELECT 1 FROM donor_partner_match_payments WHERE id=$1 AND partner_id=$2 AND year=$3 AND amount_minor=$4);
 
 -- name: MatchPaymentsInYear :one
 SELECT coalesce(sum(amount_minor), 0)::bigint AS paid_minor

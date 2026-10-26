@@ -27,9 +27,9 @@ func (q *Queries) EmployeeLink(ctx context.Context, donorID pgtype.UUID) (DonorP
 	return i, err
 }
 
-const insertMatchPayment = `-- name: InsertMatchPayment :exec
+const insertMatchPayment = `-- name: InsertMatchPayment :execrows
 INSERT INTO donor_partner_match_payments (id, partner_id, year, amount_minor, received_at, recorded_by)
-VALUES ($1,$2,$3,$4,$5,$6)
+VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(id) DO NOTHING
 `
 
 type InsertMatchPaymentParams struct {
@@ -42,8 +42,8 @@ type InsertMatchPaymentParams struct {
 }
 
 // Record an offline match payment received (EM-7). No money moves in-app.
-func (q *Queries) InsertMatchPayment(ctx context.Context, arg InsertMatchPaymentParams) error {
-	_, err := q.db.Exec(ctx, insertMatchPayment,
+func (q *Queries) InsertMatchPayment(ctx context.Context, arg InsertMatchPaymentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertMatchPayment,
 		arg.ID,
 		arg.PartnerID,
 		arg.Year,
@@ -51,7 +51,10 @@ func (q *Queries) InsertMatchPayment(ctx context.Context, arg InsertMatchPayment
 		arg.ReceivedAt,
 		arg.RecordedBy,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertTeam = `-- name: InsertTeam :one
@@ -105,6 +108,29 @@ func (q *Queries) LinkedEmployeeGiftsInYear(ctx context.Context, arg LinkedEmplo
 	return gifts_minor, err
 }
 
+const matchPaymentMatches = `-- name: MatchPaymentMatches :one
+SELECT EXISTS(SELECT 1 FROM donor_partner_match_payments WHERE id=$1 AND partner_id=$2 AND year=$3 AND amount_minor=$4)
+`
+
+type MatchPaymentMatchesParams struct {
+	ID          pgtype.UUID `json:"id"`
+	PartnerID   pgtype.UUID `json:"partner_id"`
+	Year        int32       `json:"year"`
+	AmountMinor int64       `json:"amount_minor"`
+}
+
+func (q *Queries) MatchPaymentMatches(ctx context.Context, arg MatchPaymentMatchesParams) (bool, error) {
+	row := q.db.QueryRow(ctx, matchPaymentMatches,
+		arg.ID,
+		arg.PartnerID,
+		arg.Year,
+		arg.AmountMinor,
+	)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const matchPaymentsInYear = `-- name: MatchPaymentsInYear :one
 SELECT coalesce(sum(amount_minor), 0)::bigint AS paid_minor
 FROM donor_partner_match_payments WHERE partner_id = $1 AND year = $2
@@ -140,7 +166,7 @@ func (q *Queries) PartnerByCompanyCode(ctx context.Context, companyCode pgtype.T
 }
 
 const partnerMatchTerms = `-- name: PartnerMatchTerms :one
-SELECT match_rate_bp, match_cap_minor FROM donor_partner_signups WHERE id = $1
+SELECT match_rate_bp, match_cap_minor FROM donor_partner_signups WHERE id = $1 AND approved_at IS NOT NULL
 `
 
 type PartnerMatchTermsRow struct {

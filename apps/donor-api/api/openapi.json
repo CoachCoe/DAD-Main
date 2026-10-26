@@ -9325,6 +9325,16 @@
        "type": "string",
        "format": "uuid"
       }
+     },
+     {
+      "in": "header",
+      "name": "Idempotency-Key",
+      "required": false,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "Version-4 UUID identifying this offline payment. Reuse the same key and payload after an uncertain result. Reusing it with another payload returns 409. Omission remains compatible with older clients but cannot deduplicate a retry."
      }
     ],
     "requestBody": {
@@ -9389,6 +9399,9 @@
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
+     },
+     "409": {
+      "description": "The request key already identifies a different payment."
      }
     }
    }

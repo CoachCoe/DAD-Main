@@ -2,7 +2,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import PartnerDetail from "./PartnerDetail";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  sessionStorage.clear();
+});
 
 const detail = {
   id: "p-1",
@@ -35,7 +38,8 @@ const match = {
 function stubApi() {
   const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (init?.method === "POST") return Promise.resolve(Response.json({ saved: true }));
+    if (init?.method === "POST")
+      return Promise.resolve(Response.json(url.endsWith("/match-payment") ? { recorded: true } : { saved: true }));
     if (url.includes("/match-status")) return Promise.resolve(Response.json(match));
     return Promise.resolve(Response.json(detail));
   });
@@ -82,4 +86,32 @@ it("records a match payment and removes a user", async () => {
   expect(fetch.mock.calls.some(([u, i]) => String(u).endsWith("/p-1/users/u-1/remove") && i?.method === "POST")).toBe(
     true,
   );
+});
+
+it("restores an uncertain match payment after navigation and retries the identical request", async () => {
+  const fetch = stubApi();
+  const base = fetch.getMockImplementation();
+  let payments = 0;
+  fetch.mockImplementation((input, init) => {
+    if (String(input).endsWith("/match-payment") && init?.method === "POST" && payments++ === 0)
+      return Promise.reject(new TypeError("Connection lost after commit"));
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  const page = render(<PartnerDetail partner="p-1" />);
+  fireEvent.change(await screen.findByLabelText(/Match payment received/), { target: { value: "250" } });
+  fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("The recording is not confirmed");
+  page.unmount();
+  render(<PartnerDetail partner="p-1" />);
+  expect(await screen.findByLabelText(/Match payment received/)).toHaveValue("250.00");
+  expect(screen.getByLabelText(/Match payment received/)).toHaveAttribute("readonly");
+  fireEvent.click(screen.getByRole("button", { name: "Retry recorded payment" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Recorded a $250.00 match payment"));
+  const attempts = fetch.mock.calls.filter(([u, i]) => String(u).endsWith("/match-payment") && i?.method === "POST");
+  expect(attempts).toHaveLength(2);
+  expect(attempts[0][1]?.headers).toEqual(attempts[1][1]?.headers);
+  expect(new Headers(attempts[0][1]?.headers).get("Idempotency-Key")).toMatch(/^[a-f0-9-]{36}$/i);
+  expect(attempts[0][1]?.body).toBe(attempts[1][1]?.body);
+  expect(sessionStorage.getItem("dad:match-payment:p-1")).toBeNull();
 });

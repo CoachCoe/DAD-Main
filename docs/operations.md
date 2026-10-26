@@ -652,6 +652,14 @@ retention policy. Sensitive source documents have separate authenticated downloa
 
 ## Partner report artifacts
 
+Offline match payments use a permanent version-4 UUID request key. The staff screen
+saves the key, amount and year in tab-scoped session storage before sending the request,
+and preserves them after an uncertain response or navigation. Retry the saved payment
+until confirmed; do not create another payment to resolve an unknown outcome. Identical
+replays create neither another payment nor another audit entry. A key reused with another
+partner, year or amount returns 409. Older API clients may omit `Idempotency-Key`, but
+must be upgraded before retrying uncertain requests because omission cannot deduplicate.
+
 Partner administrators upload a PNG or JPEG logo from the organization section, up to
 512 by 512 pixels and 256 KiB. The API validates dimensions before decoding, removes
 metadata, and stores a normalized PNG. Empty input explicitly removes the logo. No

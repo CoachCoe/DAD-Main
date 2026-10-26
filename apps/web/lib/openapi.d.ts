@@ -8444,7 +8444,10 @@ export interface operations {
     staffPartnerMatchPayment: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Version-4 UUID identifying this offline payment. Reuse the same key and payload after an uncertain result. Reusing it with another payload returns 409. Omission remains compatible with older clients but cannot deduplicate a retry. */
+                "Idempotency-Key"?: string;
+            };
             path: {
                 partnerID: string;
             };
@@ -8475,6 +8478,13 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The request key already identifies a different payment. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];

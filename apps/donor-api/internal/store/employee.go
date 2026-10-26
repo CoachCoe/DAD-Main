@@ -301,8 +301,15 @@ func (s EmployeeService) Match(ctx context.Context, token string, partnerID pgty
 
 // RecordMatchPayment records an offline match payment received (EM-7). No money
 // moves. Staff-only.
-func (s EmployeeService) RecordMatchPayment(ctx context.Context, token string, partnerID pgtype.UUID, year int32, amountMinor int64) error {
-	if amountMinor <= 0 {
+func (s EmployeeService) RecordMatchPayment(
+	ctx context.Context,
+	token string,
+	partnerID pgtype.UUID,
+	year int32,
+	amountMinor int64,
+	requestID pgtype.UUID,
+) error {
+	if amountMinor <= 0 || !ValidRequestID(requestID) {
 		return ErrStaffInput
 	}
 	if s.Staff == nil {
@@ -318,17 +325,35 @@ func (s EmployeeService) RecordMatchPayment(ctx context.Context, token string, p
 			if _, err := q.PartnerMatchTerms(ctx, partnerID); err != nil {
 				return struct{}{}, err
 			}
-			id, err := NewID()
+			inserted, err := q.InsertMatchPayment(ctx, queries.InsertMatchPaymentParams{
+				ID: requestID, PartnerID: partnerID, Year: year, AmountMinor: amountMinor,
+				ReceivedAt: timestamp(now), RecordedBy: actor.ID,
+			})
 			if err != nil {
 				return struct{}{}, err
 			}
-			if err = q.InsertMatchPayment(ctx, queries.InsertMatchPaymentParams{
-				ID: id, PartnerID: partnerID, Year: year, AmountMinor: amountMinor,
-				ReceivedAt: timestamp(now), RecordedBy: actor.ID,
-			}); err != nil {
-				return struct{}{}, err
+			if inserted == 0 {
+				matches, err := q.MatchPaymentMatches(
+					ctx,
+					queries.MatchPaymentMatchesParams{ID: requestID, PartnerID: partnerID, Year: year, AmountMinor: amountMinor},
+				)
+				if err != nil {
+					return struct{}{}, err
+				}
+				if !matches {
+					return struct{}{}, ErrStaffConflict
+				}
+				return struct{}{}, nil
 			}
-			return struct{}{}, auditStaff(ctx, q, actor.ID, "partner.match_payment", partnerID.String(), nil, now)
+			return struct{}{}, auditStaff(
+				ctx,
+				q,
+				actor.ID,
+				"partner.match_payment",
+				partnerID.String(),
+				map[string]any{"payment_id": requestID.String(), "amount_minor": amountMinor, "year": year},
+				now,
+			)
 		},
 	)
 	return err

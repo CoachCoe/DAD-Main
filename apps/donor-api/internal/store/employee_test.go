@@ -74,6 +74,56 @@ func mustNewID(t *testing.T) pgtype.UUID {
 	return id
 }
 
+func TestMatchPaymentIsIdempotentAcrossStaffAndConflictingPayloads(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	partner := approvedPartner(t, pool, "Idempotent Matching", "IDEMPOTENT-MATCH", 10000, 0)
+	other := approvedPartner(t, pool, "Another Match", "OTHER-MATCH", 10000, 0)
+	_, first := staffFixture(t, pool, "SUPER_ADMIN")
+	_, second := staffFixture(t, pool, "OP_PARTNERSHIPS")
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_partner_match_payments WHERE partner_id=$1", partner) })
+	svc := EmployeeService{DB: api, Staff: &StaffService{DB: api}}
+	key := mustNewID(t)
+	results := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		token := []string{first, second}[i%2]
+		go func() { results <- svc.RecordMatchPayment(ctx, token, partner, 2026, 2000, key) }()
+	}
+	for i := 0; i < 8; i++ {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, conflict := range []struct {
+		partner pgtype.UUID
+		year    int32
+		amount  int64
+	}{{partner, 2027, 2000}, {partner, 2026, 3000}, {other, 2026, 2000}} {
+		if err := svc.RecordMatchPayment(ctx, first, conflict.partner, conflict.year, conflict.amount, key); !errors.Is(
+			err,
+			ErrStaffConflict,
+		) {
+			t.Fatalf("key reused with another payment: %v", err)
+		}
+	}
+	var count int
+	var total int64
+	if err := pool.QueryRow(ctx, "SELECT count(*),sum(amount_minor)::bigint FROM donor_partner_match_payments WHERE partner_id=$1", partner).Scan(&count, &total); err != nil ||
+		count != 1 ||
+		total != 2000 {
+		t.Fatalf("retry count=%d total=%d: %v", count, total, err)
+	}
+	if err := svc.RecordMatchPayment(ctx, first, partner, 2026, 2000, mustNewID(t)); err != nil {
+		t.Fatalf("independent same-amount payment rejected: %v", err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT sum(amount_minor)::bigint FROM donor_partner_match_payments WHERE partner_id=$1", partner).Scan(&total); err != nil ||
+		total != 4000 {
+		t.Fatalf("second payment total=%d: %v", total, err)
+	}
+}
+
 func TestEmployeeMatchingAndKAnonymity(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
@@ -155,7 +205,7 @@ func TestEmployeeMatchingAndKAnonymity(t *testing.T) {
 	}
 
 	// Recording an offline payment reduces the outstanding balance; no charge.
-	if err := emp.RecordMatchPayment(ctx, superToken, partnerID, thisYear, 2000); err != nil {
+	if err := emp.RecordMatchPayment(ctx, superToken, partnerID, thisYear, 2000, mustNewID(t)); err != nil {
 		t.Fatal(err)
 	}
 	status, err = emp.Match(ctx, superToken, partnerID, thisYear)

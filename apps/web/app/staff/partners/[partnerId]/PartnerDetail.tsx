@@ -1,12 +1,14 @@
 "use client";
 import Link from "next/link";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
-import { api, failureMessage, type ResponseBody, type Schema } from "@/lib/api";
+import { api, failureMessage, type ResponseBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { formatDollars, formatMoney, parseDollars } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { matchTerms } from "../Partners";
+
+type PendingPayment = { key: string; year: number; amount_minor: number };
 
 type MatchStatus = ResponseBody<"/donor/staff/partners/{partnerID}/match-status", "get">;
 
@@ -25,6 +27,38 @@ export default function PartnerDetail({ partner }: { partner: string }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null);
+  const paymentRef = useRef<PendingPayment | null>(null);
+  const [retryBlocked, setRetryBlocked] = useState(false);
+  const paymentStorageKey = `dad:match-payment:${id}`;
+  useEffect(() => {
+    paymentRef.current = null;
+    setPendingPayment(null);
+    setRetryBlocked(false);
+    setPaymentAmount("");
+    try {
+      const raw = sessionStorage.getItem(paymentStorageKey);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as PendingPayment;
+      if (
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(saved.key) ||
+        !Number.isSafeInteger(saved.year) ||
+        !Number.isSafeInteger(saved.amount_minor) ||
+        saved.amount_minor <= 0
+      )
+        throw new Error("Invalid saved payment");
+      paymentRef.current = saved;
+      setPendingPayment(saved);
+      setPaymentAmount((saved.amount_minor / 100).toFixed(2));
+    } catch {
+      setRetryBlocked(true);
+      setError(
+        "Saved payment retry details could not be read. Contact an administrator before recording another payment.",
+      );
+    }
+  }, [paymentStorageKey]);
+
   const messages = resourceMessages(resource, {
     loading: "Loading partner…",
     failure: "This partner could not be loaded right now. Please retry in a moment.",
@@ -32,7 +66,12 @@ export default function PartnerDetail({ partner }: { partner: string }) {
     notFound: "No approved partner matches this link.",
   });
 
-  async function run(event: FormEvent<HTMLFormElement> | null, done: string, action: () => Promise<unknown>) {
+  async function run(
+    event: FormEvent<HTMLFormElement> | null,
+    done: string,
+    action: () => Promise<unknown>,
+    uncertainFailure?: string,
+  ) {
     event?.preventDefault();
     const form = event?.currentTarget;
     if (busy) return;
@@ -45,7 +84,11 @@ export default function PartnerDetail({ partner }: { partner: string }) {
       form?.reset();
       reload();
     } catch (cause) {
-      setError(failureMessage(cause, "That change could not be saved. Nothing was changed."));
+      setError(
+        uncertainFailure
+          ? unconfirmedMessage(cause, uncertainFailure)
+          : failureMessage(cause, "That change could not be saved. Nothing was changed."),
+      );
     } finally {
       setBusy(false);
     }
@@ -70,14 +113,42 @@ export default function PartnerDetail({ partner }: { partner: string }) {
   }
 
   function recordPayment(event: FormEvent<HTMLFormElement>) {
-    const amount = parseDollars(String(new FormData(event.currentTarget).get("amount") ?? ""));
+    event.preventDefault();
+    if (busy || retryBlocked) return;
+    const amount = parseDollars(paymentAmount);
     if (!amount) {
-      event.preventDefault();
       setError("Enter the payment received in dollars.");
       return;
     }
-    return run(event, `Recorded a ${formatMoney(amount)} match payment for ${year}.`, () =>
-      post("match-payment", { year, amount_minor: amount }),
+    const request = paymentRef.current ?? { key: crypto.randomUUID(), year, amount_minor: amount };
+    if (request.amount_minor !== amount) {
+      setError("Retry the unconfirmed payment before entering another payment.");
+      return;
+    }
+    try {
+      sessionStorage.setItem(paymentStorageKey, JSON.stringify(request));
+    } catch {
+      setError("This browser cannot save retry details. Use another browser to record the payment safely.");
+      return;
+    }
+    paymentRef.current = request;
+    setPendingPayment(request);
+    return run(
+      event,
+      `Recorded a ${formatMoney(request.amount_minor)} match payment for ${request.year}.`,
+      async () => {
+        const result = await api<{ recorded: boolean }>(`/donor/staff/partners/${id}/match-payment`, {
+          method: "POST",
+          headers: { "Idempotency-Key": request.key },
+          body: JSON.stringify({ year: request.year, amount_minor: request.amount_minor }),
+        });
+        if (!result.recorded) throw new Error("Payment recording not confirmed");
+        sessionStorage.removeItem(paymentStorageKey);
+        paymentRef.current = null;
+        setPendingPayment(null);
+        setPaymentAmount("");
+      },
+      "The recording is not confirmed. Retry this payment; do not record it again as a new payment.",
     );
   }
 
@@ -171,13 +242,26 @@ export default function PartnerDetail({ partner }: { partner: string }) {
               Save match terms
             </button>
           </form>
+          {pendingPayment && (
+            <p className="note">
+              An unconfirmed {formatMoney(pendingPayment.amount_minor)} payment for {pendingPayment.year} is saved for
+              retry. Retrying uses the same request and cannot record it twice.
+            </p>
+          )}
           <form onSubmit={recordPayment}>
             <label>
-              Match payment received for {year} in USD
-              <input name="amount" inputMode="decimal" required />
+              Match payment received for {pendingPayment?.year ?? year} in USD
+              <input
+                name="amount"
+                inputMode="decimal"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                readOnly={pendingPayment !== null}
+                required
+              />
             </label>
-            <button className="button" type="submit" disabled={busy}>
-              Record payment
+            <button className="button" type="submit" disabled={busy || retryBlocked}>
+              {pendingPayment ? "Retry recorded payment" : "Record payment"}
             </button>
           </form>
 
