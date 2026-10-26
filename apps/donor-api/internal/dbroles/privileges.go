@@ -211,6 +211,7 @@ var grants = map[string]map[Role]string{
 		StripeWorker:     "SELECT",
 		ProjectionWorker: "SELECT",
 		MessageWorker:    "SELECT",
+		PushWorker:       "SELECT",
 	},
 	"donor_event_reservations": {
 		API:              "SELECT, INSERT, UPDATE",

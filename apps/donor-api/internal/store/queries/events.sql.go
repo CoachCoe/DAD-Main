@@ -530,6 +530,43 @@ func (q *Queries) QueueEventReminders(ctx context.Context, arg QueueEventReminde
 	return result.RowsAffected(), nil
 }
 
+const queueNearbyEventAlerts = `-- name: QueueNearbyEventAlerts :execrows
+INSERT INTO donor_push_notifications (id, donor_id, category, dedup_key, context, available_at, expires_at)
+SELECT gen_random_uuid(), d.id, 'EVENT_NEARBY',
+       'push:event-nearby:' || e.id::text || ':' || d.id::text,
+       json_build_object('event_id', e.id::text),
+       $1::timestamptz, e.starts_at
+FROM donor_events e
+JOIN donors d ON d.disabled = false AND (
+    (e.city <> '' AND lower(d.city) = lower(e.city))
+    OR (e.zip <> '' AND left(d.zip, 3) = left(e.zip, 3))
+)
+JOIN donor_preferences p ON p.donor_id = d.id AND p.volunteer AND p.push_event_nearby
+WHERE e.id = $2
+  AND e.publish_state = 'PUBLISHED'
+  AND e.cancelled_at IS NULL
+  AND e.type <> 'INVITE_ONLY'
+  AND e.starts_at > $1::timestamptz
+ON CONFLICT (dedup_key) DO NOTHING
+`
+
+type QueueNearbyEventAlertsParams struct {
+	AsOf    pgtype.Timestamptz `json:"as_of"`
+	EventID pgtype.UUID        `json:"event_id"`
+}
+
+// E-1/§6.11: when an event is published, queue an EVENT_NEARBY push for every
+// volunteer in or near its city (same city label or three-digit ZIP region, as
+// E-2 lists events). The send rechecks the choices and that the event is
+// still on; expires_at is the start, so an alert never arrives late.
+func (q *Queries) QueueNearbyEventAlerts(ctx context.Context, arg QueueNearbyEventAlertsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, queueNearbyEventAlerts, arg.AsOf, arg.EventID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const releaseEventReservations = `-- name: ReleaseEventReservations :many
 UPDATE donor_event_reservations SET status='CANCELLED', updated_at=$2
 WHERE event_id=$1 AND status IN ('RESERVED', 'WAITLISTED')

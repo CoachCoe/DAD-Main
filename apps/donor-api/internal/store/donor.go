@@ -84,6 +84,9 @@ type Preferences struct {
 	PushStreakMilestone   bool  `json:"push_streak_milestone"`
 	PushStreakLapsed      bool  `json:"push_streak_lapsed"`
 	PushBadgeEarned       bool  `json:"push_badge_earned"`
+	PushEventNearby       bool  `json:"push_event_nearby"`
+	PushEventReminder     bool  `json:"push_event_reminder"`
+	PushEventPromoted     bool  `json:"push_event_promoted"`
 	RankingsOptedOut      bool  `json:"rankings_opted_out"`
 	NetworkVisible        bool  `json:"network_visible"`
 	// Volunteer opt-in (PRD E-1): turning this on puts the donor in the
@@ -100,6 +103,7 @@ func defaultPreferences() Preferences {
 	return Preferences{
 		PushReferralConverted: true, PushStreakAtRisk: true, PushStreakMilestone: true,
 		PushStreakLapsed: true, PushBadgeEarned: true, NetworkVisible: true,
+		PushEventNearby: true, PushEventReminder: true, PushEventPromoted: true,
 		VolunteerInterests: []string{},
 	}
 }
@@ -118,6 +122,7 @@ func readPreferences(ctx context.Context, q *queries.Queries, donor pgtype.UUID)
 		Version: pref.Version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
 		PushReferralConverted: pref.PushReferralConverted, PushStreakAtRisk: pref.PushStreakAtRisk, PushStreakMilestone: pref.PushStreakMilestone,
 		PushStreakLapsed: pref.PushStreakLapsed, PushBadgeEarned: pref.PushBadgeEarned,
+		PushEventNearby: pref.PushEventNearby, PushEventReminder: pref.PushEventReminder, PushEventPromoted: pref.PushEventPromoted,
 		RankingsOptedOut: pref.RankingsOptedOut, NetworkVisible: pref.NetworkVisible,
 		Volunteer: pref.Volunteer, VolunteerInterests: interests,
 	}, err
@@ -170,6 +175,9 @@ type PreferenceChange struct {
 	PushStreakMilestone   bool
 	PushStreakLapsed      *bool
 	PushBadgeEarned       *bool
+	PushEventNearby       *bool
+	PushEventReminder     *bool
+	PushEventPromoted     *bool
 	RankingsOptedOut      *bool
 	NetworkVisible        *bool
 	Volunteer             *bool
@@ -183,6 +191,7 @@ func (pref Preferences) Replace() PreferenceChange {
 		Version: pref.Version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
 		PushReferralConverted: pref.PushReferralConverted, PushStreakAtRisk: pref.PushStreakAtRisk, PushStreakMilestone: pref.PushStreakMilestone,
 		PushStreakLapsed: &pref.PushStreakLapsed, PushBadgeEarned: &pref.PushBadgeEarned,
+		PushEventNearby: &pref.PushEventNearby, PushEventReminder: &pref.PushEventReminder, PushEventPromoted: &pref.PushEventPromoted,
 		RankingsOptedOut: &pref.RankingsOptedOut, NetworkVisible: &pref.NetworkVisible,
 		Volunteer: &pref.Volunteer, VolunteerInterests: &interests,
 	}
@@ -193,6 +202,7 @@ func (c PreferenceChange) apply(saved Preferences) Preferences {
 		Version: c.Version, ReferralEmails: c.ReferralEmails, MarketingEmails: c.MarketingEmails,
 		PushReferralConverted: c.PushReferralConverted, PushStreakAtRisk: c.PushStreakAtRisk, PushStreakMilestone: c.PushStreakMilestone,
 		PushStreakLapsed: saved.PushStreakLapsed, PushBadgeEarned: saved.PushBadgeEarned,
+		PushEventNearby: saved.PushEventNearby, PushEventReminder: saved.PushEventReminder, PushEventPromoted: saved.PushEventPromoted,
 		RankingsOptedOut: saved.RankingsOptedOut, NetworkVisible: saved.NetworkVisible,
 		Volunteer: saved.Volunteer, VolunteerInterests: saved.VolunteerInterests,
 	}
@@ -201,6 +211,8 @@ func (c PreferenceChange) apply(saved Preferences) Preferences {
 		into  *bool
 	}{
 		{c.PushStreakLapsed, &pref.PushStreakLapsed}, {c.PushBadgeEarned, &pref.PushBadgeEarned},
+		{c.PushEventNearby, &pref.PushEventNearby}, {c.PushEventReminder, &pref.PushEventReminder},
+		{c.PushEventPromoted, &pref.PushEventPromoted},
 		{c.RankingsOptedOut, &pref.RankingsOptedOut}, {c.NetworkVisible, &pref.NetworkVisible}, {c.Volunteer, &pref.Volunteer},
 	} {
 		if field.value != nil {
@@ -239,6 +251,7 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, change 
 			ID: id, DonorID: d.ID, Version: version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
 			PushReferralConverted: pref.PushReferralConverted, PushStreakAtRisk: pref.PushStreakAtRisk, PushStreakMilestone: pref.PushStreakMilestone,
 			PushStreakLapsed: pref.PushStreakLapsed, PushBadgeEarned: pref.PushBadgeEarned,
+			PushEventNearby: pref.PushEventNearby, PushEventReminder: pref.PushEventReminder, PushEventPromoted: pref.PushEventPromoted,
 			RankingsOptedOut: pref.RankingsOptedOut, NetworkVisible: pref.NetworkVisible,
 			Volunteer: pref.Volunteer, VolunteerInterests: interests,
 		}); err != nil {
@@ -253,7 +266,10 @@ func (s DonorService) SavePreferences(ctx context.Context, token string, change 
 			PushReferralConverted: pgtype.Bool{Bool: pref.PushReferralConverted, Valid: true}, PushStreakAtRisk: pgtype.Bool{Bool: pref.PushStreakAtRisk, Valid: true},
 			PushStreakMilestone: pgtype.Bool{Bool: pref.PushStreakMilestone, Valid: true}, ConsentVersion: consentVersion,
 			PushStreakLapsed: pgtype.Bool{Bool: pref.PushStreakLapsed, Valid: true}, PushBadgeEarned: pgtype.Bool{Bool: pref.PushBadgeEarned, Valid: true},
-			RankingsOptedOut: pgtype.Bool{Bool: pref.RankingsOptedOut, Valid: true}, NetworkVisible: pgtype.Bool{Bool: pref.NetworkVisible, Valid: true},
+			PushEventNearby:   pgtype.Bool{Bool: pref.PushEventNearby, Valid: true},
+			PushEventReminder: pgtype.Bool{Bool: pref.PushEventReminder, Valid: true},
+			PushEventPromoted: pgtype.Bool{Bool: pref.PushEventPromoted, Valid: true},
+			RankingsOptedOut:  pgtype.Bool{Bool: pref.RankingsOptedOut, Valid: true}, NetworkVisible: pgtype.Bool{Bool: pref.NetworkVisible, Valid: true},
 			Volunteer: pgtype.Bool{Bool: pref.Volunteer, Valid: true}, VolunteerInterests: interests,
 		}); err != nil {
 			return Profile{}, err

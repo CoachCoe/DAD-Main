@@ -2687,6 +2687,12 @@ export interface components {
             push_streak_milestone: boolean;
             /** @description App notification when the donor earns a new badge. Starts on. */
             push_badge_earned: boolean;
+            /** @description App notification when an event is published near a volunteer (E-1). Sent only while `volunteer` is on. */
+            push_event_nearby: boolean;
+            /** @description App notification 24 hours and 2 hours before an event the donor reserved. */
+            push_event_reminder: boolean;
+            /** @description App notification when the donor moves off an event waitlist. */
+            push_event_promoted: boolean;
             /** @description When true the donor is excluded from national/city rankings and from everyone's ranking denominator. Default off (ranked). */
             rankings_opted_out: boolean;
             /** @description When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). On by default: visibility is opt-out (§10). */
@@ -4775,6 +4781,9 @@ export interface operations {
                     push_streak_milestone: boolean;
                     push_streak_lapsed?: boolean;
                     push_badge_earned?: boolean;
+                    push_event_nearby?: boolean;
+                    push_event_reminder?: boolean;
+                    push_event_promoted?: boolean;
                     rankings_opted_out?: boolean;
                     network_visible?: boolean;
                     volunteer?: boolean;

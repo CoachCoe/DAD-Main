@@ -1670,6 +1670,15 @@
          "push_badge_earned": {
           "type": "boolean"
          },
+         "push_event_nearby": {
+          "type": "boolean"
+         },
+         "push_event_reminder": {
+          "type": "boolean"
+         },
+         "push_event_promoted": {
+          "type": "boolean"
+         },
          "rankings_opted_out": {
           "type": "boolean"
          },
@@ -10624,6 +10633,18 @@
       "type": "boolean",
       "description": "App notification when the donor earns a new badge. Starts on."
      },
+     "push_event_nearby": {
+      "type": "boolean",
+      "description": "App notification when an event is published near a volunteer (E-1). Sent only while `volunteer` is on."
+     },
+     "push_event_reminder": {
+      "type": "boolean",
+      "description": "App notification 24 hours and 2 hours before an event the donor reserved."
+     },
+     "push_event_promoted": {
+      "type": "boolean",
+      "description": "App notification when the donor moves off an event waitlist."
+     },
      "rankings_opted_out": {
       "type": "boolean",
       "description": "When true the donor is excluded from national/city rankings and from everyone's ranking denominator. Default off (ranked)."
@@ -10672,7 +10693,10 @@
      "version",
      "consent_version",
      "push_streak_lapsed",
-     "push_badge_earned"
+     "push_badge_earned",
+     "push_event_nearby",
+     "push_event_reminder",
+     "push_event_promoted"
     ],
     "additionalProperties": false
    },

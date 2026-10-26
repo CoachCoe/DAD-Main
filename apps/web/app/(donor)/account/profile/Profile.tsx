@@ -66,6 +66,9 @@ export default function Profile() {
             push_streak_milestone: data.push_streak_milestone,
             push_streak_lapsed: data.push_streak_lapsed,
             push_badge_earned: data.push_badge_earned,
+            push_event_nearby: data.push_event_nearby,
+            push_event_reminder: data.push_event_reminder,
+            push_event_promoted: data.push_event_promoted,
             rankings_opted_out: data.rankings_opted_out,
             network_visible: data.network_visible,
             volunteer: data.volunteer,
@@ -258,6 +261,32 @@ export default function Profile() {
                     />{" "}
                     When I earn a badge
                   </label>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={data.push_event_reminder}
+                      onChange={(event) => setData({ ...data, push_event_reminder: event.target.checked })}
+                    />{" "}
+                    Before an event I signed up for
+                  </label>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={data.push_event_promoted}
+                      onChange={(event) => setData({ ...data, push_event_promoted: event.target.checked })}
+                    />{" "}
+                    When a waitlist spot opens for me
+                  </label>
+                  {data.volunteer && (
+                    <label className="choice">
+                      <input
+                        type="checkbox"
+                        checked={data.push_event_nearby}
+                        onChange={(event) => setData({ ...data, push_event_nearby: event.target.checked })}
+                      />{" "}
+                      When a volunteer event is announced near me
+                    </label>
+                  )}
                 </fieldset>
                 <p className="note">
                   App notifications reach only phones where you signed in to the DAD app and allowed its notifications.

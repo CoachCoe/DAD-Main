@@ -706,3 +706,107 @@ func TestEventICSAndReportIssue(t *testing.T) {
 		t.Fatalf("report url set without support email: %+v %v", v.ReportIssueURL, err)
 	}
 }
+
+// TestPublishAlertsNearbyVolunteers covers E-1: publishing tells volunteers in
+// or near the event's city once, and the alert stops if they opt out or the
+// event is withdrawn before it is sent.
+func TestPublishAlertsNearbyVolunteers(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	s := EventService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+
+	resident := func(city, zip string, volunteer, nearby bool) pgtype.UUID {
+		id, _ := donor(t, pool)
+		t.Cleanup(func() {
+			cleanExec(t, "DELETE FROM donor_push_notifications WHERE donor_id=$1", id)
+			cleanExec(t, "DELETE FROM donor_preferences WHERE donor_id=$1", id)
+		})
+		mustExec(t, pool, "UPDATE donors SET city=$2, zip=$3 WHERE id=$1", id, city, zip)
+		mustExec(
+			t,
+			pool,
+			"INSERT INTO donor_preferences(id,donor_id,version,referral_emails,marketing_emails,volunteer,push_event_nearby) VALUES($1,$2,1,false,false,$3,$4)",
+			testID(t),
+			id,
+			volunteer,
+			nearby,
+		)
+		return id
+	}
+	sameCity := resident("San Francisco", "90001", true, true)
+	sameRegion := resident("Daly City", "94105", true, true)
+	optedOut := resident("San Francisco", "94103", true, false)
+	notVolunteer := resident("San Francisco", "94103", false, true)
+	farAway := resident("Chicago", "60601", true, true)
+
+	alerts := func(donor pgtype.UUID) []queries.DonorPushNotification {
+		var found []queries.DonorPushNotification
+		for _, intent := range pushIntents(t, pool, donor) {
+			if intent.Category == eventNearbyCategory {
+				found = append(found, intent)
+			}
+		}
+		return found
+	}
+
+	id, err := s.Create(ctx, adminToken, eventInput("park-cleanup", "San Francisco", "94103", "VOLUNTEER", 48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(ctx, adminToken, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(ctx, adminToken, id); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name  string
+		donor pgtype.UUID
+		want  int
+	}{
+		{"same city", sameCity, 1}, {"same ZIP region", sameRegion, 1}, {"opted out", optedOut, 0},
+		{"not a volunteer", notVolunteer, 0}, {"far away", farAway, 0},
+	} {
+		if got := len(alerts(c.donor)); got != c.want {
+			t.Errorf("%s: %d alerts; want %d", c.name, got, c.want)
+		}
+	}
+
+	invite, err := s.Create(ctx, adminToken, eventInput("donor-dinner", "San Francisco", "94103", "INVITE_ONLY", 48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Publish(ctx, adminToken, invite); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(alerts(sameCity)); got != 1 {
+		t.Fatalf("an invite-only event alerted volunteers: %d alerts", got)
+	}
+
+	job := alerts(sameCity)[0]
+	reason := func() string {
+		t.Helper()
+		donorRow, err := queries.New(pool).LockDonor(ctx, sameCity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reason, err := pushSuppression(ctx, queries.New(pool), job, donorRow, time.Now().UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reason
+	}
+	if got := reason(); got != "" {
+		t.Fatalf("a fresh alert was suppressed as %q", got)
+	}
+	mustExec(t, pool, "UPDATE donor_events SET cancelled_at=now() WHERE id=$1", id)
+	if got := reason(); got != "event_withdrawn" {
+		t.Fatalf("an alert for a cancelled event: %q; want event_withdrawn", got)
+	}
+	mustExec(t, pool, "UPDATE donor_preferences SET push_event_nearby=false WHERE donor_id=$1", sameCity)
+	if got := reason(); got != "opted_out" {
+		t.Fatalf("an alert after opting out: %q; want opted_out", got)
+	}
+}

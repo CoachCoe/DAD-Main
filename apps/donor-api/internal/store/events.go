@@ -187,7 +187,11 @@ func (s EventService) Publish(ctx context.Context, token string, id pgtype.UUID)
 			if err := q.PublishEvent(ctx, queries.PublishEventParams{ID: id, PublishedAt: timestamp(now)}); err != nil {
 				return struct{}{}, err
 			}
-			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.published", id.String(), nil, now)
+			alerted, err := q.QueueNearbyEventAlerts(ctx, queries.QueueNearbyEventAlertsParams{EventID: id, AsOf: timestamp(now)})
+			if err != nil {
+				return struct{}{}, err
+			}
+			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.published", id.String(), map[string]int64{"alerted": alerted}, now)
 		})
 	return err
 }

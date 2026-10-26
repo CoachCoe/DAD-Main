@@ -73,12 +73,12 @@ var exportDatasets = map[string]exportDataset{
 	"cancellations": {"donor_cancellations", "id donor_id attempt_id confirmed_period_end completed_at created_at", "data.export"},
 	"preferences": {
 		"donor_preferences",
-		"donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone push_streak_lapsed push_badge_earned",
+		"donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone push_streak_lapsed push_badge_earned push_event_nearby push_event_reminder push_event_promoted rankings_opted_out network_visible volunteer",
 		"data.export",
 	},
 	"consent-history": {
 		"donor_preference_events",
-		"id donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone push_streak_lapsed push_badge_earned consent_version source created_at",
+		"id donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone push_streak_lapsed push_badge_earned push_event_nearby push_event_reminder push_event_promoted rankings_opted_out network_visible volunteer consent_version source created_at",
 		"data.export",
 	},
 	"messages": {

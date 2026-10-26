@@ -16,6 +16,9 @@ const profile = {
   push_streak_milestone: true,
   push_streak_lapsed: true,
   push_badge_earned: true,
+  push_event_nearby: true,
+  push_event_reminder: true,
+  push_event_promoted: true,
   rankings_opted_out: false,
   network_visible: true,
   volunteer: false,
@@ -72,6 +75,9 @@ it("saves app notification choices alongside the email ones", async () => {
     push_streak_milestone: false,
     push_streak_lapsed: true,
     push_badge_earned: true,
+    push_event_nearby: true,
+    push_event_reminder: true,
+    push_event_promoted: true,
     rankings_opted_out: false,
     network_visible: true,
     volunteer: false,
@@ -102,6 +108,28 @@ it("saves the streak-lapsed and badge pushes, rankings and network visibility", 
     network_visible: false,
   });
   expect(rankings).not.toBeChecked();
+});
+
+it("saves the event pushes and offers nearby events only to volunteers", async () => {
+  const fetch = stubFetch({
+    "POST /api/donor/me/preferences": (init) => json({ ...profile, ...JSON.parse(String(init?.body)), version: 4 }),
+  });
+  render(<Profile />);
+  const app = within(await screen.findByRole("group", { name: "DAD app notifications" }));
+  const nearby = "When a volunteer event is announced near me";
+  expect(app.queryByRole("checkbox", { name: nearby })).toBeNull();
+  fireEvent.click(app.getByRole("checkbox", { name: "Before an event I signed up for" }));
+  fireEvent.click(app.getByRole("checkbox", { name: "When a waitlist spot opens for me" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "I volunteer" }));
+  fireEvent.click(app.getByRole("checkbox", { name: nearby }));
+  fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
+  expect(await screen.findByText("Preferences saved.")).toBeVisible();
+  expect(sent(fetch, "/api/donor/me/preferences")).toMatchObject({
+    volunteer: true,
+    push_event_nearby: false,
+    push_event_reminder: false,
+    push_event_promoted: false,
+  });
 });
 
 it("opts in to volunteering with interests and keeps one it doesn't offer", async () => {

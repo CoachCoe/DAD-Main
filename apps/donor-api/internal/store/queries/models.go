@@ -394,6 +394,9 @@ type DonorPreference struct {
 	VolunteerInterests    []string           `json:"volunteer_interests"`
 	PushStreakLapsed      bool               `json:"push_streak_lapsed"`
 	PushBadgeEarned       bool               `json:"push_badge_earned"`
+	PushEventNearby       bool               `json:"push_event_nearby"`
+	PushEventReminder     bool               `json:"push_event_reminder"`
+	PushEventPromoted     bool               `json:"push_event_promoted"`
 }
 
 type DonorPushNotification struct {

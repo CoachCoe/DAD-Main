@@ -228,8 +228,32 @@ func pushSuppression(
 			return "badge_revoked", nil
 		}
 		return "", nil
-	case "EVENT_PROMOTED", "EVENT_REMINDER":
+	case "EVENT_PROMOTED":
+		if !pref.PushEventPromoted {
+			return "opted_out", nil
+		}
 		return reservationLapsed(ctx, q, data, donor)
+	case "EVENT_REMINDER":
+		if !pref.PushEventReminder {
+			return "opted_out", nil
+		}
+		return reservationLapsed(ctx, q, data, donor)
+	case eventNearbyCategory:
+		if !pref.Volunteer || !pref.PushEventNearby {
+			return "opted_out", nil
+		}
+		event, err := parseID(data.Text("event_id"))
+		if err != nil {
+			return "", err
+		}
+		e, err := q.EventByID(ctx, event)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", err
+		}
+		if err != nil || e.CancelledAt.Valid || e.PublishState != "PUBLISHED" {
+			return "event_withdrawn", nil
+		}
+		return "", nil
 	case eventCancelledCategory:
 		return "", nil
 	}
@@ -289,6 +313,9 @@ func pushContent(job queries.DonorPushNotification) (push.Notification, error) {
 	case "EVENT_PROMOTED":
 		n.Title = "A spot opened up"
 		n.Body = "You are off the waitlist — your spot at an upcoming event is confirmed. Open the app for details."
+	case eventNearbyCategory:
+		n.Title = "A new event near you"
+		n.Body = "A volunteer event was just announced near you. Open the app for the details."
 	case eventCancelledCategory:
 		n.Title = "An event was cancelled"
 		n.Body = "An event you signed up for has been cancelled. Open the app for the details."

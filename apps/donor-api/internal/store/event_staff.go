@@ -15,6 +15,10 @@ import (
 // donor an event they reserved or waitlisted for was cancelled (§8 Growth).
 const eventCancelledCategory = "EVENT_CANCELLED"
 
+// eventNearbyCategory is the push telling a volunteer an event was published
+// in or near their city (E-1, §6.11).
+const eventNearbyCategory = "EVENT_NEARBY"
+
 // ErrEventCancelled is returned when a donor or staff member acts on a
 // cancelled event.
 var ErrEventCancelled = errors.New("event has been cancelled")
