@@ -323,6 +323,7 @@ test("authenticated accessible surface: /account/employer", async ({ page }) => 
 const partnerPortal: Record<string, unknown> = {
   "/donor/partner/overview": {
     organization: "Delta Inc",
+    description: "Meals and water across northern Nevada.",
     role: "ADMIN",
     company_code: "DELTA-7KQ4MX",
     committed_minor: 150000,

@@ -7394,6 +7394,10 @@
           "organization": {
            "type": "string"
           },
+          "description": {
+           "type": "string",
+           "description": "The organization's description, as its administrators wrote it (\u00a77.2)."
+          },
           "role": {
            "type": "string",
            "enum": [
@@ -7445,6 +7449,7 @@
          },
          "required": [
           "organization",
+          "description",
           "role",
           "company_code",
           "committed_minor",
@@ -9076,6 +9081,92 @@
       "$ref": "#/components/responses/Unavailable"
      }
     }
+   }
+  },
+  "/donor/partner/profile": {
+   "post": {
+    "operationId": "partnerSaveProfile",
+    "summary": "Update organization profile",
+    "tags": [
+     "Partner"
+    ],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "browser",
+     "native"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "organization": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+         },
+         "description": {
+          "type": "string",
+          "maxLength": 4000
+         }
+        },
+        "required": [
+         "organization",
+         "description"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "saved": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "saved"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Replaces the organization's name and description (\u00a77.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000."
    }
   },
   "/donor/staff/partners/{partnerID}/match-status": {

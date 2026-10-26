@@ -27,6 +27,7 @@ type PartnerPortalSource interface {
 	Users(ctx context.Context, token string) ([]store.PartnerUser, error)
 	Invite(ctx context.Context, token, email, name, role string) error
 	RemoveUser(ctx context.Context, token string, userID pgtype.UUID) error
+	SaveProfile(ctx context.Context, token, organization, description string) error
 	Overview(ctx context.Context, token string) (store.PartnerOverview, error)
 	Initiatives(ctx context.Context, token string) ([]store.PartnerInitiative, error)
 	Spend(ctx context.Context, token string) ([]store.PartnerSpendRow, error)
@@ -215,6 +216,23 @@ func (a *api) partnerInviteUser(w http.ResponseWriter, r *http.Request, session 
 	}
 	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
 		return map[string]bool{"invited": true}, a.PartnerPortal.Invite(ctx, session, body.Email, body.Name, body.Role)
+	})
+}
+
+func (a *api) partnerSaveProfile(w http.ResponseWriter, r *http.Request, session string) {
+	var body struct {
+		Organization *string `json:"organization"`
+		Description  *string `json:"description"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Organization == nil || body.Description == nil {
+		invalidFields(w, r)
+		return
+	}
+	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"saved": true}, a.PartnerPortal.SaveProfile(ctx, session, *body.Organization, *body.Description)
 	})
 }
 

@@ -634,53 +634,6 @@ func (q *Queries) PartnerInitiativesList(ctx context.Context, partnerSignupID pg
 	return items, nil
 }
 
-const partnerLoginEmailByID = `-- name: PartnerLoginEmailByID :one
-SELECT id, partner_user_id, kind, encrypted_token, expires_at, attempts, last_error, available_at, completed_at, created_at FROM donor_partner_login_emails WHERE id=$1 FOR UPDATE
-`
-
-func (q *Queries) PartnerLoginEmailByID(ctx context.Context, id pgtype.UUID) (DonorPartnerLoginEmail, error) {
-	row := q.db.QueryRow(ctx, partnerLoginEmailByID, id)
-	var i DonorPartnerLoginEmail
-	err := row.Scan(
-		&i.ID,
-		&i.PartnerUserID,
-		&i.Kind,
-		&i.EncryptedToken,
-		&i.ExpiresAt,
-		&i.Attempts,
-		&i.LastError,
-		&i.AvailableAt,
-		&i.CompletedAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const partnerMessageByID = `-- name: PartnerMessageByID :one
-SELECT id, partner_id, kind, dedup_key, context, available_at, completed_at, attempts, last_error, suppressed_reason, subject, body, created_at FROM donor_partner_messages WHERE id=$1
-`
-
-func (q *Queries) PartnerMessageByID(ctx context.Context, id pgtype.UUID) (DonorPartnerMessage, error) {
-	row := q.db.QueryRow(ctx, partnerMessageByID, id)
-	var i DonorPartnerMessage
-	err := row.Scan(
-		&i.ID,
-		&i.PartnerID,
-		&i.Kind,
-		&i.DedupKey,
-		&i.Context,
-		&i.AvailableAt,
-		&i.CompletedAt,
-		&i.Attempts,
-		&i.LastError,
-		&i.SuppressedReason,
-		&i.Subject,
-		&i.Body,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const partnerMessageRecipients = `-- name: PartnerMessageRecipients :many
 SELECT email,name FROM donor_partner_users
 WHERE partner_id=$1 AND disabled=false AND accepted_at IS NOT NULL
@@ -748,6 +701,7 @@ const partnerOverviewTotals = `-- name: PartnerOverviewTotals :one
 SELECT
   p.company_code,
   p.workforce_size,
+  p.description,
   coalesce((SELECT sum(i.committed_minor) FROM donor_initiatives i
             WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
@@ -770,6 +724,7 @@ WHERE p.id=$1
 type PartnerOverviewTotalsRow struct {
 	CompanyCode       pgtype.Text        `json:"company_code"`
 	WorkforceSize     int32              `json:"workforce_size"`
+	Description       string             `json:"description"`
 	CommittedMinor    int64              `json:"committed_minor"`
 	DeployedMinor     int64              `json:"deployed_minor"`
 	PeopleReached     int64              `json:"people_reached"`
@@ -786,6 +741,7 @@ func (q *Queries) PartnerOverviewTotals(ctx context.Context, id pgtype.UUID) (Pa
 	err := row.Scan(
 		&i.CompanyCode,
 		&i.WorkforceSize,
+		&i.Description,
 		&i.CommittedMinor,
 		&i.DeployedMinor,
 		&i.PeopleReached,
@@ -1344,26 +1300,23 @@ func (q *Queries) StaffPartnersPage(ctx context.Context, pageOffset int64) ([]St
 	return items, nil
 }
 
-const updatePartnerProfile = `-- name: UpdatePartnerProfile :exec
+const updatePartnerProfile = `-- name: UpdatePartnerProfile :execrows
 UPDATE donor_partner_signups
-SET organization=$2, logo_url=$3, description=$4
+SET organization=$2, description=$3
 WHERE id=$1 AND approved_at IS NOT NULL
 `
 
 type UpdatePartnerProfileParams struct {
 	ID           pgtype.UUID `json:"id"`
 	Organization string      `json:"organization"`
-	LogoUrl      string      `json:"logo_url"`
 	Description  string      `json:"description"`
 }
 
-// Partner admin edits the org profile (name, logo, description) (§7.2).
-func (q *Queries) UpdatePartnerProfile(ctx context.Context, arg UpdatePartnerProfileParams) error {
-	_, err := q.db.Exec(ctx, updatePartnerProfile,
-		arg.ID,
-		arg.Organization,
-		arg.LogoUrl,
-		arg.Description,
-	)
-	return err
+// Partner admin edits the org profile (§7.2).
+func (q *Queries) UpdatePartnerProfile(ctx context.Context, arg UpdatePartnerProfileParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePartnerProfile, arg.ID, arg.Organization, arg.Description)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

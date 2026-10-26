@@ -6,6 +6,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 const overview = {
   organization: "Delta Inc",
+  description: "Meals and water across northern Nevada.",
   role: "ADMIN",
   company_code: "DELTA-7KQ4MX",
   committed_minor: 150000,
@@ -45,6 +46,8 @@ function stub(overrides: Record<string, unknown> = {}, calls: { url: string; ini
       if (url.endsWith("/initiatives")) return Promise.resolve(Response.json({ initiatives: [initiative] }));
       if (url.endsWith("/spend"))
         return Promise.resolve(Response.json({ categories: [{ category: "Meals", amount_minor: 50000 }] }));
+      if ((url.endsWith("/profile") || url.endsWith("/workforce")) && init?.method === "POST")
+        return Promise.resolve(Response.json({ saved: true }));
       if (url.endsWith("/users") && init?.method === "POST") return Promise.resolve(Response.json({ invited: true }));
       if (url.endsWith("/users"))
         return Promise.resolve(
@@ -114,6 +117,8 @@ it("keeps a partner viewer read-only", async () => {
   ).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Export verified report/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Users" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Organization" })).not.toBeInTheDocument();
+  expect(screen.getByText("Meals and water across northern Nevada.")).toBeInTheDocument();
   expect(screen.getByText("DELTA-7KQ4MX")).toBeInTheDocument();
 });
 
@@ -126,4 +131,31 @@ it("sends a signed-out partner to request a sign-in link", async () => {
   await waitFor(() =>
     expect(screen.getByRole("link", { name: "Email me a sign-in link" })).toHaveAttribute("href", "/partner/sign-in"),
   );
+});
+
+it("lets a partner admin edit the organization profile and workforce size", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  stub({}, calls);
+  render(<Dashboard />);
+  const organization = within(await screen.findByRole("region", { name: "Organization" }));
+  expect(organization.getByLabelText("Organization name")).toHaveValue("Delta Inc");
+  fireEvent.change(organization.getByLabelText("Organization name"), { target: { value: "Delta Group" } });
+  fireEvent.change(organization.getByLabelText("Description"), { target: { value: "Water first." } });
+  fireEvent.change(organization.getByLabelText("Workforce size"), { target: { value: "450" } });
+  fireEvent.click(organization.getByRole("button", { name: "Save profile" }));
+  expect(await organization.findByText("Organization profile saved.")).toBeInTheDocument();
+  const body = (path: string) =>
+    JSON.parse(String(calls.find((c) => c.url.endsWith(path) && c.init?.method === "POST")?.init?.body));
+  expect(body("/profile")).toEqual({ organization: "Delta Group", description: "Water first." });
+  expect(body("/workforce")).toEqual({ workforce_size: 450 });
+});
+
+it("leaves the workforce size alone when only the profile changes", async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  stub({}, calls);
+  render(<Dashboard />);
+  const organization = within(await screen.findByRole("region", { name: "Organization" }));
+  fireEvent.click(organization.getByRole("button", { name: "Save profile" }));
+  expect(await organization.findByText("Organization profile saved.")).toBeInTheDocument();
+  expect(calls.some((c) => c.url.endsWith("/workforce"))).toBe(false);
 });

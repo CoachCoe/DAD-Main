@@ -24,6 +24,7 @@ const minimumGroup = 5
 // caller's own, so a client can offer only the actions it may take (§7.2).
 type PartnerOverview struct {
 	Organization      string     `json:"organization"`
+	Description       string     `json:"description"`
 	Role              string     `json:"role"`
 	CompanyCode       string     `json:"company_code"`
 	CommittedMinor    int64      `json:"committed_minor"`
@@ -83,6 +84,7 @@ type PartnerDashboardService struct{ PartnerPortalService }
 func partnerOverview(actor PartnerActor, t queries.PartnerOverviewTotalsRow) PartnerOverview {
 	o := PartnerOverview{
 		Organization:   actor.Organization,
+		Description:    t.Description,
 		Role:           actor.Role,
 		CompanyCode:    t.CompanyCode.String,
 		CommittedMinor: t.CommittedMinor, DeployedMinor: t.DeployedMinor,

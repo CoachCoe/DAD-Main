@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -136,5 +137,56 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	}
 	if _, err := dash.ExportReport(ctx, viewerSession); !errors.Is(err, ErrPartnerForbidden) {
 		t.Fatalf("viewer exported a report: %v", err)
+	}
+}
+
+// TestPartnerProfileEditedByAdminsOnly covers the §7.2 organization profile.
+func TestPartnerProfileEditedByAdminsOnly(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	apps := PartnerApplicationService{DB: pool, Staff: &StaffService{DB: as(t, dbroles.API)}}
+	dash := PartnerDashboardService{PartnerPortalService{DB: as(t, dbroles.API)}}
+	_, superToken := staffFixture(t, pool, "SUPER_ADMIN")
+	cleanPartners(t, pool)
+	appID := testID(t)
+	if err := apps.Apply(ctx, appID, validApplication("Zeta Ltd", "cfo@zeta.test")); err != nil {
+		t.Fatal(err)
+	}
+	partnerID, err := apps.Approve(ctx, superToken, appID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var adminID string
+	if err := pool.QueryRow(ctx, "SELECT id FROM donor_partner_users WHERE partner_id=$1 AND role='ADMIN'", partnerID).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	viewerID := testID(t)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_partner_users (id, partner_id, email, name, role) VALUES ($1,$2,'viewer@zeta.test','Viewer','VIEWER')",
+		viewerID,
+		partnerID,
+	)
+	admin := issueTestPartnerSession(t, pool, adminID)
+	viewer := issueTestPartnerSession(t, pool, viewerID.String())
+
+	if err := dash.SaveProfile(ctx, admin, "  Zeta Group ", " Clean water in three counties. "); err != nil {
+		t.Fatal(err)
+	}
+	ov, err := dash.Overview(ctx, viewer)
+	if err != nil || ov.Organization != "Zeta Group" || ov.Description != "Clean water in three counties." {
+		t.Fatalf("saved profile reads back as %q / %q (%v)", ov.Organization, ov.Description, err)
+	}
+	if err := dash.SaveProfile(ctx, viewer, "Viewer Co", ""); !errors.Is(err, ErrPartnerForbidden) {
+		t.Fatalf("a viewer edited the profile: %v", err)
+	}
+	for _, name := range []string{" ", strings.Repeat("n", 201)} {
+		if err := dash.SaveProfile(ctx, admin, name, ""); !errors.Is(err, ErrPartnerApplication) {
+			t.Fatalf("name %q accepted: %v", name, err)
+		}
+	}
+	if err := dash.SaveProfile(ctx, admin, "Zeta", strings.Repeat("d", 4001)); !errors.Is(err, ErrPartnerApplication) {
+		t.Fatalf("an over-long description was accepted: %v", err)
 	}
 }

@@ -56,10 +56,10 @@ UPDATE donor_partner_signups
 SET workforce_size=$2, match_rate_bp=$3, match_cap_minor=$4
 WHERE id=$1 AND approved_at IS NOT NULL;
 
--- name: UpdatePartnerProfile :exec
--- Partner admin edits the org profile (name, logo, description) (§7.2).
+-- name: UpdatePartnerProfile :execrows
+-- Partner admin edits the org profile (§7.2).
 UPDATE donor_partner_signups
-SET organization=$2, logo_url=$3, description=$4
+SET organization=$2, description=$3
 WHERE id=$1 AND approved_at IS NOT NULL;
 
 -- name: LinkInitiativeToPartner :execrows
@@ -128,6 +128,7 @@ ORDER BY s.category;
 SELECT
   p.company_code,
   p.workforce_size,
+  p.description,
   coalesce((SELECT sum(i.committed_minor) FROM donor_initiatives i
             WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
@@ -199,9 +200,6 @@ VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (dedup_key) DO NOTHING;
 SELECT * FROM donor_partner_messages WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
 
--- name: PartnerMessageByID :one
-SELECT * FROM donor_partner_messages WHERE id=$1;
-
 -- name: RenderPartnerMessage :exec
 UPDATE donor_partner_messages SET subject=$2,body=$3 WHERE id=$1;
 
@@ -266,9 +264,6 @@ ORDER BY u.id;
 -- name: NextPartnerLoginEmail :one
 SELECT * FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED;
-
--- name: PartnerLoginEmailByID :one
-SELECT * FROM donor_partner_login_emails WHERE id=$1 FOR UPDATE;
 
 -- name: LockPartnerLoginRecipient :one
 SELECT u.id, u.email, u.name, u.role, u.disabled, u.invite_token_hash, p.organization, p.approved_at

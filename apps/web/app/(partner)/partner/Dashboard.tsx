@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { hours, TeamLeaderboard } from "@/components/donor/TeamLeaderboard";
-import { api, failureMessage, type ResponseBody } from "@/lib/api";
+import { api, failureMessage, type RequestBody, type ResponseBody } from "@/lib/api";
 import { formatDateTime, formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
@@ -414,6 +414,77 @@ function UsersSection() {
   );
 }
 
+function OrganizationSection({ overview, onSaved }: { overview: Overview; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+
+  async function save(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const workforce = Number(form.get("workforce_size"));
+    setBusy(true);
+    setError("");
+    setStatus("");
+    try {
+      await api("/donor/partner/profile", {
+        method: "POST",
+        body: JSON.stringify({
+          organization: String(form.get("organization") ?? ""),
+          description: String(form.get("description") ?? ""),
+        } satisfies RequestBody<"/donor/partner/profile", "post">),
+      });
+      if (workforce !== overview.workforce_size) {
+        await api("/donor/partner/workforce", {
+          method: "POST",
+          body: JSON.stringify({ workforce_size: workforce } satisfies RequestBody<"/donor/partner/workforce", "post">),
+        });
+      }
+      setStatus("Organization profile saved.");
+      onSaved();
+    } catch (cause) {
+      setError(failureMessage(cause, "The profile could not be saved right now. Please retry in a moment."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section id="organization" aria-labelledby="organization-heading">
+      <h2 id="organization-heading">Organization</h2>
+      <form onSubmit={save} key={`${overview.organization}-${overview.description}-${overview.workforce_size}`}>
+        <fieldset disabled={busy}>
+          <label>
+            Organization name
+            <input name="organization" defaultValue={overview.organization} required maxLength={200} />
+          </label>
+          <label>
+            Description
+            <textarea name="description" defaultValue={overview.description} maxLength={4000} />
+          </label>
+          <label>
+            Workforce size
+            <input
+              name="workforce_size"
+              type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              defaultValue={overview.workforce_size}
+              required
+            />
+          </label>
+        </fieldset>
+        <p className="note">Workforce size sets the share of employees enrolled on your overview.</p>
+        <button type="submit" className="button" disabled={busy}>
+          {busy ? "Saving…" : "Save profile"}
+        </button>
+      </form>
+      <Announcer status={status} alert={error} />
+    </section>
+  );
+}
+
 export default function Dashboard() {
   const overview = useApiResource<Overview>("/donor/partner/overview");
   const o = overview.data;
@@ -448,7 +519,9 @@ export default function Dashboard() {
               </a>
             ))}
             {admin && <a href="#users">Users</a>}
+            {admin && <a href="#organization">Organization</a>}
           </nav>
+          {o.description && <p className="lead">{o.description}</p>}
           <section id="overview" aria-labelledby="overview-heading">
             <h2 id="overview-heading">Overview</h2>
             <div className="metrics">
@@ -481,6 +554,7 @@ export default function Dashboard() {
           <PeopleSection companyCode={o.company_code} />
           <ReportsSection admin={admin} />
           {admin && <UsersSection />}
+          {admin && <OrganizationSection overview={o} onSaved={overview.reload} />}
           <p>
             <button
               type="button"

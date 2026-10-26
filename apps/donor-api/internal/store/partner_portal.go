@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -96,6 +97,25 @@ func partnerAdminWrite[T any](
 		}
 		return fn(tx, actor, now)
 	})
+}
+
+// SaveProfile replaces the organization's name and description (§7.2).
+// Admin-only.
+func (s PartnerPortalService) SaveProfile(ctx context.Context, token, organization, description string) error {
+	organization, description = strings.TrimSpace(organization), strings.TrimSpace(description)
+	if organization == "" || utf8.RuneCountInString(organization) > 200 || utf8.RuneCountInString(description) > 4000 {
+		return ErrPartnerApplication
+	}
+	_, err := partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, _ time.Time) (struct{}, error) {
+		n, err := queries.New(tx).UpdatePartnerProfile(ctx, queries.UpdatePartnerProfileParams{
+			ID: actor.PartnerID, Organization: organization, Description: description,
+		})
+		if err == nil && n == 0 {
+			err = pgx.ErrNoRows
+		}
+		return struct{}{}, err
+	})
+	return err
 }
 
 // Invite adds a partner user by email and emails them a sign-in link (P-4).

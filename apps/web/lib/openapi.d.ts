@@ -2306,6 +2306,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/partner/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update organization profile
+         * @description Replaces the organization's name and description (§7.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000.
+         */
+        post: operations["partnerSaveProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/staff/partners/{partnerID}/match-status": {
         parameters: {
             query?: never;
@@ -7558,6 +7578,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         organization: string;
+                        /** @description The organization's description, as its administrators wrote it (§7.2). */
+                        description: string;
                         /** @enum {string} */
                         role: "ADMIN" | "VIEWER";
                         company_code: string;
@@ -8240,6 +8262,41 @@ export interface operations {
             content: {
                 "application/json": {
                     workforce_size: number;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        saved: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerSaveProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    organization: string;
+                    description: string;
                 };
             };
         };

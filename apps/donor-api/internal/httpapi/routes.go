@@ -140,6 +140,7 @@ func (a *api) routes() []route {
 		a.partnerRead("GET /donor/partner/our-people", a.employeeOurPeople),
 		a.partnerRead("GET /donor/partner/teams", a.employeeTeams),
 		a.partnerWrite("POST /donor/partner/workforce", a.employeeWorkforce),
+		a.partnerWrite("POST /donor/partner/profile", a.partnerSaveProfile),
 		a.partnerRead("GET /donor/partner/report.pdf", a.partnerReport),
 		a.partnerRead("GET /donor/partner/company-code.svg", a.partnerCompanyCode),
 		a.partnerWrite("POST /donor/partner/users", a.partnerInviteUser),
