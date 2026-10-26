@@ -19,14 +19,3 @@ INSERT INTO donor_content_publications(id,actor_id,payload,created_at) VALUES($1
 -- name: PublishContentHead :exec
 INSERT INTO donor_content_head(id,publication_id) VALUES('r1',$1)
 ON CONFLICT(id) DO UPDATE SET publication_id=EXCLUDED.publication_id;
-
--- name: InsertPartnerSignup :exec
-INSERT INTO donor_partner_signups(id,organization,name,email,website,message,request_hash,consent_version)
-VALUES($1,$2,$3,$4,$5,$6,$7,'r1-partner-contact-v1') ON CONFLICT(id) DO NOTHING;
-
--- name: PartnerSignupByID :one
-SELECT * FROM donor_partner_signups WHERE id=$1;
-
--- name: PartnerSignupsPage :many
-SELECT id,organization,name,email,website,message,created_at FROM donor_partner_signups
-ORDER BY created_at DESC,id LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;

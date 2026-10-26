@@ -59,21 +59,6 @@ type StoredSource struct {
 	Sha256 string      `json:"sha256"`
 }
 
-type PartnerSignup struct {
-	At           pgtype.Timestamptz `json:"at"`
-	Email        string             `json:"email"`
-	ID           pgtype.UUID        `json:"id"`
-	Message      string             `json:"message"`
-	Name         string             `json:"name"`
-	Organization string             `json:"organization"`
-	Website      string             `json:"website"`
-}
-
-type PartnerPage struct {
-	NextOffset *int64          `json:"next_offset"`
-	Signups    []PartnerSignup `json:"signups"`
-}
-
 func (s ContentService) Inventory(ctx context.Context, token string) (ContentInventory, error) {
 	return staffRead(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, _ queries.DonorStaff, _ time.Time) (ContentInventory, error) {
 		q := queries.New(tx)
@@ -155,37 +140,4 @@ func (s ContentService) ReadSource(ctx context.Context, token string, id pgtype.
 			return ContentDocument{Name: row.Name, Data: data}, nil
 		},
 	)
-}
-
-func (s ContentService) Partners(ctx context.Context, token string, offset int64) (PartnerPage, error) {
-	if !pageOffsetValid(offset) {
-		return PartnerPage{}, ErrStaffInput
-	}
-	return staffRead(ctx, s.Staff, token, "content.publish", func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (PartnerPage, error) {
-		q := queries.New(tx)
-		rows, err := q.PartnerSignupsPage(ctx, offset)
-		if err != nil {
-			return PartnerPage{}, err
-		}
-		rows, next := page(rows, offset)
-		out := PartnerPage{NextOffset: next, Signups: make([]PartnerSignup, 0, len(rows))}
-		for _, row := range rows {
-			out.Signups = append(
-				out.Signups,
-				PartnerSignup{
-					ID:           row.ID,
-					Organization: row.Organization,
-					Name:         row.Name,
-					Email:        row.Email,
-					Website:      row.Website,
-					Message:      row.Message,
-					At:           row.CreatedAt,
-				},
-			)
-		}
-		if err = auditStaff(ctx, q, actor.ID, "partner.inquiries_viewed", "partner-signups", map[string]int{"count": len(rows)}, now); err != nil {
-			return PartnerPage{}, err
-		}
-		return out, nil
-	})
 }

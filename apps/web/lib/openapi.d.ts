@@ -157,23 +157,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/public/partner-signup": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Partner contact form */
-        post: operations["partnerSignup"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/donor/login": {
         parameters: {
             query?: never;
@@ -1193,8 +1176,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Partner inquiries */
-        get: operations["partnerInquiries"];
+        /** Approved partner organizations */
+        get: operations["staffPartners"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2370,6 +2353,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/staff/partners/{partnerID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A partner's linked initiatives, match terms, and users */
+        get: operations["staffPartnerDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partnerID}/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite a user to a partner organization
+         * @description Emails the invitee a sign-in link. Re-inviting an existing address refreshes its role and re-enables a removed user.
+         */
+        post: operations["staffPartnerInviteUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partnerID}/users/{userID}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a partner user and end their sessions */
+        post: operations["staffPartnerRemoveUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3140,26 +3177,6 @@ export interface components {
             /** Format: uuid */
             publication_id: string;
         };
-        PartnerSignup: {
-            /** Format: date-time */
-            at: string;
-            /** Format: email */
-            email: string;
-            /** Format: uuid */
-            id: string;
-            message: string;
-            name: string;
-            organization: string;
-            website: string;
-        };
-        PartnerPage: {
-            /**
-             * Format: int64
-             * @description Offset of the next page, or null on the last page.
-             */
-            next_offset: number | null;
-            signups: components["schemas"]["PartnerSignup"][];
-        };
         PublicationRequest: {
             /** @description Initiatives spreadsheet export (CSV). */
             initiatives_csv?: string;
@@ -3168,17 +3185,6 @@ export interface components {
             /** Format: date */
             as_of?: string;
             cadence?: string;
-        };
-        PartnerRequest: {
-            organization: string;
-            name: string;
-            /** Format: email */
-            email: string;
-            /** @description Optional HTTPS URL. */
-            website?: string;
-            message?: string;
-            /** @constant */
-            contact_consent: true;
         };
         /** @description A passkey the donor can sign in with. Credential material is never returned. */
         PasskeyInfo: {
@@ -3532,6 +3538,64 @@ export interface components {
             avg_streak_days: number;
             /** Format: int64 */
             volunteer_minutes: number;
+        };
+        StaffPartner: {
+            /** Format: uuid */
+            id: string;
+            organization: string;
+            type: string;
+            /** @description Empty for an org approved before company codes existed. */
+            company_code: string;
+            workforce_size: number;
+            /** @description Match rate in basis points; 10000 matches dollar for dollar. */
+            match_rate_bp: number;
+            match_cap_minor: number;
+            /** Format: date-time */
+            approved_at: string;
+            /** @description Active portal users. */
+            user_count: number;
+            initiative_count: number;
+        };
+        StaffPartnerPage: {
+            partners: components["schemas"]["StaffPartner"][];
+            next_offset: number | null;
+        };
+        StaffPartnerDetail: {
+            /** Format: uuid */
+            id: string;
+            organization: string;
+            type: string;
+            /** @description Empty for an org approved before company codes existed. */
+            company_code: string;
+            workforce_size: number;
+            /** @description Match rate in basis points; 10000 matches dollar for dollar. */
+            match_rate_bp: number;
+            match_cap_minor: number;
+            /** Format: date-time */
+            approved_at: string;
+            /** @description Active portal users. */
+            user_count: number;
+            initiative_count: number;
+            website: string;
+            initiatives: {
+                /** Format: uuid */
+                id: string;
+                title: string;
+                status: string;
+                /** @enum {string} */
+                publish_state: "DRAFT" | "PUBLISHED";
+                committed_minor: number;
+            }[];
+            users: {
+                /** Format: uuid */
+                id: string;
+                email: string;
+                name: string;
+                /** @enum {string} */
+                role: "ADMIN" | "VIEWER";
+                /** @description Whether the user has signed in at least once. */
+                accepted: boolean;
+            }[];
         };
     };
     responses: {
@@ -3959,45 +4023,6 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
-            413: components["responses"]["PayloadTooLarge"];
-            415: components["responses"]["UnsupportedMediaType"];
-            422: components["responses"]["Unprocessable"];
-            429: components["responses"]["TooManyRequests"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    partnerSignup: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PartnerRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @constant */
-                        received: true;
-                        /** @constant */
-                        mode: "test";
-                    };
-                };
-            };
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
@@ -5822,7 +5847,7 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
-    partnerInquiries: {
+    staffPartners: {
         parameters: {
             query?: {
                 /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
@@ -5840,7 +5865,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PartnerPage"];
+                    "application/json": components["schemas"]["StaffPartnerPage"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -7971,6 +7996,105 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffPartnerDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerInviteUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    name: string;
+                    /** @enum {string} */
+                    role: "ADMIN" | "VIEWER";
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        invited: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerRemoveUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+                userID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        removed: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
     };

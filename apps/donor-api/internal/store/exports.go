@@ -93,10 +93,10 @@ var exportDatasets = map[string]exportDataset{
 	},
 	"staff": {"donor_staff", "id name email role disabled created_at", "staff.manage"},
 	"audit": {"donor_staff_audit", "id actor_id action target created_at details", "audit.read"},
-	"partner-signups": {
+	"partners": {
 		"donor_partner_signups",
-		"id organization name email website message consent_version created_at",
-		"content.publish",
+		"id organization partner_type company_code workforce_size match_rate_bp match_cap_minor approved_at created_at",
+		"partner.manage",
 	},
 	"content-sources": {"donor_content_sources", "id actor_id name sha256 created_at", "content.publish"},
 	"publications":    {"donor_content_publications", "id actor_id payload created_at", "content.publish"},

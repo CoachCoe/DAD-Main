@@ -34,6 +34,22 @@ VALUES ($1,$2,$3,$4,$5,'','','r1-partner-approved-v1',$6,$7,$8,$9);
 -- name: PartnerOrgByID :one
 SELECT * FROM donor_partner_signups WHERE id=$1;
 
+-- name: StaffPartnersPage :many
+-- §8 Partnerships: approved partner orgs with their active users and linked
+-- initiatives. Rows without approved_at are R1 contact-form inquiries.
+SELECT p.id, p.organization, p.partner_type, p.company_code, p.workforce_size, p.match_rate_bp, p.match_cap_minor, p.approved_at,
+  (SELECT count(*) FROM donor_partner_users u WHERE u.partner_id=p.id AND NOT u.disabled)::bigint AS user_count,
+  (SELECT count(*) FROM donor_initiatives i WHERE i.partner_signup_id=p.id)::bigint AS initiative_count
+FROM donor_partner_signups p
+WHERE p.approved_at IS NOT NULL
+ORDER BY p.organization, p.id
+LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
+
+-- name: StaffPartnerInitiatives :many
+SELECT id, title, status, publish_state, committed_minor FROM donor_initiatives
+WHERE partner_signup_id=$1
+ORDER BY title, id;
+
 -- name: SetPartnerMatch :execrows
 -- §8 Partnerships: set workforce size, match rate (basis points) and cap.
 UPDATE donor_partner_signups

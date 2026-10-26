@@ -26,7 +26,7 @@
   },
   {
    "name": "Public",
-   "description": "Anonymous website surfaces: content, giving, referral landing, partner contact."
+   "description": "Anonymous website surfaces: content, giving, referral landing."
   },
   {
    "name": "Account",
@@ -62,7 +62,7 @@
   },
   {
    "name": "Content",
-   "description": "Source documents, publishing, and partner inquiries. Web only."
+   "description": "Source documents and publishing. Web only."
   }
  ],
  "paths": {
@@ -671,83 +671,6 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
-     },
-     "413": {
-      "$ref": "#/components/responses/PayloadTooLarge"
-     },
-     "415": {
-      "$ref": "#/components/responses/UnsupportedMediaType"
-     },
-     "422": {
-      "$ref": "#/components/responses/Unprocessable"
-     },
-     "429": {
-      "$ref": "#/components/responses/TooManyRequests"
-     },
-     "503": {
-      "$ref": "#/components/responses/Unavailable"
-     }
-    }
-   }
-  },
-  "/donor/public/partner-signup": {
-   "post": {
-    "operationId": "partnerSignup",
-    "summary": "Partner contact form",
-    "tags": [
-     "Public"
-    ],
-    "security": [],
-    "x-rate-limit": "visitor",
-    "x-clients": [
-     "browser"
-    ],
-    "parameters": [
-     {
-      "$ref": "#/components/parameters/IdempotencyKey"
-     }
-    ],
-    "requestBody": {
-     "required": true,
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/PartnerRequest"
-       }
-      }
-     }
-    },
-    "responses": {
-     "200": {
-      "description": "OK",
-      "content": {
-       "application/json": {
-        "schema": {
-         "type": "object",
-         "properties": {
-          "received": {
-           "type": "boolean",
-           "const": true
-          },
-          "mode": {
-           "type": "string",
-           "const": "test"
-          }
-         },
-         "required": [
-          "received",
-          "mode"
-         ],
-         "additionalProperties": false
-        }
-       }
-      }
-     },
-     "403": {
-      "$ref": "#/components/responses/Forbidden"
-     },
-     "409": {
-      "$ref": "#/components/responses/Conflict"
      },
      "413": {
       "$ref": "#/components/responses/PayloadTooLarge"
@@ -4499,10 +4422,10 @@
   },
   "/donor/staff/partners": {
    "get": {
-    "operationId": "partnerInquiries",
-    "summary": "Partner inquiries",
+    "operationId": "staffPartners",
+    "summary": "Approved partner organizations",
     "tags": [
-     "Content"
+     "Staff"
     ],
     "security": [
      {
@@ -4520,7 +4443,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/PartnerPage"
+         "$ref": "#/components/schemas/StaffPartnerPage"
         }
        }
       }
@@ -7970,7 +7893,7 @@
       "$ref": "#/components/responses/Forbidden"
      },
      "404": {
-       "$ref": "#/components/responses/NotFound"
+      "$ref": "#/components/responses/NotFound"
      },
      "409": {
       "$ref": "#/components/responses/Conflict"
@@ -8601,7 +8524,7 @@
       "$ref": "#/components/responses/Forbidden"
      },
      "409": {
-       "$ref": "#/components/responses/Conflict"
+      "$ref": "#/components/responses/Conflict"
      },
      "422": {
       "$ref": "#/components/responses/Unprocessable"
@@ -9212,6 +9135,237 @@
       "$ref": "#/components/responses/Unavailable"
      }
     }
+   }
+  },
+  "/donor/staff/partners/{partnerID}": {
+   "get": {
+    "operationId": "staffPartnerDetail",
+    "summary": "A partner's linked initiatives, match terms, and users",
+    "tags": [
+     "Staff"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "partnerID",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StaffPartnerDetail"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/staff/partners/{partnerID}/users": {
+   "post": {
+    "operationId": "staffPartnerInviteUser",
+    "summary": "Invite a user to a partner organization",
+    "description": "Emails the invitee a sign-in link. Re-inviting an existing address refreshes its role and re-enables a removed user.",
+    "tags": [
+     "Staff"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "parameters": [
+     {
+      "name": "partnerID",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "email": {
+          "type": "string"
+         },
+         "name": {
+          "type": "string"
+         },
+         "role": {
+          "type": "string",
+          "enum": [
+           "ADMIN",
+           "VIEWER"
+          ]
+         }
+        },
+        "required": [
+         "email",
+         "name",
+         "role"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "invited": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "invited"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "x-clients": [
+     "browser"
+    ]
+   }
+  },
+  "/donor/staff/partners/{partnerID}/users/{userID}/remove": {
+   "post": {
+    "operationId": "staffPartnerRemoveUser",
+    "summary": "Remove a partner user and end their sessions",
+    "tags": [
+     "Staff"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "parameters": [
+     {
+      "name": "partnerID",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     },
+     {
+      "name": "userID",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "removed": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "removed"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "x-clients": [
+     "browser"
+    ]
    }
   }
  },
@@ -9900,7 +10054,7 @@
      },
      "network_visible": {
       "type": "boolean",
-      "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). On by default: visibility is opt-out (§10)."
+      "description": "When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). On by default: visibility is opt-out (\u00a710)."
      },
      "volunteer": {
       "type": "boolean",
@@ -11568,70 +11722,6 @@
     ],
     "additionalProperties": false
    },
-   "PartnerSignup": {
-    "type": "object",
-    "properties": {
-     "at": {
-      "type": "string",
-      "format": "date-time"
-     },
-     "email": {
-      "type": "string",
-      "format": "email"
-     },
-     "id": {
-      "type": "string",
-      "format": "uuid"
-     },
-     "message": {
-      "type": "string"
-     },
-     "name": {
-      "type": "string"
-     },
-     "organization": {
-      "type": "string"
-     },
-     "website": {
-      "type": "string"
-     }
-    },
-    "required": [
-     "at",
-     "email",
-     "id",
-     "message",
-     "name",
-     "organization",
-     "website"
-    ],
-    "additionalProperties": false
-   },
-   "PartnerPage": {
-    "type": "object",
-    "properties": {
-     "next_offset": {
-      "type": [
-       "integer",
-       "null"
-      ],
-      "format": "int64",
-      "description": "Offset of the next page, or null on the last page.",
-      "minimum": 0
-     },
-     "signups": {
-      "type": "array",
-      "items": {
-       "$ref": "#/components/schemas/PartnerSignup"
-      }
-     }
-    },
-    "required": [
-     "next_offset",
-     "signups"
-    ],
-    "additionalProperties": false
-   },
    "PublicationRequest": {
     "type": "object",
     "properties": {
@@ -11652,46 +11742,6 @@
      }
     },
     "required": [],
-    "additionalProperties": false
-   },
-   "PartnerRequest": {
-    "type": "object",
-    "properties": {
-     "organization": {
-      "type": "string",
-      "maxLength": 200,
-      "minLength": 1
-     },
-     "name": {
-      "type": "string",
-      "maxLength": 100,
-      "minLength": 1
-     },
-     "email": {
-      "type": "string",
-      "format": "email",
-      "maxLength": 320
-     },
-     "website": {
-      "type": "string",
-      "description": "Optional HTTPS URL.",
-      "maxLength": 500
-     },
-     "message": {
-      "type": "string",
-      "maxLength": 2000
-     },
-     "contact_consent": {
-      "type": "boolean",
-      "const": true
-     }
-    },
-    "required": [
-     "organization",
-     "name",
-     "email",
-     "contact_consent"
-    ],
     "additionalProperties": false
    },
    "PasskeyInfo": {
@@ -12759,6 +12809,217 @@
      "annualized_minor",
      "avg_streak_days",
      "volunteer_minutes"
+    ],
+    "additionalProperties": false
+   },
+   "StaffPartner": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "organization": {
+      "type": "string"
+     },
+     "type": {
+      "type": "string"
+     },
+     "company_code": {
+      "type": "string",
+      "description": "Empty for an org approved before company codes existed."
+     },
+     "workforce_size": {
+      "type": "integer"
+     },
+     "match_rate_bp": {
+      "type": "integer",
+      "description": "Match rate in basis points; 10000 matches dollar for dollar."
+     },
+     "match_cap_minor": {
+      "type": "integer"
+     },
+     "approved_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "user_count": {
+      "type": "integer",
+      "description": "Active portal users."
+     },
+     "initiative_count": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "id",
+     "organization",
+     "type",
+     "company_code",
+     "workforce_size",
+     "match_rate_bp",
+     "match_cap_minor",
+     "approved_at",
+     "user_count",
+     "initiative_count"
+    ],
+    "additionalProperties": false
+   },
+   "StaffPartnerPage": {
+    "type": "object",
+    "properties": {
+     "partners": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/StaffPartner"
+      }
+     },
+     "next_offset": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "partners",
+     "next_offset"
+    ],
+    "additionalProperties": false
+   },
+   "StaffPartnerDetail": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "organization": {
+      "type": "string"
+     },
+     "type": {
+      "type": "string"
+     },
+     "company_code": {
+      "type": "string",
+      "description": "Empty for an org approved before company codes existed."
+     },
+     "workforce_size": {
+      "type": "integer"
+     },
+     "match_rate_bp": {
+      "type": "integer",
+      "description": "Match rate in basis points; 10000 matches dollar for dollar."
+     },
+     "match_cap_minor": {
+      "type": "integer"
+     },
+     "approved_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "user_count": {
+      "type": "integer",
+      "description": "Active portal users."
+     },
+     "initiative_count": {
+      "type": "integer"
+     },
+     "website": {
+      "type": "string"
+     },
+     "initiatives": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "string",
+         "format": "uuid"
+        },
+        "title": {
+         "type": "string"
+        },
+        "status": {
+         "type": "string"
+        },
+        "publish_state": {
+         "type": "string",
+         "enum": [
+          "DRAFT",
+          "PUBLISHED"
+         ]
+        },
+        "committed_minor": {
+         "type": "integer"
+        }
+       },
+       "required": [
+        "id",
+        "title",
+        "status",
+        "publish_state",
+        "committed_minor"
+       ],
+       "additionalProperties": false
+      }
+     },
+     "users": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "string",
+         "format": "uuid"
+        },
+        "email": {
+         "type": "string"
+        },
+        "name": {
+         "type": "string"
+        },
+        "role": {
+         "type": "string",
+         "enum": [
+          "ADMIN",
+          "VIEWER"
+         ]
+        },
+        "accepted": {
+         "type": "boolean",
+         "description": "Whether the user has signed in at least once."
+        }
+       },
+       "required": [
+        "id",
+        "email",
+        "name",
+        "role",
+        "accepted"
+       ],
+       "additionalProperties": false
+      }
+     }
+    },
+    "required": [
+     "id",
+     "organization",
+     "type",
+     "company_code",
+     "workforce_size",
+     "match_rate_bp",
+     "match_cap_minor",
+     "approved_at",
+     "user_count",
+     "initiative_count",
+     "website",
+     "initiatives",
+     "users"
     ],
     "additionalProperties": false
    }

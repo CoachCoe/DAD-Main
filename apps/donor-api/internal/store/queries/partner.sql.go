@@ -1248,6 +1248,102 @@ func (q *Queries) SetPartnerUserLink(ctx context.Context, arg SetPartnerUserLink
 	return err
 }
 
+const staffPartnerInitiatives = `-- name: StaffPartnerInitiatives :many
+SELECT id, title, status, publish_state, committed_minor FROM donor_initiatives
+WHERE partner_signup_id=$1
+ORDER BY title, id
+`
+
+type StaffPartnerInitiativesRow struct {
+	ID             pgtype.UUID `json:"id"`
+	Title          string      `json:"title"`
+	Status         string      `json:"status"`
+	PublishState   string      `json:"publish_state"`
+	CommittedMinor int64       `json:"committed_minor"`
+}
+
+func (q *Queries) StaffPartnerInitiatives(ctx context.Context, partnerSignupID pgtype.UUID) ([]StaffPartnerInitiativesRow, error) {
+	rows, err := q.db.Query(ctx, staffPartnerInitiatives, partnerSignupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StaffPartnerInitiativesRow{}
+	for rows.Next() {
+		var i StaffPartnerInitiativesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Status,
+			&i.PublishState,
+			&i.CommittedMinor,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const staffPartnersPage = `-- name: StaffPartnersPage :many
+SELECT p.id, p.organization, p.partner_type, p.company_code, p.workforce_size, p.match_rate_bp, p.match_cap_minor, p.approved_at,
+  (SELECT count(*) FROM donor_partner_users u WHERE u.partner_id=p.id AND NOT u.disabled)::bigint AS user_count,
+  (SELECT count(*) FROM donor_initiatives i WHERE i.partner_signup_id=p.id)::bigint AS initiative_count
+FROM donor_partner_signups p
+WHERE p.approved_at IS NOT NULL
+ORDER BY p.organization, p.id
+LIMIT 51 OFFSET $1::bigint
+`
+
+type StaffPartnersPageRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	Organization    string             `json:"organization"`
+	PartnerType     string             `json:"partner_type"`
+	CompanyCode     pgtype.Text        `json:"company_code"`
+	WorkforceSize   int32              `json:"workforce_size"`
+	MatchRateBp     int32              `json:"match_rate_bp"`
+	MatchCapMinor   int64              `json:"match_cap_minor"`
+	ApprovedAt      pgtype.Timestamptz `json:"approved_at"`
+	UserCount       int64              `json:"user_count"`
+	InitiativeCount int64              `json:"initiative_count"`
+}
+
+// §8 Partnerships: approved partner orgs with their active users and linked
+// initiatives. Rows without approved_at are R1 contact-form inquiries.
+func (q *Queries) StaffPartnersPage(ctx context.Context, pageOffset int64) ([]StaffPartnersPageRow, error) {
+	rows, err := q.db.Query(ctx, staffPartnersPage, pageOffset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StaffPartnersPageRow{}
+	for rows.Next() {
+		var i StaffPartnersPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Organization,
+			&i.PartnerType,
+			&i.CompanyCode,
+			&i.WorkforceSize,
+			&i.MatchRateBp,
+			&i.MatchCapMinor,
+			&i.ApprovedAt,
+			&i.UserCount,
+			&i.InitiativeCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updatePartnerProfile = `-- name: UpdatePartnerProfile :exec
 UPDATE donor_partner_signups
 SET organization=$2, logo_url=$3, description=$4

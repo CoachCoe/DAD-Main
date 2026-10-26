@@ -36,7 +36,6 @@ type Services struct {
 	Content  ContentSource
 	Checkout CheckoutSource
 	Webhook  WebhookReceiver
-	Partner  PartnerSource
 	// Partner portal: the public application, the authenticated
 	// partner session surface, and the staff-side partner administration.
 	PartnerApply    PartnerApplySource

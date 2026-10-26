@@ -42,6 +42,10 @@ type StaffPartnerSource interface {
 	Reject(ctx context.Context, token string, appID pgtype.UUID, reason string) error
 	LinkInitiative(ctx context.Context, token string, partnerID, initiativeID pgtype.UUID) error
 	SetMatch(ctx context.Context, token string, partnerID pgtype.UUID, workforce, rateBP int32, capMinor int64) error
+	Partners(ctx context.Context, token string, offset int64) (store.StaffPartnerPage, error)
+	Partner(ctx context.Context, token string, partnerID pgtype.UUID) (store.StaffPartnerDetail, error)
+	InviteUser(ctx context.Context, token string, partnerID pgtype.UUID, email, name, role string) error
+	RemoveUser(ctx context.Context, token string, partnerID, userID pgtype.UUID) error
 }
 
 // partnerSessionMaxAge mirrors the 12h store session lifetime.
@@ -83,8 +87,19 @@ func (a *api) partnerPortal() service {
 	return service{a.PartnerPortal != nil, "The partner portal is temporarily unavailable", readTimeout, partnerStatusCode}
 }
 
+func staffPartnerStatus(err error) (int, string) {
+	switch {
+	case errors.Is(err, store.ErrPartnerApplication):
+		return http.StatusUnprocessableEntity, "Check the highlighted fields and try again"
+	case errors.Is(err, store.ErrPartnerDecision):
+		return http.StatusConflict, "This application has already been decided"
+	default:
+		return staffStatus(err)
+	}
+}
+
 func (a *api) staffPartner() service {
-	return service{a.StaffPartner != nil, "Partner administration is temporarily unavailable", staffTimeout, staffStatus}
+	return service{a.StaffPartner != nil, "Partner administration is temporarily unavailable", staffTimeout, staffPartnerStatus}
 }
 
 func (a *api) partnerApply(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +285,55 @@ func (a *api) partnerReport(w http.ResponseWriter, r *http.Request, session stri
 	w.Header().Set("Content-Disposition", `attachment; filename="dad-impact-report.pdf"`)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(pdf)
+}
+
+func (a *api) staffPartners(w http.ResponseWriter, r *http.Request, session string) {
+	offset, ok := offsetParam(r, "offset")
+	if !ok {
+		invalidFields(w, r)
+		return
+	}
+	a.staffPartner().serve(w, r, func(ctx context.Context) (any, error) { return a.StaffPartner.Partners(ctx, session, offset) })
+}
+
+func (a *api) staffPartnerDetail(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "partnerID")
+	if !ok {
+		return
+	}
+	a.staffPartner().serve(w, r, func(ctx context.Context) (any, error) { return a.StaffPartner.Partner(ctx, session, id) })
+}
+
+func (a *api) staffPartnerInviteUser(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "partnerID")
+	if !ok {
+		return
+	}
+	var body struct {
+		Email string `json:"email"`
+		Name  string `json:"name"`
+		Role  string `json:"role"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	a.staffPartner().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"invited": true}, a.StaffPartner.InviteUser(ctx, session, id, body.Email, body.Name, body.Role)
+	})
+}
+
+func (a *api) staffPartnerRemoveUser(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "partnerID")
+	if !ok {
+		return
+	}
+	userID, ok := pathID(w, r, "userID")
+	if !ok {
+		return
+	}
+	a.staffPartner().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"removed": true}, a.StaffPartner.RemoveUser(ctx, session, id, userID)
+	})
 }
 
 func (a *api) staffPartnerPending(w http.ResponseWriter, r *http.Request, session string) {

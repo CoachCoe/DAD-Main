@@ -29,10 +29,6 @@ func TestControlCharactersAreRejectedBeforeStorage(t *testing.T) {
 	if err != nil || capture.Token != "" {
 		t.Fatalf("NUL referral capture: got %+v %v, want nothing captured", capture, err)
 	}
-	partner := PartnerRequest{Organization: "Org", Name: "Name", Email: "partner@example.org", Message: "Hello\x00", Consent: true}
-	if err = (PartnerService{DB: s.DB}).Signup(ctx, testID(t), partner); !errors.Is(err, ErrStaffInput) {
-		t.Fatalf("NUL partner message: got %v, want ErrStaffInput", err)
-	}
 	_, support := staffFixture(t, database(t), "OP_PARTNERSHIPS")
 	if _, err = (&StaffService{DB: s.DB}).SearchDonors(ctx, support, "a\x00", 0); !errors.Is(err, ErrStaffInput) {
 		t.Fatalf("NUL search: got %v, want ErrStaffInput", err)

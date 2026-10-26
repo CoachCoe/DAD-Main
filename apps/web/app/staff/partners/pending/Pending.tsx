@@ -49,7 +49,7 @@ export default function Pending() {
   return (
     <Page wide eyebrow="Staff" back={{ href: "/staff", label: "Staff back office" }} title="Partner applications">
       <p>
-        <Link href="/staff/partners">Partner inquiries (contact form)</Link>
+        <Link href="/staff/partners">Approved partners</Link>
       </p>
       {resource.state === "signedOut" && (
         <p>

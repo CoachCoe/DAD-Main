@@ -264,7 +264,7 @@ func (s PartnerApplicationService) LinkInitiative(ctx context.Context, token str
 				return struct{}{}, err
 			}
 			if !org.ApprovedAt.Valid {
-				return struct{}{}, ErrPartnerDecision
+				return struct{}{}, pgx.ErrNoRows
 			}
 			linked, err := q.LinkInitiativeToPartner(ctx, queries.LinkInitiativeToPartnerParams{
 				ID: initiativeID, PartnerSignupID: partnerID, UpdatedAt: timestamp(now),
