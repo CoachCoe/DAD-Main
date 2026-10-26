@@ -139,7 +139,9 @@ func (s EventService) Create(ctx context.Context, token string, in EventInput) (
 		})
 }
 
-// Update edits an existing event's fields. Publishing is separate.
+// Update edits an existing event's fields. Publishing is separate. Raising
+// the capacity of an upcoming event seats waitlisted donors at once (E-4);
+// lowering it never removes a seat already held.
 func (s EventService) Update(ctx context.Context, token string, id pgtype.UUID, in EventInput) error {
 	_, err := staffWrite(ctx, s.Staff, token, eventPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
@@ -148,7 +150,8 @@ func (s EventService) Update(ctx context.Context, token string, id pgtype.UUID, 
 				return struct{}{}, err
 			}
 			q := queries.New(tx)
-			if _, err = q.EventByID(ctx, id); err != nil {
+			event, err := q.LockEvent(ctx, id)
+			if err != nil {
 				return struct{}{}, err
 			}
 			if err = q.UpdateEvent(ctx, queries.UpdateEventParams{
@@ -158,6 +161,12 @@ func (s EventService) Update(ctx context.Context, token string, id pgtype.UUID, 
 				QualifyingPerk: params.QualifyingPerk, UpdatedAt: timestamp(now),
 			}); err != nil {
 				return struct{}{}, err
+			}
+			event.Capacity, event.StartsAt = params.Capacity, params.StartsAt
+			if now.Before(event.StartsAt.Time) {
+				if err = fillSeats(ctx, q, event, now); err != nil {
+					return struct{}{}, err
+				}
 			}
 			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.updated", id.String(), nil, now)
 		})
@@ -312,55 +321,62 @@ func spotsLeft(capacity int32, reserved int64) *int32 {
 // nor a ZIP gets an empty list rather than everything.
 func (r EventReader) NearDonor(ctx context.Context, token string) ([]EventView, error) {
 	return donorRead(ctx, r.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) ([]EventView, error) {
-		city := ""
-		if d.City.Valid {
-			city = d.City.String
-		}
 		zip3 := ""
-		if d.Zip.Valid && len(d.Zip.String) >= 3 {
+		if len(d.Zip.String) >= 3 {
 			zip3 = d.Zip.String[:3]
 		}
 		rows, err := q.UpcomingEventsNearDonor(ctx, queries.UpcomingEventsNearDonorParams{
-			Now: timestamp(now), City: city, Zip3: zip3,
+			Now: timestamp(now), City: d.City.String, Zip3: zip3,
 		})
 		if err != nil {
 			return nil, err
 		}
-		if len(rows) == 0 {
-			return []EventView{}, nil
-		}
-		ids := make([]pgtype.UUID, 0, len(rows))
-		for _, e := range rows {
-			ids = append(ids, e.ID)
-		}
-		reservedCounts, err := q.ReservedCountsForEvents(ctx, ids)
-		if err != nil {
-			return nil, err
-		}
-		reserved := make(map[string]int64, len(reservedCounts))
-		for _, rc := range reservedCounts {
-			reserved[rc.EventID.String()] = rc.Reserved
-		}
-		mine, err := q.DonorReservationsForEvents(ctx, queries.DonorReservationsForEventsParams{DonorID: d.ID, EventIds: ids})
-		if err != nil {
-			return nil, err
-		}
-		status := make(map[string]string, len(mine))
-		for _, m := range mine {
-			status[m.EventID.String()] = m.Status
-		}
-		out := make([]EventView, 0, len(rows))
-		for _, e := range rows {
-			v := eventView(e)
-			v.ReportIssueURL = r.reportIssueURL(e)
-			v.SpotsLeft = spotsLeft(e.Capacity, reserved[v.ID])
-			if s, ok := status[v.ID]; ok {
-				v.ReservationStatus = &s
-			}
-			out = append(out, v)
-		}
-		return out, nil
+		return r.donorViews(ctx, q, d.ID, rows)
 	})
+}
+
+// donorViews builds a donor's views of a list of events with two queries
+// however long the list: the seats taken on each and the donor's own status.
+func (r EventReader) donorViews(
+	ctx context.Context,
+	q *queries.Queries,
+	donor pgtype.UUID,
+	rows []queries.DonorEvent,
+) ([]EventView, error) {
+	out := make([]EventView, 0, len(rows))
+	if len(rows) == 0 {
+		return out, nil
+	}
+	ids := make([]pgtype.UUID, 0, len(rows))
+	for _, e := range rows {
+		ids = append(ids, e.ID)
+	}
+	reservedCounts, err := q.ReservedCountsForEvents(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	reserved := make(map[pgtype.UUID]int64, len(reservedCounts))
+	for _, rc := range reservedCounts {
+		reserved[rc.EventID] = rc.Reserved
+	}
+	mine, err := q.DonorReservationsForEvents(ctx, queries.DonorReservationsForEventsParams{DonorID: donor, EventIds: ids})
+	if err != nil {
+		return nil, err
+	}
+	status := make(map[pgtype.UUID]string, len(mine))
+	for _, m := range mine {
+		status[m.EventID] = m.Status
+	}
+	for _, e := range rows {
+		v := eventView(e)
+		v.ReportIssueURL = r.reportIssueURL(e)
+		v.SpotsLeft = spotsLeft(e.Capacity, reserved[e.ID])
+		if s, ok := status[e.ID]; ok {
+			v.ReservationStatus = &s
+		}
+		out = append(out, v)
+	}
+	return out, nil
 }
 
 // Detail returns one published event by id for the detail page (E-3). A draft
@@ -528,35 +544,48 @@ func canSeeInviteOnly(ctx context.Context, q *queries.Queries, donor pgtype.UUID
 func (r EventReader) InviteOnlyEvents(ctx context.Context, token string) ([]EventView, error) {
 	return donorRead(ctx, r.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) ([]EventView, error) {
 		rows, err := q.UpcomingInviteOnlyEvents(ctx, timestamp(now))
+		if err != nil || len(rows) == 0 {
+			return []EventView{}, err
+		}
+		codes, err := q.DonorEarnedBadgeCodes(ctx, d.ID)
 		if err != nil {
 			return nil, err
 		}
-		out := make([]EventView, 0)
-		for _, e := range rows {
-			ok, byPerk, err := canSeeInviteOnly(ctx, q, d.ID, e)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				continue
-			}
-			v, err := r.withSpotsLeft(ctx, q, e)
-			if err != nil {
-				return nil, err
-			}
-			if byPerk {
-				v.InvitationNote = invitationNote(e.QualifyingPerk)
-			}
-			if res, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: e.ID, DonorID: d.ID}); err == nil &&
-				res.Status != reservationCancelled {
-				s := res.Status
-				v.ReservationStatus = &s
-			} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return nil, err
-			}
-			out = append(out, v)
+		earned := make(map[string]bool, len(codes))
+		for _, c := range codes {
+			earned[c] = true
 		}
-		return out, nil
+		ids := make([]pgtype.UUID, 0, len(rows))
+		for _, e := range rows {
+			ids = append(ids, e.ID)
+		}
+		guestOf, err := q.DonorGuestEvents(ctx, queries.DonorGuestEventsParams{DonorID: d.ID, EventIds: ids})
+		if err != nil {
+			return nil, err
+		}
+		guest := make(map[pgtype.UUID]bool, len(guestOf))
+		for _, id := range guestOf {
+			guest[id] = true
+		}
+		var visible []queries.DonorEvent
+		var byPerk []bool
+		for _, e := range rows {
+			perk := badges.HoldsPerk(earned, badges.Perk(e.QualifyingPerk))
+			if perk || guest[e.ID] {
+				visible = append(visible, e)
+				byPerk = append(byPerk, perk)
+			}
+		}
+		views, err := r.donorViews(ctx, q, d.ID, visible)
+		if err != nil {
+			return nil, err
+		}
+		for i, e := range visible {
+			if byPerk[i] {
+				views[i].InvitationNote = invitationNote(e.QualifyingPerk)
+			}
+		}
+		return views, nil
 	})
 }
 
@@ -732,10 +761,8 @@ func (s ReservationService) Cancel(ctx context.Context, token string, eventID pg
 		}); err != nil {
 			return ReservationResult{}, err
 		}
-		// Cancelling a RESERVED seat frees a place; promote the waitlist head.
-		// Cancelling a WAITLISTED spot frees nothing, so no promotion.
 		if wasReserved {
-			if err = s.promoteWaitlistHead(ctx, q, event, now); err != nil {
+			if err = fillSeats(ctx, q, event, now); err != nil {
 				return ReservationResult{}, err
 			}
 		}
@@ -743,43 +770,62 @@ func (s ReservationService) Cancel(ctx context.Context, token string, eventID pg
 	})
 }
 
+// fillSeats promotes waitlisted donors, earliest first, into every free seat
+// of an event whose row the caller has locked.
+func fillSeats(ctx context.Context, q *queries.Queries, event queries.DonorEvent, now time.Time) error {
+	for {
+		if event.Capacity > 0 {
+			reserved, err := q.ReservedCount(ctx, event.ID)
+			if err != nil {
+				return err
+			}
+			if reserved >= int64(event.Capacity) {
+				return nil
+			}
+		}
+		promoted, err := promoteWaitlistHead(ctx, q, event, now)
+		if err != nil || !promoted {
+			return err
+		}
+	}
+}
+
 // promoteWaitlistHead promotes the earliest-queued waitlisted donor, if any, to
-// RESERVED and queues the promotion push and email (§6.11). Called under the
-// event lock.
-func (s ReservationService) promoteWaitlistHead(ctx context.Context, q *queries.Queries, event queries.DonorEvent, now time.Time) error {
+// RESERVED and queues the promotion push and email (§6.11).
+func promoteWaitlistHead(ctx context.Context, q *queries.Queries, event queries.DonorEvent, now time.Time) (bool, error) {
 	head, err := q.WaitlistHead(ctx, event.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil // no one waiting
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err = q.PromoteReservation(ctx, queries.PromoteReservationParams{ID: head.ID, UpdatedAt: timestamp(now)}); err != nil {
-		return err
+		return false, err
 	}
 	pushID, err := NewID()
 	if err != nil {
-		return err
+		return false, err
 	}
-	context, err := json.Marshal(map[string]string{"event_id": event.ID.String()})
+	payload, err := json.Marshal(map[string]string{"event_id": event.ID.String()})
 	if err != nil {
-		return err
+		return false, err
 	}
 	// Keyed by the waitlist place, so a later re-promotion is a new notice.
 	promotion := event.ID.String() + ":" + head.DonorID.String() + ":" + head.ReservedAt.Time.UTC().Format(time.RFC3339Nano)
 	if err = q.QueueEventPush(ctx, queries.QueueEventPushParams{
 		ID: pushID, DonorID: head.DonorID, Category: eventPromotedCategory, DedupKey: "push:event-promoted:" + promotion,
-		Context: context, AvailableAt: timestamp(now), ExpiresAt: event.StartsAt,
+		Context: payload, AvailableAt: timestamp(now), ExpiresAt: event.StartsAt,
 	}); err != nil {
-		return err
+		return false, err
 	}
 	messageID, err := NewID()
 	if err != nil {
-		return err
+		return false, err
 	}
-	return q.InsertFinancialMessage(ctx, queries.InsertFinancialMessageParams{
+	return true, q.InsertFinancialMessage(ctx, queries.InsertFinancialMessageParams{
 		ID: messageID, DonorID: head.DonorID, Kind: eventPromotedCategory, DedupKey: "message:event-promoted:" + promotion,
-		Context: context, AvailableAt: timestamp(now),
+		Context: payload, AvailableAt: timestamp(now),
 	})
 }
 

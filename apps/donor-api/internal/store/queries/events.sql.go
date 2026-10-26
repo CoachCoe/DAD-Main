@@ -11,18 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const activeReservationCount = `-- name: ActiveReservationCount :one
-SELECT count(*) FROM donor_event_reservations
-WHERE event_id=$1 AND status IN ('RESERVED', 'WAITLISTED')
-`
-
-func (q *Queries) ActiveReservationCount(ctx context.Context, eventID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, activeReservationCount, eventID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const addEventGuest = `-- name: AddEventGuest :exec
 INSERT INTO donor_event_guests (id, event_id, donor_id, created_at)
 VALUES ($1,$2,$3,$4)
@@ -91,6 +79,36 @@ func (q *Queries) DonorEarnedBadgeCodes(ctx context.Context, donorID pgtype.UUID
 	return items, nil
 }
 
+const donorGuestEvents = `-- name: DonorGuestEvents :many
+SELECT event_id FROM donor_event_guests
+WHERE donor_id=$1 AND event_id = ANY($2::uuid[])
+`
+
+type DonorGuestEventsParams struct {
+	DonorID  pgtype.UUID   `json:"donor_id"`
+	EventIds []pgtype.UUID `json:"event_ids"`
+}
+
+func (q *Queries) DonorGuestEvents(ctx context.Context, arg DonorGuestEventsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, donorGuestEvents, arg.DonorID, arg.EventIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var event_id pgtype.UUID
+		if err := rows.Scan(&event_id); err != nil {
+			return nil, err
+		}
+		items = append(items, event_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const donorReservationsForEvents = `-- name: DonorReservationsForEvents :many
 SELECT event_id, status FROM donor_event_reservations
 WHERE donor_id=$1 AND event_id = ANY($2::uuid[])
@@ -117,6 +135,43 @@ func (q *Queries) DonorReservationsForEvents(ctx context.Context, arg DonorReser
 	items := []DonorReservationsForEventsRow{}
 	for rows.Next() {
 		var i DonorReservationsForEventsRow
+		if err := rows.Scan(&i.EventID, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const donorUpcomingReservations = `-- name: DonorUpcomingReservations :many
+SELECT r.event_id, r.status FROM donor_event_reservations r
+JOIN donor_events e ON e.id = r.event_id
+WHERE r.donor_id = $1 AND r.status IN ('RESERVED', 'WAITLISTED') AND e.starts_at > $2::timestamptz
+ORDER BY r.event_id
+`
+
+type DonorUpcomingReservationsParams struct {
+	DonorID pgtype.UUID        `json:"donor_id"`
+	AsOf    pgtype.Timestamptz `json:"as_of"`
+}
+
+type DonorUpcomingReservationsRow struct {
+	EventID pgtype.UUID `json:"event_id"`
+	Status  string      `json:"status"`
+}
+
+func (q *Queries) DonorUpcomingReservations(ctx context.Context, arg DonorUpcomingReservationsParams) ([]DonorUpcomingReservationsRow, error) {
+	rows, err := q.db.Query(ctx, donorUpcomingReservations, arg.DonorID, arg.AsOf)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DonorUpcomingReservationsRow{}
+	for rows.Next() {
+		var i DonorUpcomingReservationsRow
 		if err := rows.Scan(&i.EventID, &i.Status); err != nil {
 			return nil, err
 		}
@@ -158,35 +213,6 @@ SELECT id, slug, title, type, description, venue, address, city, zip, starts_at,
 
 func (q *Queries) EventByID(ctx context.Context, id pgtype.UUID) (DonorEvent, error) {
 	row := q.db.QueryRow(ctx, eventByID, id)
-	var i DonorEvent
-	err := row.Scan(
-		&i.ID,
-		&i.Slug,
-		&i.Title,
-		&i.Type,
-		&i.Description,
-		&i.Venue,
-		&i.Address,
-		&i.City,
-		&i.Zip,
-		&i.StartsAt,
-		&i.EndsAt,
-		&i.Capacity,
-		&i.PublishState,
-		&i.PublishedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.QualifyingPerk,
-	)
-	return i, err
-}
-
-const eventBySlug = `-- name: EventBySlug :one
-SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk FROM donor_events WHERE slug=$1
-`
-
-func (q *Queries) EventBySlug(ctx context.Context, slug string) (DonorEvent, error) {
-	row := q.db.QueryRow(ctx, eventBySlug, slug)
 	var i DonorEvent
 	err := row.Scan(
 		&i.ID,
@@ -618,8 +644,7 @@ LIMIT 100
 `
 
 // Published, upcoming INVITE_ONLY events, soonest first. The caller applies the
-// E-5 gate (perk held OR on the guest list) per event; this returns the
-// candidate set so the gate is a cheap in-memory check over a small list.
+// E-5 gate (perk held OR on the guest list) in memory over this candidate set.
 func (q *Queries) UpcomingInviteOnlyEvents(ctx context.Context, now pgtype.Timestamptz) ([]DonorEvent, error) {
 	rows, err := q.db.Query(ctx, upcomingInviteOnlyEvents, now)
 	if err != nil {

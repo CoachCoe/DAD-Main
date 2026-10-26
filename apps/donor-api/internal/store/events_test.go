@@ -275,6 +275,71 @@ func TestReservationCapacityAndWaitlistPromotion(t *testing.T) {
 	}
 }
 
+// Raising an upcoming event's capacity seats waitlisted donors in queue order
+// at once, rather than leaving them waiting for someone to cancel.
+func TestRaisingCapacitySeatsTheWaitlist(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
+	events := EventService{Staff: &StaffService{DB: api}}
+	res := ReservationService{DB: api}
+
+	in := eventInput("garden", "San Francisco", "94103", "VOLUNTEER", 48*time.Hour)
+	in.Capacity = 1
+	eventID, err := events.Create(ctx, adminToken, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Publish(ctx, adminToken, eventID); err != nil {
+		t.Fatal(err)
+	}
+	var order []pgtype.UUID
+	for range 4 {
+		id, token := signedInDonor(t, pool)
+		pushCleanupDonor(t, pool, id)
+		if _, err := res.Reserve(ctx, token, eventID); err != nil {
+			t.Fatal(err)
+		}
+		order = append(order, id)
+	}
+
+	in.Capacity = 3
+	if err := events.Update(ctx, adminToken, eventID, in); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range order {
+		var status string
+		if err := pool.QueryRow(ctx, "SELECT status FROM donor_event_reservations WHERE event_id=$1 AND donor_id=$2", eventID, id).
+			Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		want := reservationReserved
+		if i == 3 {
+			want = reservationWaitlisted
+		}
+		if status != want {
+			t.Fatalf("donor %d of 4 is %s after capacity 1 -> 3, want %s", i+1, status, want)
+		}
+	}
+	var pushes int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_push_notifications WHERE category=$1 AND donor_id = ANY($2)",
+		eventPromotedCategory, order).Scan(&pushes); err != nil || pushes != 2 {
+		t.Fatalf("promotion pushes = %d (%v), want 2", pushes, err)
+	}
+
+	in.Capacity = 1
+	if err := events.Update(ctx, adminToken, eventID, in); err != nil {
+		t.Fatal(err)
+	}
+	var reserved int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_event_reservations WHERE event_id=$1 AND status='RESERVED'", eventID).
+		Scan(&reserved); err != nil || reserved != 3 {
+		t.Fatalf("lowering capacity changed held seats: %d %v", reserved, err)
+	}
+}
+
 // pushCleanupDonor removes a donor's queued push notifications after the test
 // (they reference the donor, not the cascaded event).
 func pushCleanupDonor(t *testing.T, pool *pgxpool.Pool, donor pgtype.UUID) {

@@ -17,9 +17,6 @@ WHERE id=$1;
 -- name: EventByID :one
 SELECT * FROM donor_events WHERE id=$1;
 
--- name: EventBySlug :one
-SELECT * FROM donor_events WHERE slug=$1;
-
 -- name: StaffEventsPage :many
 SELECT * FROM donor_events
 ORDER BY starts_at DESC, id
@@ -47,10 +44,6 @@ LIMIT 100;
 -- donors cannot each take the last seat.
 SELECT * FROM donor_events WHERE id=$1 FOR UPDATE;
 
--- name: ActiveReservationCount :one
-SELECT count(*) FROM donor_event_reservations
-WHERE event_id=$1 AND status IN ('RESERVED', 'WAITLISTED');
-
 -- name: ReservedCount :one
 SELECT count(*) FROM donor_event_reservations
 WHERE event_id=$1 AND status='RESERVED';
@@ -67,6 +60,12 @@ GROUP BY event_id;
 SELECT event_id, status FROM donor_event_reservations
 WHERE donor_id=$1 AND event_id = ANY(sqlc.arg(event_ids)::uuid[])
   AND status IN ('RESERVED', 'WAITLISTED');
+
+-- name: DonorUpcomingReservations :many
+SELECT r.event_id, r.status FROM donor_event_reservations r
+JOIN donor_events e ON e.id = r.event_id
+WHERE r.donor_id = $1 AND r.status IN ('RESERVED', 'WAITLISTED') AND e.starts_at > sqlc.arg(as_of)::timestamptz
+ORDER BY r.event_id;
 
 -- name: ReservationFor :one
 SELECT * FROM donor_event_reservations WHERE event_id=$1 AND donor_id=$2;
@@ -112,14 +111,17 @@ DELETE FROM donor_event_guests WHERE event_id=$1 AND donor_id=$2;
 -- name: IsEventGuest :one
 SELECT EXISTS(SELECT 1 FROM donor_event_guests WHERE event_id=$1 AND donor_id=$2);
 
+-- name: DonorGuestEvents :many
+SELECT event_id FROM donor_event_guests
+WHERE donor_id=$1 AND event_id = ANY(sqlc.arg(event_ids)::uuid[]);
+
 -- name: DonorEarnedBadgeCodes :many
 -- The donor's earned, non-revoked badge codes — the perk side of the E-5 gate.
 SELECT code FROM donor_badges WHERE donor_id=$1 AND revoked_at IS NULL;
 
 -- name: UpcomingInviteOnlyEvents :many
 -- Published, upcoming INVITE_ONLY events, soonest first. The caller applies the
--- E-5 gate (perk held OR on the guest list) per event; this returns the
--- candidate set so the gate is a cheap in-memory check over a small list.
+-- E-5 gate (perk held OR on the guest list) in memory over this candidate set.
 SELECT * FROM donor_events
 WHERE publish_state='PUBLISHED'
   AND type='INVITE_ONLY'
