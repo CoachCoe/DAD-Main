@@ -41,7 +41,7 @@ const (
 	renewalFailure       = 0.05
 	cancelHazard         = 0.015 // per renewal, cancelled by the donor at period end
 	scheduledCancelShare = 0.02  // of live subscriptions, ending at the current period's end
-	unreportedShare      = 0.15  // of renewals due in the last 14 days
+	unreportedShare      = 0.15  // of renewals due in the last 7 days
 	refundShare          = 0.015
 	influenceAlpha       = 1.16 // Pareto shape: a few sharers refer hundreds
 	influenceCeiling     = 3000

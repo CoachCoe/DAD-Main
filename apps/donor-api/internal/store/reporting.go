@@ -118,7 +118,7 @@ const coverageNote = "Computed from committed server facts (gifts, billing perio
 	"observation cutoff. Browser-dependent metrics are unavailable until analytics collection is approved."
 
 // Report computes the §4 metrics over [start, end). end also serves as the
-// observation cutoff: the involuntary-churn deadline (due_at + 14 days) is
+// observation cutoff: the involuntary-churn deadline (due_at + 7 days) is
 // measured against it, so a failed renewal still inside its retry window is not
 // yet counted as lost. It is a pure read, so one snapshotted read transaction
 // gives every metric a consistent view.

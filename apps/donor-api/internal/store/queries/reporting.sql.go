@@ -153,7 +153,7 @@ WITH failed AS (
 	JOIN donor_checkouts c ON c.id = bp.checkout_id
 	WHERE bp.status = 'FAILED'
 		AND bp.due_at >= $1 AND bp.due_at < $2
-		AND bp.due_at + INTERVAL '14 days' <= $3
+		AND bp.due_at + INTERVAL '7 days' <= $3
 )
 SELECT
 	count(*)::bigint AS failed_periods,
@@ -177,7 +177,7 @@ type ReportInvoluntaryChurnRow struct {
 }
 
 // Involuntary churn/recovery from billing periods. A FAILED period whose retry
-// deadline (due_at + 14 days, matching the streak grace rule) has passed by the
+// deadline (due_at + 7 days, matching the streak grace rule) has passed by the
 // observation cutoff ($3) is lost value, using the period's scheduled gift
 // amount once. A verified gift collected for that same period (period_id) is
 // recovered value. Cohort is failed periods whose due_at falls in [start, end).
