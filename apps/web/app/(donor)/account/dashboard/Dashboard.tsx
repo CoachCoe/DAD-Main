@@ -64,6 +64,11 @@ export default function Dashboard() {
         <>
           {(resource.state === "loading" || data?.state === "preparing") && (
             <>
+              <div className="metrics" aria-hidden="true">
+                <LoadingMetric title="Your giving">Given since you joined, after any refunds.</LoadingMetric>
+                <LoadingMetric title="Initiatives funded">Initiatives your daily gift has gone to.</LoadingMetric>
+                <LoadingMetric title="Events volunteered">Events you checked in at.</LoadingMetric>
+              </div>
               <div className="metrics pair" aria-hidden="true">
                 <LoadingMetric title="Link Referrals">People who gave after opening your link.</LoadingMetric>
                 <LoadingMetric title="IRL Referrals">People who gave after scanning your code.</LoadingMetric>

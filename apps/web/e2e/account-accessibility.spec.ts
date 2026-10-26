@@ -8,6 +8,7 @@ const dashboard = {
   founding_donor: true,
   referrals: { link: 12, irl: 7, total_minor: 57000, link_minor: 36000, irl_minor: 21000, currency: "USD" },
   streak: { current: 3, at_risk: false, grace_ends_at: null },
+  impact: { given_minor: 9000, currency: "USD", initiatives_funded: 4, events_volunteered: 1 },
 };
 
 test("dashboard loading preserves the account navigation position", async ({ page }) => {
@@ -59,6 +60,15 @@ const profiles = {
       push_referral_converted: true,
       push_streak_at_risk: true,
       push_streak_milestone: false,
+      push_streak_lapsed: true,
+      push_badge_earned: true,
+      rankings_opted_out: false,
+      network_visible: true,
+      volunteer: true,
+      volunteer_interests: ["mentoring"],
+      zip: "94103",
+      city: "San Francisco",
+      phone: null,
     },
   },
   "/account/share": {
