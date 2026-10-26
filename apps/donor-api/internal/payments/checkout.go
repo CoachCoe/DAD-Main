@@ -76,6 +76,12 @@ func ValidateOrigin(origin string) error {
 	return nil
 }
 
+// LocalOrigin reports whether a valid origin names this machine.
+func LocalOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && loopback(u.Hostname())
+}
+
 // loopback reports a name browsers always resolve to this machine. Every
 // *.localhost name qualifies, which lets a local staff host differ from the
 // public one.

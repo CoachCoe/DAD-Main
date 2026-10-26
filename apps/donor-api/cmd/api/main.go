@@ -55,6 +55,23 @@ func trustedProxies(value string) ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
+// allowSignInStubs lets a deployment off this machine, such as a shared test
+// environment, run the recording SMS stub or the HMAC OIDC stub.
+const allowSignInStubs = "DONOR_ALLOW_SIGN_IN_STUBS"
+
+// validateSignInStubs keeps the sign-in stubs, which accept forged tokens and
+// send no messages, to local runs unless a deployment opts in explicitly.
+func validateSignInStubs(phone *sms.Settings, social *oidc.Settings, origin string, getenv func(string) string) error {
+	stubbed := (phone != nil && phone.Provider == "stub") || (social != nil && social.Mode == "stub")
+	if !stubbed || payments.LocalOrigin(origin) || getenv(allowSignInStubs) == "true" {
+		return nil
+	}
+	return fmt.Errorf(
+		"DONOR_SMS_PROVIDER=stub and DONOR_OIDC_MODE=stub are for local runs; set %s=true only on a test deployment",
+		allowSignInStubs,
+	)
+}
+
 // validateStaffOrigin requires the back office, when enabled, to have its own
 // host: host-only cookies and passkeys are scoped by host, so neither site's
 // sessions or credentials reach the other.
@@ -100,6 +117,17 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		return services, release, fmt.Errorf("DONOR_PUBLIC_ORIGIN %w", err)
 	}
 	if services.Wallet, err = wallet.FromEnvironment(getenv, services.Origin); err != nil {
+		return services, release, err
+	}
+	smsSettings, err := sms.FromEnvironment(getenv)
+	if err != nil {
+		return services, release, fmt.Errorf("SMS sign-in: %w", err)
+	}
+	oidcSettings, err := oidc.FromEnvironment(getenv)
+	if err != nil {
+		return services, release, fmt.Errorf("OIDC sign-in: %w", err)
+	}
+	if err = validateSignInStubs(smsSettings, oidcSettings, services.Origin, getenv); err != nil {
 		return services, release, err
 	}
 	stripeKey, webhookSecret := getenv("STRIPE_SECRET_KEY"), getenv("STRIPE_WEBHOOK_SECRET")
@@ -198,18 +226,8 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		}
 		services.DonorPasskeys = donorPasskeys
 	}
-	smsSettings, err := sms.FromEnvironment(getenv)
-	if err != nil {
-		pool.Close()
-		return services, release, fmt.Errorf("SMS sign-in: %w", err)
-	}
 	if sender := sms.NewSender(smsSettings); sender != nil {
 		services.PhoneSignIn = store.PhoneService{DB: pool, Sender: sender}
-	}
-	oidcSettings, err := oidc.FromEnvironment(getenv)
-	if err != nil {
-		pool.Close()
-		return services, release, fmt.Errorf("OIDC sign-in: %w", err)
 	}
 	if verifier := oidc.NewVerifier(oidcSettings); verifier != nil {
 		services.OIDCSignIn = store.OIDCService{DB: pool, Verifier: verifier, Settings: oidcSettings}

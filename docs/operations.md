@@ -566,7 +566,9 @@ start with an invalid configuration and names the variables to fix.
 
 `DONOR_SMS_PROVIDER=stub` (with `DONOR_SMS_FROM`) records codes instead of sending them,
 and `DONOR_OIDC_MODE=stub` (with `DONOR_OIDC_STUB_KEY`) accepts HMAC-signed test tokens.
-Both are for development and tests only and must never be set in production.
+Both are for development and tests only. The API refuses to start with either unless the
+public origin is on this machine (`localhost`, `*.localhost`, `127.0.0.1`), or a shared
+test deployment sets `DONOR_ALLOW_SIGN_IN_STUBS=true`; production must never set it.
 
 ## App associations
 
