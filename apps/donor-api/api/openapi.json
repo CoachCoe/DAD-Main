@@ -6098,6 +6098,47 @@
    }
   },
   "/donor/staff/events": {
+   "get": {
+    "operationId": "staffEvents",
+    "summary": "Events, drafts and cancellations included, latest start first",
+    "tags": [
+     "Events"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/Offset"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StaffEventPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   },
    "post": {
     "operationId": "createEvent",
     "summary": "Create a draft event",
@@ -6156,6 +6197,53 @@
    }
   },
   "/donor/staff/events/{event_id}": {
+   "get": {
+    "operationId": "staffEvent",
+    "summary": "An event with its RSVPs and waitlist",
+    "tags": [
+     "Events"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StaffEventDetail"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   },
    "post": {
     "operationId": "updateEvent",
     "summary": "Update a draft event",
@@ -6211,6 +6299,9 @@
      },
      "404": {
       "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
      },
      "415": {
       "$ref": "#/components/responses/UnsupportedMediaType"
@@ -9542,6 +9633,208 @@
      }
     }
    }
+  },
+  "/donor/staff/events/{event_id}/cancel": {
+   "post": {
+    "operationId": "cancelStaffEvent",
+    "summary": "Cancel an event and notify everyone holding a place",
+    "description": "Releases every seat and waitlist place and queues an email and a push to each donor who held one. Repeating it is a no-op. 409 once the event has ended.",
+    "tags": [
+     "Events"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "cancelled": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "cancelled"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/staff/events/{event_id}/attendees/{donor_id}/check-in": {
+   "post": {
+    "operationId": "staffEventCheckIn",
+    "summary": "Check an attendee in by hand",
+    "description": "The fallback to QR check-in. The donor must hold a seat, and it is accepted from an hour before the start until the end (422 otherwise). Checking in twice is a no-op.",
+    "tags": [
+     "Events"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     },
+     {
+      "name": "donor_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "checked_in": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "checked_in"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/staff/events/{event_id}/check-in.svg": {
+   "get": {
+    "operationId": "eventCheckInQR",
+    "summary": "The venue check-in QR code as SVG (E-8)",
+    "description": "Encodes the same token as POST /donor/staff/events/{event_id}/check-in-token, for staff to print or display. 503 when the deployment has no check-in secret.",
+    "tags": [
+     "Events"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "image/svg+xml": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
   }
  },
  "components": {
@@ -12587,6 +12880,10 @@
        }
       ],
       "description": "mailto link to report an issue about this event to DAD (E-10); null when no support email is configured."
+     },
+     "cancelled": {
+      "type": "boolean",
+      "description": "The event was cancelled; it can no longer be reserved and every place was released."
      }
     },
     "required": [
@@ -12604,7 +12901,8 @@
      "spots_left",
      "reservation_status",
      "invitation_note",
-     "report_issue_url"
+     "report_issue_url",
+     "cancelled"
     ],
     "additionalProperties": false
    },
@@ -13490,6 +13788,311 @@
      "spend"
     ],
     "additionalProperties": false
+   },
+   "StaffEvent": {
+    "type": "object",
+    "properties": {
+     "slug": {
+      "type": "string"
+     },
+     "title": {
+      "type": "string"
+     },
+     "type": {
+      "type": "string",
+      "enum": [
+       "VOLUNTEER",
+       "COMMUNITY",
+       "INVITE_ONLY"
+      ]
+     },
+     "description": {
+      "type": "string"
+     },
+     "venue": {
+      "type": "string"
+     },
+     "address": {
+      "type": "string"
+     },
+     "city": {
+      "type": "string"
+     },
+     "zip": {
+      "type": "string"
+     },
+     "starts_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "ends_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "capacity": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "qualifying_perk": {
+      "type": "string",
+      "enum": [
+       "",
+       "FOUNDING_EVENTS",
+       "MILESTONE_EVENTS",
+       "TEAM_CAPTAIN"
+      ],
+      "description": "Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event."
+     },
+     "id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "publish_state": {
+      "type": "string",
+      "enum": [
+       "DRAFT",
+       "PUBLISHED"
+      ]
+     },
+     "cancelled_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "reserved": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "waitlisted": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "checked_in": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Seat holders checked in by QR or by staff."
+     }
+    },
+    "additionalProperties": false,
+    "description": "An event as staff manage it, drafts and cancellations included.",
+    "required": [
+     "slug",
+     "title",
+     "type",
+     "description",
+     "venue",
+     "address",
+     "city",
+     "zip",
+     "starts_at",
+     "ends_at",
+     "capacity",
+     "qualifying_perk",
+     "id",
+     "publish_state",
+     "cancelled_at",
+     "reserved",
+     "waitlisted",
+     "checked_in"
+    ]
+   },
+   "StaffEventPage": {
+    "type": "object",
+    "properties": {
+     "events": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/StaffEvent"
+      }
+     },
+     "next_offset": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "events",
+     "next_offset"
+    ],
+    "additionalProperties": false
+   },
+   "EventAttendee": {
+    "type": "object",
+    "properties": {
+     "donor_id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "email": {
+      "type": "string"
+     },
+     "public_name": {
+      "type": "string"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "RESERVED",
+       "WAITLISTED"
+      ]
+     },
+     "reserved_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "checked_in_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "additionalProperties": false,
+    "required": [
+     "donor_id",
+     "email",
+     "public_name",
+     "status",
+     "reserved_at",
+     "checked_in_at"
+    ]
+   },
+   "StaffEventDetail": {
+    "type": "object",
+    "properties": {
+     "slug": {
+      "type": "string"
+     },
+     "title": {
+      "type": "string"
+     },
+     "type": {
+      "type": "string",
+      "enum": [
+       "VOLUNTEER",
+       "COMMUNITY",
+       "INVITE_ONLY"
+      ]
+     },
+     "description": {
+      "type": "string"
+     },
+     "venue": {
+      "type": "string"
+     },
+     "address": {
+      "type": "string"
+     },
+     "city": {
+      "type": "string"
+     },
+     "zip": {
+      "type": "string"
+     },
+     "starts_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "ends_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "capacity": {
+      "type": "integer",
+      "format": "int32"
+     },
+     "qualifying_perk": {
+      "type": "string",
+      "enum": [
+       "",
+       "FOUNDING_EVENTS",
+       "MILESTONE_EVENTS",
+       "TEAM_CAPTAIN"
+      ],
+      "description": "Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event."
+     },
+     "id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "publish_state": {
+      "type": "string",
+      "enum": [
+       "DRAFT",
+       "PUBLISHED"
+      ]
+     },
+     "cancelled_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "reserved": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "waitlisted": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "checked_in": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Seat holders checked in by QR or by staff."
+     },
+     "attendees": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/EventAttendee"
+      }
+     }
+    },
+    "additionalProperties": false,
+    "description": "The RSVPs screen: seats in booking order, then the waitlist in promotion order.",
+    "required": [
+     "slug",
+     "title",
+     "type",
+     "description",
+     "venue",
+     "address",
+     "city",
+     "zip",
+     "starts_at",
+     "ends_at",
+     "capacity",
+     "qualifying_perk",
+     "id",
+     "publish_state",
+     "cancelled_at",
+     "reserved",
+     "waitlisted",
+     "checked_in",
+     "attendees"
+    ]
    }
   }
  }

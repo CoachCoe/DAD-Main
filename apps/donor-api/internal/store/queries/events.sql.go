@@ -34,6 +34,23 @@ func (q *Queries) AddEventGuest(ctx context.Context, arg AddEventGuestParams) er
 	return err
 }
 
+const cancelEvent = `-- name: CancelEvent :execrows
+UPDATE donor_events SET cancelled_at=$2, updated_at=$2 WHERE id=$1 AND cancelled_at IS NULL
+`
+
+type CancelEventParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	CancelledAt pgtype.Timestamptz `json:"cancelled_at"`
+}
+
+func (q *Queries) CancelEvent(ctx context.Context, arg CancelEventParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelEvent, arg.ID, arg.CancelledAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const checkInReservation = `-- name: CheckInReservation :exec
 UPDATE donor_event_reservations
 SET checked_in_at=$3, updated_at=$3
@@ -208,7 +225,7 @@ func (q *Queries) DonorVolunteerStats(ctx context.Context, donorID pgtype.UUID) 
 }
 
 const eventByID = `-- name: EventByID :one
-SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk FROM donor_events WHERE id=$1
+SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk, cancelled_at FROM donor_events WHERE id=$1
 `
 
 func (q *Queries) EventByID(ctx context.Context, id pgtype.UUID) (DonorEvent, error) {
@@ -232,8 +249,97 @@ func (q *Queries) EventByID(ctx context.Context, id pgtype.UUID) (DonorEvent, er
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.QualifyingPerk,
+		&i.CancelledAt,
 	)
 	return i, err
+}
+
+const eventReservationCounts = `-- name: EventReservationCounts :many
+SELECT event_id,
+  count(*) FILTER (WHERE status='RESERVED')::bigint AS reserved,
+  count(*) FILTER (WHERE status='WAITLISTED')::bigint AS waitlisted,
+  count(*) FILTER (WHERE checked_in_at IS NOT NULL AND status='RESERVED')::bigint AS checked_in
+FROM donor_event_reservations
+WHERE event_id = ANY($1::uuid[])
+GROUP BY event_id
+`
+
+type EventReservationCountsRow struct {
+	EventID    pgtype.UUID `json:"event_id"`
+	Reserved   int64       `json:"reserved"`
+	Waitlisted int64       `json:"waitlisted"`
+	CheckedIn  int64       `json:"checked_in"`
+}
+
+// Seats taken and waitlist length per event, for the staff list.
+func (q *Queries) EventReservationCounts(ctx context.Context, eventIds []pgtype.UUID) ([]EventReservationCountsRow, error) {
+	rows, err := q.db.Query(ctx, eventReservationCounts, eventIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []EventReservationCountsRow{}
+	for rows.Next() {
+		var i EventReservationCountsRow
+		if err := rows.Scan(
+			&i.EventID,
+			&i.Reserved,
+			&i.Waitlisted,
+			&i.CheckedIn,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const eventRoster = `-- name: EventRoster :many
+SELECT r.donor_id, r.status, r.reserved_at, r.checked_in_at, d.email, d.public_name
+FROM donor_event_reservations r
+JOIN donors d ON d.id = r.donor_id
+WHERE r.event_id = $1 AND r.status IN ('RESERVED', 'WAITLISTED')
+ORDER BY r.status = 'WAITLISTED', r.reserved_at, r.id
+`
+
+type EventRosterRow struct {
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	Status      string             `json:"status"`
+	ReservedAt  pgtype.Timestamptz `json:"reserved_at"`
+	CheckedInAt pgtype.Timestamptz `json:"checked_in_at"`
+	Email       string             `json:"email"`
+	PublicName  pgtype.Text        `json:"public_name"`
+}
+
+// §8 RSVPs: everyone holding a seat, then the waitlist in promotion order.
+func (q *Queries) EventRoster(ctx context.Context, eventID pgtype.UUID) ([]EventRosterRow, error) {
+	rows, err := q.db.Query(ctx, eventRoster, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []EventRosterRow{}
+	for rows.Next() {
+		var i EventRosterRow
+		if err := rows.Scan(
+			&i.DonorID,
+			&i.Status,
+			&i.ReservedAt,
+			&i.CheckedInAt,
+			&i.Email,
+			&i.PublicName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const insertEvent = `-- name: InsertEvent :exec
@@ -296,7 +402,7 @@ func (q *Queries) IsEventGuest(ctx context.Context, arg IsEventGuestParams) (boo
 }
 
 const lockEvent = `-- name: LockEvent :one
-SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk FROM donor_events WHERE id=$1 FOR UPDATE
+SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk, cancelled_at FROM donor_events WHERE id=$1 FOR UPDATE
 `
 
 // Serializes capacity decisions: a reserve/cancel holds this row lock so two
@@ -322,6 +428,7 @@ func (q *Queries) LockEvent(ctx context.Context, id pgtype.UUID) (DonorEvent, er
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.QualifyingPerk,
+		&i.CancelledAt,
 	)
 	return i, err
 }
@@ -421,6 +528,38 @@ func (q *Queries) QueueEventReminders(ctx context.Context, arg QueueEventReminde
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const releaseEventReservations = `-- name: ReleaseEventReservations :many
+UPDATE donor_event_reservations SET status='CANCELLED', updated_at=$2
+WHERE event_id=$1 AND status IN ('RESERVED', 'WAITLISTED')
+RETURNING donor_id
+`
+
+type ReleaseEventReservationsParams struct {
+	EventID   pgtype.UUID        `json:"event_id"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Cancels every live reservation of a cancelled event, returning who held one.
+func (q *Queries) ReleaseEventReservations(ctx context.Context, arg ReleaseEventReservationsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, releaseEventReservations, arg.EventID, arg.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var donor_id pgtype.UUID
+		if err := rows.Scan(&donor_id); err != nil {
+			return nil, err
+		}
+		items = append(items, donor_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const removeEventGuest = `-- name: RemoveEventGuest :exec
@@ -529,7 +668,7 @@ func (q *Queries) SetReservationStatus(ctx context.Context, arg SetReservationSt
 }
 
 const staffEventsPage = `-- name: StaffEventsPage :many
-SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk FROM donor_events
+SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk, cancelled_at FROM donor_events
 ORDER BY starts_at DESC, id
 LIMIT 51 OFFSET $1::bigint
 `
@@ -561,6 +700,7 @@ func (q *Queries) StaffEventsPage(ctx context.Context, pageOffset int64) ([]Dono
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.QualifyingPerk,
+			&i.CancelledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -573,8 +713,9 @@ func (q *Queries) StaffEventsPage(ctx context.Context, pageOffset int64) ([]Dono
 }
 
 const upcomingEventsNearDonor = `-- name: UpcomingEventsNearDonor :many
-SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk FROM donor_events
+SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk, cancelled_at FROM donor_events
 WHERE publish_state='PUBLISHED'
+  AND cancelled_at IS NULL
   AND type <> 'INVITE_ONLY'
   AND starts_at > $1::timestamptz
   AND (
@@ -623,6 +764,7 @@ func (q *Queries) UpcomingEventsNearDonor(ctx context.Context, arg UpcomingEvent
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.QualifyingPerk,
+			&i.CancelledAt,
 		); err != nil {
 			return nil, err
 		}
@@ -635,8 +777,9 @@ func (q *Queries) UpcomingEventsNearDonor(ctx context.Context, arg UpcomingEvent
 }
 
 const upcomingInviteOnlyEvents = `-- name: UpcomingInviteOnlyEvents :many
-SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk FROM donor_events
+SELECT id, slug, title, type, description, venue, address, city, zip, starts_at, ends_at, capacity, publish_state, published_at, created_at, updated_at, qualifying_perk, cancelled_at FROM donor_events
 WHERE publish_state='PUBLISHED'
+  AND cancelled_at IS NULL
   AND type='INVITE_ONLY'
   AND starts_at > $1::timestamptz
 ORDER BY starts_at ASC, id
@@ -672,6 +815,7 @@ func (q *Queries) UpcomingInviteOnlyEvents(ctx context.Context, now pgtype.Times
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.QualifyingPerk,
+			&i.CancelledAt,
 		); err != nil {
 			return nil, err
 		}

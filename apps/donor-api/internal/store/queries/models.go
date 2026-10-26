@@ -113,6 +113,7 @@ type DonorEvent struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	QualifyingPerk string             `json:"qualifying_perk"`
+	CancelledAt    pgtype.Timestamptz `json:"cancelled_at"`
 }
 
 type DonorEventReservation struct {

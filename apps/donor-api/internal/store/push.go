@@ -230,6 +230,8 @@ func pushSuppression(
 		return "", nil
 	case "EVENT_PROMOTED", "EVENT_REMINDER":
 		return reservationLapsed(ctx, q, data, donor)
+	case eventCancelledCategory:
+		return "", nil
 	}
 	return "", payments.ErrFacts
 }
@@ -287,6 +289,9 @@ func pushContent(job queries.DonorPushNotification) (push.Notification, error) {
 	case "EVENT_PROMOTED":
 		n.Title = "A spot opened up"
 		n.Body = "You are off the waitlist — your spot at an upcoming event is confirmed. Open the app for details."
+	case eventCancelledCategory:
+		n.Title = "An event was cancelled"
+		n.Body = "An event you signed up for has been cancelled. Open the app for the details."
 	case "EVENT_REMINDER":
 		n.Title = "Your event is coming up"
 		if data.Text("window") == "2h" {

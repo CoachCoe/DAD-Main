@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"dad/donor-api/internal/sharing"
 	"dad/donor-api/internal/store"
 )
 
@@ -19,6 +20,10 @@ type EventSource interface {
 	AddGuest(context.Context, string, pgtype.UUID, pgtype.UUID) error
 	RemoveGuest(context.Context, string, pgtype.UUID, pgtype.UUID) error
 	CheckInToken(context.Context, string, pgtype.UUID, string) (string, error)
+	List(context.Context, string, int64) (store.StaffEventPage, error)
+	Detail(context.Context, string, pgtype.UUID) (store.StaffEventDetail, error)
+	CheckInAttendee(context.Context, string, pgtype.UUID, pgtype.UUID) error
+	Cancel(context.Context, string, pgtype.UUID) error
 }
 
 // EventReadSource is the donor-facing read of published events (E-2/E-3/E-5).
@@ -43,8 +48,90 @@ func (a *api) eventsAdmin() service {
 		a.Events != nil,
 		"Event administration is temporarily unavailable",
 		staffTimeout,
-		staffStatus,
+		staffEventStatus,
 	}
+}
+
+func staffEventStatus(err error) (int, string) {
+	switch {
+	case errors.Is(err, store.ErrEventCancelled):
+		return http.StatusConflict, "This event has been cancelled"
+	case errors.Is(err, store.ErrReservationClosed):
+		return http.StatusConflict, "This event has already ended"
+	case errors.Is(err, store.ErrCheckIn):
+		return http.StatusUnprocessableEntity, "Only a donor holding a seat can be checked in, from an hour before the start until the end"
+	default:
+		return staffStatus(err)
+	}
+}
+
+func (a *api) staffEvents(w http.ResponseWriter, r *http.Request, session string) {
+	offset, ok := offsetParam(r, "offset")
+	if !ok {
+		invalidFields(w, r)
+		return
+	}
+	a.eventsAdmin().serve(w, r, func(ctx context.Context) (any, error) { return a.Events.List(ctx, session, offset) })
+}
+
+func (a *api) staffEvent(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "event_id")
+	if !ok {
+		return
+	}
+	a.eventsAdmin().serve(w, r, func(ctx context.Context) (any, error) { return a.Events.Detail(ctx, session, id) })
+}
+
+func (a *api) staffEventCheckIn(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "event_id")
+	if !ok {
+		return
+	}
+	donor, ok := pathID(w, r, "donor_id")
+	if !ok {
+		return
+	}
+	a.eventsAdmin().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"checked_in": true}, a.Events.CheckInAttendee(ctx, session, id, donor)
+	})
+}
+
+// eventCheckInQR renders an event's check-in token as the QR code staff print
+// or display at the venue (E-8, §8 Growth).
+func (a *api) eventCheckInQR(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "event_id")
+	if !ok {
+		return
+	}
+	if !a.eventsAdmin().available(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, staffTimeout)
+	defer cancel()
+	token, err := a.Events.CheckInToken(ctx, session, id, a.EventCheckInSecret)
+	if err != nil {
+		respond(w, r, nil, err, staffEventStatus)
+		return
+	}
+	image, err := sharing.SVG(token)
+	if err != nil {
+		writeError(w, r, http.StatusServiceUnavailable, "Event administration is temporarily unavailable", err)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Content-Disposition", "inline")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	_, _ = w.Write(image)
+}
+
+func (a *api) cancelStaffEvent(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "event_id")
+	if !ok {
+		return
+	}
+	a.eventsAdmin().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"cancelled": true}, a.Events.Cancel(ctx, session, id)
+	})
 }
 
 func (a *api) createEvent(w http.ResponseWriter, r *http.Request, session string) {

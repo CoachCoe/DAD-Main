@@ -247,6 +247,16 @@ func renderMessage(
 			return "", "", err
 		}
 		return "You're off the waitlist for " + event.Title, renderPromotion(event, donor, site), nil
+	case eventCancelledCategory:
+		id, err := parseID(data.Text("event_id"))
+		if err != nil {
+			return "", "", err
+		}
+		event, err := q.EventByID(ctx, id)
+		if err != nil {
+			return "", "", err
+		}
+		return event.Title + " has been cancelled", renderCancellation(event, donor, site), nil
 	case "PASSKEY_ADDED":
 		added := data.Text("added_at")
 		if added == "" {
@@ -265,19 +275,31 @@ func renderMessage(
 	}
 }
 
-// renderPromotion tells a donor a waitlisted spot is now theirs, with the time
-// in their own zone when their ZIP gives one.
-func renderPromotion(event queries.DonorEvent, donor queries.Donor, site publicSite) string {
+// renderCancellation tells a donor an event they signed up for will not go
+// ahead, with the time in their own zone when their ZIP gives one.
+func renderCancellation(event queries.DonorEvent, donor queries.Donor, site publicSite) string {
+	return "We're sorry: " + event.Title + ", planned for " + eventTime(event, donor) + ", has been cancelled.\n\n" +
+		"Your place has been released, so there is nothing you need to do.\n" +
+		"See other events near you: " + site.dashboard() + "\n"
+}
+
+// eventTime is when an event starts, in the donor's zone when known.
+func eventTime(event queries.DonorEvent, donor queries.Donor) string {
 	zone := time.UTC
 	if loc, err := time.LoadLocation(donor.Timezone.String); donor.Timezone.Valid && err == nil {
 		zone = loc
 	}
+	return event.StartsAt.Time.In(zone).Format("Monday, January 2, 2006 at 3:04 PM MST")
+}
+
+// renderPromotion tells a donor a waitlisted spot is now theirs.
+func renderPromotion(event queries.DonorEvent, donor queries.Donor, site publicSite) string {
 	where := event.Venue
 	if event.Address != "" {
 		where += ", " + event.Address
 	}
 	return "A spot opened up at " + event.Title + ", and it's yours: your reservation is confirmed.\n\n" +
-		"When: " + event.StartsAt.Time.In(zone).Format("Monday, January 2, 2006 at 3:04 PM MST") + "\n" +
+		"When: " + eventTime(event, donor) + "\n" +
 		"Where: " + where + "\n\n" +
 		"See the event and add it to your calendar: " + site.event(event.ID.String()) + "\n" +
 		"If you can no longer go, cancel there before it starts so the next person on the waitlist gets your spot.\n"

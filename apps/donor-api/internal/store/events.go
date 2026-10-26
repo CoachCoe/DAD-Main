@@ -154,6 +154,9 @@ func (s EventService) Update(ctx context.Context, token string, id pgtype.UUID, 
 			if err != nil {
 				return struct{}{}, err
 			}
+			if event.CancelledAt.Valid {
+				return struct{}{}, ErrEventCancelled
+			}
 			if err = q.UpdateEvent(ctx, queries.UpdateEventParams{
 				ID: id, Title: params.Title, Type: params.Type, Description: params.Description,
 				Venue: params.Venue, Address: params.Address, City: params.City, Zip: params.Zip,
@@ -293,13 +296,14 @@ type EventView struct {
 	// ReportIssueURL is a mailto link to report an issue about this event to DAD
 	// (E-10); nil when no support email is configured.
 	ReportIssueURL *string `json:"report_issue_url"`
+	Cancelled      bool    `json:"cancelled"`
 }
 
 func eventView(e queries.DonorEvent) EventView {
 	return EventView{
 		ID: e.ID.String(), Slug: e.Slug, Title: e.Title, Type: e.Type, Description: e.Description,
 		Venue: e.Venue, Address: e.Address, City: e.City,
-		StartsAt: e.StartsAt.Time, EndsAt: e.EndsAt.Time, Capacity: e.Capacity,
+		StartsAt: e.StartsAt.Time, EndsAt: e.EndsAt.Time, Capacity: e.Capacity, Cancelled: e.CancelledAt.Valid,
 	}
 }
 
@@ -424,7 +428,7 @@ func (r EventReader) Calendar(ctx context.Context, id pgtype.UUID) (string, erro
 	if err != nil {
 		return "", err
 	}
-	if e.PublishState != "PUBLISHED" || e.Type == "INVITE_ONLY" {
+	if e.PublishState != "PUBLISHED" || e.Type == "INVITE_ONLY" || e.CancelledAt.Valid {
 		return "", ErrEventNotFound
 	}
 	return renderICS(e), nil
@@ -679,6 +683,9 @@ func (s ReservationService) Reserve(ctx context.Context, token string, eventID p
 		}
 		if event.PublishState != "PUBLISHED" {
 			return ReservationResult{}, ErrEventNotFound
+		}
+		if event.CancelledAt.Valid {
+			return ReservationResult{}, ErrEventCancelled
 		}
 		if !now.Before(event.StartsAt.Time) {
 			return ReservationResult{}, ErrReservationClosed

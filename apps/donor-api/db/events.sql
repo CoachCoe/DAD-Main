@@ -22,6 +22,33 @@ SELECT * FROM donor_events
 ORDER BY starts_at DESC, id
 LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
 
+-- name: EventReservationCounts :many
+-- Seats taken and waitlist length per event, for the staff list.
+SELECT event_id,
+  count(*) FILTER (WHERE status='RESERVED')::bigint AS reserved,
+  count(*) FILTER (WHERE status='WAITLISTED')::bigint AS waitlisted,
+  count(*) FILTER (WHERE checked_in_at IS NOT NULL AND status='RESERVED')::bigint AS checked_in
+FROM donor_event_reservations
+WHERE event_id = ANY(sqlc.arg(event_ids)::uuid[])
+GROUP BY event_id;
+
+-- name: EventRoster :many
+-- §8 RSVPs: everyone holding a seat, then the waitlist in promotion order.
+SELECT r.donor_id, r.status, r.reserved_at, r.checked_in_at, d.email, d.public_name
+FROM donor_event_reservations r
+JOIN donors d ON d.id = r.donor_id
+WHERE r.event_id = $1 AND r.status IN ('RESERVED', 'WAITLISTED')
+ORDER BY r.status = 'WAITLISTED', r.reserved_at, r.id;
+
+-- name: CancelEvent :execrows
+UPDATE donor_events SET cancelled_at=$2, updated_at=$2 WHERE id=$1 AND cancelled_at IS NULL;
+
+-- name: ReleaseEventReservations :many
+-- Cancels every live reservation of a cancelled event, returning who held one.
+UPDATE donor_event_reservations SET status='CANCELLED', updated_at=$2
+WHERE event_id=$1 AND status IN ('RESERVED', 'WAITLISTED')
+RETURNING donor_id;
+
 -- name: UpcomingEventsNearDonor :many
 -- E-2: published events in and near the donor's city (same city label OR same
 -- three-digit ZIP region), upcoming only, soonest first. The near-city match
@@ -30,6 +57,7 @@ LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
 -- gated path (qualifying badge or admin guest list), never the open list.
 SELECT * FROM donor_events
 WHERE publish_state='PUBLISHED'
+  AND cancelled_at IS NULL
   AND type <> 'INVITE_ONLY'
   AND starts_at > sqlc.arg(now)::timestamptz
   AND (
@@ -124,6 +152,7 @@ SELECT code FROM donor_badges WHERE donor_id=$1 AND revoked_at IS NULL;
 -- E-5 gate (perk held OR on the guest list) in memory over this candidate set.
 SELECT * FROM donor_events
 WHERE publish_state='PUBLISHED'
+  AND cancelled_at IS NULL
   AND type='INVITE_ONLY'
   AND starts_at > sqlc.arg(now)::timestamptz
 ORDER BY starts_at ASC, id

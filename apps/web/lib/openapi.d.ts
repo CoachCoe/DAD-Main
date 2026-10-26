@@ -1630,7 +1630,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Events, drafts and cancellations included, latest start first */
+        get: operations["staffEvents"];
         put?: never;
         /** Create a draft event */
         post: operations["createEvent"];
@@ -1647,7 +1648,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** An event with its RSVPs and waitlist */
+        get: operations["staffEvent"];
         put?: never;
         /** Update a draft event */
         post: operations["updateEvent"];
@@ -2420,6 +2422,66 @@ export interface paths {
         put?: never;
         /** Include or exclude an initiative from the daily rotation */
         post: operations["setInitiativeRotation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel an event and notify everyone holding a place
+         * @description Releases every seat and waitlist place and queues an email and a push to each donor who held one. Repeating it is a no-op. 409 once the event has ended.
+         */
+        post: operations["cancelStaffEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/attendees/{donor_id}/check-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check an attendee in by hand
+         * @description The fallback to QR check-in. The donor must hold a seat, and it is accepted from an hour before the start until the end (422 otherwise). Checking in twice is a no-op.
+         */
+        post: operations["staffEventCheckIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/check-in.svg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The venue check-in QR code as SVG (E-8)
+         * @description Encodes the same token as POST /donor/staff/events/{event_id}/check-in-token, for staff to print or display. 503 when the deployment has no check-in secret.
+         */
+        get: operations["eventCheckInQR"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3407,6 +3469,8 @@ export interface components {
             invitation_note: string | null;
             /** @description mailto link to report an issue about this event to DAD (E-10); null when no support email is configured. */
             report_issue_url: string | null;
+            /** @description The event was cancelled; it can no longer be reserved and every place was released. */
+            cancelled: boolean;
         };
         /** @description The outcome of a reserve or cancel (E-4). */
         ReservationResult: {
@@ -3688,6 +3752,96 @@ export interface components {
             updated_at: string;
             metrics: components["schemas"]["StaffInitiativeMetric"][];
             spend: components["schemas"]["SpendInput"][];
+        };
+        /** @description An event as staff manage it, drafts and cancellations included. */
+        StaffEvent: {
+            slug: string;
+            title: string;
+            /** @enum {string} */
+            type: "VOLUNTEER" | "COMMUNITY" | "INVITE_ONLY";
+            description: string;
+            venue: string;
+            address: string;
+            city: string;
+            zip: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: int32 */
+            capacity: number;
+            /**
+             * @description Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event.
+             * @enum {string}
+             */
+            qualifying_perk: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            publish_state: "DRAFT" | "PUBLISHED";
+            cancelled_at: string | null;
+            /** Format: int64 */
+            reserved: number;
+            /** Format: int64 */
+            waitlisted: number;
+            /**
+             * Format: int64
+             * @description Seat holders checked in by QR or by staff.
+             */
+            checked_in: number;
+        };
+        StaffEventPage: {
+            events: components["schemas"]["StaffEvent"][];
+            next_offset: number | null;
+        };
+        EventAttendee: {
+            /** Format: uuid */
+            donor_id: string;
+            email: string;
+            public_name: string;
+            /** @enum {string} */
+            status: "RESERVED" | "WAITLISTED";
+            /** Format: date-time */
+            reserved_at: string;
+            checked_in_at: string | null;
+        };
+        /** @description The RSVPs screen: seats in booking order, then the waitlist in promotion order. */
+        StaffEventDetail: {
+            slug: string;
+            title: string;
+            /** @enum {string} */
+            type: "VOLUNTEER" | "COMMUNITY" | "INVITE_ONLY";
+            description: string;
+            venue: string;
+            address: string;
+            city: string;
+            zip: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: int32 */
+            capacity: number;
+            /**
+             * @description Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event.
+             * @enum {string}
+             */
+            qualifying_perk: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            publish_state: "DRAFT" | "PUBLISHED";
+            cancelled_at: string | null;
+            /** Format: int64 */
+            reserved: number;
+            /** Format: int64 */
+            waitlisted: number;
+            /**
+             * Format: int64
+             * @description Seat holders checked in by QR or by staff.
+             */
+            checked_in: number;
+            attendees: components["schemas"]["EventAttendee"][];
         };
     };
     responses: {
@@ -6757,6 +6911,33 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    staffEvents: {
+        parameters: {
+            query?: {
+                /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffEventPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     createEvent: {
         parameters: {
             query?: never;
@@ -6787,6 +6968,32 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    staffEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffEventDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     updateEvent: {
         parameters: {
             query?: never;
@@ -6814,6 +7021,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
@@ -8276,6 +8484,96 @@ export interface operations {
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    cancelStaffEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        cancelled: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffEventCheckIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        checked_in: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    eventCheckInQR: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/svg+xml": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };
