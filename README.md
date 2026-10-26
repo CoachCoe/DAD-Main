@@ -21,7 +21,7 @@ administrator records payment received out of band.
 
 ## Local setup
 
-Requires Go 1.27.2, Node 22.19+ (or Node 24), npm, and Docker Compose, which runs
+Requires Go 1.27.3, Node 22.19+ (or Node 24), npm, and Docker Compose, which runs
 PostgreSQL 16 on 127.0.0.1.
 Commands below run from the repository root. The local database uses port 55432.
 

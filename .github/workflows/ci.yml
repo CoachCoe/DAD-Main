@@ -80,7 +80,7 @@ jobs:
             # or the CI workflow itself.
             if match '^apps/donor-api/|^apps/web/|^Makefile$|^\.github/workflows/ci\.yml$'; then backend=true; fi
             # deploy: compose/env/ingress/scripts/Dockerfiles, or the CI workflow.
-            if match '^docker-compose|^\.env\..*\.example$|^scripts/|[Dd]ockerfile|^ingress/|^\.github/workflows/ci\.yml$'; then deploy=true; fi
+            if match '^docker-compose|^\.env\..*\.example$|^scripts/|[Dd]ockerfile|^deploy/nginx/|^\.github/workflows/ci\.yml$'; then deploy=true; fi
           fi
           {
             echo "full=$full"
