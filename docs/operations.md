@@ -550,6 +550,24 @@ notification as suppressed (`opted_out`, `referral_no_longer_qualifies`,
 use a fake provider and local HTTP servers; they do not prove acceptance by Apple or
 Google, which needs real accounts, a signed build, and physical devices.
 
+## Phone and social sign-in
+
+Phone sign-in and Apple/Google sign-in stay off until configured; the API refuses to
+start with an invalid configuration and names the variables to fix.
+
+- Phone: `DONOR_SMS_PROVIDER=twilio` with `DONOR_SMS_ACCOUNT_ID` (the `AC…` account
+  SID), `DONOR_SMS_AUTH_TOKEN`, and `DONOR_SMS_FROM` (an E.164 number or an `MG…`
+  Messaging Service SID). A failed send answers 503 and the donor can ask again.
+- Apple/Google: `DONOR_OIDC_MODE=live` with `DONOR_OIDC_APPLE_CLIENT_ID` and/or
+  `DONOR_OIDC_GOOGLE_CLIENT_ID`, the audience each provider puts in its ID tokens. The
+  API fetches signing keys from `appleid.apple.com` and `www.googleapis.com`, so it needs
+  outbound HTTPS to both; keys are cached for an hour and a known key keeps working
+  through a provider outage.
+
+`DONOR_SMS_PROVIDER=stub` (with `DONOR_SMS_FROM`) records codes instead of sending them,
+and `DONOR_OIDC_MODE=stub` (with `DONOR_OIDC_STUB_KEY`) accepts HMAC-signed test tokens.
+Both are for development and tests only and must never be set in production.
+
 ## App associations
 
 The web app serves `/.well-known/apple-app-site-association` and

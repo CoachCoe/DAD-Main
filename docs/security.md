@@ -57,14 +57,14 @@ stored hashed, expires after 10 minutes, and allows five attempts; a wrong guess
 counted in its own committed statement so a failed verification cannot roll the count
 back. Requesting a code answers the same whether or not the number has an account, and
 a wrong, expired, or exhausted code and an unknown number all fail with one message.
-Apple and Google sign-in verify the provider's ID token for its issuer, audience, and
-expiry, then sign in the donor already linked to that subject or, on first use, the donor
-with the token's email, recording the link. A verified identity with no account fails
-like a wrong code; accounts are created only by giving. Both methods stay off until their
-provider is configured. Only recording stubs exist so far (`DONOR_SMS_PROVIDER=stub`,
-`DONOR_OIDC_MODE=stub`): the stub verifier checks an HMAC-signed test token, not a
-provider's signature, so neither method may be enabled in production until a real SMS
-gateway and a JWKS-verifying OIDC verifier replace them.
+Apple and Google sign-in verify the ID token's RS256 signature against the provider's
+published keys, then its issuer, audience, expiry, and issue time, then sign in the donor
+already linked to that subject or, on first use, the donor with the token's email,
+recording the link. The email is used only when the provider marks it verified, so an
+unverified address can never take over an account. A verified identity with no account
+fails like a wrong code; accounts are created only by giving. Both methods stay off until
+their provider is configured ([operations](operations.md#phone-and-social-sign-in)); the
+recording stubs for development must never be configured in production.
 
 Partner portal users are separate from donors and staff and cannot give. They sign in
 through emailed single-use links: 15 minutes for a link they request, seven days for an

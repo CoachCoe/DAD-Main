@@ -2,7 +2,7 @@
 // FromEnvironment returns nil when SMS is deliberately unconfigured, so a
 // deployment without an SMS provider simply offers no phone sign-in rather than
 // failing. The Sender interface is what the store depends on; the concrete
-// provider (a stub today, a real gateway once credentials exist) is injected.
+// provider, Twilio or a recording stub for development, is injected.
 package sms
 
 import (
@@ -25,11 +25,9 @@ type Sender interface {
 	Send(ctx context.Context, phone, message string) error
 }
 
-// Settings is a resolved SMS configuration. Provider selects the concrete
-// gateway; Stub is set when the deployment opts into the recording stub
-// (DONOR_SMS_PROVIDER=stub), which is the only provider wired today — the real
-// gateway is dropped in behind the same interface once the operator provisions
-// credentials.
+// Settings is a resolved SMS configuration. Provider selects the gateway:
+// "twilio", or "stub", which records messages instead of sending them and must
+// never be configured in production.
 type Settings struct {
 	Provider  string
 	AccountID string
@@ -59,15 +57,17 @@ func FromEnvironment(getenv func(string) string) (*Settings, error) {
 			invalid = append(invalid, "DONOR_SMS_FROM")
 		}
 	case "twilio":
-		// Shape only — the live Twilio client is not built yet, so a twilio
-		// configuration is rejected with a clear message rather than silently
-		// behaving like the stub.
-		return nil, fmt.Errorf(
-			"%w: DONOR_SMS_PROVIDER=twilio is not yet implemented; set DONOR_SMS_PROVIDER=stub for now",
-			ErrConfiguration,
-		)
+		if !twilioAccount.MatchString(s.AccountID) {
+			invalid = append(invalid, "DONOR_SMS_ACCOUNT_ID")
+		}
+		if s.AuthToken == "" {
+			invalid = append(invalid, "DONOR_SMS_AUTH_TOKEN")
+		}
+		if !twilioSender.MatchString(s.Sender) {
+			invalid = append(invalid, "DONOR_SMS_FROM")
+		}
 	default:
-		invalid = append(invalid, "DONOR_SMS_PROVIDER (expected: stub)")
+		invalid = append(invalid, "DONOR_SMS_PROVIDER (expected: twilio or stub)")
 	}
 	if len(invalid) > 0 {
 		return nil, fmt.Errorf("%w: check %s", ErrConfiguration, strings.Join(invalid, ", "))
@@ -83,6 +83,8 @@ func NewSender(s *Settings) Sender {
 	switch s.Provider {
 	case "stub":
 		return &StubSender{from: s.Sender}
+	case "twilio":
+		return newTwilioSender(s)
 	default:
 		return nil
 	}
@@ -90,8 +92,7 @@ func NewSender(s *Settings) Sender {
 
 // StubSender records the most recent message per phone instead of sending it,
 // so development and tests can read back the code. It is safe for concurrent
-// use. It is NOT a real gateway: a production deployment must configure a real
-// provider once one is implemented.
+// use. It is not a gateway: production must configure Twilio.
 type StubSender struct {
 	from string
 	mu   sync.Mutex

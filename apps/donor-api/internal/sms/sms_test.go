@@ -35,8 +35,9 @@ func TestFromEnvironmentStub(t *testing.T) {
 func TestFromEnvironmentInvalid(t *testing.T) {
 	for _, m := range []map[string]string{
 		{"DONOR_SMS_PROVIDER": "stub"},                            // missing DONOR_SMS_FROM
-		{"DONOR_SMS_PROVIDER": "twilio", "DONOR_SMS_FROM": "DAD"}, // not implemented
-		{"DONOR_SMS_PROVIDER": "nope", "DONOR_SMS_FROM": "DAD"},   // unknown provider
+		{"DONOR_SMS_PROVIDER": "twilio", "DONOR_SMS_FROM": "DAD"}, // no credentials, and a sender Twilio cannot use
+		{"DONOR_SMS_PROVIDER": "twilio", "DONOR_SMS_ACCOUNT_ID": "AC123", "DONOR_SMS_AUTH_TOKEN": "t", "DONOR_SMS_FROM": "+14155550100"},
+		{"DONOR_SMS_PROVIDER": "nope", "DONOR_SMS_FROM": "DAD"}, // unknown provider
 	} {
 		if _, err := FromEnvironment(env(m)); !errors.Is(err, ErrConfiguration) {
 			t.Errorf("FromEnvironment(%v) error = %v; want ErrConfiguration", m, err)
