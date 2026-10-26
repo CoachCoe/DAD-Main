@@ -25,7 +25,7 @@ it("links the explanation to giving, source-cited figures, and partner interest"
   render(<HowItWorks />);
   expect(screen.getByRole("link", { name: "Try giving" })).toHaveAttribute("href", "/donate");
   expect(screen.getByRole("link", { name: "Read the impact ledger" })).toHaveAttribute("href", "/ledger");
-  expect(screen.getByRole("link", { name: "Partner interest form" })).toHaveAttribute("href", "/partners");
+  expect(screen.getByRole("link", { name: "Partner application" })).toHaveAttribute("href", "/apply");
   expect(screen.getByText(/reported figures cite a source document/)).toHaveTextContent(
     "illustrative figures are labeled",
   );

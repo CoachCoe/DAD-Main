@@ -60,7 +60,7 @@ export default function HowItWorks() {
         </Link>
       </div>
       <p>
-        <Link href="/partners">Partner interest form</Link>
+        <Link href="/apply">Partner application</Link>
       </p>
     </Page>
   );
