@@ -51,6 +51,17 @@ func (q *Queries) AuthenticatedDonor(ctx context.Context, arg AuthenticatedDonor
 	return i, err
 }
 
+const databaseNow = `-- name: DatabaseNow :one
+SELECT clock_timestamp()::timestamptz AS now
+`
+
+func (q *Queries) DatabaseNow(ctx context.Context) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, databaseNow)
+	var now pgtype.Timestamptz
+	err := row.Scan(&now)
+	return now, err
+}
+
 const donorSessionCredential = `-- name: DonorSessionCredential :one
 SELECT token_hash FROM donor_sessions WHERE id = $1 AND donor_id = $2
 `

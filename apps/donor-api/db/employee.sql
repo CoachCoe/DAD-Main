@@ -22,8 +22,10 @@ SELECT donor_id, partner_id, team_id, enrolled_at FROM donor_partner_employees W
 -- the employee's partner before calling this.
 UPDATE donor_partner_employees SET team_id = $2 WHERE donor_id = $1;
 
--- name: InsertTeam :exec
-INSERT INTO donor_partner_teams (id, partner_id, name, created_at) VALUES ($1,$2,$3,$4);
+-- name: InsertTeam :one
+INSERT INTO donor_partner_teams (id, partner_id, name, created_at) VALUES ($1,$2,$3,$4)
+ON CONFLICT (partner_id, name) DO NOTHING
+RETURNING id;
 
 -- name: TeamByID :one
 SELECT id, partner_id, name FROM donor_partner_teams WHERE id = $1;

@@ -54,8 +54,10 @@ func (q *Queries) InsertMatchPayment(ctx context.Context, arg InsertMatchPayment
 	return err
 }
 
-const insertTeam = `-- name: InsertTeam :exec
+const insertTeam = `-- name: InsertTeam :one
 INSERT INTO donor_partner_teams (id, partner_id, name, created_at) VALUES ($1,$2,$3,$4)
+ON CONFLICT (partner_id, name) DO NOTHING
+RETURNING id
 `
 
 type InsertTeamParams struct {
@@ -65,14 +67,16 @@ type InsertTeamParams struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-func (q *Queries) InsertTeam(ctx context.Context, arg InsertTeamParams) error {
-	_, err := q.db.Exec(ctx, insertTeam,
+func (q *Queries) InsertTeam(ctx context.Context, arg InsertTeamParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, insertTeam,
 		arg.ID,
 		arg.PartnerID,
 		arg.Name,
 		arg.CreatedAt,
 	)
-	return err
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const linkedEmployeeGiftsInYear = `-- name: LinkedEmployeeGiftsInYear :one

@@ -163,7 +163,11 @@ func (s AccountService) Refresh(ctx context.Context, token string) (Tokens, erro
 		if err != nil {
 			return err
 		}
-		session, now := row.DonorSession, time.Now().UTC()
+		clock, err := q.DatabaseNow(ctx)
+		if err != nil {
+			return err
+		}
+		session, now := row.DonorSession, clock.Time
 		if row.Disabled || session.RevokedAt.Valid || !session.RefreshExpiresAt.Time.After(now) {
 			return ErrDenied
 		}

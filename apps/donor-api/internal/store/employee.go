@@ -177,23 +177,17 @@ func (s EmployeeService) JoinTeam(ctx context.Context, token, name string) (stri
 
 // teamByName finds a partner's team by name or creates it, returning its id.
 func teamByName(ctx context.Context, q *queries.Queries, partnerID pgtype.UUID, name string) (pgtype.UUID, error) {
-	id, err := q.TeamIDByName(ctx, queries.TeamIDByNameParams{PartnerID: partnerID, Name: name})
-	if err == nil {
-		return id, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return pgtype.UUID{}, err
-	}
 	newID, err := NewID()
 	if err != nil {
 		return pgtype.UUID{}, err
 	}
-	if err = q.InsertTeam(ctx, queries.InsertTeamParams{
+	id, err := q.InsertTeam(ctx, queries.InsertTeamParams{
 		ID: newID, PartnerID: partnerID, Name: name, CreatedAt: timestamp(time.Now().UTC()),
-	}); err != nil {
-		return pgtype.UUID{}, err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return q.TeamIDByName(ctx, queries.TeamIDByNameParams{PartnerID: partnerID, Name: name})
 	}
-	return newID, nil
+	return id, err
 }
 
 // calendarYear bounds a matching year: the cap resets each

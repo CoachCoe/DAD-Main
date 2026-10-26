@@ -919,17 +919,18 @@ func (s ReservationService) CheckIn(ctx context.Context, sessionToken, qrToken s
 	if !ok {
 		return CheckInResult{}, ErrCheckIn
 	}
-	return donorWrite(ctx, s.DB, donorOwner(sessionToken), func(tx pgx.Tx, d queries.Donor, now time.Time) (CheckInResult, error) {
+	return donorWrite(ctx, s.DB, donorOwner(sessionToken), func(tx pgx.Tx, d queries.Donor, _ time.Time) (CheckInResult, error) {
 		q := queries.New(tx)
-		event, err := q.EventByID(ctx, eventID)
+		event, err := q.LockEvent(ctx, eventID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return CheckInResult{}, ErrCheckIn
 		}
 		if err != nil {
 			return CheckInResult{}, err
 		}
-		// Window check (E-8): only between start and end.
-		if now.Before(event.StartsAt.Time) || now.After(event.EndsAt.Time) {
+		now := time.Now().UTC()
+		if event.PublishState != "PUBLISHED" || event.CancelledAt.Valid ||
+			now.Before(event.StartsAt.Time) || now.After(event.EndsAt.Time) {
 			return CheckInResult{}, ErrCheckIn
 		}
 		existing, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: eventID, DonorID: d.ID})

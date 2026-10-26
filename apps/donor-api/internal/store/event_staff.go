@@ -138,21 +138,22 @@ func (s EventService) Detail(ctx context.Context, token string, id pgtype.UUID) 
 // the end. Checking in an attendee twice is a no-op. Audited.
 func (s EventService) CheckInAttendee(ctx context.Context, token string, eventID, donorID pgtype.UUID) error {
 	_, err := staffWrite(ctx, s.Staff, token, eventPermission,
-		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
+		func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (struct{}, error) {
 			q := queries.New(tx)
-			e, err := q.EventByID(ctx, eventID)
-			if err != nil {
-				return struct{}{}, err
-			}
-			if e.CancelledAt.Valid {
-				return struct{}{}, ErrEventCancelled
-			}
-			if now.Before(e.StartsAt.Time.Add(-time.Hour)) || now.After(e.EndsAt.Time) {
-				return struct{}{}, ErrCheckIn
-			}
 			donor, err := q.LockDonor(ctx, donorID)
 			if err != nil {
 				return struct{}{}, err
+			}
+			e, err := q.LockEvent(ctx, eventID)
+			if err != nil {
+				return struct{}{}, err
+			}
+			now := time.Now().UTC()
+			if e.CancelledAt.Valid {
+				return struct{}{}, ErrEventCancelled
+			}
+			if e.PublishState != "PUBLISHED" || now.Before(e.StartsAt.Time.Add(-time.Hour)) || now.After(e.EndsAt.Time) {
+				return struct{}{}, ErrCheckIn
 			}
 			reservation, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: eventID, DonorID: donorID})
 			if err != nil {

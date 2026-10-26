@@ -241,7 +241,11 @@ func lockInvitation(
 	if err != nil {
 		return invite, user, err
 	}
-	if invite.StaffID != user.staff.ID || user.staff.Disabled || invite.ConsumedAt.Valid || !invite.ExpiresAt.Time.After(time.Now()) ||
+	now, err := q.DatabaseNow(ctx)
+	if err != nil {
+		return invite, user, err
+	}
+	if invite.StaffID != user.staff.ID || user.staff.Disabled || invite.ConsumedAt.Valid || !invite.ExpiresAt.Time.After(now.Time) ||
 		invite.Attempts >= maxInviteAttempts {
 		return invite, user, ErrStaffDenied
 	}
