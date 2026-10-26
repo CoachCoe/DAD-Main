@@ -17,6 +17,7 @@ LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixtur
 .PHONY: check-ingress smoke-ingress check-images generate check-generated loadtest-seeded
 .PHONY: deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 .PHONY: generate-mobile check-mobile bundle-mobile
+.PHONY: check-deploy-secrets
 
 install:
 	cd apps/donor-api && go mod download
@@ -58,6 +59,9 @@ generate-mobile:
 check-mobile:
 	node scripts/mobile-foundation.mjs check
 	node --test scripts/mobile-foundation.test.mjs
+
+check-deploy-secrets:
+	node --test scripts/check-deploy-secrets.test.mjs
 
 bundle-mobile: check-mobile
 	node scripts/mobile-foundation.mjs bundle "$${MOBILE_BUNDLE_DIR:?set MOBILE_BUNDLE_DIR outside the repository}"

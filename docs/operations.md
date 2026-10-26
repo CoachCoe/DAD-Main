@@ -286,7 +286,7 @@ use their own logins instead. Size the pooler's server connections to the databa
 
 Stripe limits requests per account: by default 25 per second in a sandbox and 100 in
 live mode ([rate limits](https://docs.stripe.com/rate-limits)). Set the account's limit
-as `DONOR_STRIPE_REQUESTS_PER_SECOND` (default 25) for every process. It is divided
+as `DONOR_STRIPE_REQUESTS_PER_SECOND` (default 25) for every Stripe caller. It is divided
 among four buckets so that one kind of traffic cannot starve another: event-processing
 reads 40%, donor checkout and card setup 30%, staff and donor subscription commands
 20%, and the daily reconciliation 10%. Each bucket admits a burst of one second of its
@@ -519,7 +519,7 @@ indefinitely.
 | `DONOR_PUSH_FCM_KEY_FILE` | Path to the Firebase service-account JSON key; its `project_id` receives the sends. |
 
 Key material is read only from files, at most 1 MiB, like the Wallet keys: mount them
-read-only into the API and push-worker containers (readable by uid 10001), keep them
+read-only into the push-worker container (readable by uid 10001), keep them
 in the deployment secret manager, and never commit them or copy them into images.
 
 APNs setup: in Apple Developer, Certificates, Identifiers & Profiles, enable Push
@@ -937,3 +937,26 @@ Branch protection should require the CI and mobile checks and ATM acceptance.
 A green application test suite alone does not authorize deployment. Retire
 previous persistent self-hosted runners from this repository and revoke any
 credentials stored on those machines through the operator's runner controls.
+
+
+## Process secret boundaries
+
+The production Compose file never injects an entire environment file into a process.
+The application and database files are interpolation inputs; each service has an explicit
+allowlist. Keep operator files outside Git, protect them on the host, and use separate
+provider keys for independently operated capabilities.
+
+The API receives its database role, Stripe/webhook credentials, source-document and
+email-token encryption keys, configured SMS/OIDC settings, Wallet signing files and
+check-in secret. It queues email without SMTP login credentials. Mail workers alone
+receive SMTP authentication. Stripe processing and reconciliation receive the Stripe
+API key; projection and monitor processes receive no provider credentials. Rekey receives
+only the encryption keyrings it rotates. The push worker alone mounts APNs/FCM delivery
+keys; the API receives `DONOR_PUSH_PLATFORMS` to accept device registration without
+opening those keys. Compose derives the platforms from configured delivery paths unless
+an explicit platform list or `none` overrides it.
+
+`make check-deploy-secrets` renders Compose with canary settings and verifies these
+boundaries, including that unrelated secrets never reach a container. CI runs this before
+image checks. Direct API deployments retain the original key-loading configuration when
+`DONOR_PUSH_PLATFORMS` is unset; set explicit platform names to isolate delivery keys there.

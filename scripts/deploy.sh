@@ -9,8 +9,8 @@ export ENV_FILE
 cd "$root"
 compose() { docker compose --env-file "$ENV_FILE" --env-file "$DATABASE_ENV_FILE" -f docker-compose.prod.yml "$@"; }
 usage() { printf '%s\n' 'Usage: scripts/deploy.sh {build|migrate|adopt|provision-roles|up|workers|monitor [--max-age DURATION]|reconcile [--date YYYY-MM-DD] [--max-lag DURATION]|rekey --key KEY [--dry-run]|staff ARGS...|reload-ingress|down|logs [SERVICE...]|smoke}'; }
-# Every donor container receives ENV_FILE, so a database credential there would reach
-# every process. Credentials belong in DATABASE_ENV_FILE, which Compose only interpolates.
+# Both files are interpolation inputs. Keep database credentials in the database file
+# so operators can rotate them separately; Compose passes each process only its role URL.
 check_env_files() {
   [[ -f "$DATABASE_ENV_FILE" ]] || { printf 'Missing %s; copy .env.database.example.\n' "$DATABASE_ENV_FILE" >&2; exit 1; }
   if grep -Eq '^[[:space:]]*(export[[:space:]]+)?(POSTGRES_PASSWORD|DONOR_[A-Z_]*DATABASE_URL)=' "$ENV_FILE"; then
