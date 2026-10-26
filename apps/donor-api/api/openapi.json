@@ -9623,6 +9623,145 @@
     ]
    }
   },
+  "/donor/staff/partners/{partnerID}/logo": {
+   "get": {
+    "operationId": "staffPartnerLogo",
+    "summary": "Read a partner organization's logo",
+    "tags": [
+     "Staff"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "The logo as a PNG",
+      "content": {
+       "image/png": {
+        "schema": {
+         "type": "string",
+         "format": "binary"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "parameters": [
+     {
+      "name": "partnerID",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ]
+   },
+   "post": {
+    "operationId": "staffPartnerSaveLogo",
+    "summary": "Upload or remove a partner organization's logo",
+    "tags": [
+     "Staff"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "data_url": {
+          "type": "string",
+          "maxLength": 350000,
+          "description": "Base64 PNG/JPEG, at most 256 KiB and 512 by 512 pixels. Empty explicitly removes the logo. Stored as PNG without metadata."
+         }
+        },
+        "required": [
+         "data_url"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "saved": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "saved"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Staff with partnerships access set the logo while enrolling an approved partner. The partner's administrators can replace it from the portal. Audited.",
+    "parameters": [
+     {
+      "name": "partnerID",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ]
+   }
+  },
   "/donor/staff/partners/{partnerID}/users/{userID}/remove": {
    "post": {
     "operationId": "staffPartnerRemoveUser",
@@ -10057,7 +10196,7 @@
     ],
     "responses": {
      "200": {
-      "description": "Branded impact report PDF",
+      "description": "The logo as a PNG",
       "content": {
        "image/png": {
         "schema": {
@@ -10072,6 +10211,9 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -10155,7 +10297,7 @@
       "$ref": "#/components/responses/Unavailable"
      }
     },
-    "description": "Replaces the organization's name and description (\u00a77.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000."
+    "description": "Shown on the partner dashboard and included in new PDF reports. Partner administrators only; viewers get 403."
    }
   }
  },
@@ -13808,6 +13950,10 @@
      "website": {
       "type": "string"
      },
+     "has_logo": {
+      "type": "boolean",
+      "description": "Whether a logo is stored; read it from the logo path."
+     },
      "initiatives": {
       "type": "array",
       "items": {
@@ -13895,7 +14041,8 @@
      "initiative_count",
      "website",
      "initiatives",
-     "users"
+     "users",
+     "has_logo"
     ],
     "additionalProperties": false
    },

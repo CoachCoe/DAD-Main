@@ -153,6 +153,8 @@ func (a *api) routes() []route {
 		a.staffRead("GET /donor/staff/partners/pending", a.staffPartnerPending),
 		a.staffRead("GET /donor/staff/partners/{partnerID}", a.staffPartnerDetail),
 		a.staffWrite("POST /donor/staff/partners/{partnerID}/users", a.staffPartnerInviteUser),
+		a.staffRead("GET /donor/staff/partners/{partnerID}/logo", a.staffPartnerLogo),
+		a.staffWrite("POST /donor/staff/partners/{partnerID}/logo", a.staffPartnerSaveLogo),
 		a.staffWrite("POST /donor/staff/partners/{partnerID}/users/{userID}/remove", a.staffPartnerRemoveUser),
 		a.staffWrite("POST /donor/staff/partners/{appID}/approve", a.staffPartnerApprove),
 		a.staffWrite("POST /donor/staff/partners/{appID}/reject", a.staffPartnerReject),

@@ -1,8 +1,8 @@
 "use client";
-import Image from "next/image";
 import Link from "next/link";
 import { useId, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { LogoEditor } from "@/components/donor/LogoEditor";
 import { Page } from "@/components/donor/Page";
 import { hours, TeamLeaderboard } from "@/components/donor/TeamLeaderboard";
 import { api, failureMessage, type RequestBody, type ResponseBody } from "@/lib/api";
@@ -491,98 +491,14 @@ function OrganizationSection({ overview, onSaved }: { overview: Overview; onSave
           {busy ? "Saving…" : "Save profile"}
         </button>
       </form>
-      <LogoEditor hasLogo={overview.has_logo} onSaved={onSaved} />
+      <LogoEditor
+        path="/donor/partner/logo"
+        hasLogo={overview.has_logo}
+        alt="Your organization logo"
+        onSaved={onSaved}
+      />
       <Announcer status={status} alert={error} />
     </section>
-  );
-}
-
-function LogoEditor({ hasLogo, onSaved }: { hasLogo: boolean; onSaved: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [version, setVersion] = useState(0);
-  async function save(dataURL: string) {
-    setBusy(true);
-    setStatus("");
-    setError("");
-    try {
-      await api("/donor/partner/logo", {
-        method: "POST",
-        body: JSON.stringify({ data_url: dataURL } satisfies RequestBody<"/donor/partner/logo", "post">),
-      });
-      setVersion((v) => v + 1);
-      setStatus(dataURL ? "Organization logo saved." : "Organization logo removed.");
-      onSaved();
-    } catch (cause) {
-      setError(failureMessage(cause, "The logo could not be saved. Please retry."));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function upload(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setStatus("");
-    setError("");
-    const file = new FormData(event.currentTarget).get("logo");
-    if (
-      !(file instanceof File) ||
-      file.size === 0 ||
-      file.size > 256 * 1024 ||
-      !["image/png", "image/jpeg"].includes(file.type)
-    ) {
-      setError("Choose a PNG or JPEG up to 256 KiB.");
-      return;
-    }
-    setBusy(true);
-    setError("");
-    try {
-      const dataURL = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result));
-        reader.onerror = () => reject(new Error("File could not be read"));
-        reader.readAsDataURL(file);
-      });
-      await save(dataURL);
-    } catch {
-      setError("The image could not be read. Please choose it again.");
-      setBusy(false);
-    }
-  }
-  return (
-    <div>
-      <h3>Organization logo</h3>
-      {hasLogo && (
-        <Image
-          src={`/api/donor/partner/logo?v=${version}`}
-          alt="Your organization logo"
-          width={160}
-          height={80}
-          unoptimized
-          style={{ objectFit: "contain" }}
-        />
-      )}
-      <form onSubmit={upload}>
-        <fieldset disabled={busy}>
-          <label>
-            Logo image
-            <input type="file" name="logo" accept="image/png,image/jpeg" required aria-describedby="logo-help" />
-          </label>
-          <p className="note" id="logo-help">
-            PNG or JPEG, up to 512 by 512 pixels and 256 KiB. Included in new PDF reports.
-          </p>
-          <button type="submit" className="button">
-            {busy ? "Saving logo…" : "Upload logo"}
-          </button>
-          {hasLogo && (
-            <button type="button" className="secondary" onClick={() => save("")}>
-              Remove logo
-            </button>
-          )}
-        </fieldset>
-      </form>
-      <Announcer status={status} alert={error} />
-    </div>
   );
 }
 

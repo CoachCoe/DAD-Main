@@ -19,6 +19,7 @@ const detail = {
   user_count: 1,
   initiative_count: 1,
   website: "https://delta.example",
+  has_logo: false,
   initiatives: [
     { id: "i-1", title: "Reno meals", status: "ACTIVE", publish_state: "PUBLISHED", committed_minor: 2_500_000 },
   ],
@@ -114,4 +115,17 @@ it("restores an uncertain match payment after navigation and retries the identic
   expect(new Headers(attempts[0][1]?.headers).get("Idempotency-Key")).toMatch(/^[a-f0-9-]{36}$/i);
   expect(attempts[0][1]?.body).toBe(attempts[1][1]?.body);
   expect(sessionStorage.getItem("dad:match-payment:p-1")).toBeNull();
+});
+
+it("uploads the partner's logo while enrolling it", async () => {
+  const fetch = stubApi();
+  render(<PartnerDetail partner="p-1" />);
+  expect(await screen.findByRole("heading", { level: 2, name: "Organization logo" })).toBeInTheDocument();
+  const file = new File([new Uint8Array([137, 80, 78, 71])], "delta.png", { type: "image/png" });
+  const input = screen.getByLabelText("Logo image");
+  fireEvent.change(input, { target: { files: [file] } });
+  // jsdom's constraint validation does not see files set by a test, so submit directly.
+  fireEvent.submit(input.closest("form") as HTMLFormElement);
+  expect(await screen.findByText("Organization logo saved.")).toBeInTheDocument();
+  expect(posted(fetch, "/donor/staff/partners/p-1/logo").data_url).toMatch(/^data:image\/png;base64,/);
 });

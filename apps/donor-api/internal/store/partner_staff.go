@@ -50,6 +50,7 @@ type StaffPartnerUser struct {
 type StaffPartnerDetail struct {
 	StaffPartner
 	Website     string                   `json:"website"`
+	HasLogo     bool                     `json:"has_logo"`
 	Initiatives []StaffPartnerInitiative `json:"initiatives"`
 	Users       []StaffPartnerUser       `json:"users"`
 }
@@ -103,6 +104,7 @@ func (s PartnerApplicationService) Partner(ctx context.Context, token string, pa
 					ApprovedAt: org.ApprovedAt, UserCount: int64(len(users)), InitiativeCount: int64(len(initiatives)),
 				},
 				Website:     org.Website,
+				HasLogo:     len(org.LogoPng) > 0,
 				Initiatives: make([]StaffPartnerInitiative, 0, len(initiatives)),
 				Users:       make([]StaffPartnerUser, 0, len(users)),
 			}

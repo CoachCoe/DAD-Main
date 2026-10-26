@@ -50,6 +50,8 @@ type StaffPartnerSource interface {
 	Partner(ctx context.Context, token string, partnerID pgtype.UUID) (store.StaffPartnerDetail, error)
 	InviteUser(ctx context.Context, token string, partnerID pgtype.UUID, email, name, role string) error
 	RemoveUser(ctx context.Context, token string, partnerID, userID pgtype.UUID) error
+	SetLogo(ctx context.Context, token string, partnerID pgtype.UUID, dataURL string) error
+	Logo(ctx context.Context, token string, partnerID pgtype.UUID) ([]byte, error)
 }
 
 // partnerSessionMaxAge mirrors the 12h store session lifetime.
@@ -345,6 +347,36 @@ func (a *api) partnerLogo(w http.ResponseWriter, r *http.Request, session string
 		respond(w, r, nil, err, partnerStatusCode)
 		return
 	}
+	writeLogo(w, r, logo)
+}
+
+func (a *api) partnerSaveLogo(w http.ResponseWriter, r *http.Request, session string) {
+	dataURL, ok := logoBody(w, r)
+	if !ok {
+		return
+	}
+	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"saved": true}, a.PartnerPortal.SaveLogo(ctx, session, dataURL)
+	})
+}
+
+// logoBody reads a logo upload: a data URL, or empty to remove the logo.
+func logoBody(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var body struct {
+		DataURL *string `json:"data_url"`
+	}
+	if !decodeJSONLimit(w, r, &body, 360000) {
+		return "", false
+	}
+	if body.DataURL == nil {
+		invalidFields(w, r)
+		return "", false
+	}
+	return *body.DataURL, true
+}
+
+// writeLogo serves a stored logo, which is always re-encoded as PNG.
+func writeLogo(w http.ResponseWriter, r *http.Request, logo []byte) {
 	if len(logo) == 0 {
 		writeError(w, r, http.StatusNotFound, "No organization logo has been uploaded", nil)
 		return
@@ -353,20 +385,33 @@ func (a *api) partnerLogo(w http.ResponseWriter, r *http.Request, session string
 	_, _ = w.Write(logo)
 }
 
-func (a *api) partnerSaveLogo(w http.ResponseWriter, r *http.Request, session string) {
-	var body struct {
-		DataURL *string `json:"data_url"`
-	}
-	if !decodeJSONLimit(w, r, &body, 360000) {
+func (a *api) staffPartnerSaveLogo(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "partnerID")
+	if !ok {
 		return
 	}
-	if body.DataURL == nil {
-		invalidFields(w, r)
+	dataURL, ok := logoBody(w, r)
+	if !ok {
 		return
 	}
-	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
-		return map[string]bool{"saved": true}, a.PartnerPortal.SaveLogo(ctx, session, *body.DataURL)
+	a.staffPartner().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"saved": true}, a.StaffPartner.SetLogo(ctx, session, id, dataURL)
 	})
+}
+
+func (a *api) staffPartnerLogo(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "partnerID")
+	if !ok || !a.staffPartner().available(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, staffTimeout)
+	defer cancel()
+	logo, err := a.StaffPartner.Logo(ctx, session, id)
+	if err != nil {
+		respond(w, r, nil, err, staffPartnerStatus)
+		return
+	}
+	writeLogo(w, r, logo)
 }
 
 func (a *api) staffPartners(w http.ResponseWriter, r *http.Request, session string) {

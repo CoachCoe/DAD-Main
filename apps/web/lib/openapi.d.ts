@@ -2417,6 +2417,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/staff/partners/{partnerID}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a partner organization's logo */
+        get: operations["staffPartnerLogo"];
+        put?: never;
+        /**
+         * Upload or remove a partner organization's logo
+         * @description Staff with partnerships access set the logo while enrolling an approved partner. The partner's administrators can replace it from the portal. Audited.
+         */
+        post: operations["staffPartnerSaveLogo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/staff/partners/{partnerID}/users/{userID}/remove": {
         parameters: {
             query?: never;
@@ -2540,7 +2561,7 @@ export interface paths {
         put?: never;
         /**
          * Upload or remove a partner logo (admin only)
-         * @description Replaces the organization's name and description (§7.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000.
+         * @description Shown on the partner dashboard and included in new PDF reports. Partner administrators only; viewers get 403.
          */
         post: operations["partnerSaveLogo"];
         delete?: never;
@@ -3751,6 +3772,8 @@ export interface components {
             user_count: number;
             initiative_count: number;
             website: string;
+            /** @description Whether a logo is stored; read it from the logo path. */
+            has_logo: boolean;
             initiatives: {
                 /** Format: uuid */
                 id: string;
@@ -8592,6 +8615,70 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    staffPartnerLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The logo as a PNG */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerSaveLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Base64 PNG/JPEG, at most 256 KiB and 512 by 512 pixels. Empty explicitly removes the logo. Stored as PNG without metadata. */
+                    data_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        saved: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     staffPartnerRemoveUser: {
         parameters: {
             query?: never;
@@ -8784,7 +8871,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Branded impact report PDF */
+            /** @description The logo as a PNG */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -8795,6 +8882,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };

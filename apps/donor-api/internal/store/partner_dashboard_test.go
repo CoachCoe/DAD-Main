@@ -272,3 +272,51 @@ func partnerTestLogo(t *testing.T, width, height int) string {
 	}
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data.Bytes())
 }
+
+// TestStaffSetPartnerLogoAtEnrollment covers staff adding an approved
+// partner's logo during onboarding, with the same validation as the portal.
+func TestStaffSetPartnerLogoAtEnrollment(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	_, superToken := staffFixture(t, pool, "SUPER_ADMIN")
+	_, growthToken := staffFixture(t, pool, "OP_GROWTH")
+	cleanPartners(t, pool)
+	svc := PartnerApplicationService{DB: pool, Staff: &StaffService{DB: as(t, dbroles.API)}}
+	partner := approvedPartner(t, pool, "Logo Org", "LOGOORG", 0, 0)
+	logo := partnerTestLogo(t, 32, 16)
+
+	if err := svc.SetLogo(ctx, growthToken, partner, logo); !errors.Is(err, ErrStaffForbidden) {
+		t.Fatalf("an operator without partnerships access set a logo: %v", err)
+	}
+	if err := svc.SetLogo(ctx, superToken, partner, "data:image/svg+xml;base64,PHN2Zz4="); !errors.Is(err, ErrPartnerApplication) {
+		t.Fatalf("an SVG logo: %v; want ErrPartnerApplication", err)
+	}
+	if err := svc.SetLogo(ctx, superToken, testID(t), logo); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("a logo for no partner: %v; want ErrNoRows", err)
+	}
+	if err := svc.SetLogo(ctx, superToken, partner, logo); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := svc.Logo(ctx, superToken, partner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, format, err := image.DecodeConfig(bytes.NewReader(stored)); err != nil || format != "png" {
+		t.Fatalf("stored logo is %q: %v", format, err)
+	}
+	detail, err := svc.Partner(ctx, superToken, partner)
+	if err != nil || !detail.HasLogo {
+		t.Fatalf("detail after upload: has_logo=%v err=%v", detail.HasLogo, err)
+	}
+	if err := svc.SetLogo(ctx, superToken, partner, ""); err != nil {
+		t.Fatal(err)
+	}
+	if stored, err = svc.Logo(ctx, superToken, partner); err != nil || len(stored) != 0 {
+		t.Fatalf("logo after removal: %d bytes, err %v", len(stored), err)
+	}
+	var audits int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE target=$1 AND action IN ('partner.logo_set','partner.logo_removed')", partner.String()).Scan(&audits); err != nil ||
+		audits != 2 {
+		t.Fatalf("%d logo audits, err %v; want 2", audits, err)
+	}
+}

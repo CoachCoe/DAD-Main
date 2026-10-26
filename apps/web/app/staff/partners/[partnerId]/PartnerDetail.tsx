@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { LogoEditor } from "@/components/donor/LogoEditor";
 import { Page } from "@/components/donor/Page";
 import { api, failureMessage, type ResponseBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { formatDollars, formatMoney, parseDollars } from "@/lib/money";
@@ -198,6 +199,15 @@ export default function PartnerDetail({ partner }: { partner: string }) {
               </>
             )}
           </p>
+
+          <LogoEditor
+            path={`/donor/staff/partners/${id}/logo`}
+            hasLogo={detail.has_logo}
+            alt={`${detail.organization} logo`}
+            onSaved={reload}
+            level={2}
+            announce={{ status: setStatus, alert: setError }}
+          />
 
           <h2>Matching</h2>
           <p>
