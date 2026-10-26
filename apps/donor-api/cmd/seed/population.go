@@ -104,7 +104,7 @@ type donor struct {
 	code       string
 	influence  float64
 	preference bool
-	city       string // zero unless the donor set a profile location (Phase 1.2)
+	city       string // zero unless the donor set a profile location
 	zip        string // five-digit US ZIP, its SCF matching an event city
 	timezone   string
 	checkouts  []*checkout
@@ -552,7 +552,7 @@ func (g *generator) expectReferrals() {
 }
 
 // engagement builds the partners, teams, employees, initiatives, events and
-// reservations that the Phase 4–6 reads serve. It runs after donors are known
+// reservations that the event, partner and employee reads serve. It runs after donors are known
 // so links point at real claimed donors; everything is drawn from the same
 // deterministic generator, so a seed reproduces the whole population.
 func (g *generator) engagement() {
@@ -564,7 +564,7 @@ func (g *generator) engagement() {
 	g.reserveEvents()
 }
 
-// locatedShare of claimed donors set a profile location (Phase 1.2 is optional,
+// locatedShare of claimed donors set a profile location (a location is optional,
 // so not every donor has one). A located donor's city/ZIP is drawn from the
 // shared cities list, so the near-city event list returns the events seeded in
 // that city.

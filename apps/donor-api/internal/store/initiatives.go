@@ -332,7 +332,7 @@ func (s InitiativeService) DeleteMetric(
 }
 
 // SpendInput sets the running total for one spend category of an initiative
-// (Phase 2.2). Spend is category totals only — never line items (PRD §5.2).
+// . Spend is category totals only — never line items (PRD §5.2).
 type SpendInput struct {
 	Category    string `json:"category"`
 	AmountMinor int64  `json:"amount_minor"`

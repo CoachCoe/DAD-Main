@@ -37,12 +37,11 @@ type Services struct {
 	Checkout CheckoutSource
 	Webhook  WebhookReceiver
 	Partner  PartnerSource
-	// Partner portal (Phase 5): the public application, the authenticated
+	// Partner portal: the public application, the authenticated
 	// partner session surface, and the staff-side partner administration.
-	PartnerApply  PartnerApplySource
-	PartnerPortal PartnerPortalSource
-	StaffPartner  StaffPartnerSource
-	// Employee giving (Phase 6).
+	PartnerApply    PartnerApplySource
+	PartnerPortal   PartnerPortalSource
+	StaffPartner    StaffPartnerSource
 	EmployeeDonor   EmployeeDonorSource
 	EmployeePartner EmployeePartnerSource
 	EmployeeStaff   EmployeeStaffSource

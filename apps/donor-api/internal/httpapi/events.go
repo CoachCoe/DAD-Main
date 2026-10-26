@@ -11,7 +11,7 @@ import (
 	"dad/donor-api/internal/store"
 )
 
-// EventSource is the staff (Impact-Ops) surface for events (Phase 4.2, E-3).
+// EventSource is the Growth staff surface for events (E-3).
 type EventSource interface {
 	Create(context.Context, string, store.EventInput) (pgtype.UUID, error)
 	Update(context.Context, string, pgtype.UUID, store.EventInput) error

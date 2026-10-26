@@ -211,7 +211,7 @@ func TestReferralCodesFollowInfluence(t *testing.T) {
 
 // TestEngagementLayerKeepsItsConstraints checks the partners/employees/events/
 // reservations the engagement layer adds satisfy the schema and domain rules
-// the Phase 4–6 reads depend on.
+// the event, partner and employee reads depend on.
 func TestEngagementLayerKeepsItsConstraints(t *testing.T) {
 	pop := generate(20000, 0, 7, asOf)
 	if len(pop.partners) != partnerCount || len(pop.initiatives) != initiativeCount || len(pop.events) != eventCount {

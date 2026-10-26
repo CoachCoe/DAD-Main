@@ -233,7 +233,7 @@ func (s EventService) RemoveGuest(ctx context.Context, token string, eventID, do
 	return err
 }
 
-// EventReader is the donor-facing read of published events (Phase 4.2). It only
+// EventReader is the donor-facing read of published events. It only
 // ever returns PUBLISHED events; a draft or unknown id reads as "not found", so
 // the draft side is never observable to donors.
 type EventReader struct {

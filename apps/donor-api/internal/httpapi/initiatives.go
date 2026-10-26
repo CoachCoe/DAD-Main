@@ -13,7 +13,7 @@ import (
 )
 
 // InitiativeSource is the staff (Impact-Ops) surface for initiatives and their
-// headline metrics (Phase 2.1/2.3).
+// headline metrics.
 type InitiativeSource interface {
 	Create(context.Context, string, store.InitiativeInput) (pgtype.UUID, error)
 	Update(context.Context, string, pgtype.UUID, store.InitiativeInput) error
@@ -30,7 +30,7 @@ type InitiativeReadSource interface {
 	Spend(context.Context, pgtype.UUID) (store.InitiativeSpend, error)
 }
 
-// TodayInitiativeSource is the signed-in donor's daily rotation (Phase 2.4).
+// TodayInitiativeSource is the signed-in donor's daily rotation.
 type TodayInitiativeSource interface {
 	Today(context.Context, string) (store.TodayInitiative, error)
 }

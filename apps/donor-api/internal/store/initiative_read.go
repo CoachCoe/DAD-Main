@@ -16,7 +16,7 @@ import (
 )
 
 // InitiativeReader is the donor-facing, unauthenticated read of published
-// initiative data (Phase 2.2). It only ever returns data for a PUBLISHED
+// initiative data. It only ever returns data for a PUBLISHED
 // initiative — a draft or unknown id reads as "not found" — so the draft side
 // is never observable to donors.
 type InitiativeReader struct{ DB queries.DBTX }

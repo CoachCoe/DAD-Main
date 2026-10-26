@@ -280,7 +280,7 @@ test("email proof page requires an explicit keyboard confirmation", async ({ pag
   ).toEqual([]);
 });
 
-// Employee giving (Phase 6): the donor links an employer by company code and
+// Employee giving: the donor links an employer by company code and
 // joins a team. An already-linked donor sees their org and team as text, not a
 // colour-only state.
 test("authenticated accessible surface: /account/employer", async ({ page }) => {
