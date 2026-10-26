@@ -191,6 +191,8 @@ func (a *api) routes() []route {
 		a.staffWrite("POST /donor/staff/events/{event_id}/guests/{donor_id}", a.addEventGuest),
 		a.staffWrite("POST /donor/staff/events/{event_id}/guests/{donor_id}/remove", a.removeEventGuest),
 		a.staffWrite("POST /donor/staff/events/{event_id}/check-in-token", a.eventCheckInToken),
+		a.public("GET /initiatives", a.publishedInitiatives),
+		a.public("GET /initiatives/{slug}", a.publishedInitiative),
 		a.public("GET /initiatives/{initiative_id}/spend", a.initiativeSpend),
 		a.public("GET /events/{event_id}", a.eventDetail),
 		a.public("GET /events/{event_id}/calendar.ics", a.eventCalendar),

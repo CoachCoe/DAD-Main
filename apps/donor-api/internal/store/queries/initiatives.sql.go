@@ -234,6 +234,42 @@ func (q *Queries) PublishInitiativeMetric(ctx context.Context, arg PublishInitia
 	return err
 }
 
+const publishedInitiativeBySlug = `-- name: PublishedInitiativeBySlug :one
+SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, s.organization AS partner
+FROM donor_initiatives i
+LEFT JOIN donor_partner_signups s ON s.id = i.partner_signup_id AND s.approved_at IS NOT NULL
+WHERE i.publish_state = 'PUBLISHED' AND i.slug = $1
+`
+
+type PublishedInitiativeBySlugRow struct {
+	ID        pgtype.UUID `json:"id"`
+	Slug      string      `json:"slug"`
+	Title     string      `json:"title"`
+	Summary   string      `json:"summary"`
+	Type      string      `json:"type"`
+	Location  string      `json:"location"`
+	Status    string      `json:"status"`
+	StartedOn pgtype.Date `json:"started_on"`
+	Partner   pgtype.Text `json:"partner"`
+}
+
+func (q *Queries) PublishedInitiativeBySlug(ctx context.Context, slug string) (PublishedInitiativeBySlugRow, error) {
+	row := q.db.QueryRow(ctx, publishedInitiativeBySlug, slug)
+	var i PublishedInitiativeBySlugRow
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Title,
+		&i.Summary,
+		&i.Type,
+		&i.Location,
+		&i.Status,
+		&i.StartedOn,
+		&i.Partner,
+	)
+	return i, err
+}
+
 const publishedInitiativeMetrics = `-- name: PublishedInitiativeMetrics :many
 SELECT id, initiative_id, position, label, value, unit, verification_note, verified_on, publish_state, created_at, updated_at FROM donor_initiative_metrics
 WHERE initiative_id=$1 AND publish_state='PUBLISHED'
@@ -261,6 +297,57 @@ func (q *Queries) PublishedInitiativeMetrics(ctx context.Context, initiativeID p
 			&i.PublishState,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const publishedInitiatives = `-- name: PublishedInitiatives :many
+SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, s.organization AS partner
+FROM donor_initiatives i
+LEFT JOIN donor_partner_signups s ON s.id = i.partner_signup_id AND s.approved_at IS NOT NULL
+WHERE i.publish_state = 'PUBLISHED'
+ORDER BY i.status, i.started_on, i.title
+LIMIT 500
+`
+
+type PublishedInitiativesRow struct {
+	ID        pgtype.UUID `json:"id"`
+	Slug      string      `json:"slug"`
+	Title     string      `json:"title"`
+	Summary   string      `json:"summary"`
+	Type      string      `json:"type"`
+	Location  string      `json:"location"`
+	Status    string      `json:"status"`
+	StartedOn pgtype.Date `json:"started_on"`
+	Partner   pgtype.Text `json:"partner"`
+}
+
+func (q *Queries) PublishedInitiatives(ctx context.Context) ([]PublishedInitiativesRow, error) {
+	rows, err := q.db.Query(ctx, publishedInitiatives)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PublishedInitiativesRow{}
+	for rows.Next() {
+		var i PublishedInitiativesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Slug,
+			&i.Title,
+			&i.Summary,
+			&i.Type,
+			&i.Location,
+			&i.Status,
+			&i.StartedOn,
+			&i.Partner,
 		); err != nil {
 			return nil, err
 		}

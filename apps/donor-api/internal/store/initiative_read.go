@@ -182,3 +182,53 @@ func (s DonorInitiativeService) Today(ctx context.Context, token string) (TodayI
 		},
 	)
 }
+
+// PublicInitiative is a published initiative as the public pages show it.
+// Partner is the approved partner's name, or null when none is linked.
+type PublicInitiative struct {
+	ID        string  `json:"id"`
+	Slug      string  `json:"slug"`
+	Title     string  `json:"title"`
+	Summary   string  `json:"summary"`
+	Type      string  `json:"type"`
+	Location  string  `json:"location"`
+	Status    string  `json:"status"`
+	StartedOn string  `json:"started_on"`
+	Partner   *string `json:"partner"`
+}
+
+func publicInitiative(r queries.PublishedInitiativesRow) PublicInitiative {
+	out := PublicInitiative{
+		ID: r.ID.String(), Slug: r.Slug, Title: r.Title, Summary: r.Summary, Type: r.Type, Location: r.Location,
+		Status: r.Status, StartedOn: r.StartedOn.Time.Format(time.DateOnly),
+	}
+	if r.Partner.Valid {
+		out.Partner = &r.Partner.String
+	}
+	return out
+}
+
+// Published lists every published initiative, active ones first.
+func (reader InitiativeReader) Published(ctx context.Context) ([]PublicInitiative, error) {
+	rows, err := queries.New(reader.DB).PublishedInitiatives(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PublicInitiative, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, publicInitiative(r))
+	}
+	return out, nil
+}
+
+// PublishedBySlug returns one published initiative.
+func (reader InitiativeReader) PublishedBySlug(ctx context.Context, slug string) (PublicInitiative, error) {
+	r, err := queries.New(reader.DB).PublishedInitiativeBySlug(ctx, slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PublicInitiative{}, ErrInitiativeNotPublished
+	}
+	if err != nil {
+		return PublicInitiative{}, err
+	}
+	return publicInitiative(queries.PublishedInitiativesRow(r)), nil
+}

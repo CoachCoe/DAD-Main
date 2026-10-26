@@ -85,3 +85,17 @@ ON CONFLICT (donor_id, initiative_id) DO UPDATE SET last_shown_on=EXCLUDED.last_
 
 -- name: DistinctInitiativeExposures :one
 SELECT count(*)::bigint AS shown FROM donor_initiative_exposures WHERE donor_id=$1;
+
+-- name: PublishedInitiatives :many
+SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, s.organization AS partner
+FROM donor_initiatives i
+LEFT JOIN donor_partner_signups s ON s.id = i.partner_signup_id AND s.approved_at IS NOT NULL
+WHERE i.publish_state = 'PUBLISHED'
+ORDER BY i.status, i.started_on, i.title
+LIMIT 500;
+
+-- name: PublishedInitiativeBySlug :one
+SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, s.organization AS partner
+FROM donor_initiatives i
+LEFT JOIN donor_partner_signups s ON s.id = i.partner_signup_id AND s.approved_at IS NOT NULL
+WHERE i.publish_state = 'PUBLISHED' AND i.slug = $1;

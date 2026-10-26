@@ -10508,6 +10508,74 @@
      }
     }
    }
+  },
+  "/initiatives": {
+   "get": {
+    "operationId": "publishedInitiatives",
+    "summary": "Published initiatives",
+    "description": "Active initiatives first. Cacheable for a minute.",
+    "tags": [
+     "Initiatives"
+    ],
+    "security": [],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "array",
+         "items": {
+          "$ref": "#/components/schemas/PublicInitiative"
+         }
+        }
+       }
+      }
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/initiatives/{slug}": {
+   "get": {
+    "operationId": "publishedInitiative",
+    "summary": "One published initiative",
+    "tags": [
+     "Initiatives"
+    ],
+    "security": [],
+    "parameters": [
+     {
+      "name": "slug",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string"
+      },
+      "description": "A draft or unknown slug is 404."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PublicInitiative"
+        }
+       }
+      }
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
   }
  },
  "components": {
@@ -14992,6 +15060,62 @@
     "required": [
      "badges",
      "milestones"
+    ],
+    "additionalProperties": false
+   },
+   "PublicInitiative": {
+    "type": "object",
+    "description": "A published initiative.",
+    "properties": {
+     "id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "slug": {
+      "type": "string"
+     },
+     "title": {
+      "type": "string"
+     },
+     "summary": {
+      "type": "string"
+     },
+     "type": {
+      "type": "string"
+     },
+     "location": {
+      "type": "string"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "ACTIVE",
+       "COMPLETE"
+      ]
+     },
+     "started_on": {
+      "type": "string",
+      "format": "date",
+      "description": "When it started, or is planned to start when in the future"
+     },
+     "partner": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "The approved partner's name, or null when none is linked"
+     }
+    },
+    "required": [
+     "id",
+     "slug",
+     "title",
+     "summary",
+     "type",
+     "location",
+     "status",
+     "started_on",
+     "partner"
     ],
     "additionalProperties": false
    }

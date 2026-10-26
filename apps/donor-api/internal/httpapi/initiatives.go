@@ -28,9 +28,11 @@ type InitiativeSource interface {
 	SetRotation(context.Context, string, pgtype.UUID, bool) error
 }
 
-// InitiativeReadSource is the donor-facing read of published initiative spend.
+// InitiativeReadSource is the public read of published initiatives and their spend.
 type InitiativeReadSource interface {
 	Spend(context.Context, pgtype.UUID) (store.InitiativeSpend, error)
+	Published(context.Context) ([]store.PublicInitiative, error)
+	PublishedBySlug(context.Context, string) (store.PublicInitiative, error)
 }
 
 // TodayInitiativeSource is the signed-in donor's daily rotation.
@@ -207,18 +209,36 @@ func (a *api) deleteInitiativeSpend(w http.ResponseWriter, r *http.Request, sess
 // initiativeSpend is the donor-facing, unauthenticated read of a published
 // initiative's spend by category. A draft or unknown id answers 404.
 func (a *api) initiativeSpend(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r, "initiative_id")
+	if !ok {
+		return
+	}
+	a.publicInitiativeRead(w, r, func(ctx context.Context) (any, error) { return a.InitiativeRead.Spend(ctx, id) })
+}
+
+// publishedInitiatives lists every published initiative for the public pages.
+func (a *api) publishedInitiatives(w http.ResponseWriter, r *http.Request) {
+	a.publicInitiativeRead(w, r, func(ctx context.Context) (any, error) { return a.InitiativeRead.Published(ctx) })
+}
+
+// publishedInitiative is one published initiative by slug; a draft or unknown
+// slug answers 404.
+func (a *api) publishedInitiative(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	a.publicInitiativeRead(w, r, func(ctx context.Context) (any, error) { return a.InitiativeRead.PublishedBySlug(ctx, slug) })
+}
+
+// publicInitiativeRead answers a published-initiative read, cacheable for a
+// minute like the published content.
+func (a *api) publicInitiativeRead(w http.ResponseWriter, r *http.Request, read func(context.Context) (any, error)) {
 	const unavailable = "Donor database unavailable"
 	if a.InitiativeRead == nil {
 		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
 		return
 	}
-	id, ok := pathID(w, r, "initiative_id")
-	if !ok {
-		return
-	}
 	ctx, cancel := withTimeout(r, 3*time.Second)
 	defer cancel()
-	body, err := a.InitiativeRead.Spend(ctx, id)
+	body, err := read(ctx)
 	switch {
 	case errors.Is(err, store.ErrInitiativeNotPublished):
 		writeError(w, r, http.StatusNotFound, "Record not found", nil)

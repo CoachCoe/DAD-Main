@@ -2614,6 +2614,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/initiatives": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Published initiatives
+         * @description Active initiatives first. Cacheable for a minute.
+         */
+        get: operations["publishedInitiatives"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/initiatives/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One published initiative */
+        get: operations["publishedInitiative"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4045,6 +4082,25 @@ export interface components {
         RecognitionWording: {
             badges: components["schemas"]["WordingEntry"][];
             milestones: components["schemas"]["WordingEntry"][];
+        };
+        /** @description A published initiative. */
+        PublicInitiative: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            title: string;
+            summary: string;
+            type: string;
+            location: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "COMPLETE";
+            /**
+             * Format: date
+             * @description When it started, or is planned to start when in the future
+             */
+            started_on: string;
+            /** @description The approved partner's name, or null when none is linked */
+            partner: string | null;
         };
     };
     responses: {
@@ -9083,6 +9139,52 @@ export interface operations {
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    publishedInitiatives: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicInitiative"][];
+                };
+            };
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    publishedInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A draft or unknown slug is 404. */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicInitiative"];
+                };
+            };
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };

@@ -17,17 +17,21 @@ vi.mock("next/navigation", async (original) => ({
 vi.mock("next/server", () => ({ connection: async () => undefined }));
 
 const initiative = {
+  id: "8f9e0d1c-2b3a-4c5d-8e6f-7a8b9c0d1e2f",
   slug: "water",
   title: "Clean water",
   summary: "Wells with a partner.",
+  type: "Water",
+  location: "Northern region",
+  status: "ACTIVE",
+  started_on: "2099-05-01",
   partner: "Partner Org",
-  planned_start: "2027-05-01",
 };
 const published = {
   state: "published",
   ledger_as_of: "2026-09-01",
   cadence: "monthly",
-  initiatives: [initiative],
+  initiatives: [],
   ledger: [
     { id: "snapshot:0", metric: "Collected", value: 3000, unit: "USD_CENTS", illustrative: false },
     { id: "snapshot:1", metric: "Example reach", value: 100, unit: "PEOPLE", illustrative: true },
@@ -98,17 +102,27 @@ it("distinguishes an unpublished ledger from an unavailable one", async () => {
 });
 
 it("links each initiative to its detail page", async () => {
-  respond(published);
+  respond([initiative]);
   render(await InitiativesPage());
   expect(screen.getByRole("link", { name: "Clean water" })).toHaveAttribute("href", "/initiatives/water");
+  expect(screen.getByText(/Partner: Partner Org/)).toHaveTextContent("Planned start");
 });
 
 it("renders a published initiative and treats an unknown slug as not found", async () => {
-  respond(published);
+  respond(initiative);
   render(await InitiativePage({ params: Promise.resolve({ slug: "water" }), searchParams: Promise.resolve({}) }));
   expect(screen.getByRole("heading", { level: 1, name: "Clean water" })).toBeVisible();
   expect(screen.getByText(/not designated to this initiative/)).toBeVisible();
+  respond({ detail: "Record not found" }, 404);
   await expect(
     InitiativePage({ params: Promise.resolve({ slug: "missing" }), searchParams: Promise.resolve({}) }),
   ).rejects.toThrow("NEXT_NOT_FOUND");
+});
+
+it("shows a running initiative without its partner when none is linked", async () => {
+  respond([{ ...initiative, started_on: "2026-03-01", partner: null }]);
+  render(await InitiativesPage());
+  expect(screen.queryByText(/Partner:/)).toBeNull();
+  expect(screen.getByText(/Started/)).toBeInTheDocument();
+  expect(screen.queryByText(/not a recipient enrolment form/)).toBeNull();
 });
