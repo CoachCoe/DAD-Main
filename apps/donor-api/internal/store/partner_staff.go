@@ -137,6 +137,9 @@ func (s PartnerApplicationService) InviteUser(ctx context.Context, token string,
 	_, err = staffWrite(ctx, s.Staff, token, partnerPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
+			if _, err := q.LockPartnerOrg(ctx, partnerID); err != nil {
+				return struct{}{}, err
+			}
 			org, err := q.PartnerOrgByID(ctx, partnerID)
 			if err != nil {
 				return struct{}{}, err
@@ -168,6 +171,9 @@ func (s PartnerApplicationService) RemoveUser(ctx context.Context, token string,
 	_, err := staffWrite(ctx, s.Staff, token, partnerPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
+			if _, err := q.LockPartnerOrg(ctx, partnerID); err != nil {
+				return struct{}{}, err
+			}
 			removed, err := q.DisablePartnerUser(ctx, queries.DisablePartnerUserParams{PartnerID: partnerID, ID: userID})
 			if err != nil {
 				return struct{}{}, err

@@ -92,6 +92,13 @@ func partnerAdminWrite[T any](
 		if err != nil {
 			return zero, err
 		}
+		if _, err = q.LockPartnerOrg(ctx, actor.PartnerID); err != nil {
+			return zero, err
+		}
+		now = time.Now().UTC()
+		if actor, err = authenticatePartner(ctx, q, token, now); err != nil {
+			return zero, err
+		}
 		if actor.Role != "ADMIN" {
 			return zero, ErrPartnerForbidden
 		}
@@ -133,6 +140,9 @@ func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, ro
 		return ErrPartnerApplication
 	}
 	_, err = partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, now time.Time) (struct{}, error) {
+		if email == actor.Email && role != "ADMIN" {
+			return struct{}{}, ErrPartnerForbidden
+		}
 		q := queries.New(tx)
 		id, err := NewID()
 		if err != nil {
@@ -155,7 +165,6 @@ func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, ro
 func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string) (string, error) {
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (string, error) {
 		q := queries.New(tx)
-		now := time.Now().UTC()
 		user, err := q.PartnerUserByInvite(ctx, pgtype.Text{String: HashToken(invite), Valid: true})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrPartnerInvite
@@ -163,6 +172,7 @@ func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string) (
 		if err != nil {
 			return "", err
 		}
+		now := time.Now().UTC()
 		if user.Disabled || !user.InviteExpiresAt.Valid || now.After(user.InviteExpiresAt.Time) {
 			return "", ErrPartnerInvite
 		}

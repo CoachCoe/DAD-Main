@@ -82,6 +82,9 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	if shown, err := portal.CompanyCode(ctx, adminSession); err != nil || shown != code {
 		t.Fatalf("partner sees company code %q (%v), want %q", shown, err, code)
 	}
+	if err := portal.Invite(ctx, adminSession, "lead@gamma.test", "Lead", "VIEWER"); !errors.Is(err, ErrPartnerForbidden) {
+		t.Fatalf("admin demoted themselves through an invitation: %v", err)
+	}
 
 	if err := portal.Invite(ctx, adminSession, "viewer@gamma.test", "Val Viewer", "VIEWER"); err != nil {
 		t.Fatalf("admin invite: %v", err)
@@ -154,6 +157,23 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	}
 	if _, err := portal.Users(ctx, viewerSession); !errors.Is(err, ErrPartnerDenied) {
 		t.Fatalf("re-inviting a removed user revived their old session: %v", err)
+	}
+	staleProof := "pending-" + viewerID
+	mustExec(
+		t,
+		pool,
+		"UPDATE donor_partner_users SET invite_token_hash=$2,invite_expires_at=now()+interval '1 hour' WHERE id=$1",
+		mustUUID(t, viewerID),
+		HashToken(staleProof),
+	)
+	if err := portal.RemoveUser(ctx, adminSession, mustUUID(t, viewerID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := portal.Invite(ctx, adminSession, "viewer@gamma.test", "Val Viewer", "VIEWER"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := portal.AcceptInvite(ctx, staleProof); !errors.Is(err, ErrPartnerInvite) {
+		t.Fatalf("reinviting a removed user revived their old proof: %v", err)
 	}
 	if err := portal.RemoveUser(ctx, adminSession, mustNewID(t)); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("removing an unknown user: %v", err)

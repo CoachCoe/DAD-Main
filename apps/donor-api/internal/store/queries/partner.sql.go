@@ -34,7 +34,7 @@ FROM donor_partner_sessions s
 JOIN donor_partner_users u ON u.id = s.partner_user_id
 JOIN donor_partner_signups p ON p.id = u.partner_id
 WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at > $2::timestamptz
-  AND NOT u.disabled
+  AND NOT u.disabled AND p.approved_at IS NOT NULL
 `
 
 type AuthenticatedPartnerUserParams struct {
@@ -168,7 +168,7 @@ func (q *Queries) DecidePartnerApplication(ctx context.Context, arg DecidePartne
 }
 
 const disablePartnerUser = `-- name: DisablePartnerUser :execrows
-UPDATE donor_partner_users SET disabled=true WHERE partner_id=$1 AND id=$2
+UPDATE donor_partner_users SET disabled=true,invite_token_hash=NULL,invite_expires_at=NULL WHERE partner_id=$1 AND id=$2
 `
 
 type DisablePartnerUserParams struct {
@@ -396,6 +396,17 @@ func (q *Queries) LockPartnerLoginRecipient(ctx context.Context, id pgtype.UUID)
 	return i, err
 }
 
+const lockPartnerOrg = `-- name: LockPartnerOrg :one
+SELECT id FROM donor_partner_signups WHERE id=$1 AND approved_at IS NOT NULL FOR UPDATE
+`
+
+func (q *Queries) LockPartnerOrg(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockPartnerOrg, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const nextPartnerLoginEmail = `-- name: NextPartnerLoginEmail :one
 SELECT id, partner_user_id, kind, encrypted_token, expires_at, attempts, last_error, available_at, completed_at, created_at FROM donor_partner_login_emails WHERE completed_at IS NULL AND attempts<5 AND available_at<=$1
 ORDER BY available_at,id LIMIT 1 FOR UPDATE SKIP LOCKED
@@ -446,7 +457,7 @@ func (q *Queries) NextPartnerMessage(ctx context.Context, availableAt pgtype.Tim
 }
 
 const partnerApplicationByID = `-- name: PartnerApplicationByID :one
-SELECT id, organization, website, type, contact_name, title, work_email, phone, workforce_size, status, decided_by, decided_at, decision_reason, approved_partner_id, created_at, updated_at FROM donor_partner_applications WHERE id=$1
+SELECT id, organization, website, type, contact_name, title, work_email, phone, workforce_size, status, decided_by, decided_at, decision_reason, approved_partner_id, created_at, updated_at FROM donor_partner_applications WHERE id=$1 FOR UPDATE
 `
 
 func (q *Queries) PartnerApplicationByID(ctx context.Context, id pgtype.UUID) (DonorPartnerApplication, error) {
@@ -833,7 +844,9 @@ func (q *Queries) PartnerSpendByCategory(ctx context.Context, partnerSignupID pg
 }
 
 const partnerUserByInvite = `-- name: PartnerUserByInvite :one
-SELECT id, partner_id, email, name, role, invited_by, accepted_at, disabled, created_at, invite_token_hash, invite_expires_at FROM donor_partner_users WHERE invite_token_hash=$1
+SELECT id, partner_id, email, name, role, invited_by, accepted_at, disabled, created_at, invite_token_hash, invite_expires_at FROM donor_partner_users
+WHERE invite_token_hash=$1 AND NOT disabled AND invite_expires_at>clock_timestamp()
+FOR UPDATE
 `
 
 func (q *Queries) PartnerUserByInvite(ctx context.Context, inviteTokenHash pgtype.Text) (DonorPartnerUser, error) {

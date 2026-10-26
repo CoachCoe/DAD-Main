@@ -6,7 +6,7 @@ INSERT INTO donor_partner_applications
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10);
 
 -- name: PartnerApplicationByID :one
-SELECT * FROM donor_partner_applications WHERE id=$1;
+SELECT * FROM donor_partner_applications WHERE id=$1 FOR UPDATE;
 
 -- name: PendingPartnerApplications :many
 -- §8 Partnerships approval queue, oldest first.
@@ -33,6 +33,9 @@ VALUES ($1,$2,$3,$4,$5,'','','r1-partner-approved-v1',$6,$7,$8,$9);
 
 -- name: PartnerOrgByID :one
 SELECT * FROM donor_partner_signups WHERE id=$1;
+
+-- name: LockPartnerOrg :one
+SELECT id FROM donor_partner_signups WHERE id=$1 AND approved_at IS NOT NULL FOR UPDATE;
 
 -- name: StaffPartnersPage :many
 -- §8 Partnerships: approved partner orgs with their active users and linked
@@ -71,7 +74,7 @@ SELECT * FROM donor_partner_users WHERE partner_id=$1 AND NOT disabled ORDER BY 
 
 -- name: DisablePartnerUser :execrows
 -- P-4: a partner admin removes a user (soft delete).
-UPDATE donor_partner_users SET disabled=true WHERE partner_id=$1 AND id=$2;
+UPDATE donor_partner_users SET disabled=true,invite_token_hash=NULL,invite_expires_at=NULL WHERE partner_id=$1 AND id=$2;
 
 -- name: RevokePartnerUserSessions :exec
 UPDATE donor_partner_sessions SET revoked_at=$2 WHERE partner_user_id=$1 AND revoked_at IS NULL;
@@ -87,7 +90,9 @@ SET role=EXCLUDED.role, disabled=false
 RETURNING id;
 
 -- name: PartnerUserByInvite :one
-SELECT * FROM donor_partner_users WHERE invite_token_hash=$1;
+SELECT * FROM donor_partner_users
+WHERE invite_token_hash=$1 AND NOT disabled AND invite_expires_at>clock_timestamp()
+FOR UPDATE;
 
 -- name: AcceptPartnerInvite :exec
 -- Spends the sign-in link; the first one also marks the user accepted.
@@ -107,7 +112,7 @@ FROM donor_partner_sessions s
 JOIN donor_partner_users u ON u.id = s.partner_user_id
 JOIN donor_partner_signups p ON p.id = u.partner_id
 WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at > sqlc.arg(as_of)::timestamptz
-  AND NOT u.disabled;
+  AND NOT u.disabled AND p.approved_at IS NOT NULL;
 
 -- name: RevokePartnerSession :exec
 UPDATE donor_partner_sessions SET revoked_at=$2 WHERE token_hash=$1 AND revoked_at IS NULL;

@@ -80,6 +80,12 @@ delivery is never sent. Requesting a link never reveals whether the address belo
 partner. Sessions last 12 hours, in the `dad_partner_session` cookie or as a bearer token
 in the app, and removing a user revokes their sessions. Administrators alone invite and
 remove users, edit the organization profile, and export reports.
+Redemption locks the invitation so concurrent exchanges create one session. Removing a
+user also invalidates their unused link; a later invitation cannot revive it. Partner
+administration and staff changes to partner users serialize on the organization, then
+recheck the caller's access before writing. An administrator cannot demote themselves by
+reinviting their own address as a viewer. Approval and rejection lock the application,
+so competing staff decisions cannot create duplicate organizations.
 
 The donor app uses neither cookies nor Origin. It sends `X-DAD-Client: native` on
 every request and authenticates with `Authorization: Bearer <access token>`. A request
