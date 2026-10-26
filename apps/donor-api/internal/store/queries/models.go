@@ -79,6 +79,19 @@ type DonorContentSource struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorDeletedAccountReversal struct {
+	ID          pgtype.UUID        `json:"id"`
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	Kind        string             `json:"kind"`
+	Target      string             `json:"target"`
+	AmountMinor pgtype.Int8        `json:"amount_minor"`
+	Attempts    int32              `json:"attempts"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	LastError   pgtype.Text        `json:"last_error"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorEmailChange struct {
 	ID             pgtype.UUID        `json:"id"`
 	DonorID        pgtype.UUID        `json:"donor_id"`

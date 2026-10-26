@@ -326,6 +326,14 @@ events, the worker syncs any subscription stored without a billing anchor (one s
 before migration 0009), one at a time and checking hourly; one that fails to sync is
 logged as a worker step failure and retried in the next hourly pass.
 
+Account deletion waits two hours for an open checkout, but Stripe can still report one
+later. When a gift is paid after its donor deleted the account, the worker queues a full
+refund of that payment and an immediate cancellation of its subscription, then makes
+both Stripe calls between events. The gift stays in the ledger, and the refund and
+cancellation are recorded from their own events. A failed call is retried every ten
+minutes; after ten attempts it parks and the monitor's `reversals` queue counts it.
+Check the error class and the payment in Stripe, then refund or cancel it there.
+
 Monitor the oldest unprocessed `donor_stripe_events`, attempt counts, and worker health.
 A failed event waits before its next attempt, doubling from one minute up to an hour,
 so a provider outage or an event that arrives before its gift is retried later rather

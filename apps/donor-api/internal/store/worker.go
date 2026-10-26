@@ -211,7 +211,10 @@ func (w EventWorker) applyCheckoutEvent(
 	if err != nil {
 		return pgtype.UUID{}, err
 	}
-	return draft.DonorID, w.applyLockedCheckoutEvent(ctx, q, event, data, draft, attempt, facts, fetcher, now)
+	if err = w.applyLockedCheckoutEvent(ctx, q, event, data, draft, attempt, facts, fetcher, now); err != nil {
+		return pgtype.UUID{}, err
+	}
+	return draft.DonorID, queueDeletedAccountReversals(ctx, q, checkoutID, now)
 }
 
 func (w EventWorker) retrieveRefund(ctx context.Context, id string) (payments.Object, error) {

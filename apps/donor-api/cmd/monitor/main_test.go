@@ -46,7 +46,7 @@ func TestRunReportsEveryQueue(t *testing.T) {
 	for _, row := range rows {
 		queues = append(queues, row.Queue)
 	}
-	if want := []string{"email-changes", "login-email", "messages", "projections", "push", "stripe", "subscriptions"}; !slices.Equal(
+	if want := []string{"email-changes", "login-email", "messages", "projections", "push", "reversals", "stripe", "subscriptions"}; !slices.Equal(
 		queues,
 		want,
 	) {

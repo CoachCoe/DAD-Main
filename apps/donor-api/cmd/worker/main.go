@@ -105,9 +105,13 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		gateway.UseBudget(store.StripeBudget{DB: pool, PerSecond: ceiling})
 		events := store.EventWorker{DB: pool, Gateway: gateway}
 		backfill := &store.AnchorBackfill{DB: pool, Gateway: gateway}
+		reversals := store.DeletedAccountReversals{DB: pool, Gateway: gateway}
 		return func(ctx context.Context) (bool, error) {
 			worked, err := events.ProcessNext(ctx)
 			if worked || err != nil {
+				return worked, err
+			}
+			if worked, err = reversals.RunNext(ctx, time.Now().UTC()); worked || err != nil {
 				return worked, err
 			}
 			return backfill.SyncNext(ctx, time.Now().UTC())

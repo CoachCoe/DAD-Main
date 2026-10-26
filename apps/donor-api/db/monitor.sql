@@ -14,6 +14,8 @@ WITH queues AS (
  SELECT 'push',available_at,attempts>=5 FROM donor_push_notifications
  WHERE completed_at IS NULL AND expires_at>sqlc.arg(as_of)::timestamptz
  UNION ALL
+ SELECT 'reversals',available_at,attempts>=10 FROM donor_deleted_account_reversals WHERE completed_at IS NULL
+ UNION ALL
  SELECT 'email-changes',available_at,attempts>=5 FROM donor_email_changes WHERE stage IN ('CURRENT','NEW') AND sent_at IS NULL
  UNION ALL
  SELECT 'projections',next_refresh_at,refresh_error IS NOT NULL FROM donor_metric_projections
@@ -24,7 +26,7 @@ WITH queues AS (
  SELECT 'subscriptions',period_end+interval '1 day',false FROM donor_subscriptions
  WHERE status NOT IN ('canceled','incomplete_expired') AND observed_at<period_end
 ), names AS (
- SELECT unnest(ARRAY['stripe','messages','login-email','push','email-changes','projections','subscriptions']) AS queue
+ SELECT unnest(ARRAY['stripe','messages','login-email','push','reversals','email-changes','projections','subscriptions']) AS queue
 )
 SELECT n.queue,count(q.queue)::bigint AS due,
  count(q.queue) FILTER(WHERE q.parked)::bigint AS parked,

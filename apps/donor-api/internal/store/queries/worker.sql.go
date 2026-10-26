@@ -139,6 +139,55 @@ func (q *Queries) CheckoutDraft(ctx context.Context, id pgtype.UUID) (DonorCheck
 	return i, err
 }
 
+const claimDeletedAccountReversal = `-- name: ClaimDeletedAccountReversal :one
+UPDATE donor_deleted_account_reversals r SET attempts = r.attempts + 1, available_at = $1::timestamptz
+WHERE r.id = (
+    SELECT due.id FROM donor_deleted_account_reversals due
+    WHERE due.completed_at IS NULL AND due.available_at <= $2::timestamptz AND due.attempts < 10
+    ORDER BY due.available_at, due.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING id, donor_id, kind, target, amount_minor, attempts, available_at, completed_at, last_error, created_at
+`
+
+type ClaimDeletedAccountReversalParams struct {
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+}
+
+func (q *Queries) ClaimDeletedAccountReversal(ctx context.Context, arg ClaimDeletedAccountReversalParams) (DonorDeletedAccountReversal, error) {
+	row := q.db.QueryRow(ctx, claimDeletedAccountReversal, arg.LeaseUntil, arg.AsOf)
+	var i DonorDeletedAccountReversal
+	err := row.Scan(
+		&i.ID,
+		&i.DonorID,
+		&i.Kind,
+		&i.Target,
+		&i.AmountMinor,
+		&i.Attempts,
+		&i.AvailableAt,
+		&i.CompletedAt,
+		&i.LastError,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const completeDeletedAccountReversal = `-- name: CompleteDeletedAccountReversal :exec
+UPDATE donor_deleted_account_reversals SET completed_at = $2, last_error = NULL WHERE id = $1
+`
+
+type CompleteDeletedAccountReversalParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+}
+
+func (q *Queries) CompleteDeletedAccountReversal(ctx context.Context, arg CompleteDeletedAccountReversalParams) error {
+	_, err := q.db.Exec(ctx, completeDeletedAccountReversal, arg.ID, arg.CompletedAt)
+	return err
+}
+
 const completeStripeEvent = `-- name: CompleteStripeEvent :exec
 UPDATE donor_stripe_events SET processed_at=$2,last_error=NULL WHERE id=$1
 `
@@ -179,6 +228,21 @@ type EnrichGiftParams struct {
 
 func (q *Queries) EnrichGift(ctx context.Context, arg EnrichGiftParams) error {
 	_, err := q.db.Exec(ctx, enrichGift, arg.ID, arg.StripePaymentIntentID, arg.PeriodID)
+	return err
+}
+
+const failDeletedAccountReversal = `-- name: FailDeletedAccountReversal :exec
+UPDATE donor_deleted_account_reversals SET available_at = $2, last_error = $3 WHERE id = $1
+`
+
+type FailDeletedAccountReversalParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	LastError   pgtype.Text        `json:"last_error"`
+}
+
+func (q *Queries) FailDeletedAccountReversal(ctx context.Context, arg FailDeletedAccountReversalParams) error {
+	_, err := q.db.Exec(ctx, failDeletedAccountReversal, arg.ID, arg.AvailableAt, arg.LastError)
 	return err
 }
 
@@ -595,6 +659,53 @@ func (q *Queries) PendingAmountChange(ctx context.Context, checkoutID pgtype.UUI
 	var pending bool
 	err := row.Scan(&pending)
 	return pending, err
+}
+
+const queueDeletedAccountCancellation = `-- name: QueueDeletedAccountCancellation :exec
+INSERT INTO donor_deleted_account_reversals (id, donor_id, kind, target, available_at, created_at)
+SELECT gen_random_uuid(), c.donor_id, 'CANCEL', a.stripe_subscription_id,
+       $1::timestamptz, $1::timestamptz
+FROM donor_stripe_checkouts a
+JOIN donor_checkouts c ON c.id = a.checkout_id
+JOIN donor_deletions x ON x.donor_id = c.donor_id
+WHERE a.checkout_id = $2 AND a.stripe_subscription_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM donor_subscriptions s
+    WHERE s.attempt_id = a.id AND s.status IN ('canceled', 'incomplete_expired')
+  )
+ON CONFLICT (kind, target) DO NOTHING
+`
+
+type QueueDeletedAccountCancellationParams struct {
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+	CheckoutID pgtype.UUID        `json:"checkout_id"`
+}
+
+// The checkout's subscription, unless Stripe has already ended it.
+func (q *Queries) QueueDeletedAccountCancellation(ctx context.Context, arg QueueDeletedAccountCancellationParams) error {
+	_, err := q.db.Exec(ctx, queueDeletedAccountCancellation, arg.AsOf, arg.CheckoutID)
+	return err
+}
+
+const queueDeletedAccountRefunds = `-- name: QueueDeletedAccountRefunds :exec
+INSERT INTO donor_deleted_account_reversals (id, donor_id, kind, target, amount_minor, available_at, created_at)
+SELECT gen_random_uuid(), g.donor_id, 'REFUND', g.stripe_payment_intent_id, g.amount_minor,
+       $1::timestamptz, $1::timestamptz
+FROM donor_gifts g
+JOIN donor_deletions x ON x.donor_id = g.donor_id
+WHERE g.checkout_id = $2 AND g.paid_at > x.deleted_at AND g.stripe_payment_intent_id IS NOT NULL
+ON CONFLICT (kind, target) DO NOTHING
+`
+
+type QueueDeletedAccountRefundsParams struct {
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+	CheckoutID pgtype.UUID        `json:"checkout_id"`
+}
+
+// Gifts on this checkout paid after its donor deleted the account.
+func (q *Queries) QueueDeletedAccountRefunds(ctx context.Context, arg QueueDeletedAccountRefundsParams) error {
+	_, err := q.db.Exec(ctx, queueDeletedAccountRefunds, arg.AsOf, arg.CheckoutID)
+	return err
 }
 
 const recordCheckoutSession = `-- name: RecordCheckoutSession :exec
