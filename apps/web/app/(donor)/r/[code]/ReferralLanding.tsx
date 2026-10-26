@@ -62,8 +62,7 @@ export default function ReferralLanding({
     await Promise.race([capture.current, new Promise((resolve) => setTimeout(resolve, 4000))]);
     window.location.assign("/donate");
   }
-  // Always name the owner of the opened code. The capture's public_name describes an
-  // earlier first-touch credit, which stays with that referrer and is not this page's to show.
+  // Keep the server-rendered owner of the opened code; a capture response must not rename the invitation.
   const name = referrer.state === "found" ? referrer.name : null;
   const unavailable = referrer.state === "unavailable" || (referrer.state === "unknown" && result?.captured === false);
 

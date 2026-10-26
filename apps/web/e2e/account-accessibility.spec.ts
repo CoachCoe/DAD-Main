@@ -300,7 +300,7 @@ test("authenticated accessible surface: /account/employer", async ({ page }) => 
   await page.goto("/account/employer");
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
   // The enrolled state is conveyed in words, not by colour alone.
-  await expect(page.getByText("Delta Inc")).toBeVisible();
+  await expect(page.getByText("Delta Inc", { exact: true })).toBeVisible();
   await expect(page.getByText("Team A")).toBeVisible();
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(results.violations).toEqual([]);

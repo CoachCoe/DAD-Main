@@ -9,6 +9,8 @@ import { formatDateTime } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
+const streakDayKeys = Array.from({ length: 30 }, (_, day) => `streak-day-${day + 1}`);
+
 function LoadingMetric({
   title,
   children,
@@ -70,7 +72,7 @@ export default function Dashboard() {
                   Collected test gifts after successful refunds.
                 </LoadingMetric>
                 <LoadingMetric title="Giving streak">
-                  Consecutive months with a successful monthly gift. One-time gifts don’t change it.
+                  Consecutive days your monthly gift has stayed current.
                 </LoadingMetric>
                 <LoadingMetric title="Recognition">
                   <span className="metricSkeletonCopy">
@@ -91,7 +93,7 @@ export default function Dashboard() {
                         {" "}
                         Update your card by{" "}
                         <time dateTime={data.streak.grace_ends_at}>{formatDateTime(data.streak.grace_ends_at)}</time>,
-                        when the grace period ends, to keep your {data.streak.current}-month streak.
+                        when the grace period ends, to keep your {data.streak.ladder?.days ?? 0}-day streak.
                       </>
                     )}
                   </p>
@@ -128,16 +130,57 @@ export default function Dashboard() {
                 <article className="metric">
                   <h2>Giving streak</h2>
                   <p className="metricValue">
-                    {data.streak
-                      ? `${data.streak.current} ${data.streak.current === 1 ? "month" : "months"}`
-                      : "Updating"}
+                    {data.streak?.ladder
+                      ? `${data.streak.ladder.days} ${data.streak.ladder.days === 1 ? "day" : "days"}`
+                      : data.streak
+                        ? "Starting today"
+                        : "Updating"}
                   </p>
-                  {data.streak ? (
-                    <p>Consecutive months with a successful monthly gift. One-time gifts don’t change it.</p>
+                  {data.streak?.ladder ? (
+                    <>
+                      <p>
+                        {data.streak.ladder.next_milestone && data.streak.ladder.days_to_next
+                          ? `${data.streak.ladder.days_to_next} days to your ${data.streak.ladder.next_milestone}-day milestone.`
+                          : "Your giving streak keeps growing every day."}
+                      </p>
+                      <div
+                        className="streakBar"
+                        role="img"
+                        aria-label={`${data.streak.ladder.bar.filter(Boolean).length} of the last 30 days in your current streak`}
+                      >
+                        {streakDayKeys.map((key, index) => (
+                          <span
+                            key={key}
+                            className={data.streak?.ladder?.bar[index] ? "active" : ""}
+                            aria-hidden="true"
+                          />
+                        ))}
+                      </div>
+                      {data.rank && (
+                        <p>
+                          Top {data.rank.national_percentile}% nationally
+                          {data.rank.city_rank && data.rank.city
+                            ? ` · #${data.rank.city_rank} in ${data.rank.city}`
+                            : ""}
+                        </p>
+                      )}
+                    </>
+                  ) : data.streak ? (
+                    <p>Your day-based streak begins with your current monthly gift.</p>
                   ) : (
                     <p>We’re checking your billing history. Your streak is temporarily unavailable.</p>
                   )}
                 </article>
+                {data.network && (
+                  <article className="metric">
+                    <h2>Your network</h2>
+                    <p className="metricValue">{formatMoney(data.network.annualized_minor)} a year</p>
+                    <p>
+                      {data.network.active_count} active {data.network.active_count === 1 ? "donor" : "donors"} you
+                      brought in.
+                    </p>
+                  </article>
+                )}
                 {data.founding_donor && (
                   <article className="metric">
                     <h2>Founding Donor</h2>
@@ -148,8 +191,8 @@ export default function Dashboard() {
               </div>
               {!data.founding_donor && (
                 <p className="note">
-                  Founding Donor badge: not yet earned. A first gift completed before DAD launches on 22 April 2027
-                  earns it permanently.
+                  Founding Donor badge: not yet earned. A first gift completed before 1 January 2027 earns it
+                  permanently.
                 </p>
               )}
             </>

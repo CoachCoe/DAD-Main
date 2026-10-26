@@ -8,7 +8,14 @@ const data = {
   computed_at: "2027-01-01T00:00:00Z",
   founding_donor: true,
   referrals: { link: 2, irl: 3, total_minor: 12345, link_minor: 10000, irl_minor: 2345, currency: "USD" },
-  streak: { current: 2, at_risk: false, grace_ends_at: null },
+  streak: {
+    current: 2,
+    at_risk: false,
+    grace_ends_at: null,
+    ladder: { days: 24, last_milestone: 7, next_milestone: 30, days_to_next: 6, bar: Array(30).fill(true) },
+  },
+  rank: { national_percentile: 2, city: "Reno", city_rank: 7, computed_at: "2027-01-01T00:00:00Z" },
+  network: { active_count: 3, annualized_minor: 108000, currency: "USD" },
 };
 afterEach(() => vi.unstubAllGlobals());
 function respond(value: unknown) {
@@ -40,13 +47,18 @@ it("shows the five elements with separate channels and collected-dollar breakdow
   respond(data);
   render(<DashboardPage />);
   expect(await screen.findByRole("heading", { name: "Link Referrals" })).toBeVisible();
-  expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(5);
+  expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(6);
   const link = screen.getByRole("heading", { name: "Link Referrals" }).closest("article");
   const irl = screen.getByRole("heading", { name: "IRL Referrals" }).closest("article");
   if (!link || !irl) throw new Error("Missing referral cards");
   expect(within(link).getByText("2")).toBeVisible();
   expect(within(irl).getByText("3")).toBeVisible();
   expect(screen.getByText("$123.45")).toBeVisible();
+  expect(screen.getByText("24 days")).toBeVisible();
+  expect(screen.getByText("6 days to your 30-day milestone.")).toBeVisible();
+  expect(screen.getByText("Top 2% nationally · #7 in Reno")).toBeVisible();
+  expect(screen.getByText("$1,080.00 a year")).toBeVisible();
+  expect(screen.getByRole("img", { name: "30 of the last 30 days in your current streak" })).toBeVisible();
   fireEvent.click(screen.getByText("View Link and IRL breakdown"));
   expect(screen.getByText("Link: $100.00")).toBeVisible();
   expect(screen.getByText("IRL: $23.45")).toBeVisible();
@@ -62,9 +74,9 @@ it("shows the badge only when earned, and otherwise explains how it is earned", 
   render(<DashboardPage />);
   expect(await screen.findByRole("heading", { name: "Link Referrals" })).toBeVisible();
   expect(screen.queryByRole("heading", { name: "Founding Donor" })).not.toBeInTheDocument();
-  expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(4);
+  expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(5);
   expect(screen.getByText(/Founding Donor badge: not yet earned/)).toHaveTextContent(
-    "first gift completed before DAD launches on 22 April 2027",
+    "first gift completed before 1 January 2027",
   );
 });
 
@@ -73,7 +85,7 @@ it("does not substitute zeros for unavailable metrics", async () => {
   render(<DashboardPage />);
   expect(await screen.findByText(/streak is temporarily unavailable/)).toBeVisible();
   expect(screen.getAllByText("Updating")).toHaveLength(4);
-  expect(screen.queryByText("0 months")).not.toBeInTheDocument();
+  expect(screen.queryByText("0 days")).not.toBeInTheDocument();
   expect(screen.queryByText("$0.00")).not.toBeInTheDocument();
 });
 
@@ -88,18 +100,21 @@ it("can refresh an unavailable streak while keeping verified referral totals", a
   render(<DashboardPage />);
   expect(await screen.findByText("$123.45")).toBeVisible();
   expect(screen.getByRole("status")).toHaveTextContent("Your streak is updating");
-  expect(screen.queryByText("0 months")).not.toBeInTheDocument();
+  expect(screen.queryByText("0 days")).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Refresh dashboard" }));
-  expect(await screen.findByText("2 months")).toBeVisible();
+  expect(await screen.findByText("24 days")).toBeVisible();
   expect(screen.getByText("$123.45")).toBeVisible();
   expect(screen.queryByRole("button", { name: "Refresh dashboard" })).not.toBeInTheDocument();
 });
 
 it("explains the payment grace state", async () => {
-  respond({ ...data, streak: { current: 2, at_risk: true, grace_ends_at: "2027-02-15T00:00:00Z" } });
+  respond({
+    ...data,
+    streak: { ...data.streak, at_risk: true, grace_ends_at: "2027-02-15T00:00:00Z" },
+  });
   render(<DashboardPage />);
   expect(await screen.findByText(/Your streak is at risk/)).toHaveTextContent(
-    "grace period ends, to keep your 2-month streak",
+    "grace period ends, to keep your 24-day streak",
   );
   expect(screen.getByRole("link", { name: "Update payment method" })).toHaveAttribute(
     "href",
@@ -137,5 +152,5 @@ it("distinguishes preparing data from an empty account", async () => {
   respond({ mode: "test", state: "preparing" });
   render(<DashboardPage />);
   expect(await screen.findByText(/preparing your dashboard/)).toBeVisible();
-  expect(screen.queryByText("0 months")).not.toBeInTheDocument();
+  expect(screen.queryByText("0 days")).not.toBeInTheDocument();
 });

@@ -654,6 +654,22 @@ details[open] > summary::after {
   background: var(--ok);
 }
 
+.streakBar {
+  display: grid;
+  grid-template-columns: repeat(30, minmax(3px, 1fr));
+  gap: 3px;
+}
+.streakBar span {
+  min-height: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+.streakBar span.active {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
 .tableScroll {
   overflow-x: auto;
 }

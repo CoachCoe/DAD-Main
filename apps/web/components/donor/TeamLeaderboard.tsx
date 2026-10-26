@@ -33,7 +33,9 @@ export function TeamLeaderboard({ teams }: { teams: Team[] }) {
           ))}
         </select>
       </label>
-      <div className="tableScroll">
+      {/* Keyboard focus is required for horizontal scrolling in Safari. */}
+      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: this is an interactive scroll region. */}
+      <section className="tableScroll" tabIndex={0} aria-label="Team leaderboard table">
         <table className="dataTable">
           <caption className="visuallyHidden">Team leaderboard ranked by {teamViews[view].label.toLowerCase()}</caption>
           <thead>
@@ -63,7 +65,7 @@ export function TeamLeaderboard({ teams }: { teams: Team[] }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </section>
       <p className="note">Teams with fewer than 5 members are not shown.</p>
     </>
   );
