@@ -3,6 +3,7 @@ package oidc
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 )
@@ -58,8 +59,8 @@ func TestFromEnvironmentLive(t *testing.T) {
 }
 
 func stubSettings() *Settings {
-	return &Settings{Mode: "stub", StubKey: "secret", ClientIDs: map[Provider]string{
-		Apple: "com.dad.app", Google: "g.apps",
+	return &Settings{Mode: "stub", StubKey: "secret", ClientIDs: map[Provider][]string{
+		Apple: {"com.dad.app"}, Google: {"g.apps"},
 	}}
 }
 
@@ -102,5 +103,20 @@ func TestStubVerifierRejections(t *testing.T) {
 	// Malformed.
 	if _, err := v.Verify(ctx, Apple, "not.a.token.at.all"); !errors.Is(err, ErrToken) {
 		t.Errorf("malformed error = %v; want ErrToken", err)
+	}
+}
+
+func TestFromEnvironmentAcceptsSeveralClientIDs(t *testing.T) {
+	s, err := FromEnvironment(env(map[string]string{
+		"DONOR_OIDC_MODE": "live", "DONOR_OIDC_APPLE_CLIENT_ID": " org.dad.app , org.dad.web,, ",
+	}))
+	if err != nil || !slices.Equal(s.ClientIDs[Apple], []string{"org.dad.app", "org.dad.web"}) {
+		t.Fatalf("client ids: %+v %v", s, err)
+	}
+	if _, err := FromEnvironment(env(map[string]string{"DONOR_OIDC_MODE": "live", "DONOR_OIDC_APPLE_CLIENT_ID": " , "})); !errors.Is(
+		err,
+		ErrConfiguration,
+	) {
+		t.Fatalf("a list of blanks: %v; want ErrConfiguration", err)
 	}
 }

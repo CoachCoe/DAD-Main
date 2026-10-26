@@ -80,8 +80,8 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 	ctx := context.Background()
 	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
 
-	settings := &oidc.Settings{Mode: "stub", StubKey: "secret", ClientIDs: map[oidc.Provider]string{
-		oidc.Apple: "com.dad.app", oidc.Google: "g.apps",
+	settings := &oidc.Settings{Mode: "stub", StubKey: "secret", ClientIDs: map[oidc.Provider][]string{
+		oidc.Apple: {"com.dad.app"}, oidc.Google: {"g.apps"},
 	}}
 	svc := OIDCService{DB: api, Verifier: oidc.NewVerifier(settings), Settings: settings}
 
@@ -151,7 +151,7 @@ func (unreachableProvider) Verify(context.Context, oidc.Provider, string) (oidc.
 // TestOIDCProviderOutageIsNotABadToken keeps a provider outage from telling the
 // donor their sign-in was wrong.
 func TestOIDCProviderOutageIsNotABadToken(t *testing.T) {
-	settings := &oidc.Settings{Mode: "live", ClientIDs: map[oidc.Provider]string{oidc.Google: "g.apps"}}
+	settings := &oidc.Settings{Mode: "live", ClientIDs: map[oidc.Provider][]string{oidc.Google: {"g.apps"}}}
 	svc := OIDCService{DB: as(t, dbroles.API), Verifier: unreachableProvider{}, Settings: settings}
 	_, err := svc.SignIn(context.Background(), oidc.Google, "token", Client{})
 	if !errors.Is(err, oidc.ErrKeys) || errors.Is(err, ErrSignInCode) {

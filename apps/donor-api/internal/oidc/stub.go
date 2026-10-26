@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 )
@@ -17,7 +18,7 @@ import (
 // verifier checks the signature, issuer, audience and expiry exactly as the
 // live verifier will, so only the signature mechanism differs.
 type stubVerifier struct {
-	clientIDs map[Provider]string
+	clientIDs map[Provider][]string
 	key       string
 }
 
@@ -40,7 +41,7 @@ func (v *stubVerifier) Verify(_ context.Context, provider Provider, idToken stri
 	if !provider.Valid() {
 		return Identity{}, ErrToken
 	}
-	clientID, ok := v.clientIDs[provider]
+	audiences, ok := v.clientIDs[provider]
 	if !ok {
 		return Identity{}, ErrToken
 	}
@@ -63,7 +64,7 @@ func (v *stubVerifier) Verify(_ context.Context, provider Provider, idToken stri
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return Identity{}, ErrToken
 	}
-	if claims.Iss != stubIssuers[provider] || claims.Aud != clientID || claims.Sub == "" {
+	if claims.Iss != stubIssuers[provider] || !slices.Contains(audiences, claims.Aud) || claims.Sub == "" {
 		return Identity{}, ErrToken
 	}
 	if claims.Exp <= 0 || time.Now().After(time.Unix(claims.Exp, 0)) {

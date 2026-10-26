@@ -50,7 +50,7 @@ func newProvider(t *testing.T) *provider {
 }
 
 func (p *provider) verifier(now time.Time) *liveVerifier {
-	v := newLiveVerifier(map[Provider]string{Google: "g.apps", Apple: "com.dad.app"})
+	v := newLiveVerifier(map[Provider][]string{Google: {"g.apps"}, Apple: {"com.dad.app"}})
 	v.keyURLs = map[Provider]string{Google: p.server.URL, Apple: p.server.URL}
 	v.client = p.server.Client()
 	v.now = func() time.Time { return now }
@@ -207,5 +207,16 @@ func TestLiveVerifierProviderOutage(t *testing.T) {
 	cold := p.verifier(now)
 	if _, err := cold.Verify(context.Background(), Google, p.sign(rs256("k1"), claims)); !errors.Is(err, ErrKeys) {
 		t.Fatalf("no keys and an outage: %v; want ErrKeys", err)
+	}
+}
+
+func TestLiveVerifierAcceptsEveryConfiguredAudience(t *testing.T) {
+	p := newProvider(t)
+	v := p.verifier(issued)
+	v.clientIDs[Apple] = []string{"com.dad.app", "com.dad.web"}
+	claims := googleClaims()
+	claims["iss"], claims["aud"] = "https://appleid.apple.com", "com.dad.web"
+	if _, err := v.Verify(context.Background(), Apple, p.sign(rs256("k1"), claims)); err != nil {
+		t.Fatalf("the website's audience: %v", err)
 	}
 }

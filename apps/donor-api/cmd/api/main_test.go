@@ -142,7 +142,7 @@ func TestConfigureOffersDonorPasskeysOnlyOnAHostName(t *testing.T) {
 
 func TestSignInStubsNeedALocalOriginOrAnOptIn(t *testing.T) {
 	smsStub := &sms.Settings{Provider: "stub", Sender: "DAD"}
-	oidcStub := &oidc.Settings{Mode: "stub", StubKey: "k", ClientIDs: map[oidc.Provider]string{oidc.Google: "g"}}
+	oidcStub := &oidc.Settings{Mode: "stub", StubKey: "k", ClientIDs: map[oidc.Provider][]string{oidc.Google: {"g"}}}
 	none := func(string) string { return "" }
 	optIn := func(name string) string { return map[string]string{allowSignInStubs: "true"}[name] }
 	for _, tc := range []struct {

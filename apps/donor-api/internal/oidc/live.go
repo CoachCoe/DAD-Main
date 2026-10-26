@@ -12,6 +12,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -47,7 +48,7 @@ const (
 // liveVerifier verifies provider id_tokens against the provider's published
 // signing keys.
 type liveVerifier struct {
-	clientIDs map[Provider]string
+	clientIDs map[Provider][]string
 	keyURLs   map[Provider]string
 	client    *http.Client
 	now       func() time.Time
@@ -61,7 +62,7 @@ type keySet struct {
 	fetchedAt time.Time
 }
 
-func newLiveVerifier(clientIDs map[Provider]string) *liveVerifier {
+func newLiveVerifier(clientIDs map[Provider][]string) *liveVerifier {
 	return &liveVerifier{
 		clientIDs: clientIDs,
 		keyURLs:   providerKeys,
@@ -85,7 +86,7 @@ type liveClaims struct {
 }
 
 func (v *liveVerifier) Verify(ctx context.Context, provider Provider, idToken string) (Identity, error) {
-	clientID, ok := v.clientIDs[provider]
+	audiences, ok := v.clientIDs[provider]
 	if !provider.Valid() || !ok {
 		return Identity{}, ErrToken
 	}
@@ -117,7 +118,7 @@ func (v *liveVerifier) Verify(ctx context.Context, provider Provider, idToken st
 		return Identity{}, ErrToken
 	}
 	now := v.now()
-	if !issuedBy(provider, claims.Iss) || !audienceHolds(claims.Aud, clientID) || claims.Sub == "" ||
+	if !issuedBy(provider, claims.Iss) || !audienceHolds(claims.Aud, audiences) || claims.Sub == "" ||
 		claims.Exp <= 0 || now.After(time.Unix(claims.Exp, 0).Add(clockSkew)) ||
 		time.Unix(claims.Iat, 0).After(now.Add(clockSkew)) {
 		return Identity{}, ErrToken
@@ -226,21 +227,16 @@ func issuedBy(provider Provider, iss string) bool {
 	return false
 }
 
-func audienceHolds(raw json.RawMessage, clientID string) bool {
+func audienceHolds(raw json.RawMessage, audiences []string) bool {
 	var single string
 	if json.Unmarshal(raw, &single) == nil {
-		return single == clientID
+		return slices.Contains(audiences, single)
 	}
 	var many []string
 	if json.Unmarshal(raw, &many) != nil {
 		return false
 	}
-	for _, aud := range many {
-		if aud == clientID {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(many, func(aud string) bool { return slices.Contains(audiences, aud) })
 }
 
 func emailVerified(raw json.RawMessage) bool {

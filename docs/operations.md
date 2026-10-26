@@ -559,7 +559,9 @@ start with an invalid configuration and names the variables to fix.
   SID), `DONOR_SMS_AUTH_TOKEN`, and `DONOR_SMS_FROM` (an E.164 number or an `MG…`
   Messaging Service SID). A failed send answers 503 and the donor can ask again.
 - Apple/Google: `DONOR_OIDC_MODE=live` with `DONOR_OIDC_APPLE_CLIENT_ID` and/or
-  `DONOR_OIDC_GOOGLE_CLIENT_ID`, the audience each provider puts in its ID tokens. The
+  `DONOR_OIDC_GOOGLE_CLIENT_ID`, the audience each provider puts in its ID tokens. List
+  several, separated by commas, when the app and the website use different ones (Apple's
+  bundle ID and Services ID). The
   API fetches signing keys from `appleid.apple.com` and `www.googleapis.com`, so it needs
   outbound HTTPS to both; keys are cached for an hour and a known key keeps working
   through a provider outage.

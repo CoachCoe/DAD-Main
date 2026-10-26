@@ -63,28 +63,28 @@ type Verifier interface {
 	Verify(ctx context.Context, provider Provider, idToken string) (Identity, error)
 }
 
-// Settings is a resolved OIDC configuration. ClientIDs is the audience expected
-// per provider. Mode selects the verifier: "live" or "stub".
+// Settings is a resolved OIDC configuration. ClientIDs are the audiences
+// accepted per provider: an app and a website have different ones. Mode selects the verifier: "live" or "stub".
 type Settings struct {
 	Mode      string
-	ClientIDs map[Provider]string
+	ClientIDs map[Provider][]string
 	StubKey   string // HMAC key the stub verifier accepts; required in stub mode
 }
 
 // FromEnvironment reads the OIDC configuration, or nil when none is set.
 func FromEnvironment(getenv func(string) string) (*Settings, error) {
 	mode := strings.ToLower(strings.TrimSpace(getenv("DONOR_OIDC_MODE")))
-	apple := strings.TrimSpace(getenv("DONOR_OIDC_APPLE_CLIENT_ID"))
-	google := strings.TrimSpace(getenv("DONOR_OIDC_GOOGLE_CLIENT_ID"))
+	apple := clientIDs(getenv("DONOR_OIDC_APPLE_CLIENT_ID"))
+	google := clientIDs(getenv("DONOR_OIDC_GOOGLE_CLIENT_ID"))
 	stubKey := getenv("DONOR_OIDC_STUB_KEY")
-	if mode == "" && apple == "" && google == "" && stubKey == "" {
+	if mode == "" && apple == nil && google == nil && stubKey == "" {
 		return nil, nil
 	}
-	s := Settings{Mode: mode, ClientIDs: map[Provider]string{}, StubKey: stubKey}
-	if apple != "" {
+	s := Settings{Mode: mode, ClientIDs: map[Provider][]string{}, StubKey: stubKey}
+	if apple != nil {
 		s.ClientIDs[Apple] = apple
 	}
-	if google != "" {
+	if google != nil {
 		s.ClientIDs[Google] = google
 	}
 	var invalid []string
@@ -104,6 +104,17 @@ func FromEnvironment(getenv func(string) string) (*Settings, error) {
 		return nil, fmt.Errorf("%w: check %s", ErrConfiguration, strings.Join(invalid, ", "))
 	}
 	return &s, nil
+}
+
+// clientIDs splits a comma-separated list of client ids, or returns nil.
+func clientIDs(value string) []string {
+	var ids []string
+	for id := range strings.SplitSeq(value, ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // NewVerifier builds the Verifier for a resolved configuration.
