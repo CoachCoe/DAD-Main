@@ -128,7 +128,7 @@ export interface paths {
         put?: never;
         /**
          * Record a company-code visit
-         * @description Web only. Records a pre-signup visit through an employer's company code on the HttpOnly `dad_company` cookie (30 days, last touch wins) so the attribution survives the app install gap; it binds to the account at first gift. The code is normalised to upper case. The response never reveals whether the code resolves to a partner.
+         * @description Web only. Records a pre-signup visit through an employer's company code on the HttpOnly `dad_company` cookie (30 days, last touch wins). It binds when the donor proves account ownership in that browser; a guest checkout cannot change an employer based on email alone. The code is normalised to upper case. The response never reveals whether the code resolves to a partner. This browser cookie alone does not survive an app install; native clients can enter the code after sign-in.
          */
         post: operations["captureCompany"];
         delete?: never;

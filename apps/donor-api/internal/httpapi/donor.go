@@ -324,7 +324,7 @@ func (a *api) captureReferral(w http.ResponseWriter, r *http.Request) {
 
 // captureCompany records a pre-signup company-code visit on an anonymous
 // visitor cookie, mirroring referral capture. The response never reveals whether
-// the code resolves to a partner (that resolution is a later phase).
+// the code resolves to a partner. Account ownership is proved before linking it.
 func (a *api) captureCompany(w http.ResponseWriter, r *http.Request) {
 	code, ok := referralCode(w, r)
 	if !ok {

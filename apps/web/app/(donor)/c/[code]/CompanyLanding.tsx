@@ -10,7 +10,7 @@ type Capture = ResponseBody<"/donor/company/{code}", "post">;
 
 /**
  * The landing for an employer's company code (D-3). Saving it from the visitor's browser sets
- * the attribution cookie, so the gift that follows links them to the employer (EM-2).
+ * the attribution cookie; account proof is required before linking the employer (EM-2).
  */
 export default function CompanyLanding({ code }: { code: string }) {
   const [captured, setCaptured] = useState<boolean | null>(null);
@@ -47,6 +47,7 @@ export default function CompanyLanding({ code }: { code: string }) {
       <Link className="button full" href="/donate">
         Start giving $1 a day
       </Link>
+      <p className="note">Sign in or claim your account to link your giving to this workplace.</p>
       <p className="note">
         Company code <span className="hash">{code}</span>
         {captured ? " is saved for this browser." : "."} Already giving? Add it under Employer and team in your account.

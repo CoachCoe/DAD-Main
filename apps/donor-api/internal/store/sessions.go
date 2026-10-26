@@ -44,6 +44,8 @@ type Client struct {
 	App      bool
 	Device   string
 	Platform string // IOS, ANDROID, or empty
+	// CompanyToken is a company touch from the browser completing sign-in.
+	CompanyToken string
 }
 
 // Tokens are a new session's credentials and how long each lasts. A browser
@@ -107,6 +109,9 @@ func issueSession(ctx context.Context, q *queries.Queries, donor pgtype.UUID, cl
 		tokens = Tokens{Access: access, AccessTTL: accessLifetime, Refresh: refresh, RefreshTTL: refreshIdle}
 	}
 	if err = q.InsertSession(ctx, session); err != nil {
+		return Tokens{}, err
+	}
+	if _, err = bindCompanyCode(ctx, q, donor, client.CompanyToken, now); err != nil {
 		return Tokens{}, err
 	}
 	return tokens, sessionEvent(ctx, q, donor, id, "SIGNED_IN")

@@ -27,15 +27,13 @@ var (
 	ErrListPageCap = errors.New("listing exceeded its page cap; split the range")
 )
 
-// CheckoutRequest is a guest gift. Visitor and Company are the anonymous
-// tokens of a referral touch and a company-code touch captured before it.
+// CheckoutRequest is a guest gift. Visitor is an anonymous referral touch.
 type CheckoutRequest struct {
 	RequestID pgtype.UUID
 	Email     string
 	Amount    int64
 	Frequency string
 	Visitor   *string
-	Company   string
 }
 
 type CheckoutResult struct {

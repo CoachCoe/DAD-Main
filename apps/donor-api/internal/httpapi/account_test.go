@@ -58,9 +58,11 @@ func TestClaimSetsCookieOnlyAfterSuccess(t *testing.T) {
 		req := httptest.NewRequest("POST", "/donor/claim", strings.NewReader(`{"token":"`+proof+`"}`))
 		req.Header.Set("Origin", "https://dad.example.org")
 		req.AddCookie(&http.Cookie{Name: "dad_donor_session", Value: "old-session"})
+		req.AddCookie(&http.Cookie{Name: "dad_company", Value: "captured-company-touch"})
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, req)
-		if response.Code != tc.status || stub.proof != proof || stub.old != "old-session" {
+		if response.Code != tc.status || stub.proof != proof || stub.old != "old-session" ||
+			stub.client.CompanyToken != "captured-company-touch" {
 			t.Fatalf(
 				"%v: got %d with proof %q revoking %q, want %d with the proof revoking old-session",
 				tc.err,

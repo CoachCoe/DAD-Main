@@ -109,9 +109,6 @@ func prepareAttempt(
 	if err != nil {
 		return empty, err
 	}
-	if _, err = bindCompanyCode(ctx, q, donor.ID, request.Company, now); err != nil {
-		return empty, err
-	}
 	attempt, err := q.StripeCheckout(ctx, request.RequestID)
 	if err == nil {
 		if attempt.RequestHash != digest || attempt.Status == "EXPIRED" || attempt.Status == "CANCELLED" || attempt.Status == "COMPLETE" {

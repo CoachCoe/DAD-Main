@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -62,9 +63,7 @@ func TestCompanyCodeCaptureAndBind(t *testing.T) {
 	}
 }
 
-// A company code captured before signup links the donor to that employer when
-// they check out (D-3, D-4, EM-2), and a later code never replaces it.
-func TestCheckoutBindsTheCapturedCompanyCode(t *testing.T) {
+func TestCompanyAttributionWaitsForAccountProof(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	donors := DonorService{DB: as(t, dbroles.API), Origin: "https://donor.example.org"}
@@ -81,8 +80,20 @@ func TestCheckoutBindsTheCapturedCompanyCode(t *testing.T) {
 
 	checkout, request, donorID, _ := checkoutFixture(t)
 	cleanup(t, "UPDATE donors SET company_code=NULL WHERE id=$1", donorID)
-	request.Company = capture.Token
 	if _, err := checkout.BeginCheckout(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	account := AccountService{DB: as(t, dbroles.API)}
+	if _, err := account.ClaimAccount(ctx, "invalid-proof", "", Client{CompanyToken: capture.Token}); !errors.Is(err, ErrDenied) {
+		t.Fatalf("invalid account proof: %v", err)
+	}
+	var assigned bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM donor_partner_employees WHERE donor_id=$1)
+		OR EXISTS(SELECT 1 FROM donors WHERE id=$1 AND company_code IS NOT NULL)`, donorID).Scan(&assigned); err != nil || assigned {
+		t.Fatalf("guest checkout changed employer without account proof: %v %v", assigned, err)
+	}
+	proof := link(t, pool, donorID, time.Now().UTC())
+	if _, err := account.ClaimAccount(ctx, proof, "", Client{CompanyToken: capture.Token}); err != nil {
 		t.Fatal(err)
 	}
 	var linked pgtype.UUID
@@ -90,7 +101,7 @@ func TestCheckoutBindsTheCapturedCompanyCode(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT e.partner_id, d.company_code FROM donor_partner_employees e
 		JOIN donors d ON d.id=e.donor_id WHERE e.donor_id=$1`, donorID).Scan(&linked, &bound); err != nil ||
 		linked != partnerID || bound != code {
-		t.Fatalf("checkout linked %v with code %q (%v), want %v and %q", linked, bound, err, partnerID, code)
+		t.Fatalf("verified claim linked %v with code %q (%v), want %v and %q", linked, bound, err, partnerID, code)
 	}
 
 	other, err := donors.CaptureCompanyCode(ctx, "INITECH", "", time.Now().UTC())

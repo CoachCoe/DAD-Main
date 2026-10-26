@@ -624,7 +624,8 @@ type CompanyCapture struct {
 
 // CaptureCompanyCode records a pre-signup visit through an employer's company
 // code against an anonymous visitor token, so the attribution survives the app
-// install gap and binds when the donor checks out. Last touch wins. A malformed code keeps the visitor's existing unexpired touch
+// install gap and binds when the donor proves account ownership in that browser.
+// Last touch wins. A malformed code keeps the visitor's existing unexpired touch
 // if any, else records nothing. The code is normalised to upper case.
 func (s DonorService) CaptureCompanyCode(ctx context.Context, code, visitor string, now time.Time) (CompanyCapture, error) {
 	code = strings.ToUpper(strings.TrimSpace(code))
@@ -675,7 +676,7 @@ func (s DonorService) CaptureCompanyCode(ctx context.Context, code, visitor stri
 }
 
 // bindCompanyCode binds the company code captured for visitor to donor when
-// the donor is established at checkout (D-3, D-4), and links them to the
+// the donor proves account ownership (D-3, D-4), and links them to the
 // partner it resolves to, so their giving rolls up to the employer (EM-2). It
 // does nothing without an unexpired touch, and never replaces a donor's code
 // or employer. It returns the code it found, or empty.
