@@ -44,7 +44,11 @@ func TestPhoneSignIn(t *testing.T) {
 	code := extractCode(t, msg)
 
 	// A wrong code is rejected and counts an attempt.
-	if _, err := svc.FinishSignIn(ctx, phone, "000000", Client{}); !errors.Is(err, ErrSignInCode) {
+	wrong := "000000"
+	if code == wrong {
+		wrong = "111111"
+	}
+	if _, err := svc.FinishSignIn(ctx, phone, wrong, Client{}); !errors.Is(err, ErrSignInCode) {
 		t.Fatalf("wrong code = %v; want ErrSignInCode", err)
 	}
 	var attempts int
@@ -77,6 +81,95 @@ func TestPhoneSignIn(t *testing.T) {
 	}
 }
 
+func TestPhoneSignInSerializesGuessesAndResends(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	id, _ := donor(t, pool)
+	const phone = "+14155550125"
+	mustExec(t, pool, "UPDATE donors SET phone=$2 WHERE id=$1", id, phone)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone) })
+	sender := &sms.StubSender{}
+	sends := &sync.WaitGroup{}
+	svc := PhoneService{DB: as(t, dbroles.API), Sender: sender, sends: sends}
+	if err := svc.BeginSignIn(ctx, phone); err != nil {
+		t.Fatal(err)
+	}
+	sends.Wait()
+	message, _ := sender.Last(phone)
+	code := extractCode(t, message)
+	wrong := "000000"
+	if code == wrong {
+		wrong = "111111"
+	}
+	start := make(chan struct{})
+	results := make(chan error, 32)
+	for range cap(results) {
+		go func() {
+			<-start
+			_, err := svc.FinishSignIn(ctx, phone, wrong, Client{})
+			results <- err
+		}()
+	}
+	close(start)
+	for range cap(results) {
+		if err := <-results; !errors.Is(err, ErrSignInCode) {
+			t.Errorf("wrong concurrent guess: %v", err)
+		}
+	}
+	var attempts int
+	if err := pool.QueryRow(ctx, "SELECT attempts FROM donor_phone_codes WHERE phone=$1", phone).Scan(&attempts); err != nil ||
+		attempts != phoneCodeMaxTries {
+		t.Fatalf("attempts = %d (%v); want exactly %d", attempts, err, phoneCodeMaxTries)
+	}
+	if err := svc.BeginSignIn(ctx, phone); err != nil {
+		t.Fatal(err)
+	}
+	sends.Wait()
+	var hash string
+	if err := pool.QueryRow(ctx, "SELECT attempts,code_hash FROM donor_phone_codes WHERE phone=$1", phone).Scan(&attempts, &hash); err != nil ||
+		attempts != phoneCodeMaxTries ||
+		hash != HashToken(code) {
+		t.Fatalf("immediate resend reset the code or guesses: %d %v", attempts, err)
+	}
+	if _, err := svc.FinishSignIn(ctx, phone, code, Client{}); !errors.Is(err, ErrSignInCode) {
+		t.Fatalf("exhausted code signed in: %v", err)
+	}
+	mustExec(t, pool, "UPDATE donor_phone_codes SET created_at=now()-interval '2 minutes' WHERE phone=$1", phone)
+	if err := svc.BeginSignIn(ctx, phone); err != nil {
+		t.Fatal(err)
+	}
+	sends.Wait()
+	message, _ = sender.Last(phone)
+	if _, err := svc.FinishSignIn(ctx, phone, extractCode(t, message), Client{}); err != nil {
+		t.Fatalf("replacement code after cooldown: %v", err)
+	}
+}
+
+func TestPhoneChangeInvalidatesPendingCode(t *testing.T) {
+	s, token, id := donorServiceFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	const phone = "+14155550126"
+	mustExec(t, pool, "UPDATE donors SET phone=$2 WHERE id=$1", id, phone)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_phone_codes(phone,code_hash,expires_at) VALUES($1,$2,now()+interval '10 minutes')",
+		phone,
+		HashToken("123456"),
+	)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_phone_codes WHERE phone=$1", phone) })
+	if _, err := s.SaveProfile(ctx, token, ProfileUpdate{}); err != nil {
+		t.Fatal(err)
+	}
+	other, _ := donor(t, pool)
+	mustExec(t, pool, "UPDATE donors SET phone=$2 WHERE id=$1", other, phone)
+	phoneSignIn := PhoneService{DB: as(t, dbroles.API), Sender: &sms.StubSender{}}
+	if _, err := phoneSignIn.FinishSignIn(ctx, phone, "123456", Client{}); !errors.Is(err, ErrSignInCode) {
+		t.Fatalf("a detached phone's code authenticated another donor: %v", err)
+	}
+}
+
 func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
@@ -103,6 +196,9 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 	}
 	if tokens.Access == "" {
 		t.Fatal("no session issued on first sign-in")
+	}
+	if profile, err := (DonorService{DB: api}).Profile(ctx, tokens.Access); err != nil || profile.Email != email {
+		t.Fatalf("social sign-in did not claim a usable account: %+v %v", profile, err)
 	}
 	var linked int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_oidc_identities WHERE donor_id=$1 AND provider='GOOGLE' AND subject='goog-sub-1'", id).Scan(&linked); err != nil ||

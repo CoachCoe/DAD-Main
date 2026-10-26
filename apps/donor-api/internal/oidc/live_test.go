@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -81,7 +82,7 @@ func googleClaims() map[string]any {
 	return map[string]any{
 		"iss": "https://accounts.google.com", "sub": "g-123", "aud": "g.apps",
 		"iat": issued.Unix(), "exp": issued.Add(time.Hour).Unix(),
-		"email": "d@example.org", "email_verified": true,
+		"email": "d@example.org", "email_verified": true, "hd": "example.org",
 	}
 }
 
@@ -150,6 +151,12 @@ func TestLiveVerifierRejections(t *testing.T) {
 		"issued later":    p.sign(rs256("k1"), with("iat", issued.Add(10*time.Minute).Unix())),
 		"no subject":      p.sign(rs256("k1"), with("sub", "")),
 		"no expiry":       p.sign(rs256("k1"), with("exp", 0)),
+		"no issued time":  p.sign(rs256("k1"), with("iat", 0)),
+		"expiry at issue": p.sign(rs256("k1"), with("exp", issued.Unix())),
+		"wrong presenter": p.sign(rs256("k1"), with("azp", "another.apps")),
+		"no presenter":    p.sign(rs256("k1"), with("aud", []string{"g.apps", "another.apps"})),
+		"long subject":    p.sign(rs256("k1"), with("sub", strings.Repeat("s", 256))),
+		"NUL subject":     p.sign(rs256("k1"), with("sub", "s\x00")),
 		"alg none":        p.sign(map[string]any{"alg": "none", "kid": "k1"}, googleClaims()),
 		"HS256":           p.sign(map[string]any{"alg": "HS256", "kid": "k1"}, googleClaims()),
 		"no kid":          p.sign(map[string]any{"alg": "RS256"}, googleClaims()),
@@ -166,6 +173,40 @@ func TestLiveVerifierRejections(t *testing.T) {
 		if _, err := p.verifier(issued).Verify(context.Background(), provider, token); !errors.Is(err, ErrToken) {
 			t.Errorf("%s: err = %v; want ErrToken", name, err)
 		}
+	}
+}
+
+func TestGoogleEmailAuthority(t *testing.T) {
+	p := newProvider(t)
+	v := p.verifier(issued)
+	for _, tc := range []struct {
+		name, email, domain string
+		trusted             bool
+	}{
+		{"Gmail", "d@gmail.com", "", true},
+		{"Workspace", "d@example.org", "example.org", true},
+		{"external mailbox", "d@example.org", "", false},
+		{"Gmail lookalike", "d@gmail.com.example.org", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			claims := googleClaims()
+			claims["email"], claims["hd"] = tc.email, tc.domain
+			id, err := v.Verify(context.Background(), Google, p.sign(rs256("k1"), claims))
+			if err != nil || id.Subject != "g-123" || (id.Email != "") != tc.trusted {
+				t.Fatalf("identity = %+v, %v; trusted email: %v", id, err, tc.trusted)
+			}
+		})
+	}
+}
+
+func TestLiveVerifierAcceptsConfiguredPresenter(t *testing.T) {
+	p := newProvider(t)
+	v := p.verifier(issued)
+	v.clientIDs[Google] = []string{"g.apps", "g.android"}
+	claims := googleClaims()
+	claims["aud"], claims["azp"] = []string{"g.apps", "g.android"}, "g.android"
+	if _, err := v.Verify(context.Background(), Google, p.sign(rs256("k1"), claims)); err != nil {
+		t.Fatal(err)
 	}
 }
 

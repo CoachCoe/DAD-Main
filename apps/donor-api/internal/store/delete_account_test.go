@@ -22,6 +22,13 @@ func TestDeleteAccountErasesPersonalDataAndKeepsLedger(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_phone_codes(phone,code_hash,expires_at) VALUES('+14155550123',$1,now()+interval '10 minutes')",
+		HashToken("123456"),
+	)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_phone_codes WHERE phone='+14155550123'") })
 	oidcID, _ := NewID()
 	if _, err := pool.Exec(ctx,
 		"INSERT INTO donor_oidc_identities (id, donor_id, provider, subject) VALUES ($1,$2,'GOOGLE','sub-del')", oidcID, id,
@@ -109,6 +116,11 @@ func TestDeleteAccountErasesPersonalDataAndKeepsLedger(t *testing.T) {
 	}
 	if !disabled {
 		t.Error("account not disabled after deletion")
+	}
+	var phoneCodes int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_phone_codes WHERE phone='+14155550123'").Scan(&phoneCodes); err != nil ||
+		phoneCodes != 0 {
+		t.Errorf("deleted account retained %d phone codes (%v)", phoneCodes, err)
 	}
 
 	// OIDC identity removed.

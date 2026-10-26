@@ -53,15 +53,22 @@ Completing an email change removes every passkey with every session, because the
 the account's root credential; signing out everywhere keeps them.
 
 Phone sign-in sends a six-digit code to a phone already saved on an account. The code is
-stored hashed, expires after 10 minutes, and allows five attempts; a wrong guess is
-counted in its own committed statement so a failed verification cannot roll the count
-back. Requesting a code answers the same whether or not the number has an account, and
+stored hashed, expires after 10 minutes, and allows five attempts. A wrong guess commits
+while holding the code lock, before the request is rejected, so concurrent guesses cannot
+exceed the budget. A replacement is limited to one a minute per phone across API replicas;
+an immediate retry preserves the existing code and attempt count. Changing or removing a
+phone, or deleting its account, invalidates its pending code. Requesting a code answers the same whether or not the number has an account, and
 a wrong, expired, or exhausted code and an unknown number all fail with one message.
 Apple and Google sign-in verify the ID token's RS256 signature against the provider's
 published keys, then its issuer, audience, expiry, and issue time, then sign in the donor
 already linked to that subject or, on first use, the donor with the token's email,
-recording the link. The email is used only when the provider marks it verified, so an
-unverified address can never take over an account. A verified identity with no account
+recording the link. The authorized presenter must be a configured client, and a token
+with multiple audiences must name one. The email is used only when the provider marks it
+verified. Google must also be authoritative for the address: Gmail or a token with a
+Workspace hosted-domain claim. Google can mark an external mailbox verified without
+proving its current ownership, so that address cannot create a link; use email sign-in
+instead. An established provider-subject link still works without the email claim.
+A verified identity with no account
 fails like a wrong code; accounts are created only by giving. Both methods stay off until
 their provider is configured ([operations](operations.md#phone-and-social-sign-in)); the
 recording stubs for development must never be configured in production.

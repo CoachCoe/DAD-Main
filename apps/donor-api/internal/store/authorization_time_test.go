@@ -77,6 +77,38 @@ func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 	}
 }
 
+func TestCeremonyExpiryUsesDatabaseClock(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	q := queries.New(as(t, dbroles.API))
+	for _, kind := range []string{"donor", "staff"} {
+		t.Run(kind, func(t *testing.T) {
+			token := mustNewID(t).String()
+			table := "donor_ceremonies"
+			if kind == "staff" {
+				table = "donor_staff_ceremonies"
+			}
+			mustExec(
+				t,
+				pool,
+				"INSERT INTO "+table+"(token_hash,kind,session,expires_at) VALUES($1,'SIGN_IN','{}',now()-interval '1 minute')",
+				HashToken(token),
+			)
+			t.Cleanup(func() { cleanExec(t, "DELETE FROM "+table+" WHERE token_hash=$1", HashToken(token)) })
+			laggingClock := time.Now().Add(-time.Hour)
+			var err error
+			if kind == "staff" {
+				_, _, err = takeCeremony(ctx, q, token, "SIGN_IN", laggingClock)
+			} else {
+				_, _, err = takeDonorCeremony(ctx, q, token, "SIGN_IN", laggingClock)
+			}
+			if !errors.Is(err, ErrStaffDenied) && !errors.Is(err, ErrPasskeyDenied) {
+				t.Fatalf("expired ceremony accepted with a lagging API clock: %v", err)
+			}
+		})
+	}
+}
+
 // awaitBlocked waits until tx's connection is blocked on another
 // transaction's lock, failing if the work in progress finishes first.
 func awaitBlocked(ctx context.Context, t *testing.T, pool *pgxpool.Pool, tx pgx.Tx, done <-chan error) {

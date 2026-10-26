@@ -16,6 +16,7 @@ import (
 	"dad/donor-api/internal/sms"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -64,10 +65,25 @@ func (s PhoneService) BeginSignIn(ctx context.Context, phone string) error {
 	sent := false
 	if err := pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		if _, err := q.DonorByPhone(ctx, text(phone)); errors.Is(err, pgx.ErrNoRows) {
+		donor, err := q.DonorByPhone(ctx, text(phone))
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // no account: do not store or send, but report success
 		} else if err != nil {
 			return err
+		}
+		donor, err = q.LockDonor(ctx, donor.ID)
+		if err != nil {
+			return err
+		}
+		if donor.Disabled || donor.Phone.String != phone {
+			return nil
+		}
+		pending, err := q.PhoneCode(ctx, phone)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err == nil && time.Since(pending.CreatedAt.Time) < time.Minute {
+			return nil
 		}
 		sent = true
 		return q.UpsertPhoneCode(ctx, queries.UpsertPhoneCodeParams{
@@ -92,7 +108,7 @@ func (s PhoneService) BeginSignIn(ctx context.Context, phone string) error {
 			defer s.sends.Done()
 		}
 		if err := s.Sender.Send(send, phone, message); err != nil {
-			slog.Warn("sign-in code not sent", "cause", err.Error())
+			slog.Warn("sign-in code not sent", "cause", fmt.Sprintf("%T", err))
 		}
 	}()
 	return nil
@@ -107,23 +123,23 @@ func (s PhoneService) FinishSignIn(ctx context.Context, phone, code string, clie
 	if !phonePatternStore.MatchString(phone) {
 		return Tokens{}, ErrSignInCode
 	}
-	tokens, recordAttempt, err := s.finish(ctx, phone, code, client)
-	if recordAttempt {
-		// The verification tx rolled back on rejection, so the failed attempt is
-		// recorded in its own committed statement — otherwise a wrong code would
-		// never increment the counter and could be retried without limit.
-		if recErr := queries.New(s.DB).RecordPhoneCodeAttempt(ctx, phone); recErr != nil {
-			return Tokens{}, recErr
-		}
-	}
-	return tokens, err
-}
-
-// finish verifies the code in one transaction. It returns recordAttempt=true
-// when the caller must persist a failed attempt after the tx rolls back.
-func (s PhoneService) finish(ctx context.Context, phone, code string, client Client) (Tokens, bool, error) {
+	rejected := false
 	tokens, err := transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (Tokens, error) {
 		q := queries.New(tx)
+		donor, err := q.DonorByPhone(ctx, text(phone))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Tokens{}, ErrSignInCode
+		}
+		if err != nil {
+			return Tokens{}, err
+		}
+		donor, err = q.LockDonor(ctx, donor.ID)
+		if err != nil {
+			return Tokens{}, err
+		}
+		if donor.Disabled || donor.Phone.String != phone {
+			return Tokens{}, ErrSignInCode
+		}
 		pending, err := q.PhoneCode(ctx, phone)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return Tokens{}, ErrSignInCode
@@ -132,37 +148,27 @@ func (s PhoneService) finish(ctx context.Context, phone, code string, client Cli
 			return Tokens{}, err
 		}
 		now := time.Now().UTC()
-		expired := now.After(pending.ExpiresAt.Time)
+		expired := !now.Before(pending.ExpiresAt.Time)
 		overTried := pending.Attempts >= phoneCodeMaxTries
 		matched := HashToken(code) == pending.CodeHash
 		if expired || overTried || !matched {
-			// A live-but-wrong code: signal that the attempt must be counted.
 			if !expired && !overTried {
-				return Tokens{}, errCountAttempt
+				// Commit the guess while holding the code lock, then reject it.
+				rejected = true
+				return Tokens{}, q.RecordPhoneCodeAttempt(ctx, phone)
 			}
 			return Tokens{}, ErrSignInCode
-		}
-		donor, err := q.DonorByPhone(ctx, text(phone))
-		if errors.Is(err, pgx.ErrNoRows) {
-			return Tokens{}, ErrSignInCode
-		}
-		if err != nil {
-			return Tokens{}, err
 		}
 		if err := q.DeletePhoneCode(ctx, phone); err != nil {
 			return Tokens{}, err
 		}
 		return issueSession(ctx, q, donor.ID, client, now)
 	})
-	if errors.Is(err, errCountAttempt) {
-		return Tokens{}, true, ErrSignInCode
+	if err == nil && rejected {
+		return Tokens{}, ErrSignInCode
 	}
-	return tokens, false, err
+	return tokens, err
 }
-
-// errCountAttempt is an internal sentinel: the verification tx failed on a
-// live-but-wrong code and the caller must record the attempt after rollback.
-var errCountAttempt = errors.New("record failed phone attempt")
 
 // OIDCService runs Apple/Google sign-in. Verifier/Settings are nil when OIDC is
 // unconfigured.
@@ -191,6 +197,12 @@ func (s OIDCService) SignIn(ctx context.Context, provider oidc.Provider, idToken
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (Tokens, error) {
 		q := queries.New(tx)
 		now := time.Now().UTC()
+		issue := func(id pgtype.UUID) (Tokens, error) {
+			if err := q.MarkClaimed(ctx, queries.MarkClaimedParams{ID: id, ClaimedAt: timestamp(now)}); err != nil {
+				return Tokens{}, err
+			}
+			return issueSession(ctx, q, id, client, now)
+		}
 
 		// Already linked: sign that donor in.
 		if link, err := q.OIDCIdentity(ctx, queries.OIDCIdentityParams{
@@ -206,7 +218,7 @@ func (s OIDCService) SignIn(ctx context.Context, provider oidc.Provider, idToken
 			if err := q.TouchOIDCIdentity(ctx, queries.TouchOIDCIdentityParams{ID: link.ID, LastUsedAt: timestamp(now)}); err != nil {
 				return Tokens{}, err
 			}
-			return issueSession(ctx, q, donor.ID, client, now)
+			return issue(donor.ID)
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return Tokens{}, err
 		}
@@ -243,7 +255,7 @@ func (s OIDCService) SignIn(ctx context.Context, provider oidc.Provider, idToken
 		}); err != nil {
 			return Tokens{}, err
 		}
-		return issueSession(ctx, q, locked.ID, client, now)
+		return issue(locked.ID)
 	})
 }
 

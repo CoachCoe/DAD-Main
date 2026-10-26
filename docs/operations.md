@@ -559,7 +559,8 @@ start with an invalid configuration and names the variables to fix.
   SID), `DONOR_SMS_AUTH_TOKEN`, and `DONOR_SMS_FROM` (an E.164 number or an `MG…`
   Messaging Service SID). Codes are sent after the response, so a failed send reaches
   the donor only as a code that never arrives; it is logged as `sign-in code not sent`,
-  and the donor can ask again.
+  and the donor can ask again after a minute. The per-phone cooldown preserves the
+  previous code and its attempt budget during that minute, including across API replicas.
 - Apple/Google: `DONOR_OIDC_MODE=live` with `DONOR_OIDC_APPLE_CLIENT_ID` and/or
   `DONOR_OIDC_GOOGLE_CLIENT_ID`, the audience each provider puts in its ID tokens. List
   several, separated by commas, when the app and the website use different ones (Apple's

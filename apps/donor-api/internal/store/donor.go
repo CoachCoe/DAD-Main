@@ -15,6 +15,7 @@ import (
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -339,10 +340,18 @@ func (s DonorService) SaveProfile(ctx context.Context, token string, in ProfileU
 
 	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, _ time.Time) (Profile, error) {
 		q := queries.New(tx)
+		if d.Phone.Valid && d.Phone != phoneCol {
+			if err := q.DeletePhoneCode(ctx, d.Phone.String); err != nil {
+				return Profile{}, err
+			}
+		}
 		updated, err := q.UpdateDonorProfile(ctx, queries.UpdateDonorProfileParams{
 			ID: d.ID, Zip: zipCol, City: cityCol, Timezone: tzCol, Phone: phoneCol,
 		})
 		if err != nil {
+			if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
+				return Profile{}, ErrPhone
+			}
 			return Profile{}, err
 		}
 		return readProfile(ctx, q, updated)
@@ -366,6 +375,11 @@ func (s DonorService) DeleteAccount(ctx context.Context, token string) error {
 				err = ErrGivingActive
 			}
 			return struct{}{}, err
+		}
+		if d.Phone.Valid {
+			if err := q.DeletePhoneCode(ctx, d.Phone.String); err != nil {
+				return struct{}{}, err
+			}
 		}
 		if err := q.RecordDonorDeletion(ctx, queries.RecordDonorDeletionParams{DonorID: d.ID, DeletedAt: timestamp(now)}); err != nil {
 			return struct{}{}, err

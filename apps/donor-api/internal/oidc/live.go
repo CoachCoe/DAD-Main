@@ -77,9 +77,11 @@ type liveClaims struct {
 	Sub string `json:"sub"`
 	// Aud is a string, or an array holding our client id.
 	Aud   json.RawMessage `json:"aud"`
+	Azp   string          `json:"azp"`
 	Exp   int64           `json:"exp"`
 	Iat   int64           `json:"iat"`
 	Email string          `json:"email"`
+	HD    string          `json:"hd"`
 	// EmailVerified is a boolean from Google and the string "true" or
 	// "false" from Apple.
 	EmailVerified json.RawMessage `json:"email_verified"`
@@ -118,18 +120,29 @@ func (v *liveVerifier) Verify(ctx context.Context, provider Provider, idToken st
 		return Identity{}, ErrToken
 	}
 	now := v.now()
-	if !issuedBy(provider, claims.Iss) || !audienceHolds(claims.Aud, audiences) || claims.Sub == "" ||
+	if !issuedBy(provider, claims.Iss) || !audienceHolds(claims.Aud, audiences) || !authorizedParty(claims, audiences) ||
+		claims.Sub == "" || len(claims.Sub) > 255 || strings.ContainsRune(claims.Sub, 0) ||
 		claims.Exp <= 0 || now.After(time.Unix(claims.Exp, 0).Add(clockSkew)) ||
+		claims.Iat <= 0 || claims.Iat >= claims.Exp ||
 		time.Unix(claims.Iat, 0).After(now.Add(clockSkew)) {
 		return Identity{}, ErrToken
 	}
 	identity := Identity{Provider: provider, Subject: claims.Sub}
 	// An unverified address must never link a provider account to the donor
 	// who owns that address.
-	if emailVerified(claims.EmailVerified) {
+	if emailVerified(claims.EmailVerified) && (provider != Google || claims.HD != "" ||
+		strings.HasSuffix(strings.ToLower(claims.Email), "@gmail.com")) {
 		identity.Email = claims.Email
 	}
 	return identity, nil
+}
+
+func authorizedParty(claims liveClaims, audiences []string) bool {
+	if claims.Azp != "" {
+		return slices.Contains(audiences, claims.Azp)
+	}
+	var many []string
+	return json.Unmarshal(claims.Aud, &many) != nil || len(many) <= 1
 }
 
 // key returns the provider's signing key kid, refetching the key set when it
