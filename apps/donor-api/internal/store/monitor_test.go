@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -34,6 +35,15 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 		job := testID(t)
 		mustExec(t, tx, `INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at,attempts)
   VALUES($1,$2,'STREAK_MILESTONE',$3,'{}',$4,$5,$6)`, job, id, job.String(), now.Add(push.due), now.Add(push.expires), push.attempts)
+	}
+	for i, reversal := range []struct {
+		due      time.Duration
+		attempts int
+		done     bool
+	}{{-30 * time.Minute, 10, false}, {-time.Minute, 2, false}, {time.Hour, 0, false}, {-time.Hour, 1, true}} {
+		mustExec(t, tx, `INSERT INTO donor_deleted_account_reversals(id,donor_id,kind,target,available_at,attempts,completed_at,created_at)
+  VALUES($1,$2,'CANCEL',$3,$4,$5,CASE WHEN $6 THEN $4::timestamptz ELSE NULL END,$4)`,
+			testID(t), id, "sub_monitor_"+strconv.Itoa(i), now.Add(reversal.due), reversal.attempts, reversal.done)
 	}
 	day := 24 * time.Hour
 	for _, sub := range []struct {
@@ -72,7 +82,7 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 7 {
+	if len(rows) != 8 {
 		t.Fatal(rows)
 	}
 	for _, row := range rows {
@@ -88,6 +98,11 @@ func TestQueueHealthCountsParkedAndIgnoresFutureAndCompleted(t *testing.T) {
 		}
 		if row.Queue == "subscriptions" {
 			if row.Due != 1 || row.Parked != 0 || row.OldestSeconds != 86400 {
+				t.Fatal(row)
+			}
+		}
+		if row.Queue == "reversals" {
+			if row.Due != 2 || row.Parked != 1 || row.OldestSeconds != 1800 {
 				t.Fatal(row)
 			}
 		}
