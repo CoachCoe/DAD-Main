@@ -179,19 +179,24 @@ func (s EventService) Update(ctx context.Context, token string, id pgtype.UUID, 
 // Publish makes a DRAFT event donor-visible.
 func (s EventService) Publish(ctx context.Context, token string, id pgtype.UUID) error {
 	_, err := staffWrite(ctx, s.Staff, token, eventPermission,
-		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
+		func(tx pgx.Tx, actor queries.DonorStaff, _ time.Time) (struct{}, error) {
 			q := queries.New(tx)
-			if _, err := q.EventByID(ctx, id); err != nil {
-				return struct{}{}, err
-			}
-			if err := q.PublishEvent(ctx, queries.PublishEventParams{ID: id, PublishedAt: timestamp(now)}); err != nil {
-				return struct{}{}, err
-			}
-			alerted, err := q.QueueNearbyEventAlerts(ctx, queries.QueueNearbyEventAlertsParams{EventID: id, AsOf: timestamp(now)})
+			event, err := q.LockEvent(ctx, id)
 			if err != nil {
 				return struct{}{}, err
 			}
-			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.published", id.String(), map[string]int64{"alerted": alerted}, now)
+			if event.CancelledAt.Valid {
+				return struct{}{}, ErrEventCancelled
+			}
+			now := time.Now().UTC()
+			if err := q.PublishEvent(ctx, queries.PublishEventParams{ID: id, PublishedAt: timestamp(now)}); err != nil {
+				return struct{}{}, err
+			}
+			queued, err := q.QueueEventAlertJob(ctx, queries.QueueEventAlertJobParams{EventID: id, AsOf: timestamp(now)})
+			if err != nil {
+				return struct{}{}, err
+			}
+			return struct{}{}, auditStaff(ctx, q, actor.ID, "event.published", id.String(), map[string]int64{"alert_jobs": queued}, now)
 		})
 	return err
 }

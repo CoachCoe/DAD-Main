@@ -198,25 +198,39 @@ WHERE e.publish_state = 'PUBLISHED'
 ON CONFLICT (dedup_key) DO NOTHING;
 
 
--- name: QueueNearbyEventAlerts :execrows
--- E-1/§6.11: when an event is published, queue an EVENT_NEARBY push for every
--- volunteer in or near its city (same city label or three-digit ZIP region, as
--- E-2 lists events). The send rechecks the choices and that the event is
--- still on; expires_at is the start, so an alert never arrives late.
-INSERT INTO donor_push_notifications (id, donor_id, category, dedup_key, context, available_at, expires_at)
-SELECT gen_random_uuid(), d.id, 'EVENT_NEARBY',
-       'push:event-nearby:' || e.id::text || ':' || d.id::text,
-       json_build_object('event_id', e.id::text),
-       sqlc.arg(as_of)::timestamptz, e.starts_at
-FROM donor_events e
-JOIN donors d ON d.disabled = false AND (
-    (e.city <> '' AND lower(d.city) = lower(e.city))
-    OR (e.zip <> '' AND left(d.zip, 3) = left(e.zip, 3))
+-- name: QueueEventAlertJob :execrows
+INSERT INTO donor_event_alert_jobs(event_id,updated_at)
+SELECT id,sqlc.arg(as_of)::timestamptz FROM donor_events
+WHERE id=sqlc.arg(event_id) AND publish_state='PUBLISHED' AND cancelled_at IS NULL
+  AND type<>'INVITE_ONLY' AND starts_at>sqlc.arg(as_of)::timestamptz
+ON CONFLICT(event_id) DO NOTHING;
+
+-- name: NextEventAlertJob :one
+SELECT * FROM donor_event_alert_jobs WHERE completed_at IS NULL
+ORDER BY updated_at,event_id LIMIT 1 FOR UPDATE SKIP LOCKED;
+
+-- name: QueueEventAlertBatch :one
+WITH recipients AS MATERIALIZED (
+  SELECT d.id,e.id AS event_id,e.starts_at
+  FROM donor_events e
+  JOIN donors d ON NOT d.disabled AND (
+    (e.city<>'' AND lower(d.city)=lower(e.city))
+    OR (e.zip<>'' AND left(d.zip,3)=left(e.zip,3)))
+  JOIN donor_preferences p ON p.donor_id=d.id AND p.volunteer AND p.push_event_nearby
+  WHERE e.id=sqlc.arg(event_id) AND e.publish_state='PUBLISHED' AND e.cancelled_at IS NULL
+    AND e.type<>'INVITE_ONLY' AND e.starts_at>sqlc.arg(as_of)::timestamptz
+    AND (sqlc.narg(after_donor)::uuid IS NULL OR d.id>sqlc.narg(after_donor)::uuid)
+  ORDER BY d.id LIMIT sqlc.arg(batch_size)::int
+), queued AS (
+  INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
+  SELECT gen_random_uuid(),id,'EVENT_NEARBY','push:event-nearby:'||event_id::text||':'||id::text,
+    json_build_object('event_id',event_id::text),sqlc.arg(as_of)::timestamptz,starts_at
+  FROM recipients ON CONFLICT(dedup_key) DO NOTHING RETURNING id
 )
-JOIN donor_preferences p ON p.donor_id = d.id AND p.volunteer AND p.push_event_nearby
-WHERE e.id = sqlc.arg(event_id)
-  AND e.publish_state = 'PUBLISHED'
-  AND e.cancelled_at IS NULL
-  AND e.type <> 'INVITE_ONLY'
-  AND e.starts_at > sqlc.arg(as_of)::timestamptz
-ON CONFLICT (dedup_key) DO NOTHING;
+SELECT (SELECT id FROM recipients ORDER BY id DESC LIMIT 1)::uuid AS last_donor,
+  (SELECT count(*) FROM recipients)::bigint AS considered,
+  (SELECT count(*) FROM queued)::bigint AS queued;
+
+-- name: SaveEventAlertProgress :exec
+UPDATE donor_event_alert_jobs SET last_donor_id=coalesce($2,last_donor_id),completed_at=$3,updated_at=$4
+WHERE event_id=$1;

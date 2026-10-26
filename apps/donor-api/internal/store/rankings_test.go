@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"dad/donor-api/internal/dbroles"
@@ -12,6 +13,49 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestRankingScheduleSurvivesEmptyPopulationAndSerializesWorkers(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	mustExec(t, pool, "DELETE FROM donor_projection_schedules WHERE id='rankings'")
+	cleanup(t, "DELETE FROM donor_projection_schedules WHERE id='rankings'")
+	cleanup(t, "DELETE FROM donor_rankings")
+	svc := RankingService{DB: as(t, dbroles.ProjectionWorker)}
+	now := time.Now().UTC()
+	var wg sync.WaitGroup
+	results := make(chan bool, 8)
+	errors := make(chan error, 8)
+	for range 8 {
+		wg.Go(func() {
+			worked, err := svc.RefreshIfDue(ctx, now)
+			results <- worked
+			errors <- err
+		})
+	}
+	wg.Wait()
+	close(results)
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := 0
+	for worked := range results {
+		if worked {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("concurrent workers refreshed %d times, want one", count)
+	}
+	if worked, err := svc.RefreshIfDue(ctx, now.Add(RankingInterval-time.Microsecond)); err != nil || worked {
+		t.Fatalf("empty population refreshed before due: %t %v", worked, err)
+	}
+	if worked, err := svc.RefreshIfDue(ctx, now.Add(RankingInterval)); err != nil || !worked {
+		t.Fatalf("scheduled refresh did not run: %t %v", worked, err)
+	}
+}
 
 // rankDonor seeds a donor with a projection carrying a streak and start, and an
 // optional city + opt-out, for ranking tests.

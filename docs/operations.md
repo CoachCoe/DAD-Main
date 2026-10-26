@@ -431,6 +431,14 @@ projection whenever no projection is due. A donor whose facts cannot be projecte
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
 
+Global rankings use `donor_projection_schedules` to claim one refresh every 15 minutes
+across projection replicas, even when no donors qualify. The schedule and ranking changes
+commit together, so a failed refresh remains due. Publishing an event records a durable
+alert job in the same transaction; projection workers resume it in batches of at most 256
+eligible volunteers. Republishing does not restart the job. Each batch rechecks publication,
+cancellation, start time, and notification choices; delivery rechecks the recipient again.
+Apply migration `0054_projection_schedules_and_event_fanout.sql` before these binaries.
+
 Deploy migration `0017_referral_corrections.sql` before binaries using projection rules
 version 6. Older projections then converge on the earliest verified successful payment
 through the normal refresh worker. Corrections, transferred referral totals, and new

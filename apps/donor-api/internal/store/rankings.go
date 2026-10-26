@@ -32,15 +32,10 @@ type Ranking struct {
 func (s RankingService) Refresh(ctx context.Context, now time.Time) error {
 	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		if err := q.RefreshRankings(ctx, timestamp(now)); err != nil {
+		if err := q.SaveProjectionSchedule(ctx, queries.SaveProjectionScheduleParams{ID: "rankings", NextRunAt: timestamp(now.Add(RankingInterval))}); err != nil {
 			return err
 		}
-		if err := q.PruneStaleRankings(ctx, timestamp(now)); err != nil {
-			return err
-		}
-		return q.AwardRankingBadges(ctx, queries.AwardRankingBadgesParams{
-			ComputedAt: timestamp(now), ExpiresAt: timestamp(now.Add(pushLifetime)),
-		})
+		return refreshRankings(ctx, q, now)
 	})
 }
 
@@ -75,14 +70,17 @@ const RankingInterval = 15 * time.Minute
 // than RankingInterval, so it rides the projections worker loop cheaply. It
 // returns whether it refreshed.
 func (s RankingService) RefreshIfDue(ctx context.Context, now time.Time) (bool, error) {
-	last, err := queries.New(s.DB).LastRankingRefresh(ctx)
-	if err != nil {
-		return false, err
-	}
-	if last.Valid && now.Sub(last.Time) < RankingInterval {
-		return false, nil
-	}
-	return true, s.Refresh(ctx, now)
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (bool, error) {
+		q := queries.New(tx)
+		claimed, err := q.ClaimProjectionSchedule(
+			ctx,
+			queries.ClaimProjectionScheduleParams{ID: "rankings", NextRunAt: timestamp(now.Add(RankingInterval)), AsOf: timestamp(now)},
+		)
+		if err != nil || claimed == 0 {
+			return false, err
+		}
+		return true, refreshRankings(ctx, q, now)
+	})
 }
 
 // Ranking returns the signed-in donor's own ranking.
@@ -90,4 +88,17 @@ func (s RankingService) Ranking(ctx context.Context, token string) (*Ranking, er
 	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (*Ranking, error) {
 		return ForDonor(ctx, q, d.ID)
 	})
+}
+
+func refreshRankings(ctx context.Context, q *queries.Queries, now time.Time) error {
+	if err := q.RefreshRankings(ctx, timestamp(now)); err != nil {
+		return err
+	}
+	if err := q.PruneStaleRankings(ctx, timestamp(now)); err != nil {
+		return err
+	}
+	return q.AwardRankingBadges(
+		ctx,
+		queries.AwardRankingBadgesParams{ComputedAt: timestamp(now), ExpiresAt: timestamp(now.Add(pushLifetime))},
+	)
 }

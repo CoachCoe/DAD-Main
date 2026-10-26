@@ -116,6 +116,13 @@ type DonorEvent struct {
 	CancelledAt    pgtype.Timestamptz `json:"cancelled_at"`
 }
 
+type DonorEventAlertJob struct {
+	EventID     pgtype.UUID        `json:"event_id"`
+	LastDonorID pgtype.UUID        `json:"last_donor_id"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DonorEventReservation struct {
 	ID          pgtype.UUID        `json:"id"`
 	EventID     pgtype.UUID        `json:"event_id"`

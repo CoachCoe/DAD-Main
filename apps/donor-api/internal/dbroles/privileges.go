@@ -102,6 +102,8 @@ var grants = map[string]map[Role]string{
 		StripeWorker:     "SELECT, INSERT, UPDATE",
 		ProjectionWorker: "SELECT, INSERT, UPDATE",
 	},
+	"donor_projection_schedules": {ProjectionWorker: "SELECT, INSERT, UPDATE"},
+	"donor_event_alert_jobs":     {API: "SELECT, INSERT", ProjectionWorker: "SELECT, UPDATE"},
 	"donor_refunds": {
 		API:              "SELECT, INSERT, UPDATE",
 		StripeWorker:     "SELECT, INSERT, UPDATE",

@@ -761,6 +761,12 @@ func TestPublishAlertsNearbyVolunteers(t *testing.T) {
 	if err := s.Publish(ctx, adminToken, id); err != nil {
 		t.Fatal(err)
 	}
+	if got := len(alerts(sameCity)); got != 0 {
+		t.Fatalf("publishing performed inline fanout: %d", got)
+	}
+	if worked, err := (EventAlertService{DB: as(t, dbroles.ProjectionWorker)}).QueueNext(ctx, time.Now().UTC()); err != nil || !worked {
+		t.Fatalf("alert fanout: worked=%t %v", worked, err)
+	}
 	for _, c := range []struct {
 		name  string
 		donor pgtype.UUID

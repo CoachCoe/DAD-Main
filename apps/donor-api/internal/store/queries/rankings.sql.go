@@ -45,6 +45,26 @@ func (q *Queries) AwardRankingBadges(ctx context.Context, arg AwardRankingBadges
 	return err
 }
 
+const claimProjectionSchedule = `-- name: ClaimProjectionSchedule :execrows
+INSERT INTO donor_projection_schedules(id,next_run_at) VALUES($1,$2)
+ON CONFLICT(id) DO UPDATE SET next_run_at=EXCLUDED.next_run_at
+WHERE donor_projection_schedules.next_run_at <= $3::timestamptz
+`
+
+type ClaimProjectionScheduleParams struct {
+	ID        string             `json:"id"`
+	NextRunAt pgtype.Timestamptz `json:"next_run_at"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+}
+
+func (q *Queries) ClaimProjectionSchedule(ctx context.Context, arg ClaimProjectionScheduleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimProjectionSchedule, arg.ID, arg.NextRunAt, arg.AsOf)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const donorRanking = `-- name: DonorRanking :one
 SELECT r.national_percentile, r.city, r.city_rank, r.computed_at
 FROM donor_rankings r
@@ -73,19 +93,6 @@ func (q *Queries) DonorRanking(ctx context.Context, donorID pgtype.UUID) (DonorR
 		&i.ComputedAt,
 	)
 	return i, err
-}
-
-const lastRankingRefresh = `-- name: LastRankingRefresh :one
-SELECT MAX(computed_at)::timestamptz AS last FROM donor_rankings
-`
-
-// The most recent ranking computation time, or NULL if never computed. Used to
-// throttle the global refresh to a periodic cadence inside the projections worker.
-func (q *Queries) LastRankingRefresh(ctx context.Context) (pgtype.Timestamptz, error) {
-	row := q.db.QueryRow(ctx, lastRankingRefresh)
-	var last pgtype.Timestamptz
-	err := row.Scan(&last)
-	return last, err
 }
 
 const pruneStaleRankings = `-- name: PruneStaleRankings :exec
@@ -145,5 +152,20 @@ ON CONFLICT (donor_id) DO UPDATE SET
 // Replaces the prior snapshot wholesale.
 func (q *Queries) RefreshRankings(ctx context.Context, computedAt pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, refreshRankings, computedAt)
+	return err
+}
+
+const saveProjectionSchedule = `-- name: SaveProjectionSchedule :exec
+INSERT INTO donor_projection_schedules(id,next_run_at) VALUES($1,$2)
+ON CONFLICT(id) DO UPDATE SET next_run_at=EXCLUDED.next_run_at
+`
+
+type SaveProjectionScheduleParams struct {
+	ID        string             `json:"id"`
+	NextRunAt pgtype.Timestamptz `json:"next_run_at"`
+}
+
+func (q *Queries) SaveProjectionSchedule(ctx context.Context, arg SaveProjectionScheduleParams) error {
+	_, err := q.db.Exec(ctx, saveProjectionSchedule, arg.ID, arg.NextRunAt)
 	return err
 }

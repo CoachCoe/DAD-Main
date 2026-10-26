@@ -433,6 +433,23 @@ func (q *Queries) LockEvent(ctx context.Context, id pgtype.UUID) (DonorEvent, er
 	return i, err
 }
 
+const nextEventAlertJob = `-- name: NextEventAlertJob :one
+SELECT event_id, last_donor_id, completed_at, updated_at FROM donor_event_alert_jobs WHERE completed_at IS NULL
+ORDER BY updated_at,event_id LIMIT 1 FOR UPDATE SKIP LOCKED
+`
+
+func (q *Queries) NextEventAlertJob(ctx context.Context) (DonorEventAlertJob, error) {
+	row := q.db.QueryRow(ctx, nextEventAlertJob)
+	var i DonorEventAlertJob
+	err := row.Scan(
+		&i.EventID,
+		&i.LastDonorID,
+		&i.CompletedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const promoteReservation = `-- name: PromoteReservation :exec
 UPDATE donor_event_reservations SET status='RESERVED', updated_at=$2 WHERE id=$1
 `
@@ -461,6 +478,75 @@ type PublishEventParams struct {
 func (q *Queries) PublishEvent(ctx context.Context, arg PublishEventParams) error {
 	_, err := q.db.Exec(ctx, publishEvent, arg.ID, arg.PublishedAt)
 	return err
+}
+
+const queueEventAlertBatch = `-- name: QueueEventAlertBatch :one
+WITH recipients AS MATERIALIZED (
+  SELECT d.id,e.id AS event_id,e.starts_at
+  FROM donor_events e
+  JOIN donors d ON NOT d.disabled AND (
+    (e.city<>'' AND lower(d.city)=lower(e.city))
+    OR (e.zip<>'' AND left(d.zip,3)=left(e.zip,3)))
+  JOIN donor_preferences p ON p.donor_id=d.id AND p.volunteer AND p.push_event_nearby
+  WHERE e.id=$1 AND e.publish_state='PUBLISHED' AND e.cancelled_at IS NULL
+    AND e.type<>'INVITE_ONLY' AND e.starts_at>$2::timestamptz
+    AND ($3::uuid IS NULL OR d.id>$3::uuid)
+  ORDER BY d.id LIMIT $4::int
+), queued AS (
+  INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
+  SELECT gen_random_uuid(),id,'EVENT_NEARBY','push:event-nearby:'||event_id::text||':'||id::text,
+    json_build_object('event_id',event_id::text),$2::timestamptz,starts_at
+  FROM recipients ON CONFLICT(dedup_key) DO NOTHING RETURNING id
+)
+SELECT (SELECT id FROM recipients ORDER BY id DESC LIMIT 1)::uuid AS last_donor,
+  (SELECT count(*) FROM recipients)::bigint AS considered,
+  (SELECT count(*) FROM queued)::bigint AS queued
+`
+
+type QueueEventAlertBatchParams struct {
+	EventID    pgtype.UUID        `json:"event_id"`
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+	AfterDonor pgtype.UUID        `json:"after_donor"`
+	BatchSize  int32              `json:"batch_size"`
+}
+
+type QueueEventAlertBatchRow struct {
+	LastDonor  pgtype.UUID `json:"last_donor"`
+	Considered int64       `json:"considered"`
+	Queued     int64       `json:"queued"`
+}
+
+func (q *Queries) QueueEventAlertBatch(ctx context.Context, arg QueueEventAlertBatchParams) (QueueEventAlertBatchRow, error) {
+	row := q.db.QueryRow(ctx, queueEventAlertBatch,
+		arg.EventID,
+		arg.AsOf,
+		arg.AfterDonor,
+		arg.BatchSize,
+	)
+	var i QueueEventAlertBatchRow
+	err := row.Scan(&i.LastDonor, &i.Considered, &i.Queued)
+	return i, err
+}
+
+const queueEventAlertJob = `-- name: QueueEventAlertJob :execrows
+INSERT INTO donor_event_alert_jobs(event_id,updated_at)
+SELECT id,$1::timestamptz FROM donor_events
+WHERE id=$2 AND publish_state='PUBLISHED' AND cancelled_at IS NULL
+  AND type<>'INVITE_ONLY' AND starts_at>$1::timestamptz
+ON CONFLICT(event_id) DO NOTHING
+`
+
+type QueueEventAlertJobParams struct {
+	AsOf    pgtype.Timestamptz `json:"as_of"`
+	EventID pgtype.UUID        `json:"event_id"`
+}
+
+func (q *Queries) QueueEventAlertJob(ctx context.Context, arg QueueEventAlertJobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, queueEventAlertJob, arg.AsOf, arg.EventID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const queueEventPush = `-- name: QueueEventPush :exec
@@ -524,43 +610,6 @@ type QueueEventRemindersParams struct {
 // window_label distinguishes the two sweeps ('24h' / '2h').
 func (q *Queries) QueueEventReminders(ctx context.Context, arg QueueEventRemindersParams) (int64, error) {
 	result, err := q.db.Exec(ctx, queueEventReminders, arg.WindowLabel, arg.AsOf, arg.Until)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const queueNearbyEventAlerts = `-- name: QueueNearbyEventAlerts :execrows
-INSERT INTO donor_push_notifications (id, donor_id, category, dedup_key, context, available_at, expires_at)
-SELECT gen_random_uuid(), d.id, 'EVENT_NEARBY',
-       'push:event-nearby:' || e.id::text || ':' || d.id::text,
-       json_build_object('event_id', e.id::text),
-       $1::timestamptz, e.starts_at
-FROM donor_events e
-JOIN donors d ON d.disabled = false AND (
-    (e.city <> '' AND lower(d.city) = lower(e.city))
-    OR (e.zip <> '' AND left(d.zip, 3) = left(e.zip, 3))
-)
-JOIN donor_preferences p ON p.donor_id = d.id AND p.volunteer AND p.push_event_nearby
-WHERE e.id = $2
-  AND e.publish_state = 'PUBLISHED'
-  AND e.cancelled_at IS NULL
-  AND e.type <> 'INVITE_ONLY'
-  AND e.starts_at > $1::timestamptz
-ON CONFLICT (dedup_key) DO NOTHING
-`
-
-type QueueNearbyEventAlertsParams struct {
-	AsOf    pgtype.Timestamptz `json:"as_of"`
-	EventID pgtype.UUID        `json:"event_id"`
-}
-
-// E-1/§6.11: when an event is published, queue an EVENT_NEARBY push for every
-// volunteer in or near its city (same city label or three-digit ZIP region, as
-// E-2 lists events). The send rechecks the choices and that the event is
-// still on; expires_at is the start, so an alert never arrives late.
-func (q *Queries) QueueNearbyEventAlerts(ctx context.Context, arg QueueNearbyEventAlertsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, queueNearbyEventAlerts, arg.AsOf, arg.EventID)
 	if err != nil {
 		return 0, err
 	}
@@ -681,6 +730,28 @@ func (q *Queries) ReservedCountsForEvents(ctx context.Context, eventIds []pgtype
 		return nil, err
 	}
 	return items, nil
+}
+
+const saveEventAlertProgress = `-- name: SaveEventAlertProgress :exec
+UPDATE donor_event_alert_jobs SET last_donor_id=coalesce($2,last_donor_id),completed_at=$3,updated_at=$4
+WHERE event_id=$1
+`
+
+type SaveEventAlertProgressParams struct {
+	EventID     pgtype.UUID        `json:"event_id"`
+	LastDonorID pgtype.UUID        `json:"last_donor_id"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) SaveEventAlertProgress(ctx context.Context, arg SaveEventAlertProgressParams) error {
+	_, err := q.db.Exec(ctx, saveEventAlertProgress,
+		arg.EventID,
+		arg.LastDonorID,
+		arg.CompletedAt,
+		arg.UpdatedAt,
+	)
+	return err
 }
 
 const setReservationStatus = `-- name: SetReservationStatus :exec

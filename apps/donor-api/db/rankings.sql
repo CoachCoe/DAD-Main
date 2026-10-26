@@ -56,10 +56,14 @@ LEFT JOIN donor_preferences pref ON pref.donor_id=r.donor_id
 WHERE r.donor_id=$1 AND NOT d.disabled AND NOT coalesce(pref.rankings_opted_out,false)
   AND p.current_streak>0 AND p.streak_since IS NOT NULL AND p.next_refresh_at>clock_timestamp();
 
--- name: LastRankingRefresh :one
--- The most recent ranking computation time, or NULL if never computed. Used to
--- throttle the global refresh to a periodic cadence inside the projections worker.
-SELECT MAX(computed_at)::timestamptz AS last FROM donor_rankings;
+-- name: ClaimProjectionSchedule :execrows
+INSERT INTO donor_projection_schedules(id,next_run_at) VALUES($1,$2)
+ON CONFLICT(id) DO UPDATE SET next_run_at=EXCLUDED.next_run_at
+WHERE donor_projection_schedules.next_run_at <= sqlc.arg(as_of)::timestamptz;
+
+-- name: SaveProjectionSchedule :exec
+INSERT INTO donor_projection_schedules(id,next_run_at) VALUES($1,$2)
+ON CONFLICT(id) DO UPDATE SET next_run_at=EXCLUDED.next_run_at;
 
 -- name: AwardRankingBadges :exec
 -- Top 2% and Top 50 City for every donor the rollup just ranked into them,
