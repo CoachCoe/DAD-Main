@@ -7,21 +7,25 @@
 -- Replaces the prior snapshot wholesale.
 WITH eligible AS (
   SELECT d.id AS donor_id, d.city AS city,
-         p.current_streak AS streak, p.streak_since AS since
+         (sqlc.arg(computed_at)::timestamptz AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date
+           - (p.streak_since AT TIME ZONE coalesce(d.timezone,'America/New_York'))::date AS streak,
+         p.streak_since AS since
   FROM donors d
   JOIN donor_metric_projections p ON p.donor_id = d.id
   LEFT JOIN donor_preferences pref ON pref.donor_id = d.id
   WHERE d.disabled = false
     AND p.current_streak IS NOT NULL
     AND p.current_streak > 0
+    AND p.streak_since IS NOT NULL
+    AND p.next_refresh_at > sqlc.arg(computed_at)::timestamptz
     AND COALESCE(pref.rankings_opted_out, false) = false
 ),
 ranked AS (
   SELECT donor_id, city, since,
-         -- percent_rank is 0 for the top; invert to a top-percentile 1..100
+         -- percent_rank is 0 for the top; map to a top-percentile 1..100
          -- (1 = best). A single-row population is the top, percentile 1.
          GREATEST(1, LEAST(100,
-           CEIL((1.0 - PERCENT_RANK() OVER (ORDER BY streak ASC, since DESC)) * 100)::int
+           CEIL(PERCENT_RANK() OVER (ORDER BY streak DESC, since ASC) * 100)::int
          )) AS national_percentile,
          CASE WHEN city IS NOT NULL
               THEN RANK() OVER (PARTITION BY city ORDER BY streak DESC, since ASC)::int
@@ -44,8 +48,13 @@ DELETE FROM donor_rankings WHERE computed_at < $1;
 
 -- name: DonorRanking :one
 -- A donor's own ranking row (K-3: only ever their own position).
-SELECT national_percentile, city, city_rank, computed_at
-FROM donor_rankings WHERE donor_id = $1;
+SELECT r.national_percentile, r.city, r.city_rank, r.computed_at
+FROM donor_rankings r
+JOIN donors d ON d.id=r.donor_id
+JOIN donor_metric_projections p ON p.donor_id=r.donor_id
+LEFT JOIN donor_preferences pref ON pref.donor_id=r.donor_id
+WHERE r.donor_id=$1 AND NOT d.disabled AND NOT coalesce(pref.rankings_opted_out,false)
+  AND p.current_streak>0 AND p.streak_since IS NOT NULL AND p.next_refresh_at>clock_timestamp();
 
 -- name: LastRankingRefresh :one
 -- The most recent ranking computation time, or NULL if never computed. Used to

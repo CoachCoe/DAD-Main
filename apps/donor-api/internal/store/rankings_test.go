@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/recognition"
+	"dad/donor-api/internal/store/queries"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -44,11 +46,60 @@ func rankDonor(t *testing.T, pool *pgxpool.Pool, streak int32, since time.Time, 
 	return id
 }
 
+func TestRankingsUseLocalDaysAndImmediateOptOut(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	longer := rankDonor(t, pool, 2, now.Add(-61*24*time.Hour), "Austin", false)
+	shorter := rankDonor(t, pool, 3, now.Add(-60*24*time.Hour), "Austin", false)
+	stale := rankDonor(t, pool, 10, now.Add(-300*24*time.Hour), "Austin", false)
+	mustExec(t, pool, "UPDATE donor_metric_projections SET next_refresh_at=$2 WHERE donor_id=$1", stale, now.Add(-time.Second))
+	svc := RankingService{DB: as(t, dbroles.ProjectionWorker)}
+	cleanup(t, "DELETE FROM donor_badges WHERE code IN ('NAT2','CITY50')")
+	cleanup(t, "DELETE FROM donor_rankings")
+	if err := svc.Refresh(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	q := queries.New(as(t, dbroles.API))
+	for id, want := range map[pgtype.UUID]int{longer: 1, shorter: 2} {
+		rank, err := ForDonor(ctx, q, id)
+		if err != nil || rank == nil || rank.CityRank == nil || *rank.CityRank != want {
+			t.Fatalf("daily ranking for %s = %+v (%v), want city rank %d", id, rank, err, want)
+		}
+	}
+	if rank, err := ForDonor(ctx, q, stale); err != nil || rank != nil {
+		t.Fatalf("stale recognition was ranked: %+v %v", rank, err)
+	}
+	pref := mustNewID(t)
+	mustExec(t, pool, `INSERT INTO donor_preferences(id,donor_id,version,referral_emails,marketing_emails,rankings_opted_out)
+		VALUES($1,$2,1,false,false,true)`, pref, longer)
+	if rank, err := ForDonor(ctx, q, longer); err != nil || rank != nil {
+		t.Fatalf("opt-out waited for the next rollup: %+v %v", rank, err)
+	}
+}
+
+func TestSingleEligibleDonorIsTopPercentile(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	id := rankDonor(t, pool, 1, now.Add(-7*24*time.Hour), "Austin", false)
+	cleanup(t, "DELETE FROM donor_badges WHERE code IN ('NAT2','CITY50')")
+	cleanup(t, "DELETE FROM donor_rankings")
+	if err := (RankingService{DB: as(t, dbroles.ProjectionWorker)}).Refresh(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	rank, err := ForDonor(ctx, queries.New(as(t, dbroles.API)), id)
+	if err != nil || rank == nil || rank.NationalPercentile != 1 {
+		t.Fatalf("single eligible donor rank = %+v %v; want top 1%%", rank, err)
+	}
+}
+
 func TestRankingRefreshPercentileCityRankAndOptOut(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	now := time.Now().UTC()
-	base := now.Add(-100 * 24 * time.Hour)
+	local := now.In(recognition.NewYork)
+	base := time.Date(local.Year(), local.Month(), local.Day()-300, 12, 0, 0, 0, recognition.NewYork)
 
 	// Clean any pre-existing ranking rows for isolation.
 	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_rankings") })
@@ -57,12 +108,12 @@ func TestRankingRefreshPercentileCityRankAndOptOut(t *testing.T) {
 	}
 
 	// Top streak in city A, with a tie broken by earlier start.
-	top := rankDonor(t, pool, 500, base, "Austin", false)
-	tieEarlier := rankDonor(t, pool, 300, base.Add(-10*24*time.Hour), "Austin", false)
-	tieLater := rankDonor(t, pool, 300, base, "Austin", false)
-	_ = rankDonor(t, pool, 100, base, "Austin", false)
+	top := rankDonor(t, pool, 17, base.AddDate(0, 0, -200), "Austin", false)
+	tieEarlier := rankDonor(t, pool, 10, base.Add(-time.Hour), "Austin", false)
+	tieLater := rankDonor(t, pool, 10, base, "Austin", false)
+	_ = rankDonor(t, pool, 4, base.AddDate(0, 0, 200), "Austin", false)
 	// An opted-out donor with the highest streak must be excluded entirely.
-	optedOut := rankDonor(t, pool, 9999, base, "Austin", true)
+	optedOut := rankDonor(t, pool, 100, base.AddDate(0, 0, -1000), "Austin", true)
 
 	cleanup(t, "DELETE FROM donor_badges WHERE code IN ('NAT2','CITY50')")
 	svc := RankingService{DB: as(t, dbroles.ProjectionWorker)}
@@ -97,7 +148,7 @@ func TestRankingRefreshPercentileCityRankAndOptOut(t *testing.T) {
 	if got := cityRank(top); got != 1 {
 		t.Fatalf("top donor city_rank=%d want 1", got)
 	}
-	// Tie on streak 300: the earlier start ranks ahead (rank 2 vs 3).
+	// Tie on 300 local days: the earlier start ranks ahead (rank 2 vs 3).
 	if e, l := cityRank(tieEarlier), cityRank(tieLater); !(e < l) {
 		t.Fatalf("tie-break failed: earlier=%d later=%d (earlier should rank ahead)", e, l)
 	}
@@ -116,7 +167,7 @@ func TestRankingRefreshPercentileCityRankAndOptOut(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT national_percentile FROM donor_rankings WHERE donor_id=$1", top).Scan(&pct); err != nil {
 		t.Fatal(err)
 	}
-	if pct < 1 || pct > 100 {
-		t.Fatalf("percentile out of range: %d", pct)
+	if pct != 1 {
+		t.Fatalf("top donor percentile: %d, want 1", pct)
 	}
 }

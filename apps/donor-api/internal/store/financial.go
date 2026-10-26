@@ -235,8 +235,8 @@ type projection struct {
 	zone        *time.Location
 }
 
-// Version 6 attributes conversions to the earliest verified successful payment.
-const projectionRules = 6
+// Version 7 awards ranking recognition from current local-day streaks.
+const projectionRules = 7
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a
