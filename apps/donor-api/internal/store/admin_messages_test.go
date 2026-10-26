@@ -17,7 +17,7 @@ func TestStaffResendIsIdempotentLimitedAndAudited(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	support, supportToken := staffFixture(t, pool, "OP_PARTNERSHIPS")
+	staff, staffToken := staffFixture(t, pool, "SUPER_ADMIN")
 	_, adminToken := staffFixture(t, pool, "SUPER_ADMIN")
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
@@ -37,33 +37,33 @@ VALUES($1,$2,$3,$4,'{"gift_id":"g"}',now()-interval '2 minutes',CASE WHEN $5 THE
 		"suppressed": message("RECEIPT", true, "donor_disabled"),
 		"optional":   message("REFERRAL", true, ""),
 	} {
-		if _, err := s.ResendMessage(ctx, supportToken, candidate, testID(t)); !errors.Is(err, ErrStaffConflict) {
+		if _, err := s.ResendMessage(ctx, staffToken, candidate, testID(t)); !errors.Is(err, ErrStaffConflict) {
 			t.Fatalf("%s message resent: %v", name, err)
 		}
 	}
 	invalid := testID(t)
 	invalid.Bytes[6] = 0x10
-	if _, err := s.ResendMessage(ctx, supportToken, source, invalid); !errors.Is(err, ErrStaffInput) {
+	if _, err := s.ResendMessage(ctx, staffToken, source, invalid); !errors.Is(err, ErrStaffInput) {
 		t.Fatal("non-v4 request id accepted", err)
 	}
 	if _, err := s.ResendMessage(ctx, "not-a-session", source, testID(t)); !errors.Is(err, ErrStaffDenied) {
 		t.Fatal("anonymous resend", err)
 	}
 	request := testID(t)
-	first, err := s.ResendMessage(ctx, supportToken, source, request)
+	first, err := s.ResendMessage(ctx, staffToken, source, request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	view := jsonView(t, first)
 	assertKeys(t, view, "queued", "id")
-	again, err := s.ResendMessage(ctx, supportToken, source, request)
+	again, err := s.ResendMessage(ctx, staffToken, source, request)
 	if err != nil || jsonView(t, again)["id"] != view["id"] || view["queued"] != true {
 		t.Fatal("retry queued another message", again, err)
 	}
 	if _, err = s.ResendMessage(ctx, adminToken, source, request); !errors.Is(err, ErrStaffConflict) {
 		t.Fatal("request id reused by another actor", err)
 	}
-	if _, err = s.ResendMessage(ctx, supportToken, source, testID(t)); !errors.Is(err, ErrStaffConflict) {
+	if _, err = s.ResendMessage(ctx, staffToken, source, testID(t)); !errors.Is(err, ErrStaffConflict) {
 		t.Fatal("resend not rate limited", err)
 	}
 	var raw string
@@ -73,12 +73,12 @@ VALUES($1,$2,$3,$4,'{"gift_id":"g"}',now()-interval '2 minutes',CASE WHEN $5 THE
 	}
 	var saved map[string]string
 	if err = json.Unmarshal([]byte(raw), &saved); err != nil || saved["gift_id"] != "g" || saved["resend_source"] != source.String() ||
-		saved["resend_actor"] != support.String() ||
+		saved["resend_actor"] != staff.String() ||
 		resends != 1 {
 		t.Fatal("resend context", raw, resends, err)
 	}
 	var audited int
-	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='message.resend_requested' AND target=$2 AND details->>'source_id'=$3", support, view["id"], source.String()).Scan(&audited); err != nil ||
+	if err = pool.QueryRow(ctx, "SELECT count(*) FROM donor_staff_audit WHERE actor_id=$1 AND action='message.resend_requested' AND target=$2 AND details->>'source_id'=$3", staff, view["id"], source.String()).Scan(&audited); err != nil ||
 		audited != 1 {
 		t.Fatal("resend not audited", audited, err)
 	}
@@ -88,7 +88,7 @@ func TestStaffClaimRequestQueuesLoginEmail(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	support, token := staffFixture(t, pool, "OP_PARTNERSHIPS")
+	staff, token := staffFixture(t, pool, "SUPER_ADMIN")
 	id, _ := donor(t, pool)
 	accountCleanup(t, pool, id)
 	s := &StaffService{DB: api}
@@ -99,7 +99,7 @@ func TestStaffClaimRequestQueuesLoginEmail(t *testing.T) {
 		t.Fatal(err)
 	}
 	var queued, audited int
-	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM donor_login_emails WHERE donor_id=$1 AND created_at>$3),(SELECT count(*) FROM donor_staff_audit WHERE actor_id=$2 AND action='message.claim_requested' AND target=$4)", id, support, time.Now().Add(-time.Minute), id.String()).Scan(&queued, &audited); err != nil ||
+	if err := pool.QueryRow(ctx, "SELECT (SELECT count(*) FROM donor_login_emails WHERE donor_id=$1 AND created_at>$3),(SELECT count(*) FROM donor_staff_audit WHERE actor_id=$2 AND action='message.claim_requested' AND target=$4)", id, staff, time.Now().Add(-time.Minute), id.String()).Scan(&queued, &audited); err != nil ||
 		queued != 1 ||
 		audited != 1 {
 		t.Fatal("claim request", queued, audited, err)
@@ -110,7 +110,7 @@ func TestStaffDonorDetailShowsUncomputedStreakAsUpdating(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	_, token := staffFixture(t, pool, "OP_PARTNERSHIPS")
+	_, token := staffFixture(t, pool, "SUPER_ADMIN")
 	id, _ := donor(t, pool)
 	q := queries.New(pool)
 	now := time.Now().UTC()
@@ -142,7 +142,7 @@ func TestStaffActionHistoryPagesNewestFirst(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "OP_PARTNERSHIPS")
+	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
 	id, _ := donor(t, pool)
 	t.Cleanup(func() {
 		if _, err := pool.Exec(ctx, "DELETE FROM donor_staff_actions WHERE donor_id=$1", id); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -240,5 +241,41 @@ func TestBreakGlassRecoveryReplacesOnlyAnEnabledAdministratorsPasskeys(t *testin
 	}
 	if _, err = s.Activate(ctx, invitation.ID, key.register(t, invitation.Options)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Operators act only in their own area (§8): Growth runs events, Impact Ops
+// runs initiatives, Partnerships runs partners, and none of them reads donors.
+func TestOperatorsActOnlyInTheirArea(t *testing.T) {
+	pool := database(t)
+	api := as(t, dbroles.API)
+	ctx := context.Background()
+	cleanEvents(t, pool)
+	cleanInitiatives(t, pool)
+	staff := &StaffService{DB: api}
+	events := EventService{Staff: staff}
+	initiatives := InitiativeService{Staff: staff}
+	donorID, _ := donor(t, pool)
+	area := map[string]struct{ event, initiative, donors bool }{
+		"OP_GROWTH":       {event: true},
+		"OP_IMPACT":       {initiative: true},
+		"OP_PARTNERSHIPS": {},
+		"SUPER_ADMIN":     {event: true, initiative: true, donors: true},
+	}
+	for role, may := range area {
+		_, token := staffFixture(t, pool, role)
+		slug := "area-" + strings.ReplaceAll(strings.ToLower(role), "_", "-")
+		_, err := events.Create(ctx, token, eventInput(slug, "San Francisco", "94103", "VOLUNTEER", 48*time.Hour))
+		if allowed := !errors.Is(err, ErrStaffForbidden); allowed != may.event || (may.event && err != nil) {
+			t.Errorf("%s creating an event: %v", role, err)
+		}
+		_, err = initiatives.Create(ctx, token, validInitiative(slug))
+		if allowed := !errors.Is(err, ErrStaffForbidden); allowed != may.initiative || (may.initiative && err != nil) {
+			t.Errorf("%s creating an initiative: %v", role, err)
+		}
+		_, err = staff.DonorDetail(ctx, token, donorID, 0, 0)
+		if allowed := !errors.Is(err, ErrStaffForbidden); allowed != may.donors || (may.donors && err != nil) {
+			t.Errorf("%s reading a donor: %v", role, err)
+		}
 	}
 }

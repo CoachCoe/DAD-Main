@@ -13,16 +13,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// InitiativeService is the staff (Impact-Ops) surface for initiatives and their
-// headline metrics (PRD §8, Phase 2.1/2.3). It follows the same draft->publish
-// discipline as ContentService: an initiative or metric is editable while DRAFT
+// InitiativeService is the Impact Ops staff surface for initiatives and their
+// headline metrics (PRD §8). An initiative or metric is editable while DRAFT
 // and only becomes donor-visible once published, and a metric cannot be
 // published until it carries a verification note and date (enforced in the DB
-// and re-checked here for a clear error). It reuses the content.publish staff
-// permission — initiatives are the same Impact-Ops publishing concern.
+// and rechecked here for a clear error).
 type InitiativeService struct{ Staff *StaffService }
 
-const initiativePermission = "content.publish"
+const initiativePermission = "initiative.manage"
 
 // Up to 6 headline metrics per initiative, of which the app shows the first 4
 // (PRD §8).

@@ -21,14 +21,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// EventService is the staff surface for events (PRD §6.10 E-3, Phase 4.2). It
-// follows the same draft->publish discipline as InitiativeService: an event is
-// editable while DRAFT and only becomes donor-visible once published. It reuses
-// the content.publish staff permission — events are the same Impact-Ops
-// publishing concern.
+// EventService is the Growth staff surface for events (PRD §8). An event is
+// editable while DRAFT and only becomes donor-visible once published.
 type EventService struct{ Staff *StaffService }
 
-const eventPermission = "content.publish"
+const eventPermission = "event.manage"
 
 // eventTypes are the allowed event kinds (E-3).
 var eventTypes = map[string]bool{"VOLUNTEER": true, "COMMUNITY": true, "INVITE_ONLY": true}

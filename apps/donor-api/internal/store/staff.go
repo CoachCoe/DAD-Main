@@ -28,33 +28,12 @@ var (
 	ErrStaffExists = fmt.Errorf("%w: a staff account with this email already exists", ErrStaffConflict)
 )
 
-// rolePermissions lists each role's named permissions, sorted (PRD §8). The
-// additive SUPPORT ⊂ FINANCE ⊂ ADMIN ladder is replaced by a super admin plus
-// three area operators:
-//
-//   - SUPER_ADMIN does everything, including the three super-admin-only powers
-//     §8 reserves: refunds (gift.*), manual badge grants (badge.manage) and
-//     admin management (staff.manage), plus donors & money (donor.read,
-//     data.export) and audit.
-//   - Operators can act only in their area and never hold those reserved
-//     powers: OP_PARTNERSHIPS runs partner approvals/links/matching/users
-//     (partner.*) and reads donors to link them; OP_GROWTH runs events and
-//     check-ins (content.publish is the event publish permission's shared
-//     gate — see note below); OP_IMPACT enters initiative metrics and spend.
-//
-// Events and initiatives both publish through the "content.publish" permission
-// today, so Growth and Impact-Ops share it; the finer split (event.* vs
-// initiative.*) is a later refinement and does not change who §8 lets act.
-//
-// partner.* are defined now though the /partner/* and partner-admin routes land
-// in Phase 5 PR-B, so the role model is complete and PR-B only references them.
-//
-// report.read is the §4 success-metrics read (the staff KPI report). It is NOT
-// a super-admin-only power: the org-wide metrics inform every operator's area
-// (Growth reads acquisition/referral/retention, Partnerships the partner and
-// network totals, Impact the giving mix), so all four roles hold it. It is a
-// pure read of committed facts and grants no mutation, so it carries none of
-// the §8 reserved powers' risk.
+// rolePermissions lists each role's named permissions, sorted (PRD §8). A
+// super admin holds every one. Each operator holds only its own area's:
+// Partnerships runs partner approvals, links, matching and partner users;
+// Growth runs events and check-ins; Impact Ops enters initiatives, metrics and
+// spend. Donors and money, badge grants, website content, the audit log and
+// admin management stay with a super admin. Every role reads the §4 report.
 var rolePermissions = map[string][]string{
 	"SUPER_ADMIN": {
 		"audit.read",
@@ -62,16 +41,18 @@ var rolePermissions = map[string][]string{
 		"content.publish",
 		"data.export",
 		"donor.read",
+		"event.manage",
 		"gift.cancel",
 		"gift.refund",
+		"initiative.manage",
 		"message.resend",
 		"partner.manage",
 		"report.read",
 		"staff.manage",
 	},
-	"OP_PARTNERSHIPS": {"audit.read", "donor.read", "message.resend", "partner.manage", "report.read"},
-	"OP_GROWTH":       {"content.publish", "report.read"},
-	"OP_IMPACT":       {"content.publish", "report.read"},
+	"OP_PARTNERSHIPS": {"partner.manage", "report.read"},
+	"OP_GROWTH":       {"event.manage", "report.read"},
+	"OP_IMPACT":       {"initiative.manage", "report.read"},
 }
 
 func staffPermissions(role string) []string { return rolePermissions[role] }
