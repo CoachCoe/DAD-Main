@@ -45,7 +45,7 @@ jobs:
       (github.event_name != 'workflow_dispatch' || inputs.ledger_operation == 'validate') &&
       ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name != 'pull_request' && (github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/main')))
-    runs-on: [self-hosted, dad, linux]
+    runs-on: ubuntu-24.04
     timeout-minutes: 100
     permissions:
       contents: read
@@ -117,7 +117,7 @@ jobs:
   persist:
     needs: validate
     if: ${{ always() && needs.validate.result == 'success' }}
-    runs-on: [self-hosted, dad, linux]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -161,7 +161,7 @@ jobs:
     name: ATM acceptance
     needs: [validate, persist]
     if: ${{ always() && (github.event_name != 'workflow_dispatch' || inputs.ledger_operation == 'validate') }}
-    runs-on: [self-hosted, dad, linux]
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions: {}
     steps:
@@ -178,7 +178,7 @@ jobs:
 
   ledger-admin:
     if: github.event_name == 'workflow_dispatch' && inputs.ledger_operation != 'validate'
-    runs-on: [self-hosted, dad, linux]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: atm-ledger-admin
     permissions:

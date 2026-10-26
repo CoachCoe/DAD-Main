@@ -69,9 +69,9 @@ jobs:
             # backend: Go API, its migrations/sqlc/openapi, the web app (api runs
             # check-generated which spans web typegen; browser is full-stack E2E),
             # or the CI workflow itself.
-            if match '^apps/donor-api/|^apps/web/|^Makefile$|^\.github/workflows/ci\.yml$'; then backend=true; fi
+            if match '^apps/donor-api/|^apps/web/|^scripts/|^contracts/mobile/|^Makefile$|^\.github/workflows/ci\.yml$'; then backend=true; fi
             # deploy: compose/env/ingress/scripts/Dockerfiles, or the CI workflow.
-            if match '^docker-compose|^\.env\..*\.example$|^scripts/|[Dd]ockerfile|^deploy/nginx/|^\.github/workflows/ci\.yml$'; then deploy=true; fi
+            if match '^docker-compose|^\.env\..*\.example$|^scripts/|[Dd]ockerfile|^\.dockerignore$|^Makefile$|^deploy/nginx/|^\.github/workflows/ci\.yml$'; then deploy=true; fi
           fi
           {
             echo "full=$full"

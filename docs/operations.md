@@ -889,10 +889,10 @@ backup scheduling, retention, alerting, and off-host recovery ownership before l
 
 ## Continuous integration
 
-CI runs in GitHub Actions (`.github/workflows/`). Most jobs run on **self-hosted
-runners** so a private repo's test matrix does not consume GitHub-hosted Actions
-minutes. A few jobs stay **GitHub-hosted** because they require a genuine Linux
-host that the self-hosted (Apple Silicon macOS) runner cannot provide:
+CI runs in GitHub Actions (`.github/workflows/`). The repository is public.
+Some toolchain jobs use **self-hosted runners**, restricted to pushes and
+same-repository pull requests. Jobs requiring Linux containers or a fresh
+credential boundary run on **GitHub-hosted runners**:
 
 - `api` and `browser` use Postgres **service containers**, a Linux-only Actions
   feature.
@@ -900,10 +900,14 @@ host that the self-hosted (Apple Silicon macOS) runner cannot provide:
   runner service cannot authenticate non-interactively.
 - `cloudflare-ranges.yml` is a weekly schedule that must fire even when no
   self-hosted machine is online.
+- All `atm.yml` jobs use `ubuntu-24.04`. The ledger's OIDC policy requires
+  `runner_environment=github-hosted`; the publisher must have a fresh runner
+  that has never executed the candidate. Do not move these jobs to persistent
+  self-hosted runners or weaken that policy.
 
-Everything else — the Go/web/ledger jobs in `ci.yml`, all of `atm.yml`, and the
-`contract` + `swift-compatibility` jobs in `mobile-foundation.yml` — runs
-self-hosted.
+The path gate and web/ledger jobs in `ci.yml`, and the
+`contract` + `swift-compatibility` jobs in `mobile-foundation.yml`, run
+self-hosted. The mobile tag publisher also uses a self-hosted runner.
 
 ### Runner labels
 
@@ -955,14 +959,21 @@ mkdir actions-runner && cd actions-runner
 ./svc.sh install && ./svc.sh start
 ```
 
-Adjust `--labels` to what the host can serve (drop `macos` on a Linux host, drop
-`linux` on a host without Docker). The runner then polls GitHub and picks up any
+Adjust `--labels` to what the host can serve (drop `macos` on a Linux host).
+The custom `linux` label currently selects toolchain jobs and does not require Docker.
+The runner then polls GitHub and picks up any
 job whose `runs-on` labels it satisfies.
 
 ### Security
 
-Self-hosted runners are enabled here because `CoachCoe/DAD-Main` is **private**.
-GitHub strongly advises against self-hosted runners on public repositories: a pull
-request from a fork would run untrusted code on the runner host. If this repo is
-ever made public, move CI back to GitHub-hosted runners (revert the `runs-on`
-labels) before doing so.
+The repository is public. Self-hosted jobs refuse fork pull requests; the hosted
+API/browser/deploy jobs currently depend on that restricted path gate and therefore
+also skip fork pull requests. Fork contributors need an approved, isolated hosted
+validation path before their changes can be treated as checked.
+
+Only trusted maintainers may create same-repository pull requests. Persistent
+runners can retain code or credentials between jobs, so keep them isolated from
+production and personal accounts, use minimal permissions, and prefer ephemeral
+runners. Moving ordinary CI to GitHub-hosted runners removes this persistent-host
+trust requirement. ATM's hosted-runner boundary is mandatory regardless of where
+ordinary CI runs.
