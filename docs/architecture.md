@@ -84,7 +84,7 @@ app's conversion moment.
 
 ## Financial consistency
 
-Guest checkouts capture first-touch attribution before accounts exist. Durable commands
+Guest checkouts capture last-touch attribution before accounts exist. Durable commands
 are committed before external mutations and carry frozen parameters and stable processor
 idempotency keys. An ambiguous provider response is reconciled before another mutation;
 old unknown commands require operator review rather than a new blind request.
@@ -113,7 +113,7 @@ its billing anchor and whether Stripe holds a schedule or pending update, whenev
 event about it arrives: each `customer.subscription.*` event it accepts, a completed
 checkout that binds it, and an invoice while an amount change is pending. When it has no
 events to process, it also syncs subscriptions stored before the billing anchor was kept,
-which offer no pause dates until then, checking for them hourly. Recurring views, card
+which offer no billing anchor until then, checking for them hourly. Recurring views, card
 update status, and staff previews are served from that state with `observed_at`, the time
 of the sync. Of the API's requests only commands call Stripe, and each first syncs the
 subscription it acts on, committed on its own so that a command refused as out of date

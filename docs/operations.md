@@ -146,7 +146,7 @@ Some migrations and releases need more:
   from `/staff`.
 - `0008_referral_touch_retention` builds its indexes without `CONCURRENTLY`, blocking
   checkout writes while it runs; on a large database, migrate at a quiet time.
-- `0009_subscription_sync` adds the billing anchor that dates paused renewals. A
+- `0009_subscription_sync` adds the billing anchor that dates renewals. A
   subscription synced before it shows no anchor until the Stripe worker next syncs it, so
   start the workers promptly after `up`.
 - `0015_pending_refund_reconciliation` indexes unsettled refunds for bounded batch reads.
@@ -301,7 +301,7 @@ cannot validate that capacity.
 Use the organization's verified Stripe **test** account and snapshot webhook events at
 API version `2026-09-30.endive`. Subscribe to:
 
-- `payment_intent.succeeded` for one-time gifts.
+- `payment_intent.succeeded` for retained pre-R1 one-time gift facts and payment-intent verification.
 - `invoice.payment_succeeded` and `invoice.payment_failed` for monthly periods.
 - `refund.created`, `refund.updated`, and `refund.failed`.
 - `checkout.session.completed` and `checkout.session.expired`.
@@ -408,8 +408,8 @@ age of the oldest unprocessed event, and changes refused as out of date answer 4
 staff refund whose outcome was lost stays pending until the original action is retried.
 A second recurring change submitted while another is still with Stripe receives 409; the
 subscription lease expires after two minutes if a writer stops mid-command, and the same
-request ID can then resume it. One-time gifts take their paid time from the successful
-charge, so a restricted key needs read access to PaymentIntents and Charges.
+request ID can then resume it. Historical one-time gift facts take their paid time from
+the successful charge, so a restricted key needs read access to PaymentIntents and Charges.
 Refund and recurring cancellation are separate actions requiring named permissions,
 confirmation, reasons, and audit records. Never edit processor identifiers by hand.
 
@@ -420,7 +420,7 @@ use the same mail configuration, require current-address proof before new-addres
 and park delivery after five failures. Requesting a replacement invalidates prior proofs.
 Projection refresh handles grace expiry, recurring boundaries, permanent recognition,
 and prior-year summaries. A projection is recomputed when facts that change it arrive and
-at its next time boundary: a due date, period end, grace deadline, pause, cancellation,
+at its next time boundary: a due date, period end, grace deadline, cancellation,
 refund, or New Year in New York, and at least every 25 to 35 days, a span fixed per
 donor so that projections computed together fall due over ten days. A release that changes
 recognition, or the messages and push intents queued with it, raises `projectionRules` in
@@ -649,10 +649,10 @@ make seed SEED_DATABASE_URL=postgresql://user:pass@db:5432/dad_load SEED_CONFIRM
 
 `SEED_DONORS` (default 50,000, at most 1,000,000) donors are generated deterministically
 from `-seed` and held in memory, about 8 KB of RSS per donor (400 MB at 50,000, 8 GB at 1,000,000): mostly
-monthly gifts at the preselected $30, some at the $90 and $150 presets or at custom
-amounts such as $10, $50 and $100, one-time gifts, abandoned checkouts, up to two years of
-anniversary renewals with failures recovered within and after the 14-day grace,
-unrecovered failures, pauses, cancellations, refunds, and referral trees in which most
+monthly gifts at the preselected $30, some at $90 and $150 or at other valid whole-dollar
+daily amounts, abandoned checkouts, up to two years of anniversary renewals with failures
+recovered within and after the 7-day grace, unrecovered failures, cancellations, refunds,
+and referral trees in which most
 donors refer nobody and a few refer hundreds, with Link and IRL visits that did and did
 not convert. Rows are written as checkout and webhook processing store them, including
 the processed Stripe events that billing and refund observations cite, and the
@@ -730,7 +730,7 @@ remain unverified; deferral does not establish production acceptance.
 Before live solicitation, verify the receiving entity, EIN, processor account, approved
 receipt and policy text, registrations, Wallet accounts/certificates, delivery reputation,
 backup/restore and incident ownership. Exercise the full Stripe sandbox journey including
-out-of-order webhooks, refund transitions, failed renewals, pauses, early resumption,
+out-of-order webhooks, refund transitions, failed renewals, cancellation,
 month-end boundaries, and ambiguous responses. Local test doubles do not prove these
 provider behaviors. Physical QR scanning, assistive-technology checks, and viral-load
 acceptance also require explicit evidence.

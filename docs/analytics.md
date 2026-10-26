@@ -3,7 +3,7 @@
 This contract separates verified financial facts from browser observations. Reports must
 label sandbox data and must never combine it with live donor acquisition. All timestamps
 are UTC; receipt tax years use America/New_York. Amounts are integer USD cents. The launch
-cutoff is 22 April 2027 at midnight in America/New_York. Reporting periods are half-open
+cutoff is 1 January 2027 at midnight in America/New_York. Reporting periods are half-open
 intervals `[start, end)` and must include their observation cutoff and timezone.
 
 ## Durable server facts available now
@@ -13,9 +13,9 @@ Use stable record IDs for deduplication, not email addresses, names, or webhook 
 
 | Logical event | Source / identity | Meaning |
 |---|---|---|
-| `referral_touch_captured.v1` | referral-touches / touch ID | First accepted referral touch; channel and 30-day window are fixed. Further opens in that window do not replace the source. This is not every page view. Kept for good once it leads to an attributed gift; otherwise deleted 13 months after capture. |
+| `referral_touch_captured.v1` | referral-touches / touch ID | Most recent accepted referral touch; a later valid link or IRL scan replaces it before the first gift. This is not every page view. Kept for good once it leads to an attributed gift; otherwise deleted 13 months after capture. |
 | `checkout_requested.v1` | checkouts / checkout ID | Valid donation request persisted before calling Stripe. Does not prove a hosted page opened or a gift completed. |
-| `gift_collected.v1` | gifts / gift ID | Verified processor collection. One-time and recurring are explicit; checkout completion is insufficient. Carries the referrer and LINK/IRL kind valid at the moment of charge. |
+| `gift_collected.v1` | gifts / gift ID | Verified recurring collection; checkout completion is insufficient. Carries the referrer and LINK/IRL kind valid at the moment of charge. Historical one-time facts can remain from before R1. |
 | `refund_observed.v1` | refund-history / observation ID | Provider or audited staff observation of a refund transition. Count successful current refund state once per refund ID when calculating net dollars. |
 | `billing_period_observed.v1` | billing-periods / period ID | Current billing outcome and due date. Current FAILED state alone is not a permanent history of all failures. |
 | `billing_attempt_observed.v1` | billing-history / source event ID | Verified FAILED or PAID invoice observation, with amount, billing reason, processor event creation, effective occurrence, and local recording timestamps. A replay of the same event does not add a row. |
@@ -49,13 +49,13 @@ taken while that period was within retention, and state the capture cutoff.
 | Seven-day share rate | Donors with a confirmed native-share handoff or clipboard copy within seven days of first gift divided by donors whose seven-day observation window has elapsed. Label this a share-action proxy, not verified invitation delivery. Cancellation of a share sheet is not a share. |
 | IRL conversion share | IRL first-gift conversions divided by LINK plus IRL first-gift conversions in the same cohort and observation window. Direct gifts are excluded from this denominator. |
 | Viral coefficient | Converting direct referrals credited to a donor cohort divided by donors in that cohort, with acquisition dates and observation window stated. No second-level credit. Publish gross first conversions separately from currently qualified referrals after full refunds. |
-| Gift mix | Successful gift count and collected dollars grouped by MONTHLY/ONE_TIME. Also report first-gift donor mix; do not confuse gifts with unique donors. |
-| Month-three/six retention | First-recurring-gift cohort with successful consecutive recurring periods at milestone / cohort old enough to reach that milestone. Grace, pauses, late recovery, and full refunds follow the domain rules. Current streak snapshots alone cannot reconstruct historical retention. |
-| Involuntary churn/recovery | Scheduled recurring value lost to payment failure after the retry window, with later recovery count/value against that failed-period cohort. Join billing-history to billing-periods and apply the cohort rules below. Voluntary cancellation and intentional pauses are separate. |
+| Gift volume | Successful recurring gift count and collected dollars. Do not confuse gifts with unique donors; identify any retained pre-R1 one-time facts separately. |
+| Streak survival | First-recurring-gift cohorts still current at 30, 90, 180, and 365 days, divided by the cohort old enough to reach each threshold. Grace, late recovery, cancellation, and full refunds follow the domain rules. Current snapshots alone cannot reconstruct historical retention. |
+| Involuntary churn/recovery | Scheduled recurring value lost to payment failure after the retry window, with later recovery count/value against that failed-period cohort. Join billing-history to billing-periods and apply the cohort rules below. Voluntary cancellation is separate. |
 | Time to first gift | Median elapsed time from an eligible journey's first landing to its verified first collection; report sample size and missing-journey rate. A receipt page view is not collection time. |
 | Referral dollars | Actual collected referred gifts less successful refunds, direct-only, with LINK/IRL split. Never promised recurring value or projections of future gifts. |
 
-Self-referral exclusion, first-touch conflicts, refunds, and streak rules are governed by
+Self-referral exclusion, last-touch conflicts, refunds, and streak rules are governed by
 [the donor domain](donor-domain.md). Retain both gross first-conversion and currently
 qualified-referral measures so refund behavior cannot silently rewrite acquisition reports.
 Cohort identity is a donor ID, so a verified email change must not create another donor.
@@ -78,14 +78,14 @@ observations with identical occurrence timestamps.
 For renewal reporting, select `subscription_cycle`; report `subscription_create` failures
 separately from churn of existing donors. Join `period_id` to `billing-periods.id` for
 donor identity and the scheduled date. Count each failed period once, using its earliest
-failure and first successful payment. The retry deadline is `due_at + 14 days`, matching
+failure and first successful payment. The retry deadline is `due_at + 7 days`, matching
 the streak rule. At an observation cutoff, an eligible failed renewal with no successful
 payment by that deadline becomes lost value once the deadline has passed; later success
 is recovered value for that same cohort. Success within grace is recovered before churn.
 Never multiply amounts by retry count, webhook count, or the number of joined rows.
 Use each period's scheduled amount once for lost value and its verified collection for
-recovered value, checking amount consistency before aggregation. Keep pauses and voluntary
-cancellations separate using their effective dates and the subscription/pauses/cancellations
+recovered value, checking amount consistency before aggregation. Keep voluntary
+cancellations separate using their effective dates and the subscription/cancellation
 exports; a period skipped intentionally is not an involuntary loss.
 
 Collection begins when the worker version supporting migration `0005_billing_history.sql`
@@ -110,7 +110,7 @@ approved, rather than an implied live collection policy:
   timestamp, consent version, short-lived random journey ID, environment, event name.
 - Allowlisted events: `landing_viewed.v1`, `amount_selected.v1`, `checkout_opened.v1`,
   `share_requested.v1`, `share_handed_off.v1`, `invite_copied.v1`, `code_displayed.v1`.
-- Allowlisted properties: surface enum, DIRECT/LINK/IRL source, MONTHLY/ONE_TIME frequency,
+- Allowlisted properties: surface enum, DIRECT/LINK/IRL source, MONTHLY frequency,
   amount in cents where relevant, share method enum. No arbitrary property objects.
 - Never send names, email, full URLs/query strings, referral codes, login fragments,
   cookies, IP addresses, user-agent fingerprints, free text, or raw Stripe objects.

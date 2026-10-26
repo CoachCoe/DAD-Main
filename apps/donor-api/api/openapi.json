@@ -9882,7 +9882,7 @@
      },
      "push_streak_milestone": {
       "type": "boolean",
-      "description": "App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on."
+      "description": "App notification when the donor's giving streak reaches an R1 day milestone. Starts on."
      },
      "push_badge_earned": {
       "type": "boolean",

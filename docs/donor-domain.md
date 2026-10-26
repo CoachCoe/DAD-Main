@@ -1,8 +1,8 @@
 # Donor domain
 
-This repository contains the R1 donor product. Donor identity and staff identity are
-separate. Recipient, partner-portal, aid-delivery, AI, and blockchain functionality is
-outside this release. The repository remains MIT licensed.
+This repository contains the R1 donor, partner, and staff products. Donor, partner, and
+staff identities are separate. Recipient, aid-delivery, AI, chat, and blockchain
+functionality is outside this release. The repository remains MIT licensed.
 
 The following R1 rules were agreed with the product owner. They are the implementation
 contract, not a claim that every capability is already shipped.
@@ -29,19 +29,20 @@ copy of the login token until delivery or expiry. Changing email requires fresh
 authentication through the existing address and verification of the new address.
 Knowing an email or checkout ID never grants access to giving history.
 
-One active monthly subscription per donor; additional one-time gifts are allowed.
+One active monthly subscription per donor; one-time gifts and donor-initiated pauses are
+not offered in R1.
 Amount changes apply at the next renewal without proration. Cancellation stops future
-renewals without refunding past gifts. Pausing skips 1, 2, or 3 renewals, with the exact
-automatic-resume date shown before confirmation. Donors see their monthly gift as last
+renewals without refunding past gifts and plainly warns that the streak will end. Donors
+see their monthly gift as last
 synced from Stripe, with the time of that sync; confirming a change checks Stripe's
 current state and refuses the change if it no longer matches what the donor confirmed,
 saving that state so the donor sees it on refreshing.
 
 ## Referrals
 
-The first valid referral touch wins for 30 days, for both referrer and channel (LINK or
-IRL). Later scans, links, and direct visits do not overwrite it or extend its deadline.
-An expired window can be replaced by a new referral touch. Checkout stores attribution
+The most recent valid referral touch before the first gift wins, for both referrer and
+channel (LINK or IRL). A later scan or link replaces the prior touch and starts its own
+30-day window. Checkout stores attribution
 before account creation, and each collected gift records the referrer and channel that
 were valid at the moment of charge. Conversion uses the earliest verified successful
 payment's collection timestamp, with the Stripe payment object ID in ascending lexical
@@ -89,32 +90,24 @@ Fully refunding all gifts removes the count. A later gift restores the same rela
 not a second conversion. Historical conversion events remain distinguishable from the
 current count. Refund and subscription cancellation are separate staff actions.
 
-A streak month is a successful monthly recurring billing period, starting at one.
-One-time gifts do not count. A failed renewal gets 14 days from its scheduled date:
-retain the current count as at risk, increment once when recovered within grace, and
-reset the active streak to zero after grace. A renewal not yet reported by the processor
-likewise keeps the current count, not at risk, for those 14 days; after that the streak
-is unknown until the facts arrive. Later recovery starts at one. Retain the
-historical best. A cancellation ends continuity at the first skipped renewal, not
-immediately. A deliberate donor-initiated pause instead freezes the streak for up to
-three calendar months from the pause, using the billing anniversary or the last day of
-the target month: a renewal skipped by the pause within that window neither
-resets the streak nor marks it at risk, and a resumption inside the window continues the
-streak from where it was. A renewal due on the resume date gets the usual 14-day grace;
-skipped renewals do not increase the count. Cancellation during a pause still ends
-continuity at its confirmed stopping date. Only after the three-month cap does normal lapse behavior
-resume. Amount changes do not break continuity. Partial refunds retain
+A giving streak grows by one local calendar day while the monthly recurring gift is
+current. Billing-period continuity is retained internally so renewals, refunds, and late
+processor facts can be reconciled without inventing days. A failed renewal gets 7 days
+from its scheduled date: the day streak remains current and at risk during grace, then
+resets after the deadline if payment has not recovered. A renewal not yet reported by
+the processor keeps the current state until the deadline; after that the streak is
+unknown until facts arrive. A cancellation ends continuity at the first skipped renewal,
+not immediately. Amount changes do not break continuity. Partial refunds retain
 the period if recurring funds remain; full refunds disqualify it unless another qualifying
 recurring payment covers it. Recalculate subsequent continuity rather than erasing every
 later month. Staff corrections are for documented system errors and must be audited.
 
-A streak milestone is reached at 3 and 6 consecutive months, at a year, and at every
-further year. The product requirements name milestones without defining them, so this
-set is a product judgment. Each milestone is congratulated once per streak run, a run
-being identified by its first period: a streak that resets and is rebuilt is a new run.
+A streak milestone is reached at 7, 30, 100, 365, 500, 1,000, 1,095, and 1,460 days,
+then every further 365 days. Each milestone is congratulated once per streak run, which
+is identified by its first current day; a streak that resets and is rebuilt is a new run.
 
-Any successful first gift before 2027-04-22 00:00 America/New_York earns Founding Donor
-status, including one-time gifts. Use the processor's successful-payment timestamp,
+Any successful first gift before 2027-01-01 00:00 America/New_York earns Founding Donor
+status. Website-waitlist grants are also honored. Use the processor's successful-payment timestamp,
 not checkout start or webhook arrival. Claiming after cutoff is allowed. The badge is
 permanent, including after refunds/cancellation. Changing the cutoff requires a product
 decision; existing awards remain permanent.
@@ -128,8 +121,8 @@ named permissions server-side; audit actor, time, target, and result, with reaso
 refunds and staff cancellation. No donor impersonation or access to card details.
 
 Send receipts per successful gift and a prior-year summary showing gifts/refund
-adjustments. Send failed-payment recovery at failure, around day 7, and before the
-14-day deadline; stop on resolution or cancellation. Optional referral-converted emails
+adjustments. Send failed-payment recovery at failure and on grace day 5, before the
+7-day deadline; stop on resolution or cancellation. Optional referral-converted emails
 identify the channel without the referred donor's name or amount. Send the initial
 account-claim email with replacement-link access, without promotional reminders.
 The donor app's notifications follow the same facts: a referral converted (with its

@@ -32,7 +32,7 @@ name no one and no amount, and open the given app path.
 |---|---|---|---|
 | Referral converted | First qualifying referred gift; direct referrer | "Your invitation worked" / "Someone you invited through a Link Referral (an IRL Referral) just made their first test gift." | `/account/dashboard` |
 | Streak at risk | Failed latest renewal while the streak is at risk, once per period; giving donor | "Your giving streak is at risk" / "Your monthly test payment was declined. Update your payment method to keep your streak going." | `/account/payment-method` |
-| Streak milestone | Streak reaches 3 or 6 months, a year, or a further year, once per run; giving donor | "6 months in a row" / "You have given every month for 6 months. Thank you for keeping your test gifts going." | `/account/dashboard` |
+| Streak milestone | Streak reaches an R1 day milestone, once per run; giving donor | "100-day streak" / "You have kept your giving streak going for 100 days. Thank you for showing up every day." | `/account/dashboard` |
 
 A notification not sent within 24 hours is dropped rather than shown late.
 

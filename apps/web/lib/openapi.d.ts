@@ -2544,7 +2544,7 @@ export interface components {
             push_streak_at_risk: boolean;
             /** @description App notification when the donor's giving streak has lapsed after the grace period on a failed monthly payment. Starts on. */
             push_streak_lapsed: boolean;
-            /** @description App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on. */
+            /** @description App notification when the donor's giving streak reaches an R1 day milestone. Starts on. */
             push_streak_milestone: boolean;
             /** @description App notification when the donor earns a new badge. Starts on. */
             push_badge_earned: boolean;
