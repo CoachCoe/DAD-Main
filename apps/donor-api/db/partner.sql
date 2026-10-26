@@ -34,7 +34,7 @@ VALUES ($1,$2,$3,$4,$5,'','','r1-partner-approved-v1',$6,$7,$8,$9);
 -- name: PartnerOrgByID :one
 SELECT * FROM donor_partner_signups WHERE id=$1;
 
--- name: SetPartnerMatch :exec
+-- name: SetPartnerMatch :execrows
 -- §8 Partnerships: set workforce size, match rate (basis points) and cap.
 UPDATE donor_partner_signups
 SET workforce_size=$2, match_rate_bp=$3, match_cap_minor=$4
@@ -46,16 +46,19 @@ UPDATE donor_partner_signups
 SET organization=$2, logo_url=$3, description=$4
 WHERE id=$1 AND approved_at IS NOT NULL;
 
--- name: LinkInitiativeToPartner :exec
+-- name: LinkInitiativeToPartner :execrows
 -- §8/P-3: link an initiative to its partner org.
 UPDATE donor_initiatives SET partner_signup_id=$2, updated_at=$3 WHERE id=$1;
 
 -- name: PartnerUsersForPartner :many
 SELECT * FROM donor_partner_users WHERE partner_id=$1 AND NOT disabled ORDER BY created_at, id;
 
--- name: DisablePartnerUser :exec
+-- name: DisablePartnerUser :execrows
 -- P-4: a partner admin removes a user (soft delete).
 UPDATE donor_partner_users SET disabled=true WHERE partner_id=$1 AND id=$2;
+
+-- name: RevokePartnerUserSessions :exec
+UPDATE donor_partner_sessions SET revoked_at=$2 WHERE partner_user_id=$1 AND revoked_at IS NULL;
 
 -- name: InvitePartnerUser :one
 -- P-4: a partner admin invites a VIEWER (or ADMIN) by email; the signer of an

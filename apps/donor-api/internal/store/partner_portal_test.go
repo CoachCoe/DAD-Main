@@ -9,6 +9,7 @@ import (
 
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/mail"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -147,6 +148,15 @@ func TestPartnerPortalSignInJourney(t *testing.T) {
 	}
 	if sent := deliverPartnerLinks(t, time.Now().UTC()); len(sent) != 0 {
 		t.Fatalf("a removed user was sent a sign-in link: %v", sent)
+	}
+	if err := portal.Invite(ctx, adminSession, "viewer@gamma.test", "Val Viewer", "VIEWER"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := portal.Users(ctx, viewerSession); !errors.Is(err, ErrPartnerDenied) {
+		t.Fatalf("re-inviting a removed user revived their old session: %v", err)
+	}
+	if err := portal.RemoveUser(ctx, adminSession, mustNewID(t)); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("removing an unknown user: %v", err)
 	}
 }
 

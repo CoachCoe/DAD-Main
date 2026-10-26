@@ -167,7 +167,7 @@ func (q *Queries) DecidePartnerApplication(ctx context.Context, arg DecidePartne
 	return err
 }
 
-const disablePartnerUser = `-- name: DisablePartnerUser :exec
+const disablePartnerUser = `-- name: DisablePartnerUser :execrows
 UPDATE donor_partner_users SET disabled=true WHERE partner_id=$1 AND id=$2
 `
 
@@ -177,9 +177,12 @@ type DisablePartnerUserParams struct {
 }
 
 // P-4: a partner admin removes a user (soft delete).
-func (q *Queries) DisablePartnerUser(ctx context.Context, arg DisablePartnerUserParams) error {
-	_, err := q.db.Exec(ctx, disablePartnerUser, arg.PartnerID, arg.ID)
-	return err
+func (q *Queries) DisablePartnerUser(ctx context.Context, arg DisablePartnerUserParams) (int64, error) {
+	result, err := q.db.Exec(ctx, disablePartnerUser, arg.PartnerID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const failPartnerLoginEmail = `-- name: FailPartnerLoginEmail :exec
@@ -339,7 +342,7 @@ func (q *Queries) InvitePartnerUser(ctx context.Context, arg InvitePartnerUserPa
 	return id, err
 }
 
-const linkInitiativeToPartner = `-- name: LinkInitiativeToPartner :exec
+const linkInitiativeToPartner = `-- name: LinkInitiativeToPartner :execrows
 UPDATE donor_initiatives SET partner_signup_id=$2, updated_at=$3 WHERE id=$1
 `
 
@@ -350,9 +353,12 @@ type LinkInitiativeToPartnerParams struct {
 }
 
 // §8/P-3: link an initiative to its partner org.
-func (q *Queries) LinkInitiativeToPartner(ctx context.Context, arg LinkInitiativeToPartnerParams) error {
-	_, err := q.db.Exec(ctx, linkInitiativeToPartner, arg.ID, arg.PartnerSignupID, arg.UpdatedAt)
-	return err
+func (q *Queries) LinkInitiativeToPartner(ctx context.Context, arg LinkInitiativeToPartnerParams) (int64, error) {
+	result, err := q.db.Exec(ctx, linkInitiativeToPartner, arg.ID, arg.PartnerSignupID, arg.UpdatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const lockPartnerLoginRecipient = `-- name: LockPartnerLoginRecipient :one
@@ -1186,7 +1192,21 @@ func (q *Queries) RevokePartnerSession(ctx context.Context, arg RevokePartnerSes
 	return err
 }
 
-const setPartnerMatch = `-- name: SetPartnerMatch :exec
+const revokePartnerUserSessions = `-- name: RevokePartnerUserSessions :exec
+UPDATE donor_partner_sessions SET revoked_at=$2 WHERE partner_user_id=$1 AND revoked_at IS NULL
+`
+
+type RevokePartnerUserSessionsParams struct {
+	PartnerUserID pgtype.UUID        `json:"partner_user_id"`
+	RevokedAt     pgtype.Timestamptz `json:"revoked_at"`
+}
+
+func (q *Queries) RevokePartnerUserSessions(ctx context.Context, arg RevokePartnerUserSessionsParams) error {
+	_, err := q.db.Exec(ctx, revokePartnerUserSessions, arg.PartnerUserID, arg.RevokedAt)
+	return err
+}
+
+const setPartnerMatch = `-- name: SetPartnerMatch :execrows
 UPDATE donor_partner_signups
 SET workforce_size=$2, match_rate_bp=$3, match_cap_minor=$4
 WHERE id=$1 AND approved_at IS NOT NULL
@@ -1200,14 +1220,17 @@ type SetPartnerMatchParams struct {
 }
 
 // §8 Partnerships: set workforce size, match rate (basis points) and cap.
-func (q *Queries) SetPartnerMatch(ctx context.Context, arg SetPartnerMatchParams) error {
-	_, err := q.db.Exec(ctx, setPartnerMatch,
+func (q *Queries) SetPartnerMatch(ctx context.Context, arg SetPartnerMatchParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPartnerMatch,
 		arg.ID,
 		arg.WorkforceSize,
 		arg.MatchRateBp,
 		arg.MatchCapMinor,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setPartnerUserLink = `-- name: SetPartnerUserLink :exec

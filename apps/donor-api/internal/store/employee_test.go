@@ -193,6 +193,13 @@ func TestEmployeeEnrollAndTeams(t *testing.T) {
 	if err != nil || org != "Gamma Co" {
 		t.Fatalf("enroll: %q %v", org, err)
 	}
+	if org, err := emp.Enroll(ctx, donorToken, "GAMMA"); err != nil || org != "Gamma Co" {
+		t.Fatalf("re-entering the same code: %q %v", org, err)
+	}
+	approvedPartner(t, pool, "Other Co", "OTHERCO", 0, 0)
+	if org, err := emp.Enroll(ctx, donorToken, "OTHERCO"); !errors.Is(err, ErrEmployerLinked) {
+		t.Fatalf("a second employer's code linked the donor to %q: %v", org, err)
+	}
 
 	// Joining a team is reflected in /donor/me/team.
 	if _, err := emp.JoinTeam(ctx, donorToken, "Engineering"); err != nil {

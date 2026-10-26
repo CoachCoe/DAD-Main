@@ -36,7 +36,7 @@ type PartnerActor struct {
 	Organization string
 }
 
-// PartnerService... (the portal surface). It reuses the donor DB pool; partner
+// PartnerPortalService is the partner portal's sessions and users. Partner
 // auth is wholly separate from donor and staff sessions (P-5: a partner login
 // is not a donor and cannot give).
 type PartnerPortalService struct{ DB *pgxpool.Pool }
@@ -174,7 +174,7 @@ func (s PartnerPortalService) issueSession(ctx context.Context, q *queries.Queri
 
 // SignOut revokes the calling partner session.
 func (s PartnerPortalService) SignOut(ctx context.Context, token string) error {
-	return q(s.DB).RevokePartnerSession(ctx, queries.RevokePartnerSessionParams{
+	return queries.New(s.DB).RevokePartnerSession(ctx, queries.RevokePartnerSessionParams{
 		TokenHash: HashToken(token), RevokedAt: timestamp(time.Now().UTC()),
 	})
 }
@@ -214,14 +214,21 @@ func (s PartnerPortalService) CompanyCode(ctx context.Context, token string) (st
 // RemoveUser disables a partner user (P-4, admin-only). An admin cannot remove
 // themselves (avoids orphaning the org).
 func (s PartnerPortalService) RemoveUser(ctx context.Context, token string, userID pgtype.UUID) error {
-	_, err := partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, _ time.Time) (struct{}, error) {
+	_, err := partnerAdminWrite(ctx, s.DB, token, func(tx pgx.Tx, actor PartnerActor, now time.Time) (struct{}, error) {
 		if userID == actor.UserID {
 			return struct{}{}, ErrPartnerForbidden
 		}
-		return struct{}{}, queries.New(tx).DisablePartnerUser(ctx, queries.DisablePartnerUserParams{PartnerID: actor.PartnerID, ID: userID})
+		q := queries.New(tx)
+		removed, err := q.DisablePartnerUser(ctx, queries.DisablePartnerUserParams{PartnerID: actor.PartnerID, ID: userID})
+		if err != nil {
+			return struct{}{}, err
+		}
+		if removed == 0 {
+			return struct{}{}, pgx.ErrNoRows
+		}
+		return struct{}{}, q.RevokePartnerUserSessions(ctx, queries.RevokePartnerUserSessionsParams{
+			PartnerUserID: userID, RevokedAt: timestamp(now),
+		})
 	})
 	return err
 }
-
-// q is a small helper to run a one-shot query off the pool.
-func q(db *pgxpool.Pool) *queries.Queries { return queries.New(db) }

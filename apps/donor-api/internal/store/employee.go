@@ -18,6 +18,8 @@ import (
 var (
 	// ErrEmployeeLink means the company code matches no approved partner.
 	ErrEmployeeLink = errors.New("unknown company code")
+	// ErrEmployerLinked means the donor is already an employee of another partner.
+	ErrEmployerLinked = errors.New("already linked to another employer")
 	// ErrTeam is an invalid team (bad name, or a team in another partner).
 	ErrTeam = errors.New("invalid team")
 )
@@ -78,8 +80,9 @@ type MatchStatus struct {
 }
 
 // Enroll links the authenticated donor to the partner whose company code they
-// entered (EM-2). The code is normalised to upper case. Idempotent: a donor
-// already linked keeps their employer. Returns the partner organisation name.
+// entered (EM-2). The code is normalised to upper case. Re-entering the same
+// employer's code is idempotent; one employer per donor, so another
+// employer's code is refused. Returns the partner organisation name.
 func (s EmployeeService) Enroll(ctx context.Context, token, code string) (string, error) {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if !companyCode.MatchString(code) {
@@ -98,6 +101,13 @@ func (s EmployeeService) Enroll(ctx context.Context, token, code string) (string
 			DonorID: d.ID, PartnerID: partnerID, EnrolledAt: timestamp(now),
 		}); err != nil {
 			return "", err
+		}
+		link, err := q.EmployeeLink(ctx, d.ID)
+		if err != nil {
+			return "", err
+		}
+		if link.PartnerID != partnerID {
+			return "", ErrEmployerLinked
 		}
 		org, err := q.PartnerOrganizationByID(ctx, partnerID)
 		if err != nil {
@@ -284,7 +294,7 @@ func (s EmployeeService) Match(ctx context.Context, token string, partnerID pgty
 // moves. Staff-only.
 func (s EmployeeService) RecordMatchPayment(ctx context.Context, token string, partnerID pgtype.UUID, year int32, amountMinor int64) error {
 	if amountMinor <= 0 {
-		return ErrPartnerApplication
+		return ErrStaffInput
 	}
 	if s.Staff == nil {
 		return ErrStaffDenied
@@ -296,6 +306,9 @@ func (s EmployeeService) RecordMatchPayment(ctx context.Context, token string, p
 		partnerPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
+			if _, err := q.PartnerMatchTerms(ctx, partnerID); err != nil {
+				return struct{}{}, err
+			}
 			id, err := NewID()
 			if err != nil {
 				return struct{}{}, err

@@ -13,6 +13,7 @@ import (
 	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -127,11 +128,11 @@ func (s PartnerApplicationService) Apply(ctx context.Context, id pgtype.UUID, in
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if err := q.InsertPartnerApplication(ctx, params); err != nil {
-			// The pending-per-email unique index maps to a validation error.
+		err := q.InsertPartnerApplication(ctx, params)
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
 			return ErrPartnerApplication
 		}
-		return nil
+		return err
 	})
 }
 
@@ -265,10 +266,14 @@ func (s PartnerApplicationService) LinkInitiative(ctx context.Context, token str
 			if !org.ApprovedAt.Valid {
 				return struct{}{}, ErrPartnerDecision
 			}
-			if err = q.LinkInitiativeToPartner(ctx, queries.LinkInitiativeToPartnerParams{
+			linked, err := q.LinkInitiativeToPartner(ctx, queries.LinkInitiativeToPartnerParams{
 				ID: initiativeID, PartnerSignupID: partnerID, UpdatedAt: timestamp(now),
-			}); err != nil {
+			})
+			if err != nil {
 				return struct{}{}, err
+			}
+			if linked == 0 {
+				return struct{}{}, pgx.ErrNoRows
 			}
 			return struct{}{}, auditStaff(ctx, q, actor.ID, "partner.initiative_linked", partnerID.String(),
 				map[string]string{"initiative_id": initiativeID.String()}, now)
@@ -291,10 +296,14 @@ func (s PartnerApplicationService) SetMatch(
 	_, err := staffWrite(ctx, s.Staff, token, partnerPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
-			if err := q.SetPartnerMatch(ctx, queries.SetPartnerMatchParams{
+			updated, err := q.SetPartnerMatch(ctx, queries.SetPartnerMatchParams{
 				ID: partnerID, WorkforceSize: workforce, MatchRateBp: rateBP, MatchCapMinor: capMinor,
-			}); err != nil {
+			})
+			if err != nil {
 				return struct{}{}, err
+			}
+			if updated == 0 {
+				return struct{}{}, pgx.ErrNoRows
 			}
 			return struct{}{}, auditStaff(ctx, q, actor.ID, "partner.match_set", partnerID.String(), nil, now)
 		})

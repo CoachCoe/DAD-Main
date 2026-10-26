@@ -34,6 +34,8 @@ func employeeStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, store.ErrEmployeeLink):
 		return http.StatusUnprocessableEntity, "That company code is not recognised"
+	case errors.Is(err, store.ErrEmployerLinked):
+		return http.StatusConflict, "Your account is already linked to another employer"
 	case errors.Is(err, store.ErrTeam):
 		return http.StatusUnprocessableEntity, "Enter a team name of up to 80 characters"
 	default:
@@ -52,8 +54,6 @@ func (a *api) employeePartner() service {
 func (a *api) employeeStaff() service {
 	return service{a.EmployeeStaff != nil, "Partner matching is temporarily unavailable", staffTimeout, staffStatus}
 }
-
-// --- donor ---
 
 func (a *api) employeeEnroll(w http.ResponseWriter, r *http.Request, session string) {
 	var body struct {
@@ -91,8 +91,6 @@ func (a *api) employeeJoinTeam(w http.ResponseWriter, r *http.Request, session s
 	})
 }
 
-// --- partner ---
-
 func (a *api) employeeOurPeople(w http.ResponseWriter, r *http.Request, session string) {
 	a.employeePartner().serve(w, r, func(ctx context.Context) (any, error) { return a.EmployeePartner.OurPeople(ctx, session) })
 }
@@ -116,18 +114,12 @@ func (a *api) employeeWorkforce(w http.ResponseWriter, r *http.Request, session 
 	})
 }
 
-// --- staff ---
+// validYear bounds a matching year to the platform's lifetime.
+func validYear(year int) bool { return year >= 2024 && year < 3000 }
 
-// yearParam reads a ?year= query, defaulting to 0 (the service then uses the
-// current year when it sees 0 is invalid — callers always pass one).
 func yearParam(w http.ResponseWriter, r *http.Request) (int32, bool) {
-	raw := r.URL.Query().Get("year")
-	if raw == "" {
-		invalidFields(w, r)
-		return 0, false
-	}
-	year, err := strconv.Atoi(raw)
-	if err != nil || year < 2024 || year >= 3000 {
+	year, err := strconv.Atoi(r.URL.Query().Get("year"))
+	if err != nil || !validYear(year) {
 		invalidFields(w, r)
 		return 0, false
 	}
@@ -158,6 +150,10 @@ func (a *api) staffPartnerMatchPayment(w http.ResponseWriter, r *http.Request, s
 		AmountMinor int64 `json:"amount_minor"`
 	}
 	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if !validYear(int(body.Year)) || body.AmountMinor <= 0 {
+		invalidFields(w, r)
 		return
 	}
 	a.employeeStaff().serve(w, r, func(ctx context.Context) (any, error) {
