@@ -2745,6 +2745,8 @@ export interface components {
              */
             version: number;
             consent_version: string;
+            /** @description App notification when a verified gift is processed. Starts on. */
+            push_gift_processed: boolean;
         };
         /** @description The calling session's push registration. */
         PushRegistration: {
@@ -4852,6 +4854,7 @@ export interface operations {
                     network_visible?: boolean;
                     volunteer?: boolean;
                     volunteer_interests?: string[];
+                    push_gift_processed?: boolean;
                 };
             };
         };

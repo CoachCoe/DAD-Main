@@ -235,8 +235,8 @@ type projection struct {
 	zone        *time.Location
 }
 
-// Version 8 materializes historical survival at the four R1 milestones.
-const projectionRules = 8
+// Version 9 queues gift-processed pushes and both recovery reminders.
+const projectionRules = 9
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a

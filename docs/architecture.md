@@ -69,11 +69,11 @@ The app registers its installation's push token on its own session with `POST
 /donor/me/push-device`; the token is a column of that session, so it lasts exactly as
 long as the sign-in, and a token registered by another session moves to the new one.
 Each projection refresh queues push intents in the same transaction as the facts
-behind them, next to the email outbox: a referral conversion (the referral email's own
-condition, announced only within a day of the gift), a failed latest renewal while the streak is at risk (the decision behind the
-recovery email's "your streak is at risk"), and a streak milestone. Stable keys make
-each intent once: `push:referral:<referred donor>`, `push:streak-at-risk:<period>`,
-and `push:streak-milestone:<donor>:<run start>:<months>`. Only donors with a live
+behind them, next to the email outbox: recent verified gifts, referral conversions,
+failed renewals initially and on grace day five, and streak milestones. Stable keys
+identify the gift, referred donor, failed period and reminder day, or donor and streak
+run. Full refunds suppress gift-processed pushes; recovery and cancellation suppress
+payment reminders. Only donors with a live
 registered device get intents. The push worker delivers each to every live device of the
 donor through APNs or FCM (`internal/push`), rechecking preferences and facts first,
 and records the sessions reached so a retry after a partial failure reaches only the

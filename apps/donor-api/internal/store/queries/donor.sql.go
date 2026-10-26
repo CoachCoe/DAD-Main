@@ -366,8 +366,8 @@ const recordPreferenceConsent = `-- name: RecordPreferenceConsent :exec
 INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,
  push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,
  volunteer,volunteer_interests,consent_version,push_streak_lapsed,push_badge_earned,
- push_event_nearby,push_event_reminder,push_event_promoted,source)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'account')
+ push_event_nearby,push_event_reminder,push_event_promoted,push_gift_processed,source)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'account')
 `
 
 type RecordPreferenceConsentParams struct {
@@ -389,6 +389,7 @@ type RecordPreferenceConsentParams struct {
 	PushEventNearby       pgtype.Bool `json:"push_event_nearby"`
 	PushEventReminder     pgtype.Bool `json:"push_event_reminder"`
 	PushEventPromoted     pgtype.Bool `json:"push_event_promoted"`
+	PushGiftProcessed     pgtype.Bool `json:"push_gift_processed"`
 }
 
 func (q *Queries) RecordPreferenceConsent(ctx context.Context, arg RecordPreferenceConsentParams) error {
@@ -411,6 +412,7 @@ func (q *Queries) RecordPreferenceConsent(ctx context.Context, arg RecordPrefere
 		arg.PushEventNearby,
 		arg.PushEventReminder,
 		arg.PushEventPromoted,
+		arg.PushGiftProcessed,
 	)
 	return err
 }
@@ -463,15 +465,15 @@ const savePreference = `-- name: SavePreference :exec
 INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,
  push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,
  volunteer,volunteer_interests,push_streak_lapsed,push_badge_earned,
- push_event_nearby,push_event_reminder,push_event_promoted)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(donor_id) DO UPDATE
+ push_event_nearby,push_event_reminder,push_event_promoted,push_gift_processed)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT(donor_id) DO UPDATE
 SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_emails=EXCLUDED.marketing_emails,
  push_referral_converted=EXCLUDED.push_referral_converted,push_streak_at_risk=EXCLUDED.push_streak_at_risk,
  push_streak_milestone=EXCLUDED.push_streak_milestone,rankings_opted_out=EXCLUDED.rankings_opted_out,
  network_visible=EXCLUDED.network_visible,volunteer=EXCLUDED.volunteer,volunteer_interests=EXCLUDED.volunteer_interests,
  push_streak_lapsed=EXCLUDED.push_streak_lapsed,push_badge_earned=EXCLUDED.push_badge_earned,
  push_event_nearby=EXCLUDED.push_event_nearby,push_event_reminder=EXCLUDED.push_event_reminder,
- push_event_promoted=EXCLUDED.push_event_promoted
+ push_event_promoted=EXCLUDED.push_event_promoted,push_gift_processed=EXCLUDED.push_gift_processed
 `
 
 type SavePreferenceParams struct {
@@ -492,6 +494,7 @@ type SavePreferenceParams struct {
 	PushEventNearby       bool        `json:"push_event_nearby"`
 	PushEventReminder     bool        `json:"push_event_reminder"`
 	PushEventPromoted     bool        `json:"push_event_promoted"`
+	PushGiftProcessed     bool        `json:"push_gift_processed"`
 }
 
 func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) error {
@@ -513,6 +516,7 @@ func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) 
 		arg.PushEventNearby,
 		arg.PushEventReminder,
 		arg.PushEventPromoted,
+		arg.PushGiftProcessed,
 	)
 	return err
 }

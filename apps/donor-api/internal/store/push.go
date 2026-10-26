@@ -169,9 +169,39 @@ func pushSuppression(
 			return "opted_out", nil
 		}
 		return referralLapsed(ctx, q, data, donor)
+	case "GIFT_PROCESSED":
+		if !pref.PushGiftProcessed {
+			return "opted_out", nil
+		}
+		giftID, err := parseID(data.Text("gift_id"))
+		if err != nil {
+			return "", err
+		}
+		gift, err := q.ReceiptGift(ctx, queries.ReceiptGiftParams{ID: giftID, DonorID: donor.ID, PaidAt: timestamp(now)})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "gift_unavailable", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		refunds, err := q.ReceiptRefunds(ctx, gift.ID)
+		if err != nil {
+			return "", err
+		}
+		record, err := giftRecord(gift, refunds)
+		if err != nil {
+			return "", err
+		}
+		if record.Net == 0 {
+			return "gift_refunded", nil
+		}
+		return "", nil
 	case "STREAK_AT_RISK":
 		if !pref.PushStreakAtRisk {
 			return "opted_out", nil
+		}
+		if _, present := data["day"]; present {
+			return recoverySuppression(ctx, q, data, donor, now)
 		}
 		_, reason, err := failureResolved(ctx, q, data, donor, now)
 		return reason, err
@@ -293,6 +323,12 @@ func pushContent(job queries.DonorPushNotification) (push.Notification, error) {
 		}
 		n.Title = "Your invitation worked"
 		n.Body = "Someone you invited through " + channel + " just made their first test gift."
+	case "GIFT_PROCESSED":
+		if data.Text("gift_id") == "" {
+			return n, payments.ErrFacts
+		}
+		n.Title, n.Path = "Your gift was processed", "/account/gifts"
+		n.Body = "Your test gift was processed. Open the app to see your giving history."
 	case "STREAK_AT_RISK":
 		n.Title, n.Path = "Your giving streak is at risk", paymentMethodPath
 		n.Body = "Your monthly test payment was declined. Update your payment method to keep your streak going."

@@ -66,6 +66,7 @@ export default function Profile() {
             push_streak_milestone: data.push_streak_milestone,
             push_streak_lapsed: data.push_streak_lapsed,
             push_badge_earned: data.push_badge_earned,
+            push_gift_processed: data.push_gift_processed,
             push_event_nearby: data.push_event_nearby,
             push_event_reminder: data.push_event_reminder,
             push_event_promoted: data.push_event_promoted,
@@ -252,6 +253,14 @@ export default function Profile() {
                       onChange={(event) => setData({ ...data, push_streak_lapsed: event.target.checked })}
                     />{" "}
                     When my giving streak ends
+                  </label>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={data.push_gift_processed}
+                      onChange={(event) => setData({ ...data, push_gift_processed: event.target.checked })}
+                    />{" "}
+                    When my gift is processed
                   </label>
                   <label className="choice">
                     <input

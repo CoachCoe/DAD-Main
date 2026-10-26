@@ -16,6 +16,7 @@ const profile = {
   push_streak_milestone: true,
   push_streak_lapsed: true,
   push_badge_earned: true,
+  push_gift_processed: true,
   push_event_nearby: true,
   push_event_reminder: true,
   push_event_promoted: true,
@@ -75,6 +76,7 @@ it("saves app notification choices alongside the email ones", async () => {
     push_streak_milestone: false,
     push_streak_lapsed: true,
     push_badge_earned: true,
+    push_gift_processed: true,
     push_event_nearby: true,
     push_event_reminder: true,
     push_event_promoted: true,
@@ -220,4 +222,17 @@ it("signs out of this device only", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Sign out of this device" }));
   expect(await screen.findByRole("link", { name: "Sign in to manage your profile" })).toBeVisible();
   expect(fetch.mock.calls.some(([url]) => url === "/api/donor/logout-all")).toBe(false);
+});
+
+it("saves the gift-processed push choice independently of financial email", async () => {
+  const fetch = stubFetch({
+    "POST /api/donor/me/preferences": (init) => json({ ...profile, ...JSON.parse(String(init?.body)), version: 4 }),
+  });
+  render(<Profile />);
+  const gift = await screen.findByRole("checkbox", { name: "When my gift is processed" });
+  expect(gift).toBeChecked();
+  fireEvent.click(gift);
+  fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
+  expect(await screen.findByText("Preferences saved.")).toBeVisible();
+  expect(sent(fetch, "/api/donor/me/preferences")).toMatchObject({ push_gift_processed: false });
 });

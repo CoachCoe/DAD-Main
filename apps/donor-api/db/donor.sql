@@ -2,22 +2,22 @@
 INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,
  push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,
  volunteer,volunteer_interests,push_streak_lapsed,push_badge_earned,
- push_event_nearby,push_event_reminder,push_event_promoted)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) ON CONFLICT(donor_id) DO UPDATE
+ push_event_nearby,push_event_reminder,push_event_promoted,push_gift_processed)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT(donor_id) DO UPDATE
 SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_emails=EXCLUDED.marketing_emails,
  push_referral_converted=EXCLUDED.push_referral_converted,push_streak_at_risk=EXCLUDED.push_streak_at_risk,
  push_streak_milestone=EXCLUDED.push_streak_milestone,rankings_opted_out=EXCLUDED.rankings_opted_out,
  network_visible=EXCLUDED.network_visible,volunteer=EXCLUDED.volunteer,volunteer_interests=EXCLUDED.volunteer_interests,
  push_streak_lapsed=EXCLUDED.push_streak_lapsed,push_badge_earned=EXCLUDED.push_badge_earned,
  push_event_nearby=EXCLUDED.push_event_nearby,push_event_reminder=EXCLUDED.push_event_reminder,
- push_event_promoted=EXCLUDED.push_event_promoted;
+ push_event_promoted=EXCLUDED.push_event_promoted,push_gift_processed=EXCLUDED.push_gift_processed;
 
 -- name: RecordPreferenceConsent :exec
 INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,
  push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,
  volunteer,volunteer_interests,consent_version,push_streak_lapsed,push_badge_earned,
- push_event_nearby,push_event_reminder,push_event_promoted,source)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'account');
+ push_event_nearby,push_event_reminder,push_event_promoted,push_gift_processed,source)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'account');
 
 -- name: SaveSharing :one
 UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING *;

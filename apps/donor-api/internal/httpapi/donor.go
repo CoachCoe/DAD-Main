@@ -155,6 +155,7 @@ func (a *api) savePreferences(w http.ResponseWriter, r *http.Request, session st
 		StreakMilestone    *bool     `json:"push_streak_milestone"`
 		StreakLapsed       *bool     `json:"push_streak_lapsed"`
 		BadgeEarned        *bool     `json:"push_badge_earned"`
+		GiftProcessed      *bool     `json:"push_gift_processed"`
 		EventNearby        *bool     `json:"push_event_nearby"`
 		EventReminder      *bool     `json:"push_event_reminder"`
 		EventPromoted      *bool     `json:"push_event_promoted"`
@@ -175,7 +176,7 @@ func (a *api) savePreferences(w http.ResponseWriter, r *http.Request, session st
 	change := store.PreferenceChange{
 		Version: *body.Version, ReferralEmails: *body.Referral, MarketingEmails: *body.Marketing,
 		PushReferralConverted: *body.ReferralConverted, PushStreakAtRisk: *body.StreakAtRisk, PushStreakMilestone: *body.StreakMilestone,
-		PushStreakLapsed: body.StreakLapsed, PushBadgeEarned: body.BadgeEarned,
+		PushStreakLapsed: body.StreakLapsed, PushBadgeEarned: body.BadgeEarned, PushGiftProcessed: body.GiftProcessed,
 		PushEventNearby: body.EventNearby, PushEventReminder: body.EventReminder, PushEventPromoted: body.EventPromoted,
 		RankingsOptedOut: body.RankingsOptedOut, NetworkVisible: body.NetworkVisible,
 		Volunteer: body.Volunteer, VolunteerInterests: body.VolunteerInterests,

@@ -30,11 +30,17 @@ name no one and no amount, and open the given app path.
 
 | Notification | Trigger and audience | Text | Opens |
 |---|---|---|---|
+| Gift processed | Recent verified gift; giving donor, once per gift | "Your gift was processed" / "Your test gift was processed. Open the app to see your giving history." | `/account/gifts` |
 | Referral converted | First qualifying referred gift; direct referrer | "Your invitation worked" / "Someone you invited through a Link Referral (an IRL Referral) just made their first test gift." | `/account/dashboard` |
-| Streak at risk | Failed latest renewal while the streak is at risk, once per period; giving donor | "Your giving streak is at risk" / "Your monthly test payment was declined. Update your payment method to keep your streak going." | `/account/payment-method` |
+| Streak at risk | Failed latest renewal while the streak is at risk, initially and on grace day 5; giving donor | "Your giving streak is at risk" / "Your monthly test payment was declined. Update your payment method to keep your streak going." | `/account/payment-method` |
 | Streak milestone | Streak reaches an R1 day milestone, once per run; giving donor | "100-day streak" / "You have kept your giving streak going for 100 days. Thank you for showing up every day." | `/account/dashboard` |
 
-A notification not sent within 24 hours is dropped rather than shown late.
+A notification not sent within 24 hours of becoming available is dropped rather than shown late.
+The day-five reminder is queued with the failure, waits until five days after its due time,
+and is suppressed after recovery, cancellation, or grace expiry. A pending initial reminder
+is superseded once day five is due. Gift-processed notifications recheck the choice and
+verified gift at delivery; a full refund suppresses them. Email receipts remain essential
+when the donor turns off gift-processed pushes.
 
 ## Prepared enrolment confirmation
 

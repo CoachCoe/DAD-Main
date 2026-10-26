@@ -1697,6 +1697,9 @@
           },
           "maxItems": 20,
           "uniqueItems": true
+         },
+         "push_gift_processed": {
+          "type": "boolean"
          }
         },
         "required": [
@@ -10876,6 +10879,10 @@
      },
      "consent_version": {
       "type": "string"
+     },
+     "push_gift_processed": {
+      "type": "boolean",
+      "description": "App notification when a verified gift is processed. Starts on."
      }
     },
     "required": [
@@ -10901,7 +10908,8 @@
      "push_badge_earned",
      "push_event_nearby",
      "push_event_reminder",
-     "push_event_promoted"
+     "push_event_promoted",
+     "push_gift_processed"
     ],
     "additionalProperties": false
    },

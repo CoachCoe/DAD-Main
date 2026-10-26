@@ -399,7 +399,7 @@ func TestStreakMilestonePushFollowsTheProjection(t *testing.T) {
 	}
 }
 
-// A failed renewal puts the streak at risk, announced once for that period.
+// A failed renewal queues the initial and day-five reminders once per period.
 func TestStreakAtRiskPushFollowsTheProjection(t *testing.T) {
 	f := newWorkerFixture(t, "MONTHLY")
 	pushCleanup(t, f.db, f.donorID)
@@ -434,8 +434,12 @@ func TestStreakAtRiskPushFollowsTheProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	intents := intentsOf(t, f.service.DB, f.donorID, "STREAK_AT_RISK")
-	if len(intents) != 1 || intents[0].DedupKey != "push:streak-at-risk:"+period {
-		t.Fatalf("intents %+v, want one at-risk notice for the failed period", intents)
+	keys := map[string]bool{}
+	for _, intent := range intents {
+		keys[intent.DedupKey] = true
+	}
+	if len(intents) != 2 || !keys["push:streak-at-risk:"+period] || !keys["push:streak-at-risk:"+period+":5"] {
+		t.Fatalf("intents %+v, want initial and day-five notices for the failed period", intents)
 	}
 	note, err := pushContent(intents[0])
 	if err != nil || note.Path != "/account/payment-method" {

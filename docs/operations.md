@@ -33,9 +33,10 @@ cp .env.database.example .env.database
 ./scripts/deploy.sh smoke
 ```
 
-`ENV_FILE` (default `.env.production`) holds application settings and reaches every donor
-container; `DATABASE_ENV_FILE` (default `.env.database`) holds database credentials and
-reaches none: Compose reads it to give each service its own login's URL, and the scripts
+`ENV_FILE` (default `.env.production`) supplies application settings for Compose
+interpolation; each container receives only its explicitly listed settings and secrets.
+`DATABASE_ENV_FILE` (default `.env.database`) holds database credentials and is not mounted
+or passed wholesale to containers: Compose gives each service its own login's URL, and the scripts
 refuse database credentials in `ENV_FILE`. Both may be relative to the current directory.
 
 `migrate` starts PostgreSQL, applies embedded forward SQL migrations, and brings the

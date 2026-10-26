@@ -62,6 +62,7 @@ const profiles = {
       push_streak_milestone: false,
       push_streak_lapsed: true,
       push_badge_earned: true,
+      push_gift_processed: true,
       push_event_nearby: true,
       push_event_reminder: true,
       push_event_promoted: true,

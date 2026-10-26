@@ -405,6 +405,7 @@ type DonorPreference struct {
 	PushEventNearby       bool               `json:"push_event_nearby"`
 	PushEventReminder     bool               `json:"push_event_reminder"`
 	PushEventPromoted     bool               `json:"push_event_promoted"`
+	PushGiftProcessed     bool               `json:"push_gift_processed"`
 }
 
 type DonorPushNotification struct {
