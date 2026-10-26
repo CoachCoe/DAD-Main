@@ -110,8 +110,8 @@ before each costs a signature check.
 
 | Class | Paths (POST unless noted) | Cloudflare per IP | nginx per IP | API per client |
 | --- | --- | --- | --- | --- |
-| Auth | `/api/donor/login`, `/claim`, `/email-change/confirm`, `/passkeys/sign-in`; `/api/donor/staff/sign-in`, `/activate`; and each sign-in and activation's `/options` | 30/min, block 10 min | 20/min, burst 20 | 10/min |
-| Visitor | `/api/donor/checkouts`, `/api/donor/referrals/{code}`, `/api/donor/public/partner-signup` | 240/min, block 1 min | 120/min, burst 60 | 60/min |
+| Auth | `/api/donor/login`, `/claim`, `/email-change/confirm`, `/passkeys/sign-in`, `/phone/sign-in`, `/oidc/{provider}/sign-in`, `/partner/sign-in`, `/partner/accept-invite`; `/api/donor/staff/sign-in`, `/activate`; and each sign-in and activation's `/options` | 30/min, block 10 min | 20/min, burst 20 | 10/min |
+| Visitor | `/api/donor/checkouts`, `/api/donor/referrals/{code}`, `/api/donor/company/{code}`, `/api/donor/public/partner-apply` | 240/min, block 1 min | 120/min, burst 60 | 60/min |
 | General | pages, assets, other API calls | 1,200/min uncached, challenge | 30/s, burst 300 | account writes 30/min, staff writes 60/min |
 | Stripe webhook | `/api/donor/stripe/webhook` | skipped | 20/s, burst 500 | signature verified |
 
@@ -198,14 +198,19 @@ Mode or Bot Management with the skip rule above.
 Counted per IP, with a custom JSON response
 `{"detail":"Too many requests"}` and status 429 where the plan allows:
 
-1. Auth: `http.request.method eq "POST" and http.request.uri.path in {"/api/donor/login"
+1. Auth: `http.request.method eq "POST" and (http.request.uri.path in {"/api/donor/login"
    "/api/donor/claim" "/api/donor/email-change/confirm" "/api/donor/passkeys/sign-in"
-   "/api/donor/passkeys/sign-in/options" "/api/donor/staff/sign-in"
+   "/api/donor/passkeys/sign-in/options" "/api/donor/phone/sign-in"
+   "/api/donor/phone/sign-in/options" "/api/donor/partner/sign-in"
+   "/api/donor/partner/accept-invite" "/api/donor/staff/sign-in"
    "/api/donor/staff/sign-in/options" "/api/donor/staff/activate"
-   "/api/donor/staff/activate/options"}` — 30 per minute, Block for 10 minutes.
+   "/api/donor/staff/activate/options"} or (starts_with(http.request.uri.path,
+   "/api/donor/oidc/") and ends_with(http.request.uri.path, "/sign-in")))` — 30 per
+   minute, Block for 10 minutes.
 2. Visitor: `http.request.method eq "POST" and (http.request.uri.path in
-   {"/api/donor/checkouts" "/api/donor/public/partner-signup"} or
-   starts_with(http.request.uri.path, "/api/donor/referrals/"))` — 240 per minute, Block
+   {"/api/donor/checkouts" "/api/donor/public/partner-apply"} or
+   starts_with(http.request.uri.path, "/api/donor/referrals/") or
+   starts_with(http.request.uri.path, "/api/donor/company/"))` — 240 per minute, Block
    for 1 minute.
 3. Pages: `http.host eq "donors.example.org" and not starts_with(http.request.uri.path,
    "/api/")` — 1,200 per minute, Managed Challenge, cached assets not counted. API
