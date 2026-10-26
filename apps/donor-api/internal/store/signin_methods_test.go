@@ -141,3 +141,20 @@ func extractCode(t *testing.T, msg string) string {
 	t.Fatalf("no code in %q", msg)
 	return ""
 }
+
+type unreachableProvider struct{}
+
+func (unreachableProvider) Verify(context.Context, oidc.Provider, string) (oidc.Identity, error) {
+	return oidc.Identity{}, oidc.ErrKeys
+}
+
+// TestOIDCProviderOutageIsNotABadToken keeps a provider outage from telling the
+// donor their sign-in was wrong.
+func TestOIDCProviderOutageIsNotABadToken(t *testing.T) {
+	settings := &oidc.Settings{Mode: "live", ClientIDs: map[oidc.Provider]string{oidc.Google: "g.apps"}}
+	svc := OIDCService{DB: as(t, dbroles.API), Verifier: unreachableProvider{}, Settings: settings}
+	_, err := svc.SignIn(context.Background(), oidc.Google, "token", Client{})
+	if !errors.Is(err, oidc.ErrKeys) || errors.Is(err, ErrSignInCode) {
+		t.Fatalf("SignIn during a provider outage = %v; want ErrKeys", err)
+	}
+}

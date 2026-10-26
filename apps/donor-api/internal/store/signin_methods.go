@@ -160,8 +160,11 @@ func (s OIDCService) SignIn(ctx context.Context, provider oidc.Provider, idToken
 		return Tokens{}, ErrSignInUnavailable
 	}
 	ident, err := s.Verifier.Verify(ctx, provider, idToken)
-	if err != nil {
+	if errors.Is(err, oidc.ErrToken) {
 		return Tokens{}, ErrSignInCode
+	}
+	if err != nil {
+		return Tokens{}, err
 	}
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (Tokens, error) {
 		q := queries.New(tx)

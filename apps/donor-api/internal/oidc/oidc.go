@@ -5,11 +5,12 @@
 // verified Identity (stable subject); the store then links that identity to a
 // donor.
 //
-// The live verifier (fetch the provider JWKS, validate RS256/ES256 signature,
-// issuer, audience, and expiry) is not built yet — it is dropped in behind the
-// Verifier interface once client ids exist. Today a stub verifier validates an
-// HMAC-signed test token so the whole sign-in and account-linking flow is
-// exercised end to end.
+// The live verifier (DONOR_OIDC_MODE=live) checks the RS256 signature against
+// the provider's published keys, then the issuer, audience, and expiry, and
+// passes the email on only when the provider marks it verified. The stub
+// verifier (DONOR_OIDC_MODE=stub) accepts an HMAC-signed test token instead, so
+// the sign-in and account-linking flow is exercisable without a provider; it
+// must never be configured in production.
 package oidc
 
 import (
@@ -63,8 +64,7 @@ type Verifier interface {
 }
 
 // Settings is a resolved OIDC configuration. ClientIDs is the audience expected
-// per provider. Mode selects the verifier; "stub" (DONOR_OIDC_MODE=stub) is the
-// only mode wired today.
+// per provider. Mode selects the verifier: "live" or "stub".
 type Settings struct {
 	Mode      string
 	ClientIDs map[Provider]string
@@ -94,9 +94,8 @@ func FromEnvironment(getenv func(string) string) (*Settings, error) {
 			invalid = append(invalid, "DONOR_OIDC_STUB_KEY")
 		}
 	case "live":
-		return nil, fmt.Errorf("%w: DONOR_OIDC_MODE=live is not yet implemented; set DONOR_OIDC_MODE=stub for now", ErrConfiguration)
 	default:
-		invalid = append(invalid, "DONOR_OIDC_MODE (expected: stub)")
+		invalid = append(invalid, "DONOR_OIDC_MODE (expected: live or stub)")
 	}
 	if len(s.ClientIDs) == 0 {
 		invalid = append(invalid, "DONOR_OIDC_APPLE_CLIENT_ID or DONOR_OIDC_GOOGLE_CLIENT_ID")
@@ -115,6 +114,8 @@ func NewVerifier(s *Settings) Verifier {
 	switch s.Mode {
 	case "stub":
 		return &stubVerifier{clientIDs: s.ClientIDs, key: s.StubKey}
+	case "live":
+		return newLiveVerifier(s.ClientIDs)
 	default:
 		return nil
 	}

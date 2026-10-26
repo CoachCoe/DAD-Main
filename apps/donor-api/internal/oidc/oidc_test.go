@@ -38,12 +38,22 @@ func TestFromEnvironmentInvalid(t *testing.T) {
 	for _, m := range []map[string]string{
 		{"DONOR_OIDC_MODE": "stub", "DONOR_OIDC_APPLE_CLIENT_ID": "a"}, // missing stub key
 		{"DONOR_OIDC_MODE": "stub", "DONOR_OIDC_STUB_KEY": "k"},        // no client ids
-		{"DONOR_OIDC_MODE": "live", "DONOR_OIDC_APPLE_CLIENT_ID": "a"}, // not implemented
+		{"DONOR_OIDC_MODE": "live"},                                    // no client ids
 		{"DONOR_OIDC_MODE": "nope", "DONOR_OIDC_APPLE_CLIENT_ID": "a", "DONOR_OIDC_STUB_KEY": "k"},
 	} {
 		if _, err := FromEnvironment(env(m)); !errors.Is(err, ErrConfiguration) {
 			t.Errorf("FromEnvironment(%v) error = %v; want ErrConfiguration", m, err)
 		}
+	}
+}
+
+func TestFromEnvironmentLive(t *testing.T) {
+	s, err := FromEnvironment(env(map[string]string{"DONOR_OIDC_MODE": "live", "DONOR_OIDC_GOOGLE_CLIENT_ID": "g.apps"}))
+	if err != nil || s == nil || !s.Configured(Google) || s.Configured(Apple) {
+		t.Fatalf("live settings: %+v %v", s, err)
+	}
+	if _, ok := NewVerifier(s).(*liveVerifier); !ok {
+		t.Fatal("NewVerifier(live) is not the live verifier")
 	}
 }
 
