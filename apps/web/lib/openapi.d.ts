@@ -1424,7 +1424,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Initiatives, drafts included, newest first */
+        get: operations["staffInitiatives"];
         put?: never;
         /** Create a draft initiative */
         post: operations["createInitiative"];
@@ -1441,7 +1442,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** An initiative with every metric and its spend */
+        get: operations["staffInitiative"];
         put?: never;
         /** Update a draft initiative */
         post: operations["updateInitiative"];
@@ -2407,6 +2409,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/staff/initiatives/{initiative_id}/rotation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Include or exclude an initiative from the daily rotation */
+        post: operations["setInitiativeRotation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3272,6 +3291,11 @@ export interface components {
             title: string;
             summary: string;
             region: string;
+            location: string;
+            /** @description The kind of work, e.g. PROGRAM. */
+            type: string;
+            /** Format: date */
+            started_on: string;
             metrics: components["schemas"]["TodayMetric"][];
             /** Format: int64 */
             distinct_shown: number;
@@ -3596,6 +3620,74 @@ export interface components {
                 /** @description Whether the user has signed in at least once. */
                 accepted: boolean;
             }[];
+        };
+        StaffInitiative: {
+            slug: string;
+            title: string;
+            summary: string;
+            type: string;
+            location: string;
+            region: string;
+            counties: string[];
+            /** Format: date */
+            started_on: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "COMPLETE";
+            /** Format: int64 */
+            committed_minor: number;
+            partner_signup_id: string;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            publish_state: "DRAFT" | "PUBLISHED";
+            published_at: string | null;
+            /** @description Whether the daily rotation may show it once published and active (§8 Content). */
+            in_rotation: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        StaffInitiativePage: {
+            initiatives: components["schemas"]["StaffInitiative"][];
+            next_offset: number | null;
+        };
+        StaffInitiativeMetric: {
+            position: number;
+            label: string;
+            /** Format: int64 */
+            value: number;
+            /** @enum {string} */
+            unit: "USD_CENTS" | "PEOPLE" | "INITIATIVES" | "PARTNERS";
+            verification_note: string;
+            verified_on: string;
+            /** @enum {string} */
+            publish_state: "DRAFT" | "PUBLISHED";
+        };
+        StaffInitiativeDetail: {
+            slug: string;
+            title: string;
+            summary: string;
+            type: string;
+            location: string;
+            region: string;
+            counties: string[];
+            /** Format: date */
+            started_on: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "COMPLETE";
+            /** Format: int64 */
+            committed_minor: number;
+            partner_signup_id: string;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            publish_state: "DRAFT" | "PUBLISHED";
+            published_at: string | null;
+            /** @description Whether the daily rotation may show it once published and active (§8 Content). */
+            in_rotation: boolean;
+            /** Format: date-time */
+            updated_at: string;
+            metrics: components["schemas"]["StaffInitiativeMetric"][];
+            spend: components["schemas"]["SpendInput"][];
         };
     };
     responses: {
@@ -6255,6 +6347,33 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    staffInitiatives: {
+        parameters: {
+            query?: {
+                /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffInitiativePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     createInitiative: {
         parameters: {
             query?: never;
@@ -6282,6 +6401,32 @@ export interface operations {
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                initiative_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffInitiativeDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8094,6 +8239,42 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    setInitiativeRotation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                initiative_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    in_rotation: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        in_rotation: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };

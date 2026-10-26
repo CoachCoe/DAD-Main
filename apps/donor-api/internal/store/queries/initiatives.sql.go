@@ -51,7 +51,7 @@ func (q *Queries) DistinctInitiativeExposures(ctx context.Context, donorID pgtyp
 }
 
 const initiativeByID = `-- name: InitiativeByID :one
-SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at FROM donor_initiatives WHERE id=$1
+SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at, in_rotation FROM donor_initiatives WHERE id=$1
 `
 
 func (q *Queries) InitiativeByID(ctx context.Context, id pgtype.UUID) (DonorInitiative, error) {
@@ -74,34 +74,7 @@ func (q *Queries) InitiativeByID(ctx context.Context, id pgtype.UUID) (DonorInit
 		&i.PublishedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const initiativeBySlug = `-- name: InitiativeBySlug :one
-SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at FROM donor_initiatives WHERE slug=$1
-`
-
-func (q *Queries) InitiativeBySlug(ctx context.Context, slug string) (DonorInitiative, error) {
-	row := q.db.QueryRow(ctx, initiativeBySlug, slug)
-	var i DonorInitiative
-	err := row.Scan(
-		&i.ID,
-		&i.Slug,
-		&i.Title,
-		&i.Summary,
-		&i.Type,
-		&i.Location,
-		&i.Region,
-		&i.Counties,
-		&i.StartedOn,
-		&i.Status,
-		&i.CommittedMinor,
-		&i.PartnerSignupID,
-		&i.PublishState,
-		&i.PublishedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
+		&i.InRotation,
 	)
 	return i, err
 }
@@ -299,83 +272,6 @@ func (q *Queries) PublishedInitiativeMetrics(ctx context.Context, initiativeID p
 	return items, nil
 }
 
-const publishedInitiatives = `-- name: PublishedInitiatives :many
-SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at FROM donor_initiatives
-WHERE publish_state='PUBLISHED'
-ORDER BY started_on DESC, id
-`
-
-func (q *Queries) PublishedInitiatives(ctx context.Context) ([]DonorInitiative, error) {
-	rows, err := q.db.Query(ctx, publishedInitiatives)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []DonorInitiative{}
-	for rows.Next() {
-		var i DonorInitiative
-		if err := rows.Scan(
-			&i.ID,
-			&i.Slug,
-			&i.Title,
-			&i.Summary,
-			&i.Type,
-			&i.Location,
-			&i.Region,
-			&i.Counties,
-			&i.StartedOn,
-			&i.Status,
-			&i.CommittedMinor,
-			&i.PartnerSignupID,
-			&i.PublishState,
-			&i.PublishedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const publishedSpendByCategory = `-- name: PublishedSpendByCategory :many
-SELECT s.category, SUM(s.amount_minor)::bigint AS amount_minor
-FROM donor_initiative_spend s
-JOIN donor_initiatives i ON i.id = s.initiative_id
-WHERE i.publish_state='PUBLISHED'
-GROUP BY s.category
-ORDER BY s.category
-`
-
-type PublishedSpendByCategoryRow struct {
-	Category    string `json:"category"`
-	AmountMinor int64  `json:"amount_minor"`
-}
-
-func (q *Queries) PublishedSpendByCategory(ctx context.Context) ([]PublishedSpendByCategoryRow, error) {
-	rows, err := q.db.Query(ctx, publishedSpendByCategory)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []PublishedSpendByCategoryRow{}
-	for rows.Next() {
-		var i PublishedSpendByCategoryRow
-		if err := rows.Scan(&i.Category, &i.AmountMinor); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const recordInitiativeExposure = `-- name: RecordInitiativeExposure :exec
 INSERT INTO donor_initiative_exposures (donor_id, initiative_id, first_shown_on, last_shown_on)
 VALUES ($1,$2,$3,$3)
@@ -394,8 +290,8 @@ func (q *Queries) RecordInitiativeExposure(ctx context.Context, arg RecordInitia
 }
 
 const rotatableInitiatives = `-- name: RotatableInitiatives :many
-SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at FROM donor_initiatives
-WHERE publish_state='PUBLISHED' AND status='ACTIVE'
+SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at, in_rotation FROM donor_initiatives
+WHERE publish_state='PUBLISHED' AND status='ACTIVE' AND in_rotation
 ORDER BY started_on, id
 `
 
@@ -428,6 +324,7 @@ func (q *Queries) RotatableInitiatives(ctx context.Context) ([]DonorInitiative, 
 			&i.PublishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.InRotation,
 		); err != nil {
 			return nil, err
 		}
@@ -439,8 +336,26 @@ func (q *Queries) RotatableInitiatives(ctx context.Context) ([]DonorInitiative, 
 	return items, nil
 }
 
+const setInitiativeRotation = `-- name: SetInitiativeRotation :execrows
+UPDATE donor_initiatives SET in_rotation=$2, updated_at=$3 WHERE id=$1
+`
+
+type SetInitiativeRotationParams struct {
+	ID         pgtype.UUID        `json:"id"`
+	InRotation bool               `json:"in_rotation"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) SetInitiativeRotation(ctx context.Context, arg SetInitiativeRotationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setInitiativeRotation, arg.ID, arg.InRotation, arg.UpdatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const staffInitiativesPage = `-- name: StaffInitiativesPage :many
-SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at FROM donor_initiatives
+SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at, in_rotation FROM donor_initiatives
 ORDER BY created_at DESC, id
 LIMIT 51 OFFSET $1::bigint
 `
@@ -471,6 +386,7 @@ func (q *Queries) StaffInitiativesPage(ctx context.Context, pageOffset int64) ([
 			&i.PublishedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.InRotation,
 		); err != nil {
 			return nil, err
 		}

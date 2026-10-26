@@ -224,6 +224,8 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/staff/donors/{donor_id}/cancellation":           store.StaffCancellation{},
 		"GET /donor/staff/exports":                                   store.ExportDatasets{},
 		"GET /donor/staff/content":                                   store.ContentInventory{},
+		"GET /donor/staff/initiatives":                               store.StaffInitiativePage{},
+		"GET /donor/staff/initiatives/{initiative_id}":               store.StaffInitiativeDetail{},
 		"GET /donor/staff/partners":                                  store.StaffPartnerPage{},
 		"GET /donor/staff/partners/{partnerID}":                      store.StaffPartnerDetail{},
 		"POST /donor/staff/content/sources":                          store.StoredSource{},

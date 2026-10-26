@@ -159,6 +159,7 @@ type DonorInitiative struct {
 	PublishedAt     pgtype.Timestamptz `json:"published_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	InRotation      bool               `json:"in_rotation"`
 }
 
 type DonorInitiativeMetric struct {

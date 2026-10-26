@@ -23,6 +23,9 @@ type InitiativeSource interface {
 	DeleteMetric(context.Context, string, pgtype.UUID, int32) error
 	SetSpend(context.Context, string, pgtype.UUID, store.SpendInput) error
 	DeleteSpend(context.Context, string, pgtype.UUID, string) error
+	List(context.Context, string, int64) (store.StaffInitiativePage, error)
+	Detail(context.Context, string, pgtype.UUID) (store.StaffInitiativeDetail, error)
+	SetRotation(context.Context, string, pgtype.UUID, bool) error
 }
 
 // InitiativeReadSource is the donor-facing read of published initiative spend.
@@ -42,6 +45,39 @@ func (a *api) initiativesAdmin() service {
 		staffTimeout,
 		staffStatus,
 	}
+}
+
+func (a *api) staffInitiatives(w http.ResponseWriter, r *http.Request, session string) {
+	offset, ok := offsetParam(r, "offset")
+	if !ok {
+		invalidFields(w, r)
+		return
+	}
+	a.initiativesAdmin().serve(w, r, func(ctx context.Context) (any, error) { return a.Initiatives.List(ctx, session, offset) })
+}
+
+func (a *api) staffInitiative(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "initiative_id")
+	if !ok {
+		return
+	}
+	a.initiativesAdmin().serve(w, r, func(ctx context.Context) (any, error) { return a.Initiatives.Detail(ctx, session, id) })
+}
+
+func (a *api) setInitiativeRotation(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "initiative_id")
+	if !ok {
+		return
+	}
+	var body struct {
+		InRotation bool `json:"in_rotation"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	a.initiativesAdmin().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"in_rotation": body.InRotation}, a.Initiatives.SetRotation(ctx, session, id, body.InRotation)
+	})
 }
 
 func (a *api) createInitiative(w http.ResponseWriter, r *http.Request, session string) {

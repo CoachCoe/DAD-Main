@@ -95,6 +95,9 @@ type TodayInitiative struct {
 	Title         string        `json:"title"`
 	Summary       string        `json:"summary"`
 	Region        string        `json:"region"`
+	Location      string        `json:"location"`
+	Type          string        `json:"type"`
+	StartedOn     string        `json:"started_on"`
 	Metrics       []TodayMetric `json:"metrics"`
 	DistinctShown int64         `json:"distinct_shown"`
 }
@@ -158,7 +161,8 @@ func (s DonorInitiativeService) Today(ctx context.Context, token string) (TodayI
 			}
 			out := TodayInitiative{
 				InitiativeID: chosen.ID.String(), Slug: chosen.Slug, Title: chosen.Title,
-				Summary: chosen.Summary, Region: chosen.Region, DistinctShown: shown,
+				Summary: chosen.Summary, Region: chosen.Region, Location: chosen.Location, Type: chosen.Type,
+				StartedOn: chosen.StartedOn.Time.Format(time.DateOnly), DistinctShown: shown,
 				Metrics: make([]TodayMetric, 0, maxShownHeadlineMetrics),
 			}
 			for _, m := range metrics {

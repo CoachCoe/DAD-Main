@@ -5289,6 +5289,47 @@
    }
   },
   "/donor/staff/initiatives": {
+   "get": {
+    "operationId": "staffInitiatives",
+    "summary": "Initiatives, drafts included, newest first",
+    "tags": [
+     "Initiatives"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/Offset"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StaffInitiativePage"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   },
    "post": {
     "operationId": "createInitiative",
     "summary": "Create a draft initiative",
@@ -5347,6 +5388,53 @@
    }
   },
   "/donor/staff/initiatives/{initiative_id}": {
+   "get": {
+    "operationId": "staffInitiative",
+    "summary": "An initiative with every metric and its spend",
+    "tags": [
+     "Initiatives"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "initiative_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StaffInitiativeDetail"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   },
    "post": {
     "operationId": "updateInitiative",
     "summary": "Update a draft initiative",
@@ -9367,6 +9455,93 @@
      "browser"
     ]
    }
+  },
+  "/donor/staff/initiatives/{initiative_id}/rotation": {
+   "post": {
+    "operationId": "setInitiativeRotation",
+    "summary": "Include or exclude an initiative from the daily rotation",
+    "tags": [
+     "Initiatives"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "parameters": [
+     {
+      "name": "initiative_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "in_rotation": {
+          "type": "boolean"
+         }
+        },
+        "required": [
+         "in_rotation"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "in_rotation": {
+           "type": "boolean"
+          }
+         },
+         "required": [
+          "in_rotation"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
   }
  },
  "components": {
@@ -12035,6 +12210,17 @@
      "region": {
       "type": "string"
      },
+     "location": {
+      "type": "string"
+     },
+     "type": {
+      "type": "string",
+      "description": "The kind of work, e.g. PROGRAM."
+     },
+     "started_on": {
+      "type": "string",
+      "format": "date"
+     },
      "metrics": {
       "type": "array",
       "items": {
@@ -12052,6 +12238,9 @@
      "title",
      "summary",
      "region",
+     "location",
+     "type",
+     "started_on",
      "metrics",
      "distinct_shown"
     ],
@@ -13020,6 +13209,285 @@
      "website",
      "initiatives",
      "users"
+    ],
+    "additionalProperties": false
+   },
+   "StaffInitiative": {
+    "type": "object",
+    "properties": {
+     "slug": {
+      "type": "string"
+     },
+     "title": {
+      "type": "string"
+     },
+     "summary": {
+      "type": "string"
+     },
+     "type": {
+      "type": "string"
+     },
+     "location": {
+      "type": "string"
+     },
+     "region": {
+      "type": "string"
+     },
+     "counties": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "started_on": {
+      "type": "string",
+      "format": "date"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "ACTIVE",
+       "COMPLETE"
+      ]
+     },
+     "committed_minor": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "partner_signup_id": {
+      "type": "string"
+     },
+     "id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "publish_state": {
+      "type": "string",
+      "enum": [
+       "DRAFT",
+       "PUBLISHED"
+      ]
+     },
+     "published_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "in_rotation": {
+      "type": "boolean",
+      "description": "Whether the daily rotation may show it once published and active (\u00a78 Content)."
+     },
+     "updated_at": {
+      "type": "string",
+      "format": "date-time"
+     }
+    },
+    "required": [
+     "slug",
+     "title",
+     "summary",
+     "type",
+     "location",
+     "region",
+     "counties",
+     "started_on",
+     "status",
+     "committed_minor",
+     "partner_signup_id",
+     "id",
+     "publish_state",
+     "published_at",
+     "in_rotation",
+     "updated_at"
+    ],
+    "additionalProperties": false
+   },
+   "StaffInitiativePage": {
+    "type": "object",
+    "properties": {
+     "initiatives": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/StaffInitiative"
+      }
+     },
+     "next_offset": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     }
+    },
+    "required": [
+     "initiatives",
+     "next_offset"
+    ],
+    "additionalProperties": false
+   },
+   "StaffInitiativeMetric": {
+    "type": "object",
+    "properties": {
+     "position": {
+      "type": "integer"
+     },
+     "label": {
+      "type": "string"
+     },
+     "value": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "unit": {
+      "type": "string",
+      "enum": [
+       "USD_CENTS",
+       "PEOPLE",
+       "INITIATIVES",
+       "PARTNERS"
+      ]
+     },
+     "verification_note": {
+      "type": "string"
+     },
+     "verified_on": {
+      "type": "string"
+     },
+     "publish_state": {
+      "type": "string",
+      "enum": [
+       "DRAFT",
+       "PUBLISHED"
+      ]
+     }
+    },
+    "required": [
+     "position",
+     "label",
+     "value",
+     "unit",
+     "verification_note",
+     "verified_on",
+     "publish_state"
+    ],
+    "additionalProperties": false
+   },
+   "StaffInitiativeDetail": {
+    "type": "object",
+    "properties": {
+     "slug": {
+      "type": "string"
+     },
+     "title": {
+      "type": "string"
+     },
+     "summary": {
+      "type": "string"
+     },
+     "type": {
+      "type": "string"
+     },
+     "location": {
+      "type": "string"
+     },
+     "region": {
+      "type": "string"
+     },
+     "counties": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "started_on": {
+      "type": "string",
+      "format": "date"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "ACTIVE",
+       "COMPLETE"
+      ]
+     },
+     "committed_minor": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "partner_signup_id": {
+      "type": "string"
+     },
+     "id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "publish_state": {
+      "type": "string",
+      "enum": [
+       "DRAFT",
+       "PUBLISHED"
+      ]
+     },
+     "published_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "in_rotation": {
+      "type": "boolean",
+      "description": "Whether the daily rotation may show it once published and active (\u00a78 Content)."
+     },
+     "updated_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "metrics": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/StaffInitiativeMetric"
+      }
+     },
+     "spend": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/SpendInput"
+      }
+     }
+    },
+    "required": [
+     "slug",
+     "title",
+     "summary",
+     "type",
+     "location",
+     "region",
+     "counties",
+     "started_on",
+     "status",
+     "committed_minor",
+     "partner_signup_id",
+     "id",
+     "publish_state",
+     "published_at",
+     "in_rotation",
+     "updated_at",
+     "metrics",
+     "spend"
     ],
     "additionalProperties": false
    }

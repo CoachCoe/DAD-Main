@@ -1,0 +1,113 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import InitiativeEditor, { initiativeInput } from "./[initiativeId]/InitiativeEditor";
+import Initiatives from "./Initiatives";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
+afterEach(() => vi.unstubAllGlobals());
+
+const initiative = {
+  id: "i-1",
+  slug: "reno-meals",
+  title: "Reno meals",
+  summary: "Hot meals.",
+  type: "FOOD",
+  location: "Reno, NV",
+  region: "Northern Nevada",
+  counties: ["Washoe"],
+  started_on: "2026-03-01",
+  status: "ACTIVE",
+  committed_minor: 2_500_000,
+  partner_signup_id: "",
+  publish_state: "DRAFT",
+  published_at: null,
+  in_rotation: true,
+  updated_at: "2026-10-01T12:00:00Z",
+};
+
+function stubApi() {
+  const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method === "POST") return Promise.resolve(Response.json({ updated: true }));
+    if (url.includes("?offset="))
+      return Promise.resolve(Response.json({ initiatives: [initiative], next_offset: null }));
+    return Promise.resolve(
+      Response.json({
+        ...initiative,
+        metrics: [
+          {
+            position: 0,
+            label: "Meals",
+            value: 1200,
+            unit: "PEOPLE",
+            verification_note: "",
+            verified_on: "",
+            publish_state: "DRAFT",
+          },
+        ],
+        spend: [{ category: "Food", amount_minor: 90_000 }],
+      }),
+    );
+  });
+  vi.stubGlobal("fetch", fetch);
+  return fetch;
+}
+
+function posted(fetch: ReturnType<typeof stubApi>, suffix: string) {
+  const call = fetch.mock.calls.find(([u, i]) => String(u).endsWith(suffix) && i?.method === "POST");
+  return call ? JSON.parse(String(call[1]?.body ?? "null")) : undefined;
+}
+
+it("lists initiatives with their state", async () => {
+  stubApi();
+  render(<Initiatives />);
+  expect(await screen.findByRole("link", { name: "Reno meals" })).toHaveAttribute("href", "/staff/initiatives/i-1");
+  expect(screen.getByText(/Draft · Active · Reno, NV/)).toBeInTheDocument();
+});
+
+it("reads the editor form into an initiative", () => {
+  const form = new FormData();
+  for (const [name, value] of Object.entries({
+    slug: "reno-meals",
+    title: "Reno meals",
+    summary: "Hot meals.",
+    type: "FOOD",
+    location: "Reno, NV",
+    region: "Northern Nevada",
+    counties: "Washoe, Storey ,",
+    started_on: "2026-03-01",
+    status: "ACTIVE",
+    committed: "$25,000",
+    partner: "",
+  }))
+    form.set(name, value);
+  expect(initiativeInput(form)).toMatchObject({ counties: ["Washoe", "Storey"], committed_minor: 2_500_000 });
+  form.set("committed", "lots");
+  expect(initiativeInput(form)).toBe("Enter the committed amount in dollars.");
+});
+
+it("edits metrics, spend, rotation, and publishing", async () => {
+  const fetch = stubApi();
+  render(<InitiativeEditor initiative="i-1" />);
+  expect(await screen.findByText(/Meals: 1,200 people · Draft/)).toBeInTheDocument();
+
+  fireEvent.change(screen.getByLabelText("Label"), { target: { value: "Spent on food" } });
+  fireEvent.change(screen.getByLabelText("Value"), { target: { value: "1,500.50" } });
+  fireEvent.change(screen.getByLabelText("Unit"), { target: { value: "USD_CENTS" } });
+  fireEvent.change(screen.getByLabelText("Position"), { target: { value: "1" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save metric" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Metric 2 saved as a draft."));
+  expect(posted(fetch, "/i-1/metrics/1")).toMatchObject({ position: 1, value: 150_050, unit: "USD_CENTS" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Exclude from rotation" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Excluded from the daily rotation."));
+  expect(posted(fetch, "/i-1/rotation")).toEqual({ in_rotation: false });
+
+  fireEvent.click(screen.getByRole("button", { name: "Remove Food" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Food removed."));
+  expect(posted(fetch, "/i-1/spend/delete")).toEqual({ category: "Food" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Publish initiative" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Initiative published."));
+});

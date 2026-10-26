@@ -160,7 +160,10 @@ func (a *api) routes() []route {
 		a.staffRead("GET /donor/staff/content/sources/{source_id}", a.downloadSource),
 		a.staffWrite("POST /donor/staff/content/publish", a.publish),
 
+		a.staffRead("GET /donor/staff/initiatives", a.staffInitiatives),
 		a.staffWrite("POST /donor/staff/initiatives", a.createInitiative),
+		a.staffRead("GET /donor/staff/initiatives/{initiative_id}", a.staffInitiative),
+		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/rotation", a.setInitiativeRotation),
 		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}", a.updateInitiative),
 		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/publish", a.publishInitiative),
 		a.staffWrite("POST /donor/staff/initiatives/{initiative_id}/metrics/{position}", a.setInitiativeMetric),

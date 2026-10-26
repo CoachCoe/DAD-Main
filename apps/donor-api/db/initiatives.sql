@@ -17,18 +17,13 @@ WHERE id=$1;
 -- name: InitiativeByID :one
 SELECT * FROM donor_initiatives WHERE id=$1;
 
--- name: InitiativeBySlug :one
-SELECT * FROM donor_initiatives WHERE slug=$1;
-
 -- name: StaffInitiativesPage :many
 SELECT * FROM donor_initiatives
 ORDER BY created_at DESC, id
 LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
 
--- name: PublishedInitiatives :many
-SELECT * FROM donor_initiatives
-WHERE publish_state='PUBLISHED'
-ORDER BY started_on DESC, id;
+-- name: SetInitiativeRotation :execrows
+UPDATE donor_initiatives SET in_rotation=$2, updated_at=$3 WHERE id=$1;
 
 -- name: UpsertInitiativeMetric :exec
 INSERT INTO donor_initiative_metrics
@@ -75,20 +70,12 @@ ORDER BY category;
 SELECT COALESCE(SUM(amount_minor), 0)::bigint AS total_minor
 FROM donor_initiative_spend WHERE initiative_id=$1;
 
--- name: PublishedSpendByCategory :many
-SELECT s.category, SUM(s.amount_minor)::bigint AS amount_minor
-FROM donor_initiative_spend s
-JOIN donor_initiatives i ON i.id = s.initiative_id
-WHERE i.publish_state='PUBLISHED'
-GROUP BY s.category
-ORDER BY s.category;
-
 -- name: RotatableInitiatives :many
 -- The published, active set the daily rotation chooses from. Ordered stably by
 -- (started_on, id) so the deterministic index the application computes is stable
 -- across requests. Served by ix_donor_initiatives_rotatable.
 SELECT * FROM donor_initiatives
-WHERE publish_state='PUBLISHED' AND status='ACTIVE'
+WHERE publish_state='PUBLISHED' AND status='ACTIVE' AND in_rotation
 ORDER BY started_on, id;
 
 -- name: RecordInitiativeExposure :exec
