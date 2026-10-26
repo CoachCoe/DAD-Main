@@ -229,6 +229,9 @@ export default function Dashboard() {
             </button>
           )}
           <nav aria-label="Account" className="links">
+            <Link href="/account/events">Events near you</Link>
+            <Link href="/account/badges">Badges</Link>
+            <Link href="/account/network">Your network</Link>
             <Link href="/account/share">Share and invite</Link>
             <Link href="/account/code">My referral code</Link>
             <Link href="/account/giving">My giving</Link>
