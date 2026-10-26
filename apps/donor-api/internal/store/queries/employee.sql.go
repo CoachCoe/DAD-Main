@@ -11,6 +11,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const closeTeamMonth = `-- name: CloseTeamMonth :execrows
+INSERT INTO donor_team_months(partner_id, month, closed_at) VALUES($1, $2, $3)
+ON CONFLICT (partner_id, month) DO NOTHING
+`
+
+type CloseTeamMonthParams struct {
+	PartnerID pgtype.UUID        `json:"partner_id"`
+	Month     pgtype.Date        `json:"month"`
+	ClosedAt  pgtype.Timestamptz `json:"closed_at"`
+}
+
+func (q *Queries) CloseTeamMonth(ctx context.Context, arg CloseTeamMonthParams) (int64, error) {
+	result, err := q.db.Exec(ctx, closeTeamMonth, arg.PartnerID, arg.Month, arg.ClosedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const employeeLink = `-- name: EmployeeLink :one
 SELECT donor_id, partner_id, team_id, enrolled_at FROM donor_partner_employees WHERE donor_id = $1
 `
@@ -264,6 +283,96 @@ func (q *Queries) PartnerOurPeople(ctx context.Context, arg PartnerOurPeoplePara
 	return i, err
 }
 
+const partnersDueTeamMonth = `-- name: PartnersDueTeamMonth :many
+SELECT s.id FROM donor_partner_signups s
+WHERE s.approved_at IS NOT NULL
+AND EXISTS(SELECT 1 FROM donor_partner_employees e WHERE e.partner_id = s.id AND e.team_id IS NOT NULL)
+AND NOT EXISTS(SELECT 1 FROM donor_team_months m WHERE m.partner_id = s.id AND m.month = $1::date)
+ORDER BY s.id
+LIMIT $2::int
+`
+
+type PartnersDueTeamMonthParams struct {
+	Month pgtype.Date `json:"month"`
+	Batch int32       `json:"batch"`
+}
+
+// Approved partners with a team whose standings for the month are not yet recorded.
+func (q *Queries) PartnersDueTeamMonth(ctx context.Context, arg PartnersDueTeamMonthParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, partnersDueTeamMonth, arg.Month, arg.Batch)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recordTeamMonthStandings = `-- name: RecordTeamMonthStandings :many
+WITH standings AS (
+  SELECT e.team_id,
+    count(*)::int AS members,
+    (coalesce(sum(m.current_monthly_minor) FILTER (WHERE m.active), 0) * 12)::bigint AS annualized_minor,
+    (count(*) FILTER (WHERE m.active))::int AS active_givers
+  FROM donor_partner_employees e
+  LEFT JOIN donor_metric_projections m ON m.donor_id = e.donor_id
+  WHERE e.partner_id = $1::uuid AND e.team_id IS NOT NULL
+  GROUP BY e.team_id
+  HAVING count(*) >= $3::int
+), ranked AS (
+  SELECT s.team_id, s.members, s.annualized_minor, s.active_givers, s.annualized_minor / s.members AS per_member_minor,
+    row_number() OVER (ORDER BY s.annualized_minor / s.members DESC, s.active_givers DESC, t.name, t.id)::int AS rank
+  FROM standings s JOIN donor_partner_teams t ON t.id = s.team_id
+)
+INSERT INTO donor_team_month_standings(partner_id, month, team_id, rank, members, annualized_minor, per_member_minor)
+SELECT $1::uuid, $2::date, team_id, rank, members, annualized_minor, per_member_minor FROM ranked
+RETURNING team_id, rank, per_member_minor
+`
+
+type RecordTeamMonthStandingsParams struct {
+	PartnerID pgtype.UUID `json:"partner_id"`
+	Month     pgtype.Date `json:"month"`
+	Minimum   int32       `json:"minimum"`
+}
+
+type RecordTeamMonthStandingsRow struct {
+	TeamID         pgtype.UUID `json:"team_id"`
+	Rank           int32       `json:"rank"`
+	PerMemberMinor int64       `json:"per_member_minor"`
+}
+
+// Ranks the partner's teams by the annualized active giving of their members
+// divided by the team's size, as the month closes, and records the standings.
+func (q *Queries) RecordTeamMonthStandings(ctx context.Context, arg RecordTeamMonthStandingsParams) ([]RecordTeamMonthStandingsRow, error) {
+	rows, err := q.db.Query(ctx, recordTeamMonthStandings, arg.PartnerID, arg.Month, arg.Minimum)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RecordTeamMonthStandingsRow{}
+	for rows.Next() {
+		var i RecordTeamMonthStandingsRow
+		if err := rows.Scan(&i.TeamID, &i.Rank, &i.PerMemberMinor); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setEmployeeTeam = `-- name: SetEmployeeTeam :exec
 UPDATE donor_partner_employees SET team_id = $2 WHERE donor_id = $1
 `
@@ -292,6 +401,21 @@ type SetPartnerWorkforceParams struct {
 // EM-9: workforce size, admin-set and partner-updatable.
 func (q *Queries) SetPartnerWorkforce(ctx context.Context, arg SetPartnerWorkforceParams) error {
 	_, err := q.db.Exec(ctx, setPartnerWorkforce, arg.ID, arg.WorkforceSize)
+	return err
+}
+
+const setTeamMonthWinner = `-- name: SetTeamMonthWinner :exec
+UPDATE donor_team_months SET winner_team_id = $3 WHERE partner_id = $1 AND month = $2
+`
+
+type SetTeamMonthWinnerParams struct {
+	PartnerID    pgtype.UUID `json:"partner_id"`
+	Month        pgtype.Date `json:"month"`
+	WinnerTeamID pgtype.UUID `json:"winner_team_id"`
+}
+
+func (q *Queries) SetTeamMonthWinner(ctx context.Context, arg SetTeamMonthWinnerParams) error {
+	_, err := q.db.Exec(ctx, setTeamMonthWinner, arg.PartnerID, arg.Month, arg.WinnerTeamID)
 	return err
 }
 
@@ -393,6 +517,30 @@ func (q *Queries) TeamLeaderboard(ctx context.Context, arg TeamLeaderboardParams
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const teamMembers = `-- name: TeamMembers :many
+SELECT donor_id FROM donor_partner_employees WHERE team_id = $1 ORDER BY donor_id
+`
+
+func (q *Queries) TeamMembers(ctx context.Context, teamID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, teamMembers, teamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var donor_id pgtype.UUID
+		if err := rows.Scan(&donor_id); err != nil {
+			return nil, err
+		}
+		items = append(items, donor_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

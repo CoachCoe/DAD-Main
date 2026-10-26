@@ -17,7 +17,8 @@ const (
 
 // Badge is one catalog entry. Code is the stable identifier stored in the earn
 // state and sent to clients; Rule is how it is earned, shown on an unearned
-// badge (B-1). Live is false for a badge the engine does not award itself.
+// badge (B-1). Live is false for a badge the engine does not award itself:
+// Winning Team is awarded when a team month closes.
 type Badge struct {
 	Code  string
 	Title string

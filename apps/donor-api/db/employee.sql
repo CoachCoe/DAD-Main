@@ -125,3 +125,44 @@ SELECT organization FROM donor_partner_signups WHERE id = $1;
 
 -- name: TeamIDByName :one
 SELECT id FROM donor_partner_teams WHERE partner_id = $1 AND name = $2;
+
+-- name: PartnersDueTeamMonth :many
+-- Approved partners with a team whose standings for the month are not yet recorded.
+SELECT s.id FROM donor_partner_signups s
+WHERE s.approved_at IS NOT NULL
+AND EXISTS(SELECT 1 FROM donor_partner_employees e WHERE e.partner_id = s.id AND e.team_id IS NOT NULL)
+AND NOT EXISTS(SELECT 1 FROM donor_team_months m WHERE m.partner_id = s.id AND m.month = sqlc.arg(month)::date)
+ORDER BY s.id
+LIMIT sqlc.arg(batch)::int;
+
+-- name: CloseTeamMonth :execrows
+INSERT INTO donor_team_months(partner_id, month, closed_at) VALUES($1, $2, $3)
+ON CONFLICT (partner_id, month) DO NOTHING;
+
+-- name: RecordTeamMonthStandings :many
+-- Ranks the partner's teams by the annualized active giving of their members
+-- divided by the team's size, as the month closes, and records the standings.
+WITH standings AS (
+  SELECT e.team_id,
+    count(*)::int AS members,
+    (coalesce(sum(m.current_monthly_minor) FILTER (WHERE m.active), 0) * 12)::bigint AS annualized_minor,
+    (count(*) FILTER (WHERE m.active))::int AS active_givers
+  FROM donor_partner_employees e
+  LEFT JOIN donor_metric_projections m ON m.donor_id = e.donor_id
+  WHERE e.partner_id = sqlc.arg(partner_id)::uuid AND e.team_id IS NOT NULL
+  GROUP BY e.team_id
+  HAVING count(*) >= sqlc.arg(minimum)::int
+), ranked AS (
+  SELECT s.*, s.annualized_minor / s.members AS per_member_minor,
+    row_number() OVER (ORDER BY s.annualized_minor / s.members DESC, s.active_givers DESC, t.name, t.id)::int AS rank
+  FROM standings s JOIN donor_partner_teams t ON t.id = s.team_id
+)
+INSERT INTO donor_team_month_standings(partner_id, month, team_id, rank, members, annualized_minor, per_member_minor)
+SELECT sqlc.arg(partner_id)::uuid, sqlc.arg(month)::date, team_id, rank, members, annualized_minor, per_member_minor FROM ranked
+RETURNING team_id, rank, per_member_minor;
+
+-- name: SetTeamMonthWinner :exec
+UPDATE donor_team_months SET winner_team_id = $3 WHERE partner_id = $1 AND month = $2;
+
+-- name: TeamMembers :many
+SELECT donor_id FROM donor_partner_employees WHERE team_id = $1 ORDER BY donor_id;

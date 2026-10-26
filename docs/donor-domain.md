@@ -131,6 +131,13 @@ not checkout start or webhook arrival. Claiming after cutoff is allowed. The bad
 permanent, including after refunds/cancellation. Changing the cutoff requires a product
 decision; existing awards remain permanent.
 
+A company team wins a month (Winning Team) when, at the close of the calendar month in
+America/New_York, it has the most active giving per member among its company's teams:
+members' current monthly gifts, annualized, divided by the team's size, so a small team can
+beat a large one. Teams below the minimum group size are not ranked, a month in which no team
+gave has no winner, and the standings are recorded once. Members of the winning team when the
+month closes earn the badge.
+
 Team Captains reserve event places 48 hours early (B-3). Staff may set when an event's
 booking opens; until then only a Team Captain can reserve, from 48 hours before it. An
 event with no opening time opens to everyone when it is published.

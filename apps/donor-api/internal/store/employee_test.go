@@ -31,6 +31,8 @@ func approvedPartner(t *testing.T, pool *pgxpool.Pool, org, code string, rateBP 
 	t.Cleanup(func() {
 		cleanExec(t, "DELETE FROM donor_partner_match_payments WHERE partner_id=$1", id)
 		cleanExec(t, "DELETE FROM donor_partner_employees WHERE partner_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_team_month_standings WHERE partner_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_team_months WHERE partner_id=$1", id)
 		cleanExec(t, "DELETE FROM donor_partner_teams WHERE partner_id=$1", id)
 		cleanExec(t, "DELETE FROM donor_partner_signups WHERE id=$1", id)
 	})
