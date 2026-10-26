@@ -634,27 +634,24 @@ recovery for an enabled administrator:
 It works like the back-office recovery action and is audited as `staff.recovery_invited`
 with no actor. Protect the printed invitation, and review the audit history afterwards.
 
-At `/staff/content`, upload private source documents, then publish complete CSV snapshots.
+At `/staff/content`, upload private source documents, then publish complete CSV snapshots
+of the impact ledger. Initiatives are created, edited and published at `/staff/initiatives`;
+initiatives published from the spreadsheet before it was retired for them were copied there.
 Sources are limited to 10 MiB, encrypted, SHA-256 checked, and permission-protected.
 Without `DONOR_CONTENT_ENCRYPTION_KEY`, uploads return 503 before the file is read;
 publishing still works. Donor records have linkable URLs (`/staff/donors/{id}`), and
 search keeps its query in `/staff?q=`.
-Each CSV is limited to 512 KiB and 500 rows. Exact column order:
-
-```csv
-slug,title,summary,partner,planned_start,board_approval_source_id,approved_on
-```
+The CSV is limited to 512 KiB and 500 rows. Exact column order:
 
 ```csv
 metric,value,unit,source_id,illustrative
 ```
 
-Dates are YYYY-MM-DD. Every initiative references an uploaded board-approval source.
-Slugs are unique lowercase words separated by hyphens. Ledger values are nonnegative
-integers with unit `USD_CENTS`, `PEOPLE`, `INITIATIVES`, or `PARTNERS`. Real figures require
-a source; examples require `illustrative=true`. Supply an as-of date and stated update
-cadence. Invalid publications leave the current snapshot intact. Staff are responsible
-for actual accuracy and board approval; uploading a source cannot establish either.
+Ledger values are nonnegative integers with unit `USD_CENTS`, `PEOPLE`, `INITIATIVES`, or
+`PARTNERS`. Real figures require a source; examples require `illustrative=true`. Supply an
+as-of date (YYYY-MM-DD) and stated update cadence. Invalid publications leave the current
+snapshot intact. Staff are responsible for actual accuracy, and for board approval of an
+initiative before publishing it; uploading a source cannot establish either.
 
 Exports use fixed field allowlists, omit credentials and message bodies, neutralize CSV
 formula prefixes, and audit completion/interruption. Referral rows retain channel.

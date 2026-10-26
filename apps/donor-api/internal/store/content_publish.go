@@ -23,13 +23,11 @@ import (
 )
 
 type PublicationRequest struct {
-	InitiativesCSV string `json:"initiatives_csv"`
-	LedgerCSV      string `json:"ledger_csv"`
-	AsOf           string `json:"as_of"`
-	Cadence        string `json:"cadence"`
+	LedgerCSV string `json:"ledger_csv"`
+	AsOf      string `json:"as_of"`
+	Cadence   string `json:"cadence"`
 }
 
-var initiativeSlug = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 var ledgerInteger = regexp.MustCompile(`^[0-9]{1,15}$`)
 var ledgerUnits = []string{"USD_CENTS", "PEOPLE", "INITIATIVES", "PARTNERS"}
 
@@ -150,7 +148,6 @@ func (s ContentService) Publish(ctx context.Context, token string, r Publication
 				problems.add("", 0, "cadence", "invalid_text")
 			}
 			sources := sourceCitations{}
-			initiatives := parseInitiatives(problems, r.InitiativesCSV, today, sources)
 			ledger := parseLedger(problems, r.LedgerCSV, sources)
 			q := queries.New(tx)
 			if err := checkSources(ctx, q, problems, sources); err != nil {
@@ -163,7 +160,7 @@ func (s ContentService) Publish(ctx context.Context, token string, r Publication
 				return Publication{}, problems
 			}
 			payload, err := json.Marshal(
-				map[string]any{"initiatives": initiatives, "ledger": ledger, "ledger_as_of": r.AsOf, "cadence": cadence},
+				map[string]any{"ledger": ledger, "ledger_as_of": r.AsOf, "cadence": cadence},
 			)
 			if err != nil {
 				return Publication{}, err
@@ -178,57 +175,12 @@ func (s ContentService) Publish(ctx context.Context, token string, r Publication
 			if err = q.PublishContentHead(ctx, id); err != nil {
 				return Publication{}, err
 			}
-			if err = auditStaff(ctx, q, actor.ID, "content.published", id.String(), map[string]int{"initiatives": len(initiatives), "metrics": len(ledger)}, now); err != nil {
+			if err = auditStaff(ctx, q, actor.ID, "content.published", id.String(), map[string]int{"metrics": len(ledger)}, now); err != nil {
 				return Publication{}, err
 			}
 			return Publication{PublicationID: id}, nil
 		},
 	)
-}
-
-// parseInitiatives validates the initiatives spreadsheet, citing each board
-// approval source in sources.
-func parseInitiatives(problems *PublicationError, sheet, today string, sources sourceCitations) []map[string]string {
-	const name = "initiatives"
-	rows := spreadsheetRows(
-		problems,
-		name,
-		sheet,
-		[]string{"slug", "title", "summary", "partner", "planned_start", "board_approval_source_id", "approved_on"},
-	)
-	initiatives := make([]map[string]string, 0, len(rows))
-	slugs := map[string]bool{}
-	for _, row := range rows {
-		slug := row.cells["slug"]
-		switch {
-		case len(slug) > 100 || !initiativeSlug.MatchString(slug):
-			problems.add(name, row.number, "slug", "invalid_slug")
-		case slugs[slug]:
-			problems.add(name, row.number, "slug", "duplicate_slug")
-		}
-		slugs[slug] = true
-		for _, field := range []struct {
-			column  string
-			maximum int
-		}{{"title", 150}, {"summary", 4000}, {"partner", 200}} {
-			if identity.TrimSpace(row.cells[field.column]) == "" {
-				problems.add(name, row.number, field.column, "required")
-			} else if utf8.RuneCountInString(row.cells[field.column]) > field.maximum {
-				problems.add(name, row.number, field.column, "too_long")
-			}
-		}
-		if approved, err := time.Parse(time.DateOnly, row.cells["approved_on"]); err != nil {
-			problems.add(name, row.number, "approved_on", "invalid_date")
-		} else if approved.Format(time.DateOnly) > today {
-			problems.add(name, row.number, "approved_on", "future_date")
-		}
-		if _, err := time.Parse(time.DateOnly, row.cells["planned_start"]); err != nil {
-			problems.add(name, row.number, "planned_start", "invalid_date")
-		}
-		row.cells["board_approval_source_id"] = sources.cite(problems, name, row, "board_approval_source_id")
-		initiatives = append(initiatives, row.cells)
-	}
-	return initiatives
 }
 
 // parseLedger validates the ledger spreadsheet. A real figure must cite a

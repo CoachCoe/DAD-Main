@@ -26,11 +26,7 @@ func TestPublishedContentCacheAndBoundedDatabaseContext(t *testing.T) {
 		if !ok || time.Until(deadline) > 3*time.Second {
 			t.Error("database request lacks bounded deadline")
 		}
-		return store.PublicContent{
-			State:       "unpublished",
-			Initiatives: []map[string]json.RawMessage{},
-			Ledger:      []map[string]json.RawMessage{},
-		}, nil
+		return store.PublicContent{State: "unpublished", Ledger: []map[string]json.RawMessage{}}, nil
 	})
 	response := httptest.NewRecorder()
 	server := NewServer("", Services{Content: reader})
@@ -112,7 +108,7 @@ func TestRefusedPublicationListsEveryProblem(t *testing.T) {
 	r := httptest.NewRequest(
 		"POST",
 		"/donor/staff/content/publish",
-		strings.NewReader(`{"initiatives_csv":"","ledger_csv":"","as_of":"2026-10-01","cadence":"monthly"}`),
+		strings.NewReader(`{"ledger_csv":"","as_of":"2026-10-01","cadence":"monthly"}`),
 	)
 	r.Header.Set("Origin", testStaffOrigin)
 	r.AddCookie(&http.Cookie{Name: staffCookie, Value: "staff-session"})

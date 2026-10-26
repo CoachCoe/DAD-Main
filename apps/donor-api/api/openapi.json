@@ -4615,7 +4615,7 @@
   "/donor/staff/content/publish": {
    "post": {
     "operationId": "publish",
-    "summary": "Publish initiatives and ledger",
+    "summary": "Publish the ledger",
     "description": "A refused publication answers 422 `{\"detail\":\"The spreadsheet has problems\",\"errors\":[{sheet,row,column,reason}]}` listing every problem found.",
     "tags": [
      "Content"
@@ -10887,13 +10887,6 @@
       ],
       "description": "Publication cadence label."
      },
-     "initiatives": {
-      "type": "array",
-      "items": {
-       "$ref": "#/components/schemas/Initiative"
-      },
-      "description": "Published initiatives, in spreadsheet order."
-     },
      "ledger": {
       "type": "array",
       "items": {
@@ -10927,39 +10920,9 @@
     },
     "required": [
      "cadence",
-     "initiatives",
      "ledger",
      "ledger_as_of",
      "state"
-    ],
-    "additionalProperties": false
-   },
-   "Initiative": {
-    "type": "object",
-    "properties": {
-     "slug": {
-      "type": "string"
-     },
-     "title": {
-      "type": "string"
-     },
-     "summary": {
-      "type": "string"
-     },
-     "partner": {
-      "type": "string"
-     },
-     "planned_start": {
-      "type": "string",
-      "format": "date"
-     }
-    },
-    "required": [
-     "slug",
-     "title",
-     "summary",
-     "partner",
-     "planned_start"
     ],
     "additionalProperties": false
    },
@@ -12958,10 +12921,6 @@
    "PublicationRequest": {
     "type": "object",
     "properties": {
-     "initiatives_csv": {
-      "type": "string",
-      "description": "Initiatives spreadsheet export (CSV)."
-     },
      "ledger_csv": {
       "type": "string",
       "description": "Impact ledger spreadsheet export (CSV)."

@@ -1230,7 +1230,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Publish initiatives and ledger
+         * Publish the ledger
          * @description A refused publication answers 422 `{"detail":"The spreadsheet has problems","errors":[{sheet,row,column,reason}]}` listing every problem found.
          */
         post: operations["publish"];
@@ -2699,8 +2699,6 @@ export interface components {
         PublicContent: {
             /** @description Publication cadence label. */
             cadence: string | null;
-            /** @description Published initiatives, in spreadsheet order. */
-            initiatives: components["schemas"]["Initiative"][];
             /** @description Published impact ledger figures, in spreadsheet order. */
             ledger: components["schemas"]["LedgerFigure"][];
             /**
@@ -2714,14 +2712,6 @@ export interface components {
             published_at?: string;
             /** @enum {string} */
             state: "unpublished" | "published";
-        };
-        Initiative: {
-            slug: string;
-            title: string;
-            summary: string;
-            partner: string;
-            /** Format: date */
-            planned_start: string;
         };
         LedgerFigure: {
             /** @description Unique within the publication. */
@@ -3431,8 +3421,6 @@ export interface components {
             publication_id: string;
         };
         PublicationRequest: {
-            /** @description Initiatives spreadsheet export (CSV). */
-            initiatives_csv?: string;
             /** @description Impact ledger spreadsheet export (CSV). */
             ledger_csv?: string;
             /** Format: date */

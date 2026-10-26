@@ -131,10 +131,12 @@ current consent before delivery. Logs avoid payloads and donor identifiers.
 
 ## Public content
 
-Staff publish a pair of spreadsheet CSV snapshots. Source documents are private,
-encrypted, and integrity-checked; public data contains no source bytes or private donor
-information. Ledger values carry an as-of date and visibly mark illustrative figures.
-Publishing is manual; there is no CMS or live outcome pipeline.
+Staff publish the impact ledger as a spreadsheet CSV snapshot. Source documents are
+private, encrypted, and integrity-checked; public data contains no source bytes or private
+donor information. Ledger values carry an as-of date and visibly mark illustrative figures.
+Initiatives live in the database, edited and published in the staff initiative editor; the
+public initiative pages read the published ones. Publishing is manual; there is no CMS or
+live outcome pipeline.
 
 ## Database lifecycle
 

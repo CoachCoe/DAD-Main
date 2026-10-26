@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"regexp"
 	"slices"
 	"strconv"
 	"time"
@@ -52,9 +53,9 @@ type MetricInput struct {
 	VerifiedOn       string `json:"verified_on"`
 }
 
+var initiativeSlug = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
 // validate checks an initiative input, returning ErrStaffInput on any problem.
-// The slug and length bounds mirror parseInitiatives in content_publish.go so
-// the two initiative surfaces agree on what a valid initiative looks like.
 func (in InitiativeInput) validate(now time.Time) (queries.InsertInitiativeParams, error) {
 	var params queries.InsertInitiativeParams
 	if len(in.Slug) > 100 || !initiativeSlug.MatchString(in.Slug) {
