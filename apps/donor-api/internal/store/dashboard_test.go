@@ -202,11 +202,11 @@ func TestDashboardJSONContract(t *testing.T) {
 		want  string
 	}{
 		{DonorDashboard{Mode: "test", State: "preparing"}, `{"mode":"test","state":"preparing"}`},
-		{DonorDashboard{Mode: "test", State: "ready", ComputedAt: at}, `{"computed_at":"2027-01-02T03:04:05Z","founding_donor":false,"mode":"test","referrals":null,"state":"ready","streak":null,"rank":null,"network":null}`},
+		{DonorDashboard{Mode: "test", State: "ready", ComputedAt: at}, `{"computed_at":"2027-01-02T03:04:05Z","founding_donor":false,"mode":"test","referrals":null,"state":"ready","streak":null,"rank":null,"network":null,"impact":{"given_minor":null,"currency":"","initiatives_funded":0,"events_volunteered":0}}`},
 		{DonorDashboard{Mode: "test", State: "ready", ComputedAt: at, FoundingDonor: true,
 			Referrals: &ReferralSummary{Link: 1, IRL: 2, LinkMinor: 300, IRLMinor: 400, TotalMinor: 700, Currency: "USD"},
 			Streak:    &StreakSummary{Current: 3, AtRisk: true, GraceEndsAt: &grace}},
-			`{"computed_at":"2027-01-02T03:04:05Z","founding_donor":true,"mode":"test","referrals":{"currency":"USD","irl":2,"irl_minor":400,"link":1,"link_minor":300,"total_minor":700},"state":"ready","streak":{"at_risk":true,"current":3,"grace_ends_at":"2027-01-16T03:04:05Z"},"rank":null,"network":null}`},
+			`{"computed_at":"2027-01-02T03:04:05Z","founding_donor":true,"mode":"test","referrals":{"currency":"USD","irl":2,"irl_minor":400,"link":1,"link_minor":300,"total_minor":700},"state":"ready","streak":{"at_risk":true,"current":3,"grace_ends_at":"2027-01-16T03:04:05Z"},"rank":null,"network":null,"impact":{"given_minor":null,"currency":"","initiatives_funded":0,"events_volunteered":0}}`},
 	} {
 		got, err := json.Marshal(c.board)
 		if err != nil || string(got) != c.want {

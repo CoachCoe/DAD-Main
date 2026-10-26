@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
+import { TodayInitiative } from "@/components/donor/TodayInitiative";
 import type { Schema } from "@/lib/api";
 import { formatDateTime } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
@@ -53,7 +54,7 @@ export default function Dashboard() {
           : "";
 
   return (
-    <Page wide eyebrow="My account" title="Your circle’s impact">
+    <Page wide eyebrow="My account" title="Your impact">
       <p className="note">
         DAD launches in April 2027. This preview shows test payments and simulated recognition only.
       </p>
@@ -102,6 +103,26 @@ export default function Dashboard() {
                   </Link>
                 </div>
               )}
+              <div className="metrics">
+                <article className="metric">
+                  <h2>Your giving</h2>
+                  <p className="metricValue">
+                    {data.impact.given_minor === null ? "Updating" : formatMoney(data.impact.given_minor)}
+                  </p>
+                  <p>Given since you joined, after any refunds.</p>
+                </article>
+                <article className="metric">
+                  <h2>Initiatives funded</h2>
+                  <p className="metricValue">{data.impact.initiatives_funded}</p>
+                  <p>Initiatives your daily gift has gone to.</p>
+                </article>
+                <article className="metric">
+                  <h2>Events volunteered</h2>
+                  <p className="metricValue">{data.impact.events_volunteered}</p>
+                  <p>Events you checked in at.</p>
+                </article>
+                <TodayInitiative />
+              </div>
               <div className="metrics pair">
                 <article className="metric">
                   <h2>Link Referrals</h2>

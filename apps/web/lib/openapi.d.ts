@@ -2639,6 +2639,7 @@ export interface components {
             rank: components["schemas"]["Ranking"] | null;
             /** @description The donor's active-network headline (I-2), or null when they have no active referrals. */
             network: components["schemas"]["NetworkCard"] | null;
+            impact: components["schemas"]["ImpactSummary"];
         };
         Profile: {
             /** Format: email */
@@ -3842,6 +3843,23 @@ export interface components {
              */
             checked_in: number;
             attendees: components["schemas"]["EventAttendee"][];
+        };
+        /** @description The donor's own impact totals (I-1, I-3). */
+        ImpactSummary: {
+            /** @description Total given since joining, net of refunds; null while it is being recomputed. */
+            given_minor: number | null;
+            /** @enum {string} */
+            currency: "USD";
+            /**
+             * Format: int64
+             * @description Distinct initiatives the donor has been shown (A-4).
+             */
+            initiatives_funded: number;
+            /**
+             * Format: int64
+             * @description Events the donor checked in at.
+             */
+            events_volunteered: number;
         };
     };
     responses: {

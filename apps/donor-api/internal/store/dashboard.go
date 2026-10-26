@@ -23,6 +23,17 @@ type DonorDashboard struct {
 	Streak        *StreakSummary   `json:"streak"`
 	Rank          *Ranking         `json:"rank"`
 	Network       *NetworkCard     `json:"network"`
+	Impact        ImpactSummary    `json:"impact"`
+}
+
+// ImpactSummary is the donor's own impact totals (PRD I-1, I-3): what they have
+// given since joining, net of refunds, the distinct initiatives they have been
+// shown (A-4), and the events they checked in at.
+type ImpactSummary struct {
+	GivenMinor        *int64 `json:"given_minor"`
+	Currency          string `json:"currency"`
+	InitiativesFunded int64  `json:"initiatives_funded"`
+	EventsVolunteered int64  `json:"events_volunteered"`
 }
 
 type ReferralSummary struct {
@@ -125,6 +136,18 @@ func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now
 	if net.ActiveCount > 0 {
 		result.Network = &NetworkCard{ActiveCount: net.ActiveCount, AnnualizedMinor: net.AnnualizedMinor, Currency: "USD"}
 	}
+	result.Impact.Currency = "USD"
+	if row.NetMinor.Valid {
+		result.Impact.GivenMinor = &row.NetMinor.Int64
+	}
+	if result.Impact.InitiativesFunded, err = q.DistinctInitiativeExposures(ctx, id); err != nil {
+		return DonorDashboard{}, err
+	}
+	volunteered, err := q.DonorVolunteerStats(ctx, id)
+	if err != nil {
+		return DonorDashboard{}, err
+	}
+	result.Impact.EventsVolunteered = volunteered.Events
 	return result, nil
 }
 

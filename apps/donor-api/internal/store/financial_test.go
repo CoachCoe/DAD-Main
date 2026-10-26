@@ -130,6 +130,11 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	if referrals == nil || referrals.IRL != 1 || referrals.Link != 0 || referrals.TotalMinor != 6000 {
 		t.Fatalf("wrong attribution: %v", referrals)
 	}
+	own, err := dashboard(ctx, q, queries.Donor{ID: donorID}, now)
+	if err != nil || own.Impact.GivenMinor == nil || *own.Impact.GivenMinor != 6000 || own.Impact.Currency != "USD" ||
+		own.Impact.InitiativesFunded != 0 || own.Impact.EventsVolunteered != 0 {
+		t.Fatalf("impact totals: %+v %v", own.Impact, err)
+	}
 	// A full refund breaks the current streak; the attained best and badge survive.
 	refund, event := testID(t), testID(t)
 	observed := feb.Add(24 * time.Hour)

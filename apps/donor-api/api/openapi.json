@@ -10428,6 +10428,9 @@
          }
         ],
         "description": "The donor's active-network headline (I-2), or null when they have no active referrals."
+       },
+       "impact": {
+        "$ref": "#/components/schemas/ImpactSummary"
        }
       },
       "required": [
@@ -10438,7 +10441,8 @@
        "state",
        "streak",
        "rank",
-       "network"
+       "network",
+       "impact"
       ],
       "additionalProperties": false
      }
@@ -14093,6 +14097,47 @@
      "checked_in",
      "attendees"
     ]
+   },
+   "ImpactSummary": {
+    "type": "object",
+    "description": "The donor's own impact totals (I-1, I-3).",
+    "properties": {
+     "given_minor": {
+      "anyOf": [
+       {
+        "type": "integer",
+        "format": "int64"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "Total given since joining, net of refunds; null while it is being recomputed."
+     },
+     "currency": {
+      "type": "string",
+      "enum": [
+       "USD"
+      ]
+     },
+     "initiatives_funded": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Distinct initiatives the donor has been shown (A-4)."
+     },
+     "events_volunteered": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Events the donor checked in at."
+     }
+    },
+    "required": [
+     "given_minor",
+     "currency",
+     "initiatives_funded",
+     "events_volunteered"
+    ],
+    "additionalProperties": false
    }
   }
  }
