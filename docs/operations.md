@@ -956,6 +956,21 @@ previous persistent self-hosted runners from this repository and revoke any
 credentials stored on those machines through the operator's runner controls.
 
 
+## One email, one role
+
+New identities are refused for an address held by another role (see
+[donor domain](donor-domain.md#giving-and-identity)), but addresses that already held two
+roles are left as they are. List them with the owner role before deciding, with each
+person, which login keeps the address:
+
+```sql
+SELECT email, array_agg(role ORDER BY role) AS roles FROM (
+  SELECT email, 'DONOR' AS role FROM donors WHERE email IS NOT NULL
+  UNION ALL SELECT email, 'STAFF' FROM donor_staff WHERE NOT disabled
+  UNION ALL SELECT email, 'PARTNER:' || partner_id FROM donor_partner_users WHERE NOT disabled
+) held GROUP BY email HAVING count(*) > 1;
+```
+
 ## Process secret boundaries
 
 The production Compose file never injects an entire environment file into a process.

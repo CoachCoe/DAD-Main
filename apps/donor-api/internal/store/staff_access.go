@@ -40,6 +40,9 @@ func inviteStaff(ctx context.Context, q *queries.Queries, actor pgtype.UUID, ema
 	if err != nil {
 		return "", err
 	}
+	if err = reserveEmailIdentity(ctx, q, canonical, identityStaff, pgtype.UUID{}); err != nil {
+		return "", err
+	}
 	if _, err = q.InsertStaff(ctx, queries.InsertStaffParams{ID: id, Email: canonical, Name: identity.TrimSpace(name), Role: role}); err != nil {
 		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
 			return "", ErrStaffExists

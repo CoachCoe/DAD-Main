@@ -151,6 +151,9 @@ func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, ro
 			return struct{}{}, ErrPartnerForbidden
 		}
 		q := queries.New(tx)
+		if err := reserveEmailIdentity(ctx, q, email, identityPartner, actor.PartnerID); err != nil {
+			return struct{}{}, err
+		}
 		id, err := NewID()
 		if err != nil {
 			return struct{}{}, err

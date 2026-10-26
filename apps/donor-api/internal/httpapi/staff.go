@@ -33,6 +33,21 @@ const (
 	maxCredentialBytes = 64 << 10
 )
 
+// emailRoleDetail names the account that already holds an address, for staff
+// and partner admins adding a login (PRD §3: one email, one role).
+func emailRoleDetail(err error) string {
+	var held store.EmailRoleError
+	errors.As(err, &held)
+	switch held.Role {
+	case "DONOR":
+		return "This email already has a donor account. Use a different email for this login."
+	case "STAFF":
+		return "This email is a DAD staff login. Use a different email for this login."
+	default:
+		return "This email already signs in to a partner organization. Use a different email for this login."
+	}
+}
+
 func staffStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, store.ErrStaffDenied):
@@ -45,6 +60,8 @@ func staffStatus(err error) (int, string) {
 		return http.StatusConflict, "A staff account with this email already exists"
 	case errors.Is(err, store.ErrStaffConflict):
 		return http.StatusConflict, "Staff access changed or conflicts with this request"
+	case errors.Is(err, store.EmailRoleError{}):
+		return http.StatusConflict, emailRoleDetail(err)
 	case errors.Is(err, pgx.ErrNoRows):
 		return http.StatusNotFound, "Record not found"
 	default:

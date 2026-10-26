@@ -44,6 +44,7 @@ var grants = map[string]map[Role]string{
 		EmailChangeWorker: lock,
 		MessageWorker:     lock,
 		PushWorker:        lock,
+		StaffCLI:          "SELECT (email)",
 	},
 
 	"donor_sessions": {
@@ -194,6 +195,7 @@ var grants = map[string]map[Role]string{
 	"donor_partner_applications": {API: "SELECT, INSERT, UPDATE"},
 	"donor_partner_users": {
 		API:              "SELECT, INSERT, UPDATE",
+		StaffCLI:         "SELECT (email, partner_id, disabled)",
 		MessageWorker:    "SELECT",
 		LoginEmailWorker: "SELECT, UPDATE (invite_token_hash, invite_expires_at)",
 	},

@@ -13,6 +13,7 @@ import (
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -159,6 +160,9 @@ func prepareAttempt(
 func lockGuest(ctx context.Context, q *queries.Queries, email string, now time.Time) (queries.Donor, error) {
 	id, err := NewID()
 	if err != nil {
+		return queries.Donor{}, err
+	}
+	if err = reserveEmailIdentity(ctx, q, email, identityDonor, pgtype.UUID{}); err != nil {
 		return queries.Donor{}, err
 	}
 	if err = q.InsertGuest(ctx, queries.InsertGuestParams{ID: id, Email: email}); err != nil {

@@ -175,6 +175,9 @@ func (s PartnerApplicationService) Approve(ctx context.Context, token string, ap
 			}); err != nil {
 				return pgtype.UUID{}, err
 			}
+			if err = reserveEmailIdentity(ctx, q, app.WorkEmail, identityPartner, partnerID); err != nil {
+				return pgtype.UUID{}, err
+			}
 			userID, err := NewID()
 			if err != nil {
 				return pgtype.UUID{}, err

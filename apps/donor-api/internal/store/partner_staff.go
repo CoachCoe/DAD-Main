@@ -147,6 +147,9 @@ func (s PartnerApplicationService) InviteUser(ctx context.Context, token string,
 			if !org.ApprovedAt.Valid {
 				return struct{}{}, pgx.ErrNoRows
 			}
+			if err = reserveEmailIdentity(ctx, q, email, identityPartner, partnerID); err != nil {
+				return struct{}{}, err
+			}
 			id, err := NewID()
 			if err != nil {
 				return struct{}{}, err

@@ -87,7 +87,7 @@ export interface paths {
         put?: never;
         /**
          * Start a guest Stripe Checkout
-         * @description Web only: giving stays on the website. Reads the `dad_referral` cookie for attribution. 403 also means giving is unavailable for this account. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.
+         * @description Web only: giving stays on the website. Reads the `dad_referral` cookie for attribution. 403 also means giving is unavailable for this account. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor. Refused with 409 when the email signs in to a DAD partner or staff account: one email holds one role, so such a person gives with a different email.
          */
         post: operations["beginCheckout"];
         delete?: never;
@@ -874,7 +874,7 @@ export interface paths {
         put?: never;
         /**
          * Invite a staff member
-         * @description 409 when a staff account with this email already exists.
+         * @description 409 when a staff account with this email already exists. Refused with 409 when the email already has a donor or partner login (one email, one role).
          */
         post: operations["inviteStaff"];
         delete?: never;
@@ -2029,7 +2029,7 @@ export interface paths {
         put?: never;
         /**
          * Invite a partner portal user
-         * @description Admin only. Emails the person a single-use invitation link that expires after 7 days. Re-inviting an existing user refreshes their role and re-enables them.
+         * @description Admin only. Emails the person a single-use invitation link that expires after 7 days. Re-inviting an existing user refreshes their role and re-enables them. Refused with 409 when the email already has a donor or staff login, or signs in to another partner organization (one email, one role).
          */
         post: operations["partnerInviteUser"];
         delete?: never;
@@ -2152,7 +2152,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Approve a partner application */
+        /**
+         * Approve a partner application
+         * @description Refused with 409 when the applicant's work email already has a donor or staff login, or signs in to another partner organization (one email, one role).
+         */
         post: operations["staffPartnerApprove"];
         delete?: never;
         options?: never;
@@ -2405,7 +2408,7 @@ export interface paths {
         put?: never;
         /**
          * Invite a user to a partner organization
-         * @description Emails the invitee a sign-in link. Re-inviting an existing address refreshes its role and re-enables a removed user.
+         * @description Emails the invitee a sign-in link. Re-inviting an existing address refreshes its role and re-enables a removed user. Refused with 409 when the email already has a donor or staff login, or signs in to another partner organization (one email, one role).
          */
         post: operations["staffPartnerInviteUser"];
         delete?: never;

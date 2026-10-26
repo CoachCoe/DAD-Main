@@ -57,6 +57,8 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusConflict, "Checkout conflicts with an existing request", nil)
 	case errors.Is(err, store.ErrDenied):
 		writeError(w, r, http.StatusForbidden, "Giving is unavailable for this account", nil)
+	case errors.Is(err, store.EmailRoleError{}):
+		writeError(w, r, http.StatusConflict, "This email signs in to a DAD partner or staff account. Give with a different email.", nil)
 	case errors.Is(err, payments.ErrCheckoutInput):
 		invalidFields(w, r)
 	case err != nil:

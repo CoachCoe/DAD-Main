@@ -21,6 +21,13 @@ remove dots or plus tags. Different addresses are separate identities until an e
 merge verifies both. Never infer identity from a shared card, device, or postal address.
 The initial implementation accepts ASCII mailbox names and IDNA domains.
 
+One email holds one role (PRD §3). Giving, a donor email change, a staff invitation, a
+partner invitation, and partner approval each refuse an address that already signs in as
+a donor, an active staff member, or an active login of another partner organization. A
+partner employee who gives uses a different email. Addresses that held two roles before
+this check keep working; operators can list them with the query in
+[operations](operations.md#one-email-one-role).
+
 A company-code visit is captured before giving and kept for 30 days. It links the donor
 to the employer when they prove account ownership in that browser, or when they enter
 the code in their signed-in profile. Starting a guest checkout with someone's email

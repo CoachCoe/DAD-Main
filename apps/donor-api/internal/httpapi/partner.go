@@ -80,6 +80,8 @@ func partnerStatusCode(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "Check the highlighted fields and try again"
 	case errors.Is(err, store.ErrPartnerDecision):
 		return http.StatusConflict, "This application has already been decided"
+	case errors.Is(err, store.EmailRoleError{}):
+		return http.StatusConflict, emailRoleDetail(err)
 	case errors.Is(err, pgx.ErrNoRows):
 		return http.StatusNotFound, "Record not found"
 	default:
