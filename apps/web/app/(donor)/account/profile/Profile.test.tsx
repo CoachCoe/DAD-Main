@@ -162,15 +162,20 @@ it("leaves the account alone when deletion is not confirmed", async () => {
 
 it("explains that renewing giving must be cancelled before deletion", async () => {
   stubFetch({
-    "POST /api/donor/me/delete": () => json({ detail: "Cancel your monthly giving before deleting your account" }, 409),
+    "POST /api/donor/me/delete": () =>
+      json(
+        { detail: "Cancel your monthly giving, or let a checkout in progress finish, before deleting your account" },
+        409,
+      ),
   });
   vi.stubGlobal("confirm", () => true);
   render(<Profile />);
   fireEvent.click(await screen.findByRole("button", { name: "Delete my account" }));
-  expect(await screen.findByText("Cancel your monthly giving before deleting your account")).toHaveAttribute(
-    "role",
-    "alert",
-  );
+  expect(
+    await screen.findByText(
+      "Cancel your monthly giving, or let a checkout in progress finish, before deleting your account",
+    ),
+  ).toHaveAttribute("role", "alert");
   expect(screen.getByRole("link", { name: "cancel it" })).toHaveAttribute("href", "/account/recurring");
 });
 

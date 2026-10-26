@@ -61,7 +61,7 @@ func donorStatus(err error) (int, string) {
 	case errors.Is(err, store.ErrPreferenceConflict):
 		return http.StatusConflict, "Preferences changed. Refresh before saving again"
 	case errors.Is(err, store.ErrGivingActive):
-		return http.StatusConflict, "Cancel your monthly giving before deleting your account"
+		return http.StatusConflict, "Cancel your monthly giving, or let a checkout in progress finish, before deleting your account"
 	case errors.Is(err, store.ErrPushToken):
 		return http.StatusUnprocessableEntity, "The push token is not valid for this platform"
 	case errors.Is(err, store.ErrPublicName):
