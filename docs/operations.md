@@ -301,13 +301,15 @@ cannot validate that capacity.
 Use the organization's verified Stripe **test** account and snapshot webhook events at
 API version `2026-09-30.endive`. Subscribe to:
 
-- `payment_intent.succeeded` for retained pre-R1 one-time gift facts and payment-intent verification.
 - `invoice.payment_succeeded` and `invoice.payment_failed` for monthly periods.
 - `refund.created`, `refund.updated`, and `refund.failed`.
 - `checkout.session.completed` and `checkout.session.expired`.
 - `customer.subscription.created`, `customer.subscription.updated`,
   `customer.subscription.deleted`, `customer.subscription.pending_update_applied`, and
   `customer.subscription.pending_update_expired`.
+
+New `payment_intent.succeeded` events are ignored by the R1 receiver. Retained
+pre-R1 one-time gift records remain readable; new giving is monthly only.
 
 Point the endpoint at `/api/donor/stripe/webhook` on the public origin. nginx gives it
 its own generous limit ([edge](edge.md#rate-limits)); Cloudflare must skip its bot and

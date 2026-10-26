@@ -109,7 +109,7 @@ export default function ReferralLanding({
 function About() {
   return (
     <>
-      <p>A first gift before launch earns a permanent Founding Donor badge.</p>
+      <p>A first gift completed before 1 January 2027 (New York time) earns a permanent Founding Donor badge.</p>
       <p className="note">This is a sandbox preview. No real donation is collected or live badge awarded.</p>
     </>
   );

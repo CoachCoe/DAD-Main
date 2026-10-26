@@ -82,7 +82,8 @@ export default function Dashboard() {
                 </LoadingMetric>
                 <LoadingMetric title="Recognition">
                   <span className="metricSkeletonCopy">
-                    Your first gift came before launch. The badge is permanent. Sandbox recognition only.
+                    Your first gift completed before 1 January 2027 (New York time). The badge is permanent. Sandbox
+                    recognition only.
                   </span>
                 </LoadingMetric>
               </div>
@@ -211,7 +212,10 @@ export default function Dashboard() {
                   <article className="metric">
                     <h2>Founding Donor</h2>
                     <p className="metricValue">Earned</p>
-                    <p>Your first gift came before launch. The badge is permanent. Sandbox recognition only.</p>
+                    <p>
+                      Your first gift completed before 1 January 2027 (New York time). The badge is permanent. Sandbox
+                      recognition only.
+                    </p>
                   </article>
                 )}
               </div>

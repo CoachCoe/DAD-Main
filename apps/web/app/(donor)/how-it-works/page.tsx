@@ -33,10 +33,14 @@ export default function HowItWorks() {
       </p>
       <h2>Streaks and recognition</h2>
       <p>
-        Successful monthly gifts build your streak. A failed renewal has 7 days to recover before your active streak
-        resets. Cancellation ends it at the first skipped renewal. Your historical best stays recorded.
+        Successful monthly gifts keep your streak growing in local calendar days. A failed renewal has 7 days to recover
+        before your active streak resets. Cancellation ends it at the first skipped renewal. Your historical best stays
+        recorded.
       </p>
-      <p>DAD launches on 22 April 2027. A first gift completed before launch earns a permanent Founding Donor badge.</p>
+      <p>
+        DAD launches on 22 April 2027. A first gift completed before 1 January 2027 (New York time) earns a permanent
+        Founding Donor badge.
+      </p>
       <h2>Clear records, honest limits</h2>
       <p>
         The impact ledger is updated by staff on a stated cadence. Figures carry an as-of date, illustrative figures are
@@ -44,9 +48,9 @@ export default function HowItWorks() {
       </p>
       <h2>Programs start at launch</h2>
       <p>
-        This donor release does not enrol recipients or send money to them. Aid programs begin at launch, when
-        recipients and partners get their own accounts and the DAD donor app arrives for iOS and Android. Until then,
-        partners can register interest with the website form.
+        This donor release does not enrol recipients or send money to them. Aid programs begin at launch. Partners can
+        apply now; approved partners use the partner portal to manage their profile, initiatives, employee giving, and
+        reports. Donor apps for iOS and Android are being developed separately.
       </p>
       <p className="note">
         This environment is a sandbox preview using Stripe test payments. No real donation is collected.
@@ -61,6 +65,8 @@ export default function HowItWorks() {
       </div>
       <p>
         <Link href="/apply">Partner application</Link>
+        {" · "}
+        <Link href="/partner/sign-in">Partner sign-in</Link>
       </p>
     </Page>
   );

@@ -8,7 +8,7 @@ configured provider before enabling live donations. SMTP delivery is at least on
 |---|---|---|---|
 | Gift receipt | Successful gift; giving donor | Essential financial record; no marketing content | `internal/store/receipts.go` and `messages.go` |
 | Annual summary | Prior calendar year has gifts; giving donor | Essential financial record | `internal/store/receipts.go` and `outbox.go` |
-| Payment recovery | Failed renewal, then days 7 and 13; giving donor | Essential payment notice; stop after recovery or cancellation | `internal/store/messages.go` and `outbox.go` |
+| Payment recovery | Failed renewal, then day 5 of the 7-day grace window; giving donor | Essential payment notice; stop after recovery or cancellation | `internal/store/messages.go` and `outbox.go` |
 | Referral converted | First qualifying referred gift; direct referrer | Optional; recheck referral-email preference before sending | `internal/store/messages.go` |
 | Account claim/sign-in | Requested access or initial checkout claim; address owner | Essential authentication; single-use link, 15-minute expiry | `internal/store/email.go` |
 | Email change | Signed-in request, then current-address confirmation; current/new address respectively | Essential security confirmation; two single-use proofs, each valid 15 minutes | `internal/store/email_change_delivery.go` |

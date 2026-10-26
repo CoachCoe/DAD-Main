@@ -8,7 +8,10 @@ export default function DonorHome() {
           <span className="eyebrow">Dynamic Aid Delivery · Donor preview</span>
           <h1>Start small. Invite someone. Grow your circle’s impact.</h1>
           <p>Join with about a dollar a day · $30/month. Monthly giving, no account needed to start.</p>
-          <p>DAD launches on 22 April 2027. Give before launch to earn a permanent Founding Donor badge.</p>
+          <p>
+            DAD launches on 22 April 2027. A first gift completed before 1 January 2027 (New York time) earns a
+            permanent Founding Donor badge.
+          </p>
           <div className="actions">
             <Link className="button" href="/donate">
               Try giving
@@ -31,7 +34,7 @@ export default function DonorHome() {
             <div>
               <dt>Recognition</dt>
               <dd>
-                Founding Donor<small>Permanent, for a first gift before launch</small>
+                Founding Donor<small>Permanent, for a first gift before 1 January 2027 (New York time)</small>
               </dd>
             </div>
             <div>
@@ -50,7 +53,7 @@ export default function DonorHome() {
             <li>Give on the web, without creating an account first.</li>
             <li>Claim your account from the confirmation email.</li>
             <li>Share your personal link or show your referral code on your phone.</li>
-            <li>See Link and IRL Referrals, collected dollars, your monthly streak, and your badge.</li>
+            <li>See Link and IRL Referrals, collected dollars, your streak in days, and your badge.</li>
           </ol>
           <p>
             Only the people you personally invite count toward your circle. A referral counts when their first gift
