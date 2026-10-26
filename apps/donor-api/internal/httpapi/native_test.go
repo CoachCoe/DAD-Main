@@ -38,7 +38,7 @@ func (s *sessionDonor) Profile(_ context.Context, token string) (store.Profile, 
 	return store.Profile{Email: "donor@example.org"}, s.check(token)
 }
 
-func (s *sessionDonor) SavePreferences(_ context.Context, token string, _ store.Preferences) (store.Profile, error) {
+func (s *sessionDonor) SavePreferences(_ context.Context, token string, _ store.PreferenceChange) (store.Profile, error) {
 	return store.Profile{Email: "donor@example.org"}, s.check(token)
 }
 

@@ -403,7 +403,7 @@ export interface paths {
         put?: never;
         /**
          * Delete this donor account
-         * @description Erases the donor's personal data and signs them out everywhere. Personal fields and personal records (passkeys, social sign-in links, notification preferences, sessions and push registrations) are removed; the gift and billing ledger is retained for legal and tax records and carries no personal data. The deletion is irreversible. A browser's session cookie is cleared in the response.
+         * @description Erases the donor's personal data and signs them out everywhere. Personal fields and personal records (passkeys, social sign-in links, notification preferences, sessions and push registrations) are removed; the gift and billing ledger is retained for legal and tax records and carries no personal data. The deletion is irreversible. A browser's session cookie is cleared in the response. Refused with 409 while a monthly gift is still set to renew, so a deleted account is never charged.
          */
         post: operations["deleteAccount"];
         delete?: never;
@@ -422,8 +422,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Save notification preferences
-         * @description Replaces every notification choice at once. 409 when `version` is stale: re-read the profile and retry.
+         * Save preferences
+         * @description Saves the donor's notification, rankings, network and volunteer choices. The required fields are always replaced; an optional field left out keeps its saved value. 409 when `version` is stale: re-read the profile and retry.
          */
         post: operations["savePreferences"];
         delete?: never;
@@ -4726,6 +4726,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["TooManyRequests"];
@@ -4752,6 +4753,8 @@ export interface operations {
                     push_referral_converted: boolean;
                     push_streak_at_risk: boolean;
                     push_streak_milestone: boolean;
+                    push_streak_lapsed?: boolean;
+                    push_badge_earned?: boolean;
                     rankings_opted_out?: boolean;
                     network_visible?: boolean;
                     volunteer?: boolean;

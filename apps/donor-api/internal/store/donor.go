@@ -42,6 +42,10 @@ func page[T any](rows []T, offset int64) ([]T, *int64) {
 }
 
 var ErrPreferenceConflict = errors.New("preferences changed; refresh before saving")
+
+// ErrGivingActive refuses an account deletion while a monthly gift would keep
+// charging the card of a donor whose account no longer exists.
+var ErrGivingActive = errors.New("cancel monthly giving before deleting the account")
 var ErrPublicName = errors.New("choose a public first name or nickname of 1 to 80 characters")
 
 // ErrPublicNameCharacters is an ErrPublicName for a name that looks like an
@@ -151,18 +155,73 @@ func (s DonorService) Profile(ctx context.Context, token string) (Profile, error
 	)
 }
 
-// SavePreferences replaces the donor's notification choices if pref.Version
-// is still current, and records the consent change.
-func (s DonorService) SavePreferences(ctx context.Context, token string, pref Preferences) (Profile, error) {
+// PreferenceChange is a save of the donor's choices. A nil field keeps its
+// saved value, so a client that predates a choice cannot clear it.
+type PreferenceChange struct {
+	Version               int32
+	ReferralEmails        bool
+	MarketingEmails       bool
+	PushReferralConverted bool
+	PushStreakAtRisk      bool
+	PushStreakMilestone   bool
+	PushStreakLapsed      *bool
+	PushBadgeEarned       *bool
+	RankingsOptedOut      *bool
+	NetworkVisible        *bool
+	Volunteer             *bool
+	VolunteerInterests    *[]string
+}
+
+// Replace is a change that sets every choice to pref.
+func (pref Preferences) Replace() PreferenceChange {
+	interests := pref.VolunteerInterests
+	return PreferenceChange{
+		Version: pref.Version, ReferralEmails: pref.ReferralEmails, MarketingEmails: pref.MarketingEmails,
+		PushReferralConverted: pref.PushReferralConverted, PushStreakAtRisk: pref.PushStreakAtRisk, PushStreakMilestone: pref.PushStreakMilestone,
+		PushStreakLapsed: &pref.PushStreakLapsed, PushBadgeEarned: &pref.PushBadgeEarned,
+		RankingsOptedOut: &pref.RankingsOptedOut, NetworkVisible: &pref.NetworkVisible,
+		Volunteer: &pref.Volunteer, VolunteerInterests: &interests,
+	}
+}
+
+func (c PreferenceChange) apply(saved Preferences) Preferences {
+	pref := Preferences{
+		Version: c.Version, ReferralEmails: c.ReferralEmails, MarketingEmails: c.MarketingEmails,
+		PushReferralConverted: c.PushReferralConverted, PushStreakAtRisk: c.PushStreakAtRisk, PushStreakMilestone: c.PushStreakMilestone,
+		PushStreakLapsed: saved.PushStreakLapsed, PushBadgeEarned: saved.PushBadgeEarned,
+		RankingsOptedOut: saved.RankingsOptedOut, NetworkVisible: saved.NetworkVisible,
+		Volunteer: saved.Volunteer, VolunteerInterests: saved.VolunteerInterests,
+	}
+	for _, field := range []struct {
+		value *bool
+		into  *bool
+	}{
+		{c.PushStreakLapsed, &pref.PushStreakLapsed}, {c.PushBadgeEarned, &pref.PushBadgeEarned},
+		{c.RankingsOptedOut, &pref.RankingsOptedOut}, {c.NetworkVisible, &pref.NetworkVisible}, {c.Volunteer, &pref.Volunteer},
+	} {
+		if field.value != nil {
+			*field.into = *field.value
+		}
+	}
+	if c.VolunteerInterests != nil {
+		pref.VolunteerInterests = *c.VolunteerInterests
+	}
+	return pref
+}
+
+// SavePreferences applies change if its Version is still current, and records
+// the consent change.
+func (s DonorService) SavePreferences(ctx context.Context, token string, change PreferenceChange) (Profile, error) {
 	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (Profile, error) {
 		q := queries.New(tx)
 		current, err := readProfile(ctx, q, d)
 		if err != nil {
 			return Profile{}, err
 		}
-		if pref.Version < 0 || pref.Version != current.Version || pref.Version == math.MaxInt32 {
+		if change.Version < 0 || change.Version != current.Version || change.Version == math.MaxInt32 {
 			return Profile{}, ErrPreferenceConflict
 		}
+		pref := change.apply(current.Preferences)
 		id, err := NewID()
 		if err != nil {
 			return Profile{}, err
@@ -277,10 +336,17 @@ func (s DonorService) SaveProfile(ctx context.Context, token string, in ProfileU
 // gives up the donor's places at upcoming events, so the waitlist moves up. The
 // financial ledger (gifts, checkouts, billing periods, refunds) is retained for
 // legal and tax records and carries no personal data of its own. The erasure
-// is recorded in donor_deletions, which outlives the scrub.
+// is recorded in donor_deletions, which outlives the scrub. It is refused
+// while a monthly gift is still set to renew.
 func (s DonorService) DeleteAccount(ctx context.Context, token string) error {
 	_, err := donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (struct{}, error) {
 		q := queries.New(tx)
+		if renewing, err := givingRenews(ctx, q, d.ID); err != nil || renewing {
+			if err == nil {
+				err = ErrGivingActive
+			}
+			return struct{}{}, err
+		}
 		if err := q.RecordDonorDeletion(ctx, queries.RecordDonorDeletionParams{DonorID: d.ID, DeletedAt: timestamp(now)}); err != nil {
 			return struct{}{}, err
 		}
@@ -312,6 +378,20 @@ func (s DonorService) DeleteAccount(ctx context.Context, token string) error {
 		return struct{}{}, q.AnonymizeDonor(ctx, d.ID)
 	})
 	return err
+}
+
+// givingRenews reports whether the donor's latest monthly gift will charge
+// again: its subscription is live and not scheduled to stop, or checkout has
+// finished but the subscription has not been synced yet.
+func givingRenews(ctx context.Context, q *queries.Queries, donor pgtype.UUID) (bool, error) {
+	attempt, row, err := syncedSubscription(ctx, q, donor)
+	if err != nil {
+		return false, err
+	}
+	if row == nil {
+		return attempt.StripeSubscriptionID.Valid || attempt.Status == "COMPLETE", nil
+	}
+	return !terminalSubscription(row.Status) && !row.StopsAt.Valid, nil
 }
 
 // releaseEventPlaces cancels a donor's reservations at upcoming events and

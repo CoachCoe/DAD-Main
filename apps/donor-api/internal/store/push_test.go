@@ -236,7 +236,7 @@ func TestPushPreferencesStartOnAndAreVersioned(t *testing.T) {
 		profile.MarketingEmails {
 		t.Fatalf("defaults: %+v %v", profile, err)
 	}
-	saved, err := s.SavePreferences(ctx, token, Preferences{Version: 0, PushReferralConverted: true, PushStreakMilestone: true})
+	saved, err := s.SavePreferences(ctx, token, Preferences{Version: 0, PushReferralConverted: true, PushStreakMilestone: true}.Replace())
 	if err != nil || saved.Version != 1 || !saved.PushReferralConverted || saved.PushStreakAtRisk || !saved.PushStreakMilestone {
 		t.Fatalf("saved: %+v %v", saved, err)
 	}
@@ -249,7 +249,7 @@ func TestPushPreferencesStartOnAndAreVersioned(t *testing.T) {
 		consent != consentVersion {
 		t.Fatalf("preference event: %v %v %v %q %v", referral, atRisk, milestone, consent, err)
 	}
-	if _, err = s.SavePreferences(ctx, token, Preferences{Version: 0}); !errors.Is(err, ErrPreferenceConflict) {
+	if _, err = s.SavePreferences(ctx, token, Preferences{Version: 0}.Replace()); !errors.Is(err, ErrPreferenceConflict) {
 		t.Fatalf("stale version saved: %v", err)
 	}
 }

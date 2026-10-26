@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -159,5 +160,55 @@ func TestDeleteAccountErasesPersonalDataAndKeepsLedger(t *testing.T) {
 	// A disabled anonymised donor still reads back by id for the ledger's FK.
 	if _, err := queries.New(pool).LockDonor(ctx, id); err != nil {
 		t.Errorf("anonymised donor row unreadable: %v", err)
+	}
+}
+
+// TestDeleteAccountRefusedWhileGivingRenews keeps a deleted donor from being
+// charged: deletion waits until the monthly gift is cancelled.
+func TestDeleteAccountRefusedWhileGivingRenews(t *testing.T) {
+	s, token, id := donorServiceFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+	checkout, attempt, subscription := mustNewID(t), mustNewID(t), mustNewID(t)
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_subscriptions WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_stripe_checkouts WHERE id=$1", attempt)
+		cleanExec(t, "DELETE FROM donor_checkouts WHERE donor_id=$1", id)
+		cleanExec(t, "DELETE FROM donor_deletions WHERE donor_id=$1", id)
+	})
+	mustExec(t, pool, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES($1,$2,3000,'MONTHLY')", checkout, id)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_stripe_checkouts(id,checkout_id,request_hash,request_params,status) VALUES($1,$2,$3,'{}','COMPLETE')",
+		attempt,
+		checkout,
+		attempt.String(),
+	)
+
+	if err := s.DeleteAccount(ctx, token); !errors.Is(err, ErrGivingActive) {
+		t.Fatalf("delete with checkout complete but subscription unsynced: %v", err)
+	}
+	mustExec(t, pool, "UPDATE donor_stripe_checkouts SET stripe_subscription_id=$2 WHERE id=$1", attempt, "sub_"+attempt.String())
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_subscriptions(id,attempt_id,donor_id,status,period_end,observed_at) VALUES($1,$2,$3,'active',now()+interval '20 days',now())",
+		subscription,
+		attempt,
+		id,
+	)
+	if err := s.DeleteAccount(ctx, token); !errors.Is(err, ErrGivingActive) {
+		t.Fatalf("delete with a renewing subscription: %v", err)
+	}
+	var email string
+	if err := pool.QueryRow(ctx, "SELECT email FROM donors WHERE id=$1", id).Scan(&email); err != nil ||
+		strings.HasSuffix(email, "@deleted.invalid") {
+		t.Fatalf("a refused deletion changed the donor: %q %v", email, err)
+	}
+
+	mustExec(t, pool, "UPDATE donor_subscriptions SET stops_at=period_end WHERE id=$1", subscription)
+	if err := s.DeleteAccount(ctx, token); err != nil {
+		t.Fatalf("delete once the gift is cancelled at period end: %v", err)
 	}
 }

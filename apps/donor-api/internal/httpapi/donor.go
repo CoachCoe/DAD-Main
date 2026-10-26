@@ -26,7 +26,7 @@ type DonorSource interface {
 	Profile(context.Context, string) (store.Profile, error)
 	SaveProfile(context.Context, string, store.ProfileUpdate) (store.Profile, error)
 	DeleteAccount(context.Context, string) error
-	SavePreferences(context.Context, string, store.Preferences) (store.Profile, error)
+	SavePreferences(context.Context, string, store.PreferenceChange) (store.Profile, error)
 	Sessions(context.Context, string) (store.Sessions, error)
 	SignOutSession(context.Context, string, pgtype.UUID) (store.Sessions, error)
 	SignOutOthers(context.Context, string) (store.Sessions, error)
@@ -60,6 +60,8 @@ func donorStatus(err error) (int, string) {
 		return http.StatusConflict, "This is the session making the request. Sign out instead"
 	case errors.Is(err, store.ErrPreferenceConflict):
 		return http.StatusConflict, "Preferences changed. Refresh before saving again"
+	case errors.Is(err, store.ErrGivingActive):
+		return http.StatusConflict, "Cancel your monthly giving before deleting your account"
 	case errors.Is(err, store.ErrPushToken):
 		return http.StatusUnprocessableEntity, "The push token is not valid for this platform"
 	case errors.Is(err, store.ErrPublicName):
@@ -134,28 +136,62 @@ func (a *api) deleteAccount(w http.ResponseWriter, r *http.Request, session stri
 	})
 }
 
+// maxVolunteerInterests and maxInterestLength bound the E-1 interest set.
+const (
+	maxVolunteerInterests = 20
+	maxInterestLength     = 60
+)
+
+// savePreferences replaces the donor's choices. The original six fields are
+// required; older clients may omit the later ones, which keep their saved
+// values.
 func (a *api) savePreferences(w http.ResponseWriter, r *http.Request, session string) {
 	var body struct {
-		Version           *int32 `json:"version"`
-		Referral          *bool  `json:"referral_emails"`
-		Marketing         *bool  `json:"marketing_emails"`
-		ReferralConverted *bool  `json:"push_referral_converted"`
-		StreakAtRisk      *bool  `json:"push_streak_at_risk"`
-		StreakMilestone   *bool  `json:"push_streak_milestone"`
+		Version            *int32    `json:"version"`
+		Referral           *bool     `json:"referral_emails"`
+		Marketing          *bool     `json:"marketing_emails"`
+		ReferralConverted  *bool     `json:"push_referral_converted"`
+		StreakAtRisk       *bool     `json:"push_streak_at_risk"`
+		StreakMilestone    *bool     `json:"push_streak_milestone"`
+		StreakLapsed       *bool     `json:"push_streak_lapsed"`
+		BadgeEarned        *bool     `json:"push_badge_earned"`
+		RankingsOptedOut   *bool     `json:"rankings_opted_out"`
+		NetworkVisible     *bool     `json:"network_visible"`
+		Volunteer          *bool     `json:"volunteer"`
+		VolunteerInterests *[]string `json:"volunteer_interests"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
 	if body.Version == nil || *body.Version < 0 || body.Referral == nil || body.Marketing == nil ||
-		body.ReferralConverted == nil || body.StreakAtRisk == nil || body.StreakMilestone == nil {
+		body.ReferralConverted == nil || body.StreakAtRisk == nil || body.StreakMilestone == nil ||
+		(body.VolunteerInterests != nil && !validInterests(*body.VolunteerInterests)) {
 		invalidFields(w, r)
 		return
 	}
-	preferences := store.Preferences{
+	change := store.PreferenceChange{
 		Version: *body.Version, ReferralEmails: *body.Referral, MarketingEmails: *body.Marketing,
 		PushReferralConverted: *body.ReferralConverted, PushStreakAtRisk: *body.StreakAtRisk, PushStreakMilestone: *body.StreakMilestone,
+		PushStreakLapsed: body.StreakLapsed, PushBadgeEarned: body.BadgeEarned,
+		RankingsOptedOut: body.RankingsOptedOut, NetworkVisible: body.NetworkVisible,
+		Volunteer: body.Volunteer, VolunteerInterests: body.VolunteerInterests,
 	}
-	a.donor().serve(w, r, func(ctx context.Context) (any, error) { return a.Donor.SavePreferences(ctx, session, preferences) })
+	a.donor().serve(w, r, func(ctx context.Context) (any, error) { return a.Donor.SavePreferences(ctx, session, change) })
+}
+
+func validInterests(interests []string) bool {
+	if len(interests) > maxVolunteerInterests {
+		return false
+	}
+	seen := make(map[string]bool, len(interests))
+	for _, interest := range interests {
+		if interest == "" || strings.TrimSpace(interest) != interest || utf8.RuneCountInString(interest) > maxInterestLength ||
+			seen[interest] {
+			return false
+		}
+		seen[interest] = true
+	}
+	return true
 }
 
 func (a *api) logoutAll(w http.ResponseWriter, r *http.Request, session string) {

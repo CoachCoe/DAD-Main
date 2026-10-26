@@ -46,7 +46,7 @@ func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		go func() {
 			<-start
-			_, err := s.SavePreferences(ctx, token, Preferences{Version: 0, ReferralEmails: true})
+			_, err := s.SavePreferences(ctx, token, Preferences{Version: 0, ReferralEmails: true}.Replace())
 			results <- err
 		}()
 	}
@@ -284,7 +284,7 @@ func TestVolunteerPreferenceRoundTrip(t *testing.T) {
 	saved, err := s.SavePreferences(ctx, token, Preferences{
 		Version: 0, PushReferralConverted: true,
 		Volunteer: true, VolunteerInterests: []string{"food-bank", "mentoring"},
-	})
+	}.Replace())
 	if err != nil || saved.Version != 1 || !saved.Volunteer ||
 		len(saved.VolunteerInterests) != 2 || saved.VolunteerInterests[0] != "food-bank" || saved.VolunteerInterests[1] != "mentoring" {
 		t.Fatalf("saved volunteer prefs: %+v %v", saved.Preferences, err)
@@ -300,8 +300,29 @@ func TestVolunteerPreferenceRoundTrip(t *testing.T) {
 	}
 
 	// Turning volunteer back off clears the pool membership but the record keeps versioning.
-	off, err := s.SavePreferences(ctx, token, Preferences{Version: 1, PushReferralConverted: true})
+	off, err := s.SavePreferences(ctx, token, Preferences{Version: 1, PushReferralConverted: true}.Replace())
 	if err != nil || off.Version != 2 || off.Volunteer || len(off.VolunteerInterests) != 0 {
 		t.Fatalf("opt back out: %+v %v", off.Preferences, err)
+	}
+}
+
+// TestPreferenceChangeKeepsOmittedChoices covers a client that predates a
+// choice: saving without it must not reset it.
+func TestPreferenceChangeKeepsOmittedChoices(t *testing.T) {
+	s, token, _ := donorServiceFixture(t)
+	ctx := context.Background()
+	on, off := true, false
+	interests := []string{"mentoring"}
+	if _, err := s.SavePreferences(ctx, token, PreferenceChange{
+		Version: 0, PushStreakLapsed: &off, RankingsOptedOut: &on, NetworkVisible: &off,
+		Volunteer: &on, VolunteerInterests: &interests,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.SavePreferences(ctx, token, PreferenceChange{Version: 1, MarketingEmails: true})
+	if err != nil || saved.Version != 2 || !saved.MarketingEmails || saved.PushStreakLapsed || !saved.PushBadgeEarned ||
+		!saved.RankingsOptedOut || saved.NetworkVisible || !saved.Volunteer ||
+		len(saved.VolunteerInterests) != 1 || saved.VolunteerInterests[0] != "mentoring" {
+		t.Fatalf("omitted choices changed: %+v %v", saved.Preferences, err)
 	}
 }
