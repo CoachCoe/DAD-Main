@@ -10427,6 +10427,87 @@
      }
     }
    }
+  },
+  "/donor/staff/founding-claims": {
+   "post": {
+    "operationId": "importFoundingClaims",
+    "summary": "Import website waitlist Founding Donor claims",
+    "description": "D-6. `claims_csv` has the header `email,signed_up_on,source`; `signed_up_on` is a date before the Founding cutoff and `source` is WAITLIST or WEBSITE_DONOR. At most 4 MB and 50,000 rows. Only a hash of each address is stored; a donor whose email matches earns Founding Donor at their next update, until 90 days after the cutoff. Importing an address again keeps its earliest sign-up. A refused import answers 422 `{\"detail\":\"The spreadsheet has problems\",\"errors\":[{sheet,row,column,reason}]}` and stores nothing.",
+    "tags": [
+     "Staff"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "claims_csv": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "claims_csv"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "rows": {
+           "type": "integer",
+           "description": "Distinct addresses in the file"
+          }
+         },
+         "required": [
+          "rows"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "413": {
+      "$ref": "#/components/responses/PayloadTooLarge"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
   }
  },
  "components": {

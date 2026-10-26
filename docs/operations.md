@@ -664,6 +664,22 @@ The `billing-history` CSV contains verified failed and successful invoice observ
 See [analytics](analytics.md) for its coverage boundary and for timestamp, replay, and
 renewal-cohort rules.
 
+At `/staff/content/wording`, content staff change badge titles, how-to-earn text, and
+streak-milestone notifications; an empty entry restores the default.
+
+At `/staff/founding-claims`, an administrator imports website waitlist sign-ups and earlier
+website donors (D-6) as a CSV of at most 4 MiB and 50,000 rows:
+
+```csv
+email,signed_up_on,source
+```
+
+`signed_up_on` is a YYYY-MM-DD date before 2027-01-01 and `source` is `WAITLIST` or
+`WEBSITE_DONOR`. Any invalid row refuses the whole file. The API stores only the SHA-256 of
+each lower-cased address; delete the source file once imported. Re-importing is safe and
+keeps each address's earliest sign-up. The projections worker deletes the claims 90 days
+after the Founding cutoff.
+
 The enrolment CSV has headers only until R2. Keep exports private and apply an approved
 retention policy. Sensitive source documents have separate authenticated downloads.
 

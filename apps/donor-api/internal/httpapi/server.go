@@ -68,6 +68,7 @@ type Services struct {
 	InitiativeRead  InitiativeReadSource
 	TodayInitiative TodayInitiativeSource
 	Badges          BadgeSource
+	FoundingClaims  FoundingClaimSource
 	Network         NetworkSource
 	Events          EventSource
 	EventRead       EventReadSource

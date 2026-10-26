@@ -167,6 +167,7 @@ func (a *api) routes() []route {
 		a.staffRead("GET /donor/staff/content/sources/{source_id}", a.downloadSource),
 		a.staffWrite("POST /donor/staff/content/publish", a.publish),
 		a.staffWrite("POST /donor/staff/content/wording", a.setRecognitionWording),
+		a.staffWrite("POST /donor/staff/founding-claims", a.importFoundingClaims),
 
 		a.staffRead("GET /donor/staff/initiatives", a.staffInitiatives),
 		a.staffWrite("POST /donor/staff/initiatives", a.createInitiative),

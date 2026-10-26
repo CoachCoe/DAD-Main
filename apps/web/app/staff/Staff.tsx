@@ -101,6 +101,9 @@ export default function Staff({ q }: { q: string | null }) {
               {actor.permissions.includes("initiative.manage") && <Link href="/staff/initiatives">Initiatives</Link>}
               {actor.permissions.includes("event.manage") && <Link href="/staff/events">Events</Link>}
               {actor.permissions.includes("audit.read") && <Link href="/staff/audit">Audit history</Link>}
+              {actor.permissions.includes("badge.manage") && (
+                <Link href="/staff/founding-claims">Waitlist Founding Donors</Link>
+              )}
               {actor.permissions.includes("partner.manage") && (
                 <>
                   <Link href="/staff/partners">Partners</Link>

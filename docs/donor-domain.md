@@ -125,9 +125,11 @@ named streak milestone's notification; the yearly milestones after 1,460 days us
 standard wording. Earning rules and thresholds are not editable, and every change is audited.
 
 Any successful first gift before 2027-01-01 00:00 America/New_York earns Founding Donor
-status. Website-waitlist sign-ups and earlier website donors (D-6) are not yet imported, so
-they hold no grant until that migration runs. Use the processor's successful-payment timestamp,
-not checkout start or webhook arrival. Claiming after cutoff is allowed. The badge is
+status. Use the processor's successful-payment timestamp, not checkout start or webhook
+arrival. Website-waitlist sign-ups and earlier website donors (D-6) are Founding Donors too:
+staff import their addresses with sign-up dates before the cutoff, and a donor whose email
+matches earns the badge at their next update, without needing a gift before the cutoff. Only
+a hash of each imported address is kept, and the claims are deleted 90 days after the cutoff. Claiming after cutoff is allowed. The badge is
 permanent, including after refunds/cancellation. Changing the cutoff requires a product
 decision; existing awards remain permanent.
 

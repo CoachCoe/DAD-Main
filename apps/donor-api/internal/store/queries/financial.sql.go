@@ -48,6 +48,27 @@ func (q *Queries) ApplyReferralDelta(ctx context.Context, arg ApplyReferralDelta
 	return i, err
 }
 
+const foundingClaimed = `-- name: FoundingClaimed :one
+SELECT EXISTS(
+  SELECT 1 FROM donors d JOIN donor_founding_claims c
+    ON c.email_hash = encode(sha256(convert_to(lower(d.email), 'UTF8')), 'hex')
+  WHERE d.id = $1 AND c.expires_at > $2
+)::bool
+`
+
+type FoundingClaimedParams struct {
+	ID        pgtype.UUID        `json:"id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+// Whether the donor's email matches an unexpired waitlist claim (D-6).
+func (q *Queries) FoundingClaimed(ctx context.Context, arg FoundingClaimedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, foundingClaimed, arg.ID, arg.ExpiresAt)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const giftHistory = `-- name: GiftHistory :many
 SELECT g.stripe_object_id,g.donor_id,g.amount_minor,g.currency,g.frequency,g.paid_at,g.period_id,
 g.referrer_id,g.referral_kind,c.referral_expires_at
@@ -96,6 +117,39 @@ func (q *Queries) GiftHistory(ctx context.Context, donorID pgtype.UUID) ([]GiftH
 		return nil, err
 	}
 	return items, nil
+}
+
+const importFoundingClaims = `-- name: ImportFoundingClaims :execrows
+INSERT INTO donor_founding_claims(email_hash, signed_up_on, source, imported_at, expires_at)
+SELECT unnest($1::text[]), unnest($2::date[]), unnest($3::text[]),
+  $4::timestamptz, $5::timestamptz
+ON CONFLICT (email_hash) DO UPDATE SET
+  signed_up_on = least(donor_founding_claims.signed_up_on, EXCLUDED.signed_up_on),
+  source = CASE WHEN EXCLUDED.signed_up_on < donor_founding_claims.signed_up_on THEN EXCLUDED.source ELSE donor_founding_claims.source END
+WHERE EXCLUDED.signed_up_on < donor_founding_claims.signed_up_on
+`
+
+type ImportFoundingClaimsParams struct {
+	Hashes     []string           `json:"hashes"`
+	Dates      []pgtype.Date      `json:"dates"`
+	Sources    []string           `json:"sources"`
+	ImportedAt pgtype.Timestamptz `json:"imported_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+}
+
+// An address listed more than once keeps its earliest sign-up.
+func (q *Queries) ImportFoundingClaims(ctx context.Context, arg ImportFoundingClaimsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, importFoundingClaims,
+		arg.Hashes,
+		arg.Dates,
+		arg.Sources,
+		arg.ImportedAt,
+		arg.ExpiresAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertReferralCorrection = `-- name: InsertReferralCorrection :exec
@@ -253,6 +307,15 @@ func (q *Queries) Projection(ctx context.Context, donorID pgtype.UUID) (DonorMet
 		&i.Active,
 	)
 	return i, err
+}
+
+const purgeFoundingClaims = `-- name: PurgeFoundingClaims :exec
+DELETE FROM donor_founding_claims WHERE expires_at <= $1
+`
+
+func (q *Queries) PurgeFoundingClaims(ctx context.Context, expiresAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, purgeFoundingClaims, expiresAt)
+	return err
 }
 
 const referralTotals = `-- name: ReferralTotals :one

@@ -19,8 +19,9 @@ const (
 	touchPurgeBatch = 2000
 )
 
-// TouchRetention deletes referral touches past retention, and company-code
-// touches once they expire, since an expired one can never bind. A pass starts
+// TouchRetention deletes referral touches past retention, company-code
+// touches once they expire, since an expired one can never bind, and expired
+// waitlist claims (D-6). A pass starts
 // once an interval and deletes one batch per call until a batch comes up
 // short. Concurrent passes skip each other's rows, so every worker may run one.
 type TouchRetention struct {
@@ -37,7 +38,12 @@ func (r *TouchRetention) PurgeNext(ctx context.Context, now time.Time) (bool, er
 		if now.Before(r.next) {
 			return false, nil
 		}
-		if err := queries.New(r.DB).PurgeCompanyTouches(ctx, timestamp(now)); err != nil {
+		q := queries.New(r.DB)
+		if err := q.PurgeCompanyTouches(ctx, timestamp(now)); err != nil {
+			r.next = now.Add(touchPurgeInterval)
+			return false, err
+		}
+		if err := q.PurgeFoundingClaims(ctx, timestamp(now)); err != nil {
 			r.next = now.Add(touchPurgeInterval)
 			return false, err
 		}

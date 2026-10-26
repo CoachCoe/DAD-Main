@@ -99,3 +99,24 @@ INSERT INTO donor_retention_milestones(donor_id,days,cohort_at,checkpoint_at,ret
 VALUES($1,$2,$3,$4,$5,$6)
 ON CONFLICT(donor_id,days) DO UPDATE SET cohort_at=EXCLUDED.cohort_at,
 checkpoint_at=EXCLUDED.checkpoint_at,retained=EXCLUDED.retained,computed_at=EXCLUDED.computed_at;
+
+-- name: FoundingClaimed :one
+-- Whether the donor's email matches an unexpired waitlist claim (D-6).
+SELECT EXISTS(
+  SELECT 1 FROM donors d JOIN donor_founding_claims c
+    ON c.email_hash = encode(sha256(convert_to(lower(d.email), 'UTF8')), 'hex')
+  WHERE d.id = $1 AND c.expires_at > $2
+)::bool;
+
+-- name: ImportFoundingClaims :execrows
+-- An address listed more than once keeps its earliest sign-up.
+INSERT INTO donor_founding_claims(email_hash, signed_up_on, source, imported_at, expires_at)
+SELECT unnest(sqlc.arg(hashes)::text[]), unnest(sqlc.arg(dates)::date[]), unnest(sqlc.arg(sources)::text[]),
+  sqlc.arg(imported_at)::timestamptz, sqlc.arg(expires_at)::timestamptz
+ON CONFLICT (email_hash) DO UPDATE SET
+  signed_up_on = least(donor_founding_claims.signed_up_on, EXCLUDED.signed_up_on),
+  source = CASE WHEN EXCLUDED.signed_up_on < donor_founding_claims.signed_up_on THEN EXCLUDED.source ELSE donor_founding_claims.source END
+WHERE EXCLUDED.signed_up_on < donor_founding_claims.signed_up_on;
+
+-- name: PurgeFoundingClaims :exec
+DELETE FROM donor_founding_claims WHERE expires_at <= $1;

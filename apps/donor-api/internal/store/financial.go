@@ -290,7 +290,13 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		return projection{SaveProjectionParams: out}, err
 	}
 	refunds, refundBoundaries := refundsAsOf(h.Refunds, observations, now)
-	if err = projectConversion(&out, h, id, now); err != nil {
+	claimed := false
+	if !out.FoundingAwardedAt.Valid {
+		if claimed, err = q.FoundingClaimed(ctx, queries.FoundingClaimedParams{ID: id, ExpiresAt: timestamp(now)}); err != nil {
+			return projection{SaveProjectionParams: out}, err
+		}
+	}
+	if err = projectConversion(&out, h, id, claimed, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
 	if out.NetMinor, err = netMinor(h.Gifts, refunds, now); err != nil {
@@ -494,7 +500,8 @@ func nextRefresh(
 }
 
 // Arrival order must not determine attribution. The founding award stays earned.
-func projectConversion(out *queries.SaveProjectionParams, h history, id pgtype.UUID, now time.Time) error {
+// A donor on the website waitlist (claimed, D-6) earns it when matched.
+func projectConversion(out *queries.SaveProjectionParams, h history, id pgtype.UUID, claimed bool, now time.Time) error {
 	relations, err := recognition.Relationships(h.Gifts, now)
 	if err != nil {
 		return err
@@ -513,8 +520,11 @@ func projectConversion(out *queries.SaveProjectionParams, h history, id pgtype.U
 		return nil
 	}
 	at, qualified, err := recognition.FoundingQualifiedAt(h.Gifts, id.String(), now)
-	if qualified {
+	switch {
+	case qualified:
 		out.FoundingAwardedAt = timestamp(at)
+	case claimed:
+		out.FoundingAwardedAt = timestamp(now)
 	}
 	return err
 }
