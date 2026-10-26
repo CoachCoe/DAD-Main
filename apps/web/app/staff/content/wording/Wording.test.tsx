@@ -28,16 +28,19 @@ const wording = {
 };
 
 it("saves a badge's new wording and restores a milestone's default", async () => {
-  const fetch = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) =>
-    init?.method === "POST" ? Response.json({ saved: true }) : Response.json(wording),
-  );
+  const fetch = vi
+    .fn()
+    .mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "POST" ? Response.json({ saved: true }) : Response.json(wording),
+    );
   vi.stubGlobal("fetch", fetch);
   render(<Wording />);
   const title = (await screen.findAllByLabelText("Title"))[0];
   fireEvent.change(title, { target: { value: " Top Team " } });
   fireEvent.click(screen.getByRole("button", { name: "Save badge WT" }));
   expect(await screen.findByText("Saved the wording for badge WT.")).toBeTruthy();
-  const saves = () => fetch.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(init.body));
+  const saves = () =>
+    fetch.mock.calls.filter(([, init]) => init?.method === "POST").map(([, init]) => JSON.parse(init.body));
   expect(saves()).toEqual([{ kind: "BADGE", key: "WT", title: "Top Team", text: "Your team finishes a month at #1" }]);
 
   expect(screen.getByText(/Default: Your 30-day giving streak/)).toBeTruthy();

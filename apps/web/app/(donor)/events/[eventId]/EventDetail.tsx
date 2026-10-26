@@ -87,7 +87,9 @@ export default function EventDetail({ event: id }: { event: string }) {
           {!event.cancelled && <p>{placeSummary(event)}</p>}
           {!event.cancelled && !started && opensLater && event.booking_opens_at && (
             <p className="note">
-              {event.early_booking ? "As a Team Captain, you can reserve now, before booking opens on " : "Booking opens "}
+              {event.early_booking
+                ? "As a Team Captain, you can reserve now, before booking opens on "
+                : "Booking opens "}
               <time dateTime={event.booking_opens_at}>{formatDateTime(event.booking_opens_at)}</time>.
             </p>
           )}

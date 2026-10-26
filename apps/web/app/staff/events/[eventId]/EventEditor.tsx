@@ -152,7 +152,10 @@ export default function EventEditor({ event }: { event: string | null }) {
               {detail.cancelled_at && ` ${formatDateTime(detail.cancelled_at)}`}
             </p>
           )}
-          <form onSubmit={save} key={detail ? `${detail.id}-${detail.starts_at}-${detail.capacity}-${detail.booking_opens_at}` : "new"}>
+          <form
+            onSubmit={save}
+            key={detail ? `${detail.id}-${detail.starts_at}-${detail.capacity}-${detail.booking_opens_at}` : "new"}
+          >
             <fieldset disabled={cancelled}>
               <label>
                 Slug
