@@ -69,7 +69,7 @@ it("reserves the metric layout without announcing unverified results", async () 
       }),
   );
   const { container } = render(<DashboardPage />);
-  expect(container.querySelectorAll('[aria-hidden="true"] .metricSkeleton')).toHaveLength(5);
+  expect(container.querySelectorAll('[aria-hidden="true"] .metricSkeleton')).toHaveLength(8);
   expect(screen.getByRole("status")).toHaveTextContent("Loading your dashboard");
   expect(screen.queryByRole("heading", { name: "Link Referrals" })).not.toBeInTheDocument();
   expect(screen.queryByText("Earned")).not.toBeInTheDocument();
