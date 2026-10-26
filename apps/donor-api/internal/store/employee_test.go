@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"errors"
+	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +12,49 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// TestMatchOwed covers the pure matching-math function directly, including the
+// branches the DB-backed matching tests cannot reach: negative inputs and the
+// big.Int overflow guard (a silent-wrong-money branch otherwise untested).
+func TestMatchOwed(t *testing.T) {
+	cases := []struct {
+		name            string
+		giftsMinor      int64
+		rateBP          int32
+		capMinor        int64
+		want            int64
+		wantErrContains string
+	}{
+		{name: "basic 10%", giftsMinor: 50000, rateBP: 1000, capMinor: 0, want: 5000},
+		{name: "cap applies", giftsMinor: 50000, rateBP: 1000, capMinor: 5000, want: 5000},
+		{name: "under cap", giftsMinor: 50000, rateBP: 1000, capMinor: 6000, want: 5000},
+		{name: "zero gifts", giftsMinor: 0, rateBP: 1000, capMinor: 0, want: 0},
+		{name: "negative gifts", giftsMinor: -1, rateBP: 1000, capMinor: 0, wantErrContains: "invalid"},
+		{name: "negative rate", giftsMinor: 1, rateBP: -1, capMinor: 0, wantErrContains: "invalid"},
+		{name: "negative cap", giftsMinor: 1, rateBP: 1, capMinor: -1, wantErrContains: "invalid"},
+		// MaxInt64 * MaxInt32 / 10000 vastly exceeds int64 with no cap to clamp it.
+		{name: "overflow uncapped", giftsMinor: math.MaxInt64, rateBP: math.MaxInt32, capMinor: 0, wantErrContains: "exceeds supported range"},
+		// A cap clamps before the overflow guard is reached, so the same inputs succeed.
+		{name: "overflow but capped", giftsMinor: math.MaxInt64, rateBP: math.MaxInt32, capMinor: 5000, want: 5000},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := matchOwed(c.giftsMinor, c.rateBP, c.capMinor)
+			if c.wantErrContains != "" {
+				if err == nil || !strings.Contains(err.Error(), c.wantErrContains) {
+					t.Fatalf("want error containing %q, got %v", c.wantErrContains, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != c.want {
+				t.Fatalf("want %d, got %d", c.want, got)
+			}
+		})
+	}
+}
 
 // approvedPartner creates an APPROVED partner org with a company code and match
 // terms, returning its id.

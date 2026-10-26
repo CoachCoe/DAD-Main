@@ -78,9 +78,25 @@ func TestStaffPermissionMatrixAndExpiredSessions(t *testing.T) {
 	// Every permission any role carries, plus one that no role has, so the
 	// matrix also proves unknown permissions are denied.
 	allPermissions := []string{
-		"donor.read", "message.resend", "gift.refund", "gift.cancel", "data.export",
-		"staff.manage", "content.publish", "audit.read", "badge.manage", "partner.manage",
+		"audit.read", "badge.manage", "content.publish", "data.export", "donor.read",
+		"event.manage", "gift.cancel", "gift.refund", "initiative.manage", "message.resend",
+		"partner.manage", "report.read", "staff.manage",
 		"nonexistent.permission",
+	}
+	// Independent oracle: the permissions each role is expected to hold, spelled
+	// out here rather than read back from staffPermissions, so a mistake in the
+	// production catalog (rolePermissions) is caught instead of moving both sides
+	// of the assertion together. Keep in sync with PRD §8 deliberately, by hand.
+	wantPermissions := map[string]map[string]bool{
+		"SUPER_ADMIN": {
+			"audit.read": true, "badge.manage": true, "content.publish": true, "data.export": true,
+			"donor.read": true, "event.manage": true, "gift.cancel": true, "gift.refund": true,
+			"initiative.manage": true, "message.resend": true, "partner.manage": true,
+			"report.read": true, "staff.manage": true,
+		},
+		"OP_PARTNERSHIPS": {"partner.manage": true, "report.read": true},
+		"OP_GROWTH":       {"event.manage": true, "report.read": true},
+		"OP_IMPACT":       {"initiative.manage": true, "report.read": true},
 	}
 	// super-admin-only powers (PRD §8): no operator may ever hold these.
 	superAdminOnly := map[string]bool{
@@ -90,10 +106,8 @@ func TestStaffPermissionMatrixAndExpiredSessions(t *testing.T) {
 
 	for _, role := range []string{"SUPER_ADMIN", "OP_PARTNERSHIPS", "OP_GROWTH", "OP_IMPACT"} {
 		id, token := staffFixture(t, pool, role)
-		held := staffPermissions(role)
 		for _, permission := range allPermissions {
-			// Authoritative source of truth: the role's own permission set.
-			allowed := slices.Contains(held, permission)
+			allowed := wantPermissions[role][permission]
 			// §8 invariant: an operator never holds a super-admin-only power.
 			if role != superAdminRole && superAdminOnly[permission] && allowed {
 				t.Fatalf("%s must not hold super-admin-only permission %s", role, permission)
