@@ -67,13 +67,15 @@ func partnerRead[T any](
 	token string,
 	fn func(*queries.Queries, PartnerActor) (T, error),
 ) (T, error) {
-	var zero T
-	q := queries.New(db)
-	actor, err := authenticatePartner(ctx, q, token, time.Now().UTC())
-	if err != nil {
-		return zero, err
-	}
-	return fn(q, actor)
+	return transact(ctx, db, readSnapshot, func(tx pgx.Tx) (T, error) {
+		q := queries.New(tx)
+		actor, err := authenticatePartner(ctx, q, token, time.Now().UTC())
+		if err != nil {
+			var zero T
+			return zero, err
+		}
+		return fn(q, actor)
+	})
 }
 
 // partnerAdminWrite runs fn in a transaction for an authenticated partner ADMIN
@@ -84,7 +86,12 @@ func partnerAdminWrite[T any](
 	token string,
 	fn func(pgx.Tx, PartnerActor, time.Time) (T, error),
 ) (T, error) {
-	return transact(ctx, db, pgx.TxOptions{}, func(tx pgx.Tx) (T, error) {
+	return partnerAdminTransaction(ctx, db, token, pgx.TxOptions{}, fn)
+}
+
+func partnerAdminTransaction[T any](ctx context.Context, db *pgxpool.Pool, token string, opts pgx.TxOptions,
+	fn func(pgx.Tx, PartnerActor, time.Time) (T, error)) (T, error) {
+	return transact(ctx, db, opts, func(tx pgx.Tx) (T, error) {
 		var zero T
 		q := queries.New(tx)
 		now := time.Now().UTC()

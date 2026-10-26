@@ -62,6 +62,21 @@ Cohort identity is a donor ID, so a verified email change must not create anothe
 
 ## Billing failure and recovery history
 
+The staff report uses first-gift donor cohorts, including donors who never refer anyone,
+for the viral denominator. Financial history is evaluated at the report cutoff rather
+than using today's net projection. Billing recovery retains its original failure even
+after the current invoice becomes paid, and reports recovery within grace separately.
+Missing observations or inconsistent amounts make the metric explicitly unavailable.
+
+Streak survival is materialized by the projections worker at 30, 90, 180 and 365 local
+calendar days after the first recurring gift. Each checkpoint replays verified financial
+facts, refunds and cancellation boundaries at that time. A later lapse cannot erase an
+earlier survival result, and restarting does not count as surviving the original run.
+Unknown billing history stays unknown. Run the projections worker after upgrading to
+rules version 8 to backfill these checkpoints. The report discloses incomplete coverage
+until the backfill completes. Landing-to-gift timing remains unavailable without landing
+linkage; account creation is never substituted for landing time.
+
 The event worker appends `billing-history` in the same transaction as the validated
 period, gift, and projection writes. Invalid facts roll back together. `source_event_id`
 references the verified Stripe inbox; the unique constraint makes worker replay safe.

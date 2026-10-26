@@ -7454,6 +7454,18 @@
             "null"
            ],
            "format": "date-time"
+          },
+          "has_logo": {
+           "type": "boolean"
+          },
+          "committed_verified": {
+           "type": "boolean"
+          },
+          "deployed_verified": {
+           "type": "boolean"
+          },
+          "people_reached_verified": {
+           "type": "boolean"
           }
          },
          "required": [
@@ -7468,7 +7480,11 @@
           "employees_enrolled",
           "workforce_size",
           "enrolled_percent",
-          "updated_at"
+          "updated_at",
+          "has_logo",
+          "committed_verified",
+          "deployed_verified",
+          "people_reached_verified"
          ],
          "additionalProperties": false
         }
@@ -7915,6 +7931,12 @@
              "created_at": {
               "type": "string",
               "format": "date-time"
+             },
+             "downloadable": {
+              "type": "boolean"
+             },
+             "people_reached_verified": {
+              "type": "boolean"
              }
             },
             "required": [
@@ -7923,7 +7945,9 @@
              "deployed_minor",
              "people_reached",
              "exported_by",
-             "created_at"
+             "created_at",
+             "downloadable",
+             "people_reached_verified"
             ],
             "additionalProperties": false
            }
@@ -9947,6 +9971,174 @@
       "$ref": "#/components/responses/Unavailable"
      }
     }
+   }
+  },
+  "/donor/partner/reports/{report_id}/report.pdf": {
+   "get": {
+    "operationId": "partnerRetainedReport",
+    "summary": "Download an immutable retained export owned by this partner",
+    "tags": [
+     "Partner"
+    ],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Branded impact report PDF",
+      "content": {
+       "application/pdf": {
+        "schema": {
+         "type": "string",
+         "format": "binary"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "parameters": [
+     {
+      "in": "path",
+      "name": "report_id",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      }
+     }
+    ]
+   }
+  },
+  "/donor/partner/logo": {
+   "get": {
+    "operationId": "partnerLogo",
+    "summary": "Read the organization logo",
+    "tags": [
+     "Partner"
+    ],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Branded impact report PDF",
+      "content": {
+       "image/png": {
+        "schema": {
+         "type": "string",
+         "format": "binary"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   },
+   "post": {
+    "operationId": "partnerSaveLogo",
+    "summary": "Upload or remove a partner logo (admin only)",
+    "tags": [
+     "Partner"
+    ],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "browser",
+     "native"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "data_url": {
+          "type": "string",
+          "maxLength": 350000,
+          "description": "Base64 PNG/JPEG, at most 256 KiB and 512 by 512 pixels. Empty explicitly removes the logo. Stored as PNG without metadata."
+         }
+        },
+        "required": [
+         "data_url"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "saved": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "saved"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Replaces the organization's name and description (\u00a77.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000."
    }
   }
  },

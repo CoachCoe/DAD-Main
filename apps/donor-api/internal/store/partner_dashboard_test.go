@@ -3,12 +3,16 @@ package store
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
+	"image"
+	"image/png"
 	"strings"
 	"testing"
 	"time"
 
 	"dad/donor-api/internal/dbroles"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -57,7 +61,7 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	apps := PartnerApplicationService{DB: pool, Staff: &StaffService{DB: as(t, dbroles.API)}}
-	dash := PartnerDashboardService{PartnerPortalService{DB: pool}}
+	dash := PartnerDashboardService{PartnerPortalService{DB: as(t, dbroles.API)}}
 	_, superToken := staffFixture(t, pool, "SUPER_ADMIN")
 	cleanPartners(t, pool)
 
@@ -74,6 +78,9 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	adminSession := issueTestPartnerSession(t, pool, adminID)
+	if err := dash.SaveLogo(ctx, adminSession, partnerTestLogo(t, 32, 16)); err != nil {
+		t.Fatal(err)
+	}
 
 	// Two published initiatives: $1,000 committed / $400 deployed / 150 people,
 	// and $500 committed / $100 deployed / 50 people. Tiles sum them.
@@ -119,8 +126,42 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 		t.Fatalf("not a PDF: %d bytes", len(pdf))
 	}
 	exports, err := dash.Exports(ctx, adminSession)
-	if err != nil || len(exports) != 1 || exports[0].CommittedMinor != 150000 {
+	if err != nil || len(exports) != 1 || exports[0].CommittedMinor != 150000 || !exports[0].Downloadable ||
+		!exports[0].PeopleReachedVerified {
 		t.Fatalf("export history: %+v %v", exports, err)
+	}
+	var reportID pgtype.UUID
+	if err := reportID.Scan(exports[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := dash.SaveProfile(ctx, adminSession, "Delta Updated", "Changed since export"); err != nil {
+		t.Fatal(err)
+	}
+	retained, err := dash.ReportArtifact(ctx, adminSession, reportID)
+	if err != nil || !bytes.Equal(retained, pdf) {
+		t.Fatalf("old export was changed or regenerated: %v", err)
+	}
+	var snapshotName string
+	if err := pool.QueryRow(ctx, "SELECT snapshot->'overview'->>'organization' FROM donor_partner_reports WHERE id=$1", reportID).Scan(&snapshotName); err != nil ||
+		snapshotName != "Delta Inc" {
+		t.Fatalf("snapshot changed: %q %v", snapshotName, err)
+	}
+	other := approvedPartner(t, pool, "Other Report Owner", "OTHER-REPORT", 0, 0)
+	otherUser := mustNewID(t)
+	mustExec(
+		t,
+		pool,
+		"INSERT INTO donor_partner_users(id,partner_id,email,name,role) VALUES($1,$2,'other@report.test','Other','ADMIN')",
+		otherUser,
+		other,
+	)
+	otherSession := issueTestPartnerSession(t, pool, otherUser.String())
+	t.Cleanup(func() {
+		cleanExec(t, "DELETE FROM donor_partner_sessions WHERE partner_user_id=$1", otherUser)
+		cleanExec(t, "DELETE FROM donor_partner_users WHERE id=$1", otherUser)
+	})
+	if _, err := dash.ReportArtifact(ctx, otherSession, reportID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("another organization read the export: %v", err)
 	}
 
 	// A VIEWER can read tiles but cannot export (admin-only).
@@ -137,6 +178,9 @@ func TestPartnerDashboardAndReport(t *testing.T) {
 	}
 	if _, err := dash.ExportReport(ctx, viewerSession); !errors.Is(err, ErrPartnerForbidden) {
 		t.Fatalf("viewer exported a report: %v", err)
+	}
+	if got, err := dash.ReportArtifact(ctx, viewerSession, reportID); err != nil || !bytes.Equal(got, pdf) {
+		t.Fatalf("viewer could not read a retained export: %v", err)
 	}
 }
 
@@ -178,6 +222,9 @@ func TestPartnerProfileEditedByAdminsOnly(t *testing.T) {
 	if err != nil || ov.Organization != "Zeta Group" || ov.Description != "Clean water in three counties." {
 		t.Fatalf("saved profile reads back as %q / %q (%v)", ov.Organization, ov.Description, err)
 	}
+	if ov.CommittedVerified || ov.DeployedVerified || ov.PeopleReachedVerified {
+		t.Fatalf("unknown figures were labeled verified: %+v", ov)
+	}
 	if err := dash.SaveProfile(ctx, viewer, "Viewer Co", ""); !errors.Is(err, ErrPartnerForbidden) {
 		t.Fatalf("a viewer edited the profile: %v", err)
 	}
@@ -189,4 +236,39 @@ func TestPartnerProfileEditedByAdminsOnly(t *testing.T) {
 	if err := dash.SaveProfile(ctx, admin, "Zeta", strings.Repeat("d", 4001)); !errors.Is(err, ErrPartnerApplication) {
 		t.Fatalf("an over-long description was accepted: %v", err)
 	}
+	logo := partnerTestLogo(t, 32, 16)
+	if err := dash.SaveLogo(ctx, viewer, logo); !errors.Is(err, ErrPartnerForbidden) {
+		t.Fatalf("viewer changed logo: %v", err)
+	}
+	for _, invalid := range []string{"data:image/svg+xml;base64,PHN2Zz4=", "data:image/png;base64,bad", partnerTestLogo(t, 513, 1), strings.Repeat("a", 350001)} {
+		if err := dash.SaveLogo(ctx, admin, invalid); !errors.Is(err, ErrPartnerApplication) {
+			t.Fatalf("unsafe logo accepted: %v", err)
+		}
+	}
+	if err := dash.SaveLogo(ctx, admin, logo); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := dash.Logo(ctx, viewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := png.DecodeConfig(bytes.NewReader(stored))
+	if err != nil || config.Width != 32 || config.Height != 16 {
+		t.Fatalf("logo round trip: %+v %v", config, err)
+	}
+	if err := dash.SaveLogo(ctx, admin, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := dash.Logo(ctx, viewer); err != nil || len(got) != 0 {
+		t.Fatalf("logo removal failed: %v", err)
+	}
+}
+
+func partnerTestLogo(t *testing.T, width, height int) string {
+	t.Helper()
+	var data bytes.Buffer
+	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, width, height))); err != nil {
+		t.Fatal(err)
+	}
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data.Bytes())
 }

@@ -1,4 +1,5 @@
 "use client";
+import Image from "next/image";
 import Link from "next/link";
 import { useId, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
@@ -300,8 +301,18 @@ function ReportsSection({ admin }: { admin: boolean }) {
                     <span className="note">by {row.exported_by}</span>
                   </span>
                   <span>
-                    {formatMoney(row.committed_minor)} committed · {row.people_reached.toLocaleString("en-US")} people
+                    {formatMoney(row.committed_minor)} committed ·{" "}
+                    {row.people_reached_verified
+                      ? `${row.people_reached.toLocaleString("en-US")} people`
+                      : "People reached awaiting verification"}
                   </span>
+                  {row.downloadable ? (
+                    <a href={`/api/donor/partner/reports/${encodeURIComponent(row.id)}/report.pdf`} download>
+                      Download report
+                    </a>
+                  ) : (
+                    <span className="note">File was not retained</span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -480,8 +491,98 @@ function OrganizationSection({ overview, onSaved }: { overview: Overview; onSave
           {busy ? "Saving…" : "Save profile"}
         </button>
       </form>
+      <LogoEditor hasLogo={overview.has_logo} onSaved={onSaved} />
       <Announcer status={status} alert={error} />
     </section>
+  );
+}
+
+function LogoEditor({ hasLogo, onSaved }: { hasLogo: boolean; onSaved: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [version, setVersion] = useState(0);
+  async function save(dataURL: string) {
+    setBusy(true);
+    setStatus("");
+    setError("");
+    try {
+      await api("/donor/partner/logo", {
+        method: "POST",
+        body: JSON.stringify({ data_url: dataURL } satisfies RequestBody<"/donor/partner/logo", "post">),
+      });
+      setVersion((v) => v + 1);
+      setStatus(dataURL ? "Organization logo saved." : "Organization logo removed.");
+      onSaved();
+    } catch (cause) {
+      setError(failureMessage(cause, "The logo could not be saved. Please retry."));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function upload(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setStatus("");
+    setError("");
+    const file = new FormData(event.currentTarget).get("logo");
+    if (
+      !(file instanceof File) ||
+      file.size === 0 ||
+      file.size > 256 * 1024 ||
+      !["image/png", "image/jpeg"].includes(file.type)
+    ) {
+      setError("Choose a PNG or JPEG up to 256 KiB.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const dataURL = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("File could not be read"));
+        reader.readAsDataURL(file);
+      });
+      await save(dataURL);
+    } catch {
+      setError("The image could not be read. Please choose it again.");
+      setBusy(false);
+    }
+  }
+  return (
+    <div>
+      <h3>Organization logo</h3>
+      {hasLogo && (
+        <Image
+          src={`/api/donor/partner/logo?v=${version}`}
+          alt="Your organization logo"
+          width={160}
+          height={80}
+          unoptimized
+          style={{ objectFit: "contain" }}
+        />
+      )}
+      <form onSubmit={upload}>
+        <fieldset disabled={busy}>
+          <label>
+            Logo image
+            <input type="file" name="logo" accept="image/png,image/jpeg" required aria-describedby="logo-help" />
+          </label>
+          <p className="note" id="logo-help">
+            PNG or JPEG, up to 512 by 512 pixels and 256 KiB. Included in new PDF reports.
+          </p>
+          <button type="submit" className="button">
+            {busy ? "Saving logo…" : "Upload logo"}
+          </button>
+          {hasLogo && (
+            <button type="button" className="secondary" onClick={() => save("")}>
+              Remove logo
+            </button>
+          )}
+        </fieldset>
+      </form>
+      <Announcer status={status} alert={error} />
+    </div>
   );
 }
 
@@ -525,15 +626,23 @@ export default function Dashboard() {
           <section id="overview" aria-labelledby="overview-heading">
             <h2 id="overview-heading">Overview</h2>
             <div className="metrics">
-              <Tile label="Committed" value={formatMoney(o.committed_minor)} detail="Across your initiatives" />
+              <Tile
+                label="Committed"
+                value={o.committed_verified ? formatMoney(o.committed_minor) : "Awaiting verification"}
+                detail="Across your initiatives"
+              />
               <Tile
                 label="Deployed"
-                value={formatMoney(o.deployed_minor)}
-                detail={`${o.deployed_percent}% of committed`}
+                value={o.deployed_verified ? formatMoney(o.deployed_minor) : "Awaiting verification"}
+                detail={
+                  o.deployed_verified && o.committed_verified
+                    ? `${o.deployed_percent}% of committed`
+                    : "Verified category totals only"
+                }
               />
               <Tile
                 label="People reached"
-                value={o.people_reached.toLocaleString("en-US")}
+                value={o.people_reached_verified ? o.people_reached.toLocaleString("en-US") : "Awaiting verification"}
                 detail="Verified figures only"
               />
               <Tile

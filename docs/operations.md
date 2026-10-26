@@ -650,6 +650,22 @@ renewal-cohort rules.
 The enrolment CSV has headers only until R2. Keep exports private and apply an approved
 retention policy. Sensitive source documents have separate authenticated downloads.
 
+## Partner report artifacts
+
+Partner administrators upload a PNG or JPEG logo from the organization section, up to
+512 by 512 pixels and 256 KiB. The API validates dimensions before decoding, removes
+metadata, and stores a normalized PNG. Empty input explicitly removes the logo. No
+external image URL is fetched.
+
+New PDF exports retain their exact bytes and dashboard snapshot. A later edit to the
+organization, logo, metrics or spending never changes an existing export. Authenticated
+users of that organization can download retained files; only administrators can create
+exports or change the logo. Historical entries created before artifact retention remain
+listed as unavailable because their original contents cannot be reconstructed safely.
+Unverified figures are labeled awaiting verification in the portal and omitted from the
+PDF. Published zero values remain distinguishable from unknown values. PDFs carry a
+sandbox label, export time, logo, and a header and footer on each page.
+
 ## Load testing with representative data
 
 Capacity is measured against a populated staging deployment: `cmd/seed` fills a

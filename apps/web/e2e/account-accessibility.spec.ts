@@ -305,6 +305,10 @@ test("authenticated accessible surface: /account/employer", async ({ page }) => 
       json: {
         partner_id: "9c7e1f20-0a1b-4c3d-8e5f-6a7b8c9d0e1f",
         organization: "Delta Inc",
+        has_logo: false,
+        committed_verified: true,
+        deployed_verified: true,
+        people_reached_verified: true,
         team_name: "Team A",
         leaderboard: [],
       },
@@ -326,6 +330,10 @@ test("authenticated accessible surface: /account/employer", async ({ page }) => 
 const partnerPortal: Record<string, unknown> = {
   "/donor/partner/overview": {
     organization: "Delta Inc",
+    has_logo: false,
+    committed_verified: true,
+    deployed_verified: true,
+    people_reached_verified: true,
     description: "Meals and water across northern Nevada.",
     role: "ADMIN",
     company_code: "DELTA-7KQ4MX",

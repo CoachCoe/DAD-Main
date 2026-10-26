@@ -134,6 +134,12 @@ SELECT
   p.company_code,
   p.workforce_size,
   p.description,
+  (p.logo_png IS NOT NULL)::boolean AS has_logo,
+  EXISTS(SELECT 1 FROM donor_initiatives i WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED') AS committed_verified,
+  EXISTS(SELECT 1 FROM donor_initiative_spend s JOIN donor_initiatives i ON i.id=s.initiative_id
+    WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED') AS deployed_verified,
+  EXISTS(SELECT 1 FROM donor_initiative_metrics m JOIN donor_initiatives i ON i.id=m.initiative_id
+    WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE') AS people_reached_verified,
   coalesce((SELECT sum(i.committed_minor) FROM donor_initiatives i
             WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
@@ -155,17 +161,28 @@ WHERE p.id=$1;
 -- name: InsertPartnerReport :exec
 -- P-14: record one dashboard PDF export for the export-history list.
 INSERT INTO donor_partner_reports
-  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7);
+  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at, pdf, snapshot)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9);
 
 -- name: PartnerReports :many
 -- P-14: previous exports for a partner, newest first, with the exporter name.
-SELECT r.id, r.committed_minor, r.deployed_minor, r.people_reached, r.created_at, u.name AS exported_by_name
+SELECT r.id, r.committed_minor, r.deployed_minor, r.people_reached, r.created_at, u.name AS exported_by_name,
+  (r.pdf IS NOT NULL)::boolean AS downloadable,
+  coalesce((r.snapshot->'overview'->>'people_reached_verified')::boolean,false)::boolean AS people_reached_verified
 FROM donor_partner_reports r
 JOIN donor_partner_users u ON u.id = r.exported_by
 WHERE r.partner_id=$1
 ORDER BY r.created_at DESC
 LIMIT 50;
+
+-- name: PartnerReportArtifact :one
+SELECT pdf FROM donor_partner_reports WHERE id=$1 AND partner_id=$2 AND pdf IS NOT NULL;
+
+-- name: PartnerLogo :one
+SELECT logo_png FROM donor_partner_signups WHERE id=$1;
+
+-- name: SetPartnerLogo :exec
+UPDATE donor_partner_signups SET logo_png=$2 WHERE id=$1 AND approved_at IS NOT NULL;
 
 -- name: PartnerInitiativesList :many
 -- P-11: the partner's published initiatives with committed and deployed totals

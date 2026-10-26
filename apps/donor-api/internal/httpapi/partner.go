@@ -33,6 +33,9 @@ type PartnerPortalSource interface {
 	Spend(ctx context.Context, token string) ([]store.PartnerSpendRow, error)
 	Exports(ctx context.Context, token string) ([]store.PartnerReportRow, error)
 	ExportReport(ctx context.Context, token string) ([]byte, error)
+	ReportArtifact(context.Context, string, pgtype.UUID) ([]byte, error)
+	Logo(context.Context, string) ([]byte, error)
+	SaveLogo(context.Context, string, string) error
 	CompanyCode(ctx context.Context, token string) (string, error)
 }
 
@@ -303,6 +306,65 @@ func (a *api) partnerReport(w http.ResponseWriter, r *http.Request, session stri
 	w.Header().Set("Content-Disposition", `attachment; filename="dad-impact-report.pdf"`)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(pdf)
+}
+
+func (a *api) partnerReportArtifact(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "report_id")
+	if !ok {
+		return
+	}
+	if !a.partnerPortal().available(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, staffTimeout)
+	defer cancel()
+	pdf, err := a.PartnerPortal.ReportArtifact(ctx, session, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, r, http.StatusNotFound, "This report was not retained or is not available", nil)
+		return
+	}
+	if err != nil {
+		respond(w, r, nil, err, partnerStatusCode)
+		return
+	}
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", `attachment; filename="dad-impact-report.pdf"`)
+	_, _ = w.Write(pdf)
+}
+
+func (a *api) partnerLogo(w http.ResponseWriter, r *http.Request, session string) {
+	if !a.partnerPortal().available(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, staffTimeout)
+	defer cancel()
+	logo, err := a.PartnerPortal.Logo(ctx, session)
+	if err != nil {
+		respond(w, r, nil, err, partnerStatusCode)
+		return
+	}
+	if len(logo) == 0 {
+		writeError(w, r, http.StatusNotFound, "No organization logo has been uploaded", nil)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	_, _ = w.Write(logo)
+}
+
+func (a *api) partnerSaveLogo(w http.ResponseWriter, r *http.Request, session string) {
+	var body struct {
+		DataURL *string `json:"data_url"`
+	}
+	if !decodeJSONLimit(w, r, &body, 360000) {
+		return
+	}
+	if body.DataURL == nil {
+		invalidFields(w, r)
+		return
+	}
+	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"saved": true}, a.PartnerPortal.SaveLogo(ctx, session, *body.DataURL)
+	})
 }
 
 func (a *api) staffPartners(w http.ResponseWriter, r *http.Request, session string) {

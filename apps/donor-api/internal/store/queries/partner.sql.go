@@ -254,8 +254,8 @@ func (q *Queries) InsertPartnerApplication(ctx context.Context, arg InsertPartne
 
 const insertPartnerReport = `-- name: InsertPartnerReport :exec
 INSERT INTO donor_partner_reports
-  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7)
+  (id, partner_id, exported_by, committed_minor, deployed_minor, people_reached, created_at, pdf, snapshot)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 `
 
 type InsertPartnerReportParams struct {
@@ -266,6 +266,8 @@ type InsertPartnerReportParams struct {
 	DeployedMinor  int64              `json:"deployed_minor"`
 	PeopleReached  int64              `json:"people_reached"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	Pdf            []byte             `json:"pdf"`
+	Snapshot       []byte             `json:"snapshot"`
 }
 
 // P-14: record one dashboard PDF export for the export-history list.
@@ -278,6 +280,8 @@ func (q *Queries) InsertPartnerReport(ctx context.Context, arg InsertPartnerRepo
 		arg.DeployedMinor,
 		arg.PeopleReached,
 		arg.CreatedAt,
+		arg.Pdf,
+		arg.Snapshot,
 	)
 	return err
 }
@@ -645,6 +649,17 @@ func (q *Queries) PartnerInitiativesList(ctx context.Context, partnerSignupID pg
 	return items, nil
 }
 
+const partnerLogo = `-- name: PartnerLogo :one
+SELECT logo_png FROM donor_partner_signups WHERE id=$1
+`
+
+func (q *Queries) PartnerLogo(ctx context.Context, id pgtype.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, partnerLogo, id)
+	var logo_png []byte
+	err := row.Scan(&logo_png)
+	return logo_png, err
+}
+
 const partnerMessageRecipients = `-- name: PartnerMessageRecipients :many
 SELECT email,name FROM donor_partner_users
 WHERE partner_id=$1 AND disabled=false AND accepted_at IS NOT NULL
@@ -680,7 +695,7 @@ func (q *Queries) PartnerMessageRecipients(ctx context.Context, partnerID pgtype
 }
 
 const partnerOrgByID = `-- name: PartnerOrgByID :one
-SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at, approved_at, partner_type, workforce_size, match_rate_bp, match_cap_minor, company_code, logo_url, description FROM donor_partner_signups WHERE id=$1
+SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at, approved_at, partner_type, workforce_size, match_rate_bp, match_cap_minor, company_code, logo_url, description, logo_png FROM donor_partner_signups WHERE id=$1
 `
 
 func (q *Queries) PartnerOrgByID(ctx context.Context, id pgtype.UUID) (DonorPartnerSignup, error) {
@@ -704,6 +719,7 @@ func (q *Queries) PartnerOrgByID(ctx context.Context, id pgtype.UUID) (DonorPart
 		&i.CompanyCode,
 		&i.LogoUrl,
 		&i.Description,
+		&i.LogoPng,
 	)
 	return i, err
 }
@@ -713,6 +729,12 @@ SELECT
   p.company_code,
   p.workforce_size,
   p.description,
+  (p.logo_png IS NOT NULL)::boolean AS has_logo,
+  EXISTS(SELECT 1 FROM donor_initiatives i WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED') AS committed_verified,
+  EXISTS(SELECT 1 FROM donor_initiative_spend s JOIN donor_initiatives i ON i.id=s.initiative_id
+    WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED') AS deployed_verified,
+  EXISTS(SELECT 1 FROM donor_initiative_metrics m JOIN donor_initiatives i ON i.id=m.initiative_id
+    WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE') AS people_reached_verified,
   coalesce((SELECT sum(i.committed_minor) FROM donor_initiatives i
             WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
@@ -733,14 +755,18 @@ WHERE p.id=$1
 `
 
 type PartnerOverviewTotalsRow struct {
-	CompanyCode       pgtype.Text        `json:"company_code"`
-	WorkforceSize     int32              `json:"workforce_size"`
-	Description       string             `json:"description"`
-	CommittedMinor    int64              `json:"committed_minor"`
-	DeployedMinor     int64              `json:"deployed_minor"`
-	PeopleReached     int64              `json:"people_reached"`
-	EmployeesEnrolled int64              `json:"employees_enrolled"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	CompanyCode           pgtype.Text        `json:"company_code"`
+	WorkforceSize         int32              `json:"workforce_size"`
+	Description           string             `json:"description"`
+	HasLogo               bool               `json:"has_logo"`
+	CommittedVerified     bool               `json:"committed_verified"`
+	DeployedVerified      bool               `json:"deployed_verified"`
+	PeopleReachedVerified bool               `json:"people_reached_verified"`
+	CommittedMinor        int64              `json:"committed_minor"`
+	DeployedMinor         int64              `json:"deployed_minor"`
+	PeopleReached         int64              `json:"people_reached"`
+	EmployeesEnrolled     int64              `json:"employees_enrolled"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 // P-10 tiles over the partner's published initiatives: committed, deployed
@@ -753,6 +779,10 @@ func (q *Queries) PartnerOverviewTotals(ctx context.Context, id pgtype.UUID) (Pa
 		&i.CompanyCode,
 		&i.WorkforceSize,
 		&i.Description,
+		&i.HasLogo,
+		&i.CommittedVerified,
+		&i.DeployedVerified,
+		&i.PeopleReachedVerified,
 		&i.CommittedMinor,
 		&i.DeployedMinor,
 		&i.PeopleReached,
@@ -762,8 +792,26 @@ func (q *Queries) PartnerOverviewTotals(ctx context.Context, id pgtype.UUID) (Pa
 	return i, err
 }
 
+const partnerReportArtifact = `-- name: PartnerReportArtifact :one
+SELECT pdf FROM donor_partner_reports WHERE id=$1 AND partner_id=$2 AND pdf IS NOT NULL
+`
+
+type PartnerReportArtifactParams struct {
+	ID        pgtype.UUID `json:"id"`
+	PartnerID pgtype.UUID `json:"partner_id"`
+}
+
+func (q *Queries) PartnerReportArtifact(ctx context.Context, arg PartnerReportArtifactParams) ([]byte, error) {
+	row := q.db.QueryRow(ctx, partnerReportArtifact, arg.ID, arg.PartnerID)
+	var pdf []byte
+	err := row.Scan(&pdf)
+	return pdf, err
+}
+
 const partnerReports = `-- name: PartnerReports :many
-SELECT r.id, r.committed_minor, r.deployed_minor, r.people_reached, r.created_at, u.name AS exported_by_name
+SELECT r.id, r.committed_minor, r.deployed_minor, r.people_reached, r.created_at, u.name AS exported_by_name,
+  (r.pdf IS NOT NULL)::boolean AS downloadable,
+  coalesce((r.snapshot->'overview'->>'people_reached_verified')::boolean,false)::boolean AS people_reached_verified
 FROM donor_partner_reports r
 JOIN donor_partner_users u ON u.id = r.exported_by
 WHERE r.partner_id=$1
@@ -772,12 +820,14 @@ LIMIT 50
 `
 
 type PartnerReportsRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	CommittedMinor int64              `json:"committed_minor"`
-	DeployedMinor  int64              `json:"deployed_minor"`
-	PeopleReached  int64              `json:"people_reached"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	ExportedByName string             `json:"exported_by_name"`
+	ID                    pgtype.UUID        `json:"id"`
+	CommittedMinor        int64              `json:"committed_minor"`
+	DeployedMinor         int64              `json:"deployed_minor"`
+	PeopleReached         int64              `json:"people_reached"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	ExportedByName        string             `json:"exported_by_name"`
+	Downloadable          bool               `json:"downloadable"`
+	PeopleReachedVerified bool               `json:"people_reached_verified"`
 }
 
 // P-14: previous exports for a partner, newest first, with the exporter name.
@@ -797,6 +847,8 @@ func (q *Queries) PartnerReports(ctx context.Context, partnerID pgtype.UUID) ([]
 			&i.PeopleReached,
 			&i.CreatedAt,
 			&i.ExportedByName,
+			&i.Downloadable,
+			&i.PeopleReachedVerified,
 		); err != nil {
 			return nil, err
 		}
@@ -1172,6 +1224,20 @@ type RevokePartnerUserSessionsParams struct {
 
 func (q *Queries) RevokePartnerUserSessions(ctx context.Context, arg RevokePartnerUserSessionsParams) error {
 	_, err := q.db.Exec(ctx, revokePartnerUserSessions, arg.PartnerUserID, arg.RevokedAt)
+	return err
+}
+
+const setPartnerLogo = `-- name: SetPartnerLogo :exec
+UPDATE donor_partner_signups SET logo_png=$2 WHERE id=$1 AND approved_at IS NOT NULL
+`
+
+type SetPartnerLogoParams struct {
+	ID      pgtype.UUID `json:"id"`
+	LogoPng []byte      `json:"logo_png"`
+}
+
+func (q *Queries) SetPartnerLogo(ctx context.Context, arg SetPartnerLogoParams) error {
+	_, err := q.db.Exec(ctx, setPartnerLogo, arg.ID, arg.LogoPng)
 	return err
 }
 

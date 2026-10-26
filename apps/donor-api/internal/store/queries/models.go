@@ -324,6 +324,7 @@ type DonorPartnerSignup struct {
 	CompanyCode    pgtype.Text        `json:"company_code"`
 	LogoUrl        string             `json:"logo_url"`
 	Description    string             `json:"description"`
+	LogoPng        []byte             `json:"logo_png"`
 }
 
 type DonorPartnerUser struct {

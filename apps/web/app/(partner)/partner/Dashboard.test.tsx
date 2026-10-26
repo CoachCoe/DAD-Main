@@ -4,7 +4,68 @@ import Dashboard from "./Dashboard";
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("hides unverified overview values instead of presenting fabricated zeros", async () => {
+  stub({
+    committed_minor: 0,
+    deployed_minor: 0,
+    people_reached: 0,
+    committed_verified: false,
+    deployed_verified: false,
+    people_reached_verified: false,
+  });
+  render(<Dashboard />);
+  const tiles = within(await screen.findByRole("region", { name: "Overview" }));
+  expect(tiles.getAllByText("Awaiting verification")).toHaveLength(3);
+  expect(tiles.queryByText("$0.00")).not.toBeInTheDocument();
+  expect(tiles.queryByText("0")).not.toBeInTheDocument();
+});
+
+it("links retained reports and explains unavailable historical files", async () => {
+  stub();
+  const base = vi.mocked(fetch).getMockImplementation();
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/exports"))
+      return Promise.resolve(
+        Response.json({
+          exports: [
+            {
+              id: "retained",
+              created_at: "2026-10-20T15:00:00Z",
+              exported_by: "Ana",
+              committed_minor: 150000,
+              people_reached: 200,
+              people_reached_verified: true,
+              downloadable: true,
+            },
+            {
+              id: "legacy",
+              created_at: "2026-10-19T15:00:00Z",
+              exported_by: "Ana",
+              committed_minor: 0,
+              people_reached: 0,
+              people_reached_verified: false,
+              downloadable: false,
+            },
+          ],
+        }),
+      );
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  expect(await screen.findByRole("link", { name: "Download report" })).toHaveAttribute(
+    "href",
+    "/api/donor/partner/reports/retained/report.pdf",
+  );
+  expect(screen.getByText("File was not retained")).toBeInTheDocument();
+  expect(screen.getByText(/People reached awaiting verification/)).toBeInTheDocument();
+});
+
 const overview = {
+  has_logo: false,
+  committed_verified: true,
+  deployed_verified: true,
+  people_reached_verified: true,
   organization: "Delta Inc",
   description: "Meals and water across northern Nevada.",
   role: "ADMIN",
