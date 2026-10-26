@@ -201,7 +201,7 @@ WITH projection AS (
       AND greatest(g.paid_at,g.created_at)>$4::timestamptz
 )
 INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
-SELECT gen_random_uuid(),c.donor_id,c.category,c.dedup_key,c.context,c.available_at,c.available_at+($1::timestamptz-$2::timestamptz)
+SELECT gen_random_uuid(),c.donor_id,c.category,c.dedup_key,c.context,c.available_at,c.available_at+make_interval(secs=>extract(epoch FROM $1::timestamptz-$2::timestamptz))
 FROM candidates c
 WHERE EXISTS(SELECT 1 FROM donor_sessions s WHERE s.donor_id=c.donor_id AND s.push_token IS NOT NULL
     AND coalesce(s.refresh_expires_at,s.expires_at)>$2::timestamptz)
@@ -227,6 +227,10 @@ type QueuePushIntentsParams struct {
 // while the streak it threatens is at risk, and a streak milestone the caller
 // computed, keyed by the run it belongs to. Only donors with a live device
 // get one, so nothing accumulates for donors without the app.
+// The lifetime is a fixed span of seconds: a bare timestamptz difference
+// normalises to an interval of whole days, and adding days back across a DST
+// boundary shifts the instant by the offset, so a push scheduled past a
+// transition would expire an hour early or late.
 func (q *Queries) QueuePushIntents(ctx context.Context, arg QueuePushIntentsParams) error {
 	_, err := q.db.Exec(ctx, queuePushIntents,
 		arg.ExpiresAt,
