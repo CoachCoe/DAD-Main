@@ -83,13 +83,6 @@ func (s RankingService) RefreshIfDue(ctx context.Context, now time.Time) (bool, 
 	})
 }
 
-// Ranking returns the signed-in donor's own ranking.
-func (s RankingService) Ranking(ctx context.Context, token string) (*Ranking, error) {
-	return donorRead(ctx, s.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (*Ranking, error) {
-		return ForDonor(ctx, q, d.ID)
-	})
-}
-
 func refreshRankings(ctx context.Context, q *queries.Queries, now time.Time) error {
 	if err := q.RefreshRankings(ctx, timestamp(now)); err != nil {
 		return err
