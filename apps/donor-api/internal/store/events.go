@@ -731,7 +731,7 @@ type ReservationService struct {
 // it is full (E-4). Reserving is refused once the event has started. A donor
 // who already holds an active reservation keeps it (idempotent).
 func (s ReservationService) Reserve(ctx context.Context, token string, eventID pgtype.UUID) (ReservationResult, error) {
-	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (ReservationResult, error) {
+	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, _ time.Time) (ReservationResult, error) {
 		q := queries.New(tx)
 		event, err := q.LockEvent(ctx, eventID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -740,6 +740,7 @@ func (s ReservationService) Reserve(ctx context.Context, token string, eventID p
 		if err != nil {
 			return ReservationResult{}, err
 		}
+		now := time.Now().UTC()
 		if event.PublishState != "PUBLISHED" {
 			return ReservationResult{}, ErrEventNotFound
 		}
@@ -804,7 +805,7 @@ func (s ReservationService) Reserve(ctx context.Context, token string, eventID p
 // queues a push to them (E-4) — all in the same transaction under the event
 // lock, so the promotion is atomic with the cancellation.
 func (s ReservationService) Cancel(ctx context.Context, token string, eventID pgtype.UUID) (ReservationResult, error) {
-	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, now time.Time) (ReservationResult, error) {
+	return donorWrite(ctx, s.DB, donorOwner(token), func(tx pgx.Tx, d queries.Donor, _ time.Time) (ReservationResult, error) {
 		q := queries.New(tx)
 		event, err := q.LockEvent(ctx, eventID)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -813,6 +814,7 @@ func (s ReservationService) Cancel(ctx context.Context, token string, eventID pg
 		if err != nil {
 			return ReservationResult{}, err
 		}
+		now := time.Now().UTC()
 		if !now.Before(event.StartsAt.Time) {
 			return ReservationResult{}, ErrReservationClosed
 		}

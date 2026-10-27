@@ -224,6 +224,44 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 	}
 }
 
+func TestOIDCLinkRechecksEmailAfterDonorLock(t *testing.T) {
+	pool := database(t)
+	id, email := donor(t, pool)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM donor_oidc_identities WHERE donor_id=$1", id) })
+	settings := &oidc.Settings{Mode: "stub", StubKey: "fixture", ClientIDs: map[oidc.Provider][]string{oidc.Google: {"g.apps"}}}
+	svc := OIDCService{DB: as(t, dbroles.API), Verifier: oidc.NewVerifier(settings), Settings: settings}
+	lock, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback(ctx)
+	mustExec(t, lock, "UPDATE donors SET email=$2 WHERE id=$1", id, "changed-"+email)
+	result := make(chan error, 1)
+	go func() {
+		token := oidc.SignStubToken("fixture", oidc.Google, id.String(), "g.apps", email, time.Now().Add(time.Hour))
+		_, err := svc.SignIn(ctx, oidc.Google, token, Client{})
+		result <- err
+	}()
+	awaitPartnerWaiters(t, pool, 1)
+	if err := lock.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; !errors.Is(err, ErrSignInCode) {
+		t.Fatalf("sign-in linked a stale email: %v", err)
+	}
+	var identities, sessions int
+	if err := pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM donor_oidc_identities WHERE donor_id=$1),
+		(SELECT count(*) FROM donor_sessions WHERE donor_id=$1)`, id).Scan(&identities, &sessions); err != nil {
+		t.Fatal(err)
+	}
+	if identities != 0 || sessions != 0 {
+		t.Fatalf("stale email created %d identities and %d sessions", identities, sessions)
+	}
+}
+
 // extractCode pulls the 6-digit code out of the stub SMS message.
 func extractCode(t *testing.T, msg string) string {
 	t.Helper()

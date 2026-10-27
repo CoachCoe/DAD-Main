@@ -242,7 +242,7 @@ func (s OIDCService) SignIn(ctx context.Context, provider oidc.Provider, idToken
 		if err != nil {
 			return Tokens{}, err
 		}
-		if locked.Disabled {
+		if locked.Disabled || locked.Email != canonical {
 			return Tokens{}, ErrSignInCode
 		}
 		id, err := NewID()
