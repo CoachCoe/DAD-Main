@@ -118,6 +118,33 @@ func seedBadgeProjection(t *testing.T, pool *pgxpool.Pool, donorID pgtype.UUID, 
 	}
 }
 
+func TestExpiredProjectionCannotAwardNewStreakBadges(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	donorID, token := signedInDonor(t, pool)
+	now := time.Now().UTC()
+	seedBadgeProjection(t, pool, donorID, now)
+	mustExec(t, pool, "UPDATE donor_metric_projections SET next_refresh_at=$2 WHERE donor_id=$1", donorID, now.Add(-time.Hour))
+	mustExec(t, pool, "INSERT INTO donor_badges(donor_id,code,source,earned_at) VALUES($1,'7','AUTO',$2)", donorID, now.Add(-24*time.Hour))
+	service := BadgeService{DB: as(t, dbroles.API)}
+	views, err := service.Badges(ctx, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	earned := earnedSet(views)
+	if earned["30"] || earned["100"] {
+		t.Fatalf("expired continuity awarded new streak badges: %v", earned)
+	}
+	if !earned["7"] || !earned["1D"] || !earned["F"] {
+		t.Fatalf("expired continuity erased permanent awards or verified first-gift facts: %v", earned)
+	}
+	mustExec(t, pool, "UPDATE donor_metric_projections SET next_refresh_at=$2 WHERE donor_id=$1", donorID, now.Add(time.Hour))
+	views, err = service.Badges(ctx, token)
+	if err != nil || !earnedSet(views)["100"] {
+		t.Fatalf("fresh continuity did not award the streak badge: %v, %v", earnedSet(views), err)
+	}
+}
+
 // Badges are earned when the donor's facts change, not when they open the
 // badges page, so a perk works on its own: a Founding Donor whose projection
 // is refreshed can see the invite-only Founding Donor Dinner straight away

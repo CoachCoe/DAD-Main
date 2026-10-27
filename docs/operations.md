@@ -120,6 +120,10 @@ Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURE
 
 Some migrations and releases need more:
 
+- Projection rules version 11 prevents expired continuity from awarding new streak
+  badges. Run the projections worker after upgrading so overdue projections refresh;
+  previously earned badges remain permanent.
+
 - The DAD rebrand changes image names, example database names/logins, and the default
   TLS directory. Existing PostgreSQL volumes keep their original database, owner, and
   password: changing `POSTGRES_*` does not rename or update an initialized cluster.

@@ -46,7 +46,7 @@ func signalsFor(ctx context.Context, q *queries.Queries, donor queries.Donor, no
 		s.FoundingQualified = proj.FoundingAwardedAt.Valid
 		s.ConvertedReferrals = proj.ReferredLinkCount + proj.ReferredIrlCount
 		s.HasIRLReferral = proj.ReferredIrlCount > 0
-		if proj.StreakSince.Valid {
+		if proj.StreakSince.Valid && proj.CurrentStreak.Valid && proj.CurrentStreak.Int32 > 0 && proj.NextRefreshAt.Time.After(now) {
 			since := proj.StreakSince.Time
 			s.StreakDays = recognition.Streak{Since: &since}.Ladder(now, recognition.Zone(donor.Timezone.String)).Days
 			first, err := q.DonorFirstGiftAt(ctx, donor.ID)

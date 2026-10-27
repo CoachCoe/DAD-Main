@@ -235,8 +235,8 @@ type projection struct {
 	zone        *time.Location
 }
 
-// Version 10 awards Founding Donor to holders of a website waitlist grant (D-6).
-const projectionRules = 10
+// Version 11 requires fresh continuity before awarding new streak badges.
+const projectionRules = 11
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a
