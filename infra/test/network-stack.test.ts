@@ -47,4 +47,13 @@ describe('NetworkStack', () => {
     const t = synth('production');
     t.resourceCountIs('AWS::EC2::NatGateway', 2);
   });
+
+  it('publishes the named outputs the app pipeline resolves (ComputeSubnetIds, WorkersSecurityGroupId)', () => {
+    // deploy.yml reads these exact OutputKeys off dad-network-<env> to wire the
+    // migrate / provision-roles ECS run-tasks (compute subnets + workers SG).
+    const t = synth('staging');
+    const outputs = t.findOutputs('*');
+    expect(outputs).toHaveProperty('ComputeSubnetIds');
+    expect(outputs).toHaveProperty('WorkersSecurityGroupId');
+  });
 });

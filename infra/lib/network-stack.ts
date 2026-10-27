@@ -179,6 +179,28 @@ export class NetworkStack extends cdk.Stack {
     // RDS SG ingress (proxy → RDS:5432) is created inside DataStack alongside
     // the RDS instance to keep that bidirectional wiring in a single stack and
     // avoid a cross-stack dependency cycle.
+
+    // --- Outputs --------------------------------------------------------
+    // Stable, human-named CfnOutputs consumed by the app pipeline
+    // (.github/workflows/deploy.yml → the "names" step) to run the migrate /
+    // provision-roles ECS run-tasks: the compute-tier subnet ids and the
+    // workers security-group id. The pipeline reads these exact keys
+    // (ComputeSubnetIds, WorkersSecurityGroupId) off the dad-network-<env>
+    // stack, so they must stay named and are intentionally separate from the
+    // auto-generated cross-stack Fn::ImportValue exports CDK emits for props.
+    new cdk.CfnOutput(this, 'ComputeSubnetIds', {
+      description:
+        'Comma-separated compute-tier (private-with-egress) subnet ids for ECS run-task networking.',
+      value: cdk.Fn.join(
+        ',',
+        this.vpc.selectSubnets(this.computeSubnets).subnetIds,
+      ),
+    });
+    new cdk.CfnOutput(this, 'WorkersSecurityGroupId', {
+      description:
+        'Security-group id for the workers tier, used by maintenance ECS run-tasks.',
+      value: this.workersSecurityGroup.securityGroupId,
+    });
   }
 
   /**
