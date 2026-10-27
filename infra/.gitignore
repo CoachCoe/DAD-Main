@@ -1,0 +1,20 @@
+# Node / npm
+node_modules/
+npm-debug.log
+
+# TypeScript build output
+dist/
+*.d.ts
+*.js
+!jest.config.js
+
+# CDK synth output
+cdk.out/
+cdk.context.json
+
+# Task hand-off artifacts — never commit
+.agents/
+
+# OS / editor
+.DS_Store
+*.log
