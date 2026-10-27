@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Page } from "@/components/donor/Page";
 import { PasskeySignIn } from "@/components/donor/PasskeySignIn";
+import { PhoneSignIn } from "@/components/donor/PhoneSignIn";
 import { SignInForm } from "@/components/donor/SignInForm";
 import { AlreadySignedIn } from "./AlreadySignedIn";
 
@@ -16,6 +17,7 @@ export default function SignInPage() {
       <SignInForm />
       <p className="note">The link expires after 15 minutes. You don’t need a password.</p>
       <PasskeySignIn />
+      <PhoneSignIn />
     </Page>
   );
 }
