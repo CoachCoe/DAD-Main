@@ -55,6 +55,21 @@ test("every mobile reference resolves, including transitive response schemas", (
   );
 });
 
+test("mobile initiative spend and event journeys retain their public reads", () => {
+  const mobile = nativeContract(original);
+  for (const path of [
+    "/initiatives",
+    "/initiatives/{slug}",
+    "/initiatives/{initiative_id}/spend",
+    "/events/{event_id}",
+    "/events/{event_id}/calendar.ics",
+  ]) {
+    assert.deepEqual(mobile.paths[path]?.get, original.paths[path].get, path);
+  }
+  assert.equal(mobile.paths["/health/ready"], undefined);
+  assert.equal(mobile.paths["/donor/public/content"], undefined);
+});
+
 test("token generators preserve semantic names and reject invalid numeric values", () => {
   const input = {
     schema_version: 1,

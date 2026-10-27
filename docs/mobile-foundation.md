@@ -10,7 +10,8 @@ Their screens and platform interactions are separate from the Go financial domai
 `make bundle-mobile MOBILE_BUNDLE_DIR=/tmp/dad-foundation` creates:
 
 - `openapi.json`: the complete canonical API.
-- `mobile.openapi.json`: native-admitted mutations, donor-account reads, and liveness,
+- `mobile.openapi.json`: native-admitted mutations, donor-account and public
+  initiative/event reads, and liveness,
   derived from the canonical API without rewriting schemas or response variants.
 - `tokens.json`: platform-neutral design values, with `schema_version`.
 - `tokens.ts`, `DADTokens.swift`, `DADTokens.kt`: generated platform values.
@@ -64,6 +65,8 @@ backend behavior so synthetic previews cannot conceal contract drift. Apps addin
 notifications must also handle `/account/gifts`, now present in both the account and
 notification link allowlists. Tests keep the Apple association paths aligned with the
 same policy.
+The bundle also includes public initiative detail/spend and event detail/calendar reads,
+so native clients can generate those R1 journeys from the same contract.
 
 Version 2 does not restore compatibility for an installed version 1 client. If one
 has been distributed against a real environment, preserve its response contract through
@@ -105,7 +108,8 @@ applications in `DAD-iOS` and `DAD-Android`, approved on 18 October 2026. This s
 the historical PRD's single cross-platform codebase requirement. DAD-Main continues to
 own business rules, API contracts, design values, and server integrations; client code
 owns native presentation, lifecycle, secure credential storage, and platform interaction.
-The final mobile feature subset and navigation remain subject to the mobile PRD.
+The R1 PRD defines the required donor and partner features; the native foundations
+are the transport and session starting point for those screens.
 
 The native foundations implement an authenticated read, single-flight
 refresh and atomic token replacement, cancellation/timeouts, revoked-session handling,

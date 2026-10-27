@@ -11,6 +11,15 @@ export const digest = (value) => createHash("sha256").update(value).digest("hex"
 const bearer = (operation) =>
   operation.security?.some((requirement) => "bearerAuth" in requirement || "partnerBearerAuth" in requirement);
 
+const publicReads = new Set([
+  "/health/live",
+  "/initiatives",
+  "/initiatives/{slug}",
+  "/initiatives/{initiative_id}/spend",
+  "/events/{event_id}",
+  "/events/{event_id}/calendar.ics",
+]);
+
 export function nativeContract(source) {
   const paths = {};
   for (const [path, item] of Object.entries(source.paths)) {
@@ -19,7 +28,7 @@ export function nativeContract(source) {
       if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
       if (
         operation["x-clients"]?.includes("native") ||
-        (method === "get" && (bearer(operation) || path === "/health/live"))
+        (method === "get" && (bearer(operation) || publicReads.has(path)))
       ) {
         operations[method] = structuredClone(operation);
       }
