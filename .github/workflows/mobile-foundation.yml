@@ -34,7 +34,7 @@ jobs:
         run: |
           node scripts/mobile-foundation.mjs bundle "$RUNNER_TEMP/foundation"
           cp -R contracts/mobile/swift "$RUNNER_TEMP/swift"
-          cp "$RUNNER_TEMP/foundation/mobile.openapi.json" "$RUNNER_TEMP/swift/Sources/DADAPI/openapi.json"
+          cp "$RUNNER_TEMP/foundation/swift.openapi.json" "$RUNNER_TEMP/swift/Sources/DADAPI/openapi.json"
           cp "$RUNNER_TEMP/foundation/DADTokens.swift" "$RUNNER_TEMP/swift/Sources/DADAPI/DADTokens.swift"
           swift test --package-path "$RUNNER_TEMP/swift" --scratch-path "$RUNNER_TEMP/swift-build" --force-resolved-versions
   publish:

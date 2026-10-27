@@ -65,6 +65,45 @@ export function nativeContract(source) {
   };
 }
 
+// Apple's generator understands nullable types, but skips standalone null
+// branches. Keep the wire contract intact and adapt only its Swift input.
+export function swiftContract(source) {
+  const document = structuredClone(source);
+  let literalNull = false;
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return value;
+    if (Array.isArray(value)) return value.map(visit);
+    if (value.type === "null") {
+      literalNull = true;
+      return { $ref: "#/components/schemas/DADLiteralNull" };
+    }
+    if (value.anyOf?.some((branch) => branch.type === "null")) {
+      const branches = value.anyOf.filter((branch) => branch.type !== "null");
+      if (value.anyOf.length !== 2 || branches.length !== 1)
+        throw new Error("Swift nullable adaptation requires exactly one value branch");
+      let branch = structuredClone(branches[0]);
+      if (branch.$ref) {
+        const match = branch.$ref.match(/^#\/components\/schemas\/([^/]+)$/);
+        if (!match || !document.components.schemas[match[1]]) throw new Error("Unknown Swift nullable reference");
+        branch = structuredClone(document.components.schemas[match[1]]);
+      }
+      if (typeof branch.type !== "string" || branch.type === "null" || branch.const !== undefined)
+        throw new Error("Unsupported Swift nullable value branch");
+      const { anyOf: _, ...annotations } = value;
+      value = { ...branch, ...annotations, type: [branch.type, "null"] };
+      if (branch.enum) value.enum = [...branch.enum, null];
+    }
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, visit(child)]));
+  };
+  const result = visit(document);
+  if (literalNull) {
+    // A supported placeholder lets the pinned generator reach its type
+    // override. DADNullValue's Codable implementation enforces literal null.
+    result.components.schemas.DADLiteralNull = { type: "string", "x-dad-literal-null": true };
+  }
+  return result;
+}
+
 const header = "// Generated from DAD-Main design/tokens.json; do not edit.\n";
 
 const validToken = (group, value) =>
@@ -132,9 +171,15 @@ export async function bundle(output) {
   const openapi = await readFile(resolve(root, "apps/donor-api/api/openapi.json"), "utf8");
   const tokens = await readFile(resolve(root, "design/tokens.json"), "utf8");
   const links = await readFile(resolve(root, "contracts/mobile/links.json"), "utf8");
+  const mobile = nativeContract(JSON.parse(openapi));
   const files = {
     "openapi.json": openapi,
-    "mobile.openapi.json": json(nativeContract(JSON.parse(openapi))),
+    "mobile.openapi.json": json(mobile),
+    "swift.openapi.json": json(swiftContract(mobile)),
+    "DADNullValue.swift": await readFile(
+      resolve(root, "contracts/mobile/swift/Sources/DADAPI/DADNullValue.swift"),
+      "utf8",
+    ),
     "tokens.json": tokens,
     "links.json": links,
     ...tokenSources(JSON.parse(tokens)),

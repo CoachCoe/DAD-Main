@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { nativeContract, tokenSources } from "./mobile-foundation.mjs";
+import { nativeContract, swiftContract, tokenSources } from "./mobile-foundation.mjs";
 
 const original = JSON.parse(await readFile(new URL("../apps/donor-api/api/openapi.json", import.meta.url), "utf8"));
 
@@ -84,4 +84,33 @@ test("token generators preserve semantic names and reject invalid numeric values
   assert.ok(output["tokens.ts"].includes('"1": 4.5'));
   assert.ok(output["DADTokens.kt"].includes('"1" to 4.5,'));
   assert.throws(() => tokenSources({ ...input, text: { md: -1 } }), /Invalid design token/);
+});
+
+test("Swift nullable input preserves object constraints and admits null enum values", () => {
+  const mobile = nativeContract(original);
+  const before = structuredClone(mobile);
+  const swift = swiftContract(mobile);
+  assert.deepEqual(mobile, before);
+  const rank = swift.components.schemas.DonorDashboard.oneOf[1].properties.rank;
+  const { type: _, ...ranking } = mobile.components.schemas.Ranking;
+  assert.deepEqual(rank, {
+    ...ranking,
+    description: mobile.components.schemas.DonorDashboard.oneOf[1].properties.rank.description,
+    type: ["object", "null"],
+  });
+  const status = swift.components.schemas.EventView.properties.reservation_status;
+  assert.deepEqual(status.type, ["string", "null"]);
+  assert.deepEqual(status.enum, ["RESERVED", "WAITLISTED", null]);
+  assert.deepEqual(swift.components.schemas.Profile, mobile.components.schemas.Profile);
+  assert.deepEqual(swift.components.schemas.PaymentUpdate.oneOf[1].properties.url, {
+    $ref: "#/components/schemas/DADLiteralNull",
+  });
+  assert.equal(swift.components.schemas.DADLiteralNull["x-dad-literal-null"], true);
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return;
+    assert.ok(!value.anyOf?.some((branch) => branch.type === "null"));
+    Object.values(value).forEach(visit);
+  };
+  visit(swift);
+  assert.throws(() => swiftContract({ anyOf: [{ type: "null" }, { type: "string" }, { type: "integer" }] }));
 });
