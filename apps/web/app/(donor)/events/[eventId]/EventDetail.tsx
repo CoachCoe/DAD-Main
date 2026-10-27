@@ -115,8 +115,8 @@ export default function EventDetail({ event: id }: { event: string }) {
             </p>
           )}
           <p className="links">
-            {!event.cancelled && event.type !== "INVITE_ONLY" && (
-              <a href={`/api/events/${path}/calendar.ics`} download>
+            {!event.cancelled && (event.type !== "INVITE_ONLY" || data.signedIn) && (
+              <a href={`/api/${event.type === "INVITE_ONLY" ? "donor/me/" : ""}events/${path}/calendar.ics`} download>
                 Add to calendar
               </a>
             )}

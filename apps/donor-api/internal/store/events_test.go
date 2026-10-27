@@ -699,6 +699,34 @@ func TestEventICSAndReportIssue(t *testing.T) {
 	if _, err := reader.Calendar(ctx, invID); !errors.Is(err, ErrEventNotFound) {
 		t.Fatalf("invite-only ics was downloadable: %v", err)
 	}
+	donor, token := signedInDonor(t, pool)
+	if _, err := reader.CalendarForDonor(ctx, "invalid", invID); !errors.Is(err, ErrDenied) {
+		t.Fatalf("calendar accepted invalid session: %v", err)
+	}
+	if _, err := reader.CalendarForDonor(ctx, token, invID); !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("calendar leaked private event: %v", err)
+	}
+	if err := events.AddGuest(ctx, adminToken, invID, donor); err != nil {
+		t.Fatal(err)
+	}
+	if ics, err := reader.CalendarForDonor(ctx, token, invID); err != nil || !strings.Contains(ics, "SUMMARY:Event secret") {
+		t.Fatalf("guest calendar: %q %v", ics, err)
+	}
+	if err := events.RemoveGuest(ctx, adminToken, invID, donor); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.CalendarForDonor(ctx, token, invID); !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("removed guest downloaded calendar: %v", err)
+	}
+	if err := events.AddGuest(ctx, adminToken, invID, donor); err != nil {
+		t.Fatal(err)
+	}
+	if err := events.Cancel(ctx, adminToken, invID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.CalendarForDonor(ctx, token, invID); !errors.Is(err, ErrEventNotFound) {
+		t.Fatalf("cancelled calendar downloaded: %v", err)
+	}
 
 	// With no support email, report_issue_url is nil.
 	plain := EventReader{DB: pool}

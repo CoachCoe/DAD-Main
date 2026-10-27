@@ -57,6 +57,18 @@ it("falls back to the public listing when signed out", async () => {
   expect(screen.queryByRole("button", { name: /Reserve/ })).not.toBeInTheDocument();
 });
 
+it("offers an authenticated calendar download for an invite-only event", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => Promise.resolve(Response.json({ ...event, type: "INVITE_ONLY" }))),
+  );
+  render(<EventDetail event="e-1" />);
+  expect(await screen.findByRole("link", { name: "Add to calendar" })).toHaveAttribute(
+    "href",
+    "/api/donor/me/events/e-1/calendar.ics",
+  );
+});
+
 it("explains a cancelled event", async () => {
   vi.stubGlobal(
     "fetch",

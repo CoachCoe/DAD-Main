@@ -2657,6 +2657,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/me/events/{event_id}/calendar.ics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download an authorized event as an .ics calendar file, including invite-only events */
+        get: operations["donorEventCalendar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/partner/push-device": {
         parameters: {
             query?: never;
@@ -9271,6 +9288,32 @@ export interface operations {
                     "application/json": components["schemas"]["PublicInitiative"];
                 };
             };
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    donorEventCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed, unknown, draft, cancelled, or unauthorized event is 404. */
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An iCalendar document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/calendar": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             503: components["responses"]["Unavailable"];
         };

@@ -78,6 +78,7 @@ func (a *api) routes() []route {
 		a.donorRead("GET /donor/me/events", a.events),
 		a.donorRead("GET /donor/me/events/invite-only", a.inviteOnlyEvents),
 		a.donorRead("GET /donor/me/events/{event_id}", a.donorEventDetail),
+		a.donorRead("GET /donor/me/events/{event_id}/calendar.ics", a.donorEventCalendar),
 		a.donorWrite("POST /donor/me/events/{event_id}/reserve", a.reserveEvent),
 		a.donorWrite("POST /donor/me/events/{event_id}/cancel", a.cancelEvent),
 		a.donorWrite("POST /donor/me/events/check-in", a.checkInEvent),

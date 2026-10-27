@@ -490,6 +490,31 @@ func (r EventReader) Calendar(ctx context.Context, id pgtype.UUID) (string, erro
 	return renderICS(e), nil
 }
 
+func (r EventReader) CalendarForDonor(ctx context.Context, token string, id pgtype.UUID) (string, error) {
+	return donorRead(ctx, r.DB, token, func(q *queries.Queries, d queries.Donor, _ time.Time) (string, error) {
+		e, err := q.EventByID(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrEventNotFound
+		}
+		if err != nil {
+			return "", err
+		}
+		if e.PublishState != "PUBLISHED" || e.CancelledAt.Valid {
+			return "", ErrEventNotFound
+		}
+		if e.Type == "INVITE_ONLY" {
+			allowed, _, err := canSeeInviteOnly(ctx, q, d.ID, e)
+			if err != nil {
+				return "", err
+			}
+			if !allowed {
+				return "", ErrEventNotFound
+			}
+		}
+		return renderICS(e), nil
+	})
+}
+
 // renderICS builds a single-VEVENT VCALENDAR. Times are UTC (the trailing Z
 // form), which every calendar client reads correctly. Text fields are escaped
 // and long lines folded per RFC 5545.

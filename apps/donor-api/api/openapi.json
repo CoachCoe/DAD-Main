@@ -10585,6 +10585,56 @@
     }
    }
   },
+  "/donor/me/events/{event_id}/calendar.ics": {
+   "get": {
+    "operationId": "donorEventCalendar",
+    "summary": "Download an authorized event as an .ics calendar file, including invite-only events",
+    "tags": [
+     "Events"
+    ],
+    "security": [
+     {
+      "cookieAuth": []
+     },
+     {
+      "bearerAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "name": "event_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed, unknown, draft, cancelled, or unauthorized event is 404."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "An iCalendar document.",
+      "content": {
+       "text/calendar": {
+        "schema": {
+         "type": "string"
+        }
+       }
+      }
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     }
+    }
+   }
+  },
   "/donor/partner/push-device": {
    "post": {
     "operationId": "partnerRegisterPushDevice",

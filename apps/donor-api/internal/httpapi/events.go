@@ -33,6 +33,7 @@ type EventReadSource interface {
 	Detail(context.Context, pgtype.UUID) (store.EventView, error)
 	DetailForDonor(context.Context, string, pgtype.UUID) (store.EventView, error)
 	Calendar(context.Context, pgtype.UUID) (string, error)
+	CalendarForDonor(context.Context, string, pgtype.UUID) (string, error)
 }
 
 // ReservationSource books, waitlists, and cancels event reservations (E-4/E-9),
@@ -261,6 +262,28 @@ func (a *api) donorEventDetail(w http.ResponseWriter, r *http.Request, session s
 	svc.serve(w, r, func(ctx context.Context) (any, error) {
 		return a.EventRead.DetailForDonor(ctx, session, id)
 	})
+}
+
+func (a *api) donorEventCalendar(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "event_id")
+	if !ok {
+		return
+	}
+	svc := service{a.EventRead != nil, donorUnavailable, readTimeout, donorStatus}
+	if !svc.available(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	ics, err := a.EventRead.CalendarForDonor(ctx, session, id)
+	if err != nil {
+		respond(w, r, nil, err, donorStatus)
+		return
+	}
+	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"event.ics\"")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write([]byte(ics))
 }
 
 // addEventGuest puts a donor on an event's guest list (E-5, admin).
