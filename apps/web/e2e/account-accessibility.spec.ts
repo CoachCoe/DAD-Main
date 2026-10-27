@@ -409,3 +409,26 @@ test("authenticated accessible surface: /partner", async ({ page }) => {
   expect(errors).toEqual([]);
   expect(await page.locator("body").evaluate((body) => body.scrollWidth <= innerWidth + 1)).toBe(true);
 });
+
+test("partner sign-out stays on the dashboard after failure and navigates only after a successful retry", async ({
+  page,
+}) => {
+  for (const [path, json] of Object.entries(partnerPortal)) {
+    await page.route(`**/api${path}`, (route) => route.fulfill({ json: json as object }));
+  }
+  let attempts = 0;
+  await page.route("**/api/donor/partner/sign-out", (route) => {
+    attempts++;
+    return route.fulfill(
+      attempts === 1 ? { status: 503, json: { detail: "Unavailable" } } : { json: { signed_out: true } },
+    );
+  });
+  await page.goto("/partner");
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Sign-out wasn’t confirmed." })).toBeVisible();
+  await expect(page).toHaveURL(/\/partner$/);
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect(page).toHaveURL(/\/partner\/sign-in$/);
+  await expect(page.getByRole("heading", { name: "Sign in to your partner portal" })).toBeVisible();
+  expect(attempts).toBe(2);
+});

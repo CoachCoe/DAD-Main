@@ -20,6 +20,27 @@ it("hides unverified overview values instead of presenting fabricated zeros", as
   expect(tiles.queryByText("0")).not.toBeInTheDocument();
 });
 
+it("keeps a failed sign-out visible and lets the partner retry", async () => {
+  stub();
+  const base = vi.mocked(fetch).getMockImplementation();
+  let resolveSignOut: ((response: Response) => void) | undefined;
+  vi.mocked(fetch).mockImplementation((input, init) => {
+    if (String(input).endsWith("/sign-out"))
+      return new Promise<Response>((resolve) => {
+        resolveSignOut = resolve;
+      });
+    if (!base) throw new Error("Missing fixture fetch");
+    return base(input, init);
+  });
+  render(<Dashboard />);
+  fireEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+  expect(screen.getByRole("button", { name: "Signing out…" })).toBeDisabled();
+  resolveSignOut?.(Response.json({ detail: "Unavailable" }, { status: 503 }));
+  expect(await screen.findByText(/Sign-out wasn’t confirmed/)).toBeVisible();
+  expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
+  expect(screen.getByRole("region", { name: "Overview" })).toBeVisible();
+});
+
 it("links retained reports and explains unavailable historical files", async () => {
   stub();
   const base = vi.mocked(fetch).getMockImplementation();

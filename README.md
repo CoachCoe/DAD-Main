@@ -123,7 +123,7 @@ DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" make test-browser-e2e
 
 Browser tests run against `next dev` by default; set `E2E_PRODUCTION=1` to run them
 against a production build (`npm run build && npm start`), where account and staff pages
-use the nonce-based CSP. Next allows
+use the nonce-based CSP, as do partner-portal pages. Next allows
 one dev server per checkout, so stop any running `make web` first. Staff pages are tested
 on `DONOR_STAFF_ORIGIN` (default http://staff.localhost:3000) with Chromium's virtual
 authenticator; the staff journey provisions or recovers `e2e.administrator@example.org`

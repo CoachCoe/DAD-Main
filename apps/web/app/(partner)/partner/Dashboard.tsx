@@ -5,7 +5,7 @@ import { Announcer } from "@/components/donor/Announcer";
 import { LogoEditor } from "@/components/donor/LogoEditor";
 import { Page } from "@/components/donor/Page";
 import { hours, TeamLeaderboard } from "@/components/donor/TeamLeaderboard";
-import { api, failureMessage, type RequestBody, type ResponseBody } from "@/lib/api";
+import { api, failureMessage, type RequestBody, type ResponseBody, unconfirmedMessage } from "@/lib/api";
 import { formatDateTime, formatDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
@@ -504,6 +504,8 @@ function OrganizationSection({ overview, onSaved }: { overview: Overview; onSave
 
 export default function Dashboard() {
   const overview = useApiResource<Overview>("/donor/partner/overview");
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
   const o = overview.data;
   const messages = resourceMessages(overview.resource, {
     loading: "Loading your dashboard…",
@@ -511,6 +513,20 @@ export default function Dashboard() {
     forbidden: "This dashboard requires a partner account.",
   });
   const admin = o?.role === "ADMIN";
+
+  async function signOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    setSignOutError("");
+    try {
+      await api("/donor/partner/sign-out", { method: "POST", body: "{}" });
+      window.location.assign("/partner/sign-in");
+    } catch (cause) {
+      setSignOutError(unconfirmedMessage(cause, "Sign-out wasn’t confirmed. Please retry before leaving this device."));
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   return (
     <Page wide eyebrow="Partner portal" title={o?.organization ?? "Partner dashboard"}>
@@ -581,21 +597,13 @@ export default function Dashboard() {
           {admin && <UsersSection />}
           {admin && <OrganizationSection overview={o} onSaved={overview.reload} />}
           <p>
-            <button
-              type="button"
-              className="secondary"
-              onClick={() =>
-                api("/donor/partner/sign-out", { method: "POST", body: "{}" }).finally(() =>
-                  window.location.assign("/partner/sign-in"),
-                )
-              }
-            >
-              Sign out
+            <button type="button" className="secondary" onClick={signOut} disabled={signingOut}>
+              {signingOut ? "Signing out…" : "Sign out"}
             </button>
           </p>
         </>
       )}
-      <Announcer status={messages.status} alert={messages.alert} />
+      <Announcer status={messages.status} alert={signOutError || messages.alert} />
     </Page>
   );
 }

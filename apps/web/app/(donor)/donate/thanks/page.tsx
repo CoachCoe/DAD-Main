@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
 import { isGiftAmount } from "@/lib/money";
@@ -46,9 +45,9 @@ export default async function ThankYouPage({ searchParams }: PageProps<"/donate/
         Your receipt email follows once Stripe confirms the payment. In this sandbox preview it is a test gift record,
         not a tax receipt, and no real donation is collected.
       </p>
-      <Link className="secondary" href="/account/share">
+      <a className="secondary" href="/account/share">
         Invite someone to give with you
-      </Link>
+      </a>
     </Page>
   );
 }

@@ -175,6 +175,10 @@ describe("proxy scope", () => {
     "/account",
     "/account/dashboard",
     "/account/sign-in",
+    "/partner",
+    "/partner/sign-in",
+    "/partner/accept",
+    "/Partner/sign-in",
     "/staff",
     "/staff/sign-in",
     "/staff/donors/abc",
@@ -183,7 +187,7 @@ describe("proxy scope", () => {
     expect(sets(url)).toBe(true);
   });
 
-  it.each(["/", "/ledger", "/accounts", "/staffing", "/api/donor/me", "/_next/static/chunk.js"])(
+  it.each(["/", "/ledger", "/accounts", "/partners", "/apply", "/staffing", "/api/donor/me", "/_next/static/chunk.js"])(
     "leaves %s to the static policy",
     (url) => {
       expect(sets(url)).toBe(false);

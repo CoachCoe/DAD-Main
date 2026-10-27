@@ -196,6 +196,6 @@ func partnerLoginEmail(kind string, user queries.LockPartnerLoginRecipientRow, l
 		return "Sign in to the DAD partner portal",
 			"Use this link to sign in to " + org + "'s DAD partner portal:\n" + link + "\n\n" +
 				"This single-use link expires in 15 minutes.\n" +
-				"If you did not request it, ignore this email. No access is granted until the link is opened.\n"
+				"If you did not request it, ignore this email. No access is granted until you confirm on the page.\n"
 	}
 }

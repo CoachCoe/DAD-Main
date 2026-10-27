@@ -4,7 +4,7 @@ import { isStaffHost, UNSERVED_HEADER } from "@/lib/hosts";
 
 // Case-insensitive to agree with next.config.ts, whose header sources always are; a
 // case-sensitive matcher would leave /Account/... with no policy at all.
-const signedInSurface = /^\/(?:account|staff)(?:\/|$)/i;
+const signedInSurface = /^\/(?:account|partner|staff)(?:\/|$)/i;
 // The staff host serves the back office's routes exactly as written, since routes are
 // case-sensitive; the public host refuses any spelling of them.
 const staffSurface = /^\/(?:staff|api\/donor\/staff)(?:\/|$)/;

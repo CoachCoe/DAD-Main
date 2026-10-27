@@ -51,7 +51,7 @@ const nextConfig: NextConfig = {
       // proxy.ts sets a nonce policy on these instead. Browsers enforce every CSP header they
       // receive, so this one must not reach those responses as well.
       {
-        source: "/((?!(?:account|staff)(?:/|$)).*)",
+        source: "/((?!(?:account|partner|staff)(?:/|$)).*)",
         headers: [{ key: "Content-Security-Policy", value: contentSecurityPolicy() }],
       },
     ];

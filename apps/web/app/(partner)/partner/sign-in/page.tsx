@@ -15,7 +15,7 @@ export default function SignInPage() {
       <SignIn />
       <p className="note">The link expires after 15 minutes. You don’t need a password.</p>
       <p>
-        Not a partner yet? <Link href="/partner/apply">Apply to partner with DAD</Link>.
+        Not a partner yet? <Link href="/apply">Apply to partner with DAD</Link>.
       </p>
     </Page>
   );

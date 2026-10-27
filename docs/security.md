@@ -204,19 +204,22 @@ key is rotated without downtime by putting a new key first, re-encrypting stored
 with `rekey`, and then removing the old key ([operations](operations.md#encryption-keys)).
 Every key in a list is validated at startup, and errors name the variable and position,
 never the key. A retired key still opens backups taken before its rotation, so it is kept
-in the secret store only as long as those backups and destroyed with them. No lookup uses
-a keyed hash; stored token hashes are unkeyed SHA-256 of random secrets.
+in the secret store only as long as those backups and destroyed with them. Session and
+proof lookups use unkeyed SHA-256 of random secrets. Website-waitlist claims instead use
+a keyed hash of the normalized email address, with a separate Founding Donor claim key.
 
 The frontend restricts connections to its own origin, denies framing, uses no-referrer,
 and disables camera, microphone, and geolocation. Production CSP excludes unsafe-eval.
-Account and staff pages render per request with a nonce-based `'strict-dynamic'` script
+Account, partner-portal, and staff pages render per request with a nonce-based `'strict-dynamic'` script
 policy set in `proxy.ts`; public pages keep a static policy that permits inline scripts
 so they can be cached. Each response carries exactly one policy. Public links into donor
-accounts use full-document navigation to install the nonce policy; staff entry is a
+accounts and the partner portal use full-document navigation to install the nonce policy; staff entry is a
 direct document load on the staff host. Any new public link into account routes must use
 a native anchor rather than client routing. Both origins are compiled into the web build,
 so its host routing and headers always agree. User content must never be inserted as
-raw HTML. Account tokens use fragments removed before network requests.
+raw HTML. Email proof tokens use fragments removed before network requests. Donor and
+partner email proofs require an explicit confirmation before exchange; visiting a link
+alone does not consume it or replace the browser's account.
 
 ## Dependency advisory boundary
 

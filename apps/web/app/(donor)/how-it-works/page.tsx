@@ -66,7 +66,7 @@ export default function HowItWorks() {
       <p>
         <Link href="/apply">Partner application</Link>
         {" · "}
-        <Link href="/partner/sign-in">Partner sign-in</Link>
+        <a href="/partner/sign-in">Partner sign-in</a>
       </p>
     </Page>
   );

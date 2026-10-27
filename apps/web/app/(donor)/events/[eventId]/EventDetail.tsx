@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
@@ -110,9 +109,9 @@ export default function EventDetail({ event: id }: { event: string }) {
           )}
           {!event.cancelled && !data.signedIn && (
             <p>
-              <Link className="button" href="/account/sign-in">
+              <a className="button" href="/account/sign-in">
                 Sign in to reserve a spot
-              </Link>
+              </a>
             </p>
           )}
           <p className="links">
@@ -122,7 +121,7 @@ export default function EventDetail({ event: id }: { event: string }) {
               </a>
             )}
             {event.report_issue_url && <a href={event.report_issue_url}>Report an issue</a>}
-            {data.signedIn && <Link href="/account/events">All events near you</Link>}
+            {data.signedIn && <a href="/account/events">All events near you</a>}
           </p>
         </>
       )}
