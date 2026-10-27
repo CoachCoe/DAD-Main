@@ -521,7 +521,7 @@ anywhere real.
 
 ## App notifications
 
-The push worker (`make worker KIND=push`, or `push-worker` in Compose) sends donor app
+The push worker (`make worker KIND=push`, or `push-worker` in Compose) sends donor and partner app
 notifications through Apple Push Notification service for iOS and Firebase Cloud
 Messaging for Android. The API reads the same settings: it accepts device registrations
 only for a configured platform, answering `PUSH_UNCONFIGURED` otherwise, so no
@@ -531,6 +531,18 @@ without any provider and completes notifications for unconfigured platforms as
 suppressed `push_unconfigured`; notifications are queued only for donors with a
 registered device and are dropped as `expired` 24 hours after queuing, so none wait
 indefinitely.
+
+Partner installations register through `POST /donor/partner/push-device` after a native
+partner sign-in; browsers and donor credentials cannot register partner devices.
+`POST /donor/partner/push-device/unregister` removes the registration. Devices receive
+approval (when registered within 24 hours of approval), verified-metric, and initiative
+completion notices. Approval email remains the way into a newly approved portal.
+Each installation has its own bounded-retry job and stable notification identifier.
+Notices contain generic copy and open `/partner`; they contain no organization, donor,
+or financial details. The normal push queue monitor includes parked partner jobs.
+Registrations end with the existing 12-hour partner session, sign-out, or user removal;
+a new sign-in must register again. An installation moves between donor and partner
+accounts when it registers, so a shared device cannot retain both recipients.
 
 | Variable | Meaning |
 |---|---|
@@ -1023,3 +1035,32 @@ an explicit platform list or `none` overrides it.
 boundaries, including that unrelated secrets never reach a container. CI runs this before
 image checks. Direct API deployments retain the original key-loading configuration when
 `DONOR_PUSH_PLATFORMS` is unset; set explicit platform names to isolate delivery keys there.
+
+## Partner application receipts
+
+The web application form uses `POST /donor/partner/applications` with a
+client-generated 32-byte random base64url receipt and a stable idempotency key. The
+receipt and application commit together. Application submission remains browser-only. A retry must retain both values and the same
+form. The browser receives an HttpOnly, SameSite=Lax cookie lasting 30 days. `GET /donor/partner/application-status` also accepts the receipt
+as a native bearer credential; native clients must obtain and securely retain that
+separate receipt through an explicit application-submission integration. No receipt is
+implicitly shared from the browser to an app.
+
+`/apply/status` shows the organization and current review decision after navigation or
+refresh. A receipt proves possession of the submission, not ownership of its work
+email; it grants no partner or donor access and exposes no contact details or staff
+notes. It is never put in a URL. The database stores only its SHA-256 hash. Browsers
+without the original receipt, including another device, need the partnerships team's
+help; approval continues to require the emailed sign-in proof. Existing application
+clients remain supported through the original submission endpoint.
+
+## Recognition repair
+
+A super admin can use **Repair recognition after a system error** on a donor record.
+`POST /donor/staff/donors/{donor_id}/recognition/recompute` requires `donor.recompute`
+and a 10–1000-character reason identifying the documented error and resolution.
+The repair uses the normal locked projection path and records the reason, before/after
+current and best streaks, and rules version in the same transaction's audit event.
+Payment history remains authoritative; permanent earned badges and historical bests
+are preserved. This operation repairs derived state after facts or code have been
+corrected. It does not provide an arbitrary manual continuity override.

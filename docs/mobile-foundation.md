@@ -26,7 +26,7 @@ in the first mobile product. Backend authorization remains authoritative. Native
 call the API host directly with `X-DAD-Client: native`, no cookies or Origin, and a bearer
 access token when authenticated. Browser-only giving and staff operations stay on the web.
 
-After checks pass on the release commit, tag it `mobile-foundation-v2.0.0` (using the
+After checks pass on the release commit, tag it `mobile-foundation-v2.1.0` (using the
 version in the file) and push that tag. The mobile-foundation workflow verifies the tag
 matches the declared version and publishes the individual files as GitHub Release assets.
 Existing release assets are never overwritten. The workflow also retains a candidate
@@ -40,7 +40,7 @@ the vendored contract without network access to this private repository. An auth
 maintainer can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v2.0.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
+gh release download mobile-foundation-v2.1.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
@@ -48,6 +48,17 @@ additions, and major versions for breaking contract/token/link changes. A mobile
 pins its dependency; changing the backend must preserve supported installed clients.
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
+
+## Compatible additions in version 2.1
+
+Version 2.1 adds authenticated invite-only event calendar downloads, partner device
+registration and push delivery, and application-status receipts. Existing version 2.0
+request and response bodies remain unchanged. Partner notifications open `/partner`
+and use the partner session, whose existing 12-hour lifetime also bounds registration.
+Applications that expose pending application status must securely retain their separate
+receipt; it does not authenticate a partner user. See `docs/operations.md` for lifecycle
+and recovery behavior. The web donor sign-in page also offers the existing phone-code
+API, alongside email and passkeys.
 
 ## Moving the apps from foundation 1 to 2
 
