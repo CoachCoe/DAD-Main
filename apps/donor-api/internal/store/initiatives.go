@@ -180,7 +180,7 @@ func (s InitiativeService) Update(ctx context.Context, token string, id pgtype.U
 				return struct{}{}, err
 			}
 			q := queries.New(tx)
-			existing, err := q.InitiativeByID(ctx, id)
+			existing, err := q.LockInitiative(ctx, id)
 			if err != nil {
 				return struct{}{}, err
 			}
@@ -225,7 +225,7 @@ func (s InitiativeService) Publish(ctx context.Context, token string, id pgtype.
 	_, err := staffWrite(ctx, s.Staff, token, initiativePermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
-			initiative, err := q.InitiativeByID(ctx, id)
+			initiative, err := q.LockInitiative(ctx, id)
 			if err != nil {
 				return struct{}{}, err
 			}

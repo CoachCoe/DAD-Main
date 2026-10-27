@@ -19,6 +19,9 @@ WHERE id=$1;
 -- name: InitiativeByID :one
 SELECT * FROM donor_initiatives WHERE id=$1;
 
+-- name: LockInitiative :one
+SELECT * FROM donor_initiatives WHERE id=$1 FOR UPDATE;
+
 -- name: StaffInitiativesPage :many
 SELECT * FROM donor_initiatives
 ORDER BY created_at DESC, id

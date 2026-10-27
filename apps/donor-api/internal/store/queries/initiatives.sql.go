@@ -208,6 +208,37 @@ func (q *Queries) InsertInitiative(ctx context.Context, arg InsertInitiativePara
 	return err
 }
 
+const lockInitiative = `-- name: LockInitiative :one
+SELECT id, slug, title, summary, type, location, region, counties, started_on, status, committed_minor, partner_signup_id, publish_state, published_at, created_at, updated_at, in_rotation, board_approval_source_id, board_approved_on FROM donor_initiatives WHERE id=$1 FOR UPDATE
+`
+
+func (q *Queries) LockInitiative(ctx context.Context, id pgtype.UUID) (DonorInitiative, error) {
+	row := q.db.QueryRow(ctx, lockInitiative, id)
+	var i DonorInitiative
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Title,
+		&i.Summary,
+		&i.Type,
+		&i.Location,
+		&i.Region,
+		&i.Counties,
+		&i.StartedOn,
+		&i.Status,
+		&i.CommittedMinor,
+		&i.PartnerSignupID,
+		&i.PublishState,
+		&i.PublishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.InRotation,
+		&i.BoardApprovalSourceID,
+		&i.BoardApprovedOn,
+	)
+	return i, err
+}
+
 const publishInitiative = `-- name: PublishInitiative :exec
 UPDATE donor_initiatives
 SET publish_state='PUBLISHED', published_at=$2, updated_at=$2
