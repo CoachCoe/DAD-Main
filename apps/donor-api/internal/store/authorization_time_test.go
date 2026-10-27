@@ -152,7 +152,7 @@ func TestProofExpiryIsCheckedAfterWaitingForOwnerLock(t *testing.T) {
 				}
 				redeem = func(tx pgx.Tx) error { _, _, err := claim(ctx, tx, proof, Client{}); return err }
 				expire = func() {
-					mustExec(t, lock, "UPDATE donor_login_links SET expires_at=$2 WHERE donor_id=$1", id, time.Now().UTC())
+					mustExec(t, lock, "UPDATE donor_login_links SET expires_at=clock_timestamp() WHERE donor_id=$1", id)
 				}
 			} else {
 				id, _ := staffFixture(t, pool, "OP_PARTNERSHIPS")
@@ -170,7 +170,7 @@ func TestProofExpiryIsCheckedAfterWaitingForOwnerLock(t *testing.T) {
 				}
 				redeem = func(tx pgx.Tx) error { _, _, err := staffInvitation(ctx, queries.New(tx), proof); return err }
 				expire = func() {
-					mustExec(t, lock, "UPDATE donor_staff_invites SET expires_at=$2 WHERE staff_id=$1", id, time.Now().UTC())
+					mustExec(t, lock, "UPDATE donor_staff_invites SET expires_at=clock_timestamp() WHERE staff_id=$1", id)
 				}
 			}
 			tx, err := api.Begin(ctx)
