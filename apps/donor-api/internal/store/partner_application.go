@@ -119,9 +119,10 @@ func (s PartnerApplicationService) Apply(ctx context.Context, id pgtype.UUID, in
 	}
 	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		// Idempotent retry: the same id already stored is a success.
 		if existing, err := q.PartnerApplicationByID(ctx, id); err == nil {
-			if existing.WorkEmail == params.WorkEmail {
+			if existing.Organization == params.Organization && existing.Website == params.Website && existing.Type == params.Type &&
+				existing.ContactName == params.ContactName && existing.Title == params.Title && existing.WorkEmail == params.WorkEmail &&
+				existing.Phone == params.Phone && existing.WorkforceSize == params.WorkforceSize {
 				return nil
 			}
 			return ErrPartnerApplication

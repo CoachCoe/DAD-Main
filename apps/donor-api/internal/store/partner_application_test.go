@@ -38,6 +38,41 @@ func validApplication(org, email string) PartnerApplicationInput {
 	}
 }
 
+func TestPartnerApplicationRetryPreservesTheSubmittedFields(t *testing.T) {
+	pool := database(t)
+	cleanPartners(t, pool)
+	svc := PartnerApplicationService{DB: as(t, dbroles.API)}
+	ctx := context.Background()
+	id := testID(t)
+	original := validApplication("Retry Corp", "retry@partner.test")
+	if err := svc.Apply(ctx, id, original); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*PartnerApplicationInput){
+		"organization": func(in *PartnerApplicationInput) { in.Organization = "Another organization" },
+		"website":      func(in *PartnerApplicationInput) { in.Website = "https://another.example.org" },
+		"type":         func(in *PartnerApplicationInput) { in.Type = "Foundation" },
+		"contact":      func(in *PartnerApplicationInput) { in.ContactName = "Another contact" },
+		"title":        func(in *PartnerApplicationInput) { in.Title = "Another title" },
+		"email":        func(in *PartnerApplicationInput) { in.WorkEmail = "another@partner.test" },
+		"phone":        func(in *PartnerApplicationInput) { in.Phone = "+14155550124" },
+		"workforce":    func(in *PartnerApplicationInput) { in.WorkforceSize++ },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := original
+			change(&changed)
+			if err := svc.Apply(ctx, id, changed); !errors.Is(err, ErrPartnerApplication) {
+				t.Fatalf("changed %s acknowledged as the original application: %v", name, err)
+			}
+		})
+	}
+	original.Organization = " Retry Corp "
+	original.WorkEmail = "RETRY@partner.test"
+	if err := svc.Apply(ctx, id, original); err != nil {
+		t.Fatalf("equivalent normalized retry: %v", err)
+	}
+}
+
 func TestPartnerApplicationApprovalStateMachine(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
