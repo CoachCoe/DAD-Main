@@ -163,6 +163,13 @@ trust policy scopes staging to `refs/heads/dev` and production to the `productio
 environment and release tags. Override the repo slug (default `dynamicaid/dad`)
 with `-c githubRepo=owner/repo` when synthesising the pipeline-iam stack.
 
+**Before bootstrap (no OIDC yet):** until `INFRA_DEPLOY_ROLE_ARN` is set, the
+`infra.yml` PR job runs an offline `cdk synth` of both environments only — that
+synth is the PR signal — and skips the credentialed `cdk diff`. Once the account
+is bootstrapped and `INFRA_DEPLOY_ROLE_ARN` is populated, the PR job automatically
+also runs a real `cdk diff`. The `deploy-*` jobs never run on a PR, so they do not
+require credentials until the first merge/release after bootstrap.
+
 ## Email (SES)
 
 `lib/ses-stack.ts` creates an SES domain identity for the per-env sending
