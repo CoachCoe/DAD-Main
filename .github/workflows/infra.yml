@@ -54,7 +54,12 @@ env:
   NODE_VERSION: "22"
 
 jobs:
-  # PRs: synth + diff only, no credentials write beyond read-only OIDC assume.
+  # PRs: always validate the IaC offline with `cdk synth` (no AWS credentials
+  # needed). Only attempt a credentialed `cdk diff` once the account has been
+  # bootstrapped and the OIDC deploy role ARN is configured as the GitHub
+  # Environment variable INFRA_DEPLOY_ROLE_ARN. Before bootstrap that variable
+  # is unset, so the diff step is skipped and the PR check stays green on the
+  # synth alone. See infra/README.md for the one-time bootstrap steps.
   diff:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
@@ -73,11 +78,32 @@ jobs:
           cache-dependency-path: infra/package-lock.json
       - run: npm ci
       - run: npm run build
+      # Offline validation: synth both environments with dummy account/region.
+      # This is the real PR signal and needs no AWS credentials.
+      - name: cdk synth (staging + production, offline)
+        env:
+          CDK_DEFAULT_ACCOUNT: "000000000000"
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
+        run: |
+          npx cdk synth -c env=staging >/dev/null
+          npx cdk synth -c env=production >/dev/null
+      # Credentialed diff, only once OIDC is set up (role ARN variable present).
+      - name: Check whether OIDC deploy role is configured
+        id: oidc
+        run: |
+          if [ -n "${{ vars.INFRA_DEPLOY_ROLE_ARN }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "INFRA_DEPLOY_ROLE_ARN is not set yet; skipping credentialed cdk diff. The offline synth above is the PR signal until the account is bootstrapped." >&2
+          fi
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        if: steps.oidc.outputs.configured == 'true'
         with:
           role-to-assume: ${{ vars.INFRA_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: cdk diff (staging)
+        if: steps.oidc.outputs.configured == 'true'
         run: npx cdk diff -c env=staging
 
   # Merge to dev -> staging deploy.
