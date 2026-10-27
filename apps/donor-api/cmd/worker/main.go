@@ -172,7 +172,16 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 			}
 		}
 		worker := store.PushWorker{DB: pool, Providers: providers}
-		return func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }, nil
+		partner := store.PartnerPushWorker{DB: pool, Providers: providers}
+		return func(ctx context.Context) (bool, error) {
+			now := time.Now().UTC()
+			donorWorked, err := worker.DeliverNext(ctx, now)
+			if err != nil {
+				return donorWorked, err
+			}
+			partnerWorked, err := partner.DeliverNext(ctx, now)
+			return donorWorked || partnerWorked, err
+		}, nil
 	}
 	settings, err := mail.FromEnvironment(getenv)
 	if err != nil || settings == nil {

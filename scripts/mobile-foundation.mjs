@@ -9,7 +9,10 @@ const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
 export const digest = (value) => createHash("sha256").update(value).digest("hex");
 
 const bearer = (operation) =>
-  operation.security?.some((requirement) => "bearerAuth" in requirement || "partnerBearerAuth" in requirement);
+  operation.security?.some(
+    (requirement) =>
+      "bearerAuth" in requirement || "partnerBearerAuth" in requirement || "applicationBearerAuth" in requirement,
+  );
 
 const publicReads = new Set([
   "/health/live",

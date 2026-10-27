@@ -7,11 +7,12 @@ import "net/http"
 type auth string
 
 const (
-	noAuth      auth = "none"
-	donorAuth   auth = "donor"   // browser cookie, or bearer token from the donor app
-	partnerAuth auth = "partner" // browser cookie, or bearer token from the app
-	staffAuth   auth = "staff"   // browser cookie only
-	stripeAuth  auth = "stripe"  // Stripe-Signature over the raw body
+	applicationAuth auth = "application"
+	noAuth          auth = "none"
+	donorAuth       auth = "donor"   // browser cookie, or bearer token from the donor app
+	partnerAuth     auth = "partner" // browser cookie, or bearer token from the app
+	staffAuth       auth = "staff"   // browser cookie only
+	stripeAuth      auth = "stripe"  // Stripe-Signature over the raw body
 )
 
 type route struct {
@@ -39,6 +40,8 @@ func (a *api) routes() []route {
 		a.visitor("POST /donor/company/{code}", a.captureCompany),
 		{"POST /analytics/events", noAuth, a.guarded(a.Origin, analyticsLimit, true, a.ingestAnalytics)},
 		a.visitor("POST /donor/public/partner-apply", a.partnerApply),
+		a.visitor("POST /donor/partner/applications", a.applyWithReceipt),
+		{"GET /donor/partner/application-status", applicationAuth, signedIn(applicationSession, a.applicationStatus)},
 		a.partnerEntry("POST /donor/partner/sign-in", a.partnerSignIn),
 		a.partnerEntry("POST /donor/partner/accept-invite", a.partnerAccept),
 
@@ -133,6 +136,8 @@ func (a *api) routes() []route {
 
 		a.staffRead("GET /donor/staff/content", a.contentInventory),
 		a.staffRead("GET /donor/staff/content/wording", a.recognitionWording),
+		a.partnerAppWrite("POST /donor/partner/push-device", a.registerPartnerPushDevice),
+		a.partnerAppWrite("POST /donor/partner/push-device/unregister", a.unregisterPartnerPushDevice),
 		a.partnerRead("GET /donor/partner/overview", a.partnerOverview),
 		a.partnerRead("GET /donor/partner/initiatives", a.partnerInitiatives),
 		a.partnerRead("GET /donor/partner/spend", a.partnerSpend),
@@ -324,4 +329,14 @@ func signedIn(session func(*http.Request) string, next sessionHandler) http.Hand
 		}
 		next(w, r, token)
 	}
+}
+
+func (a *api) partnerAppWrite(pattern string, handler sessionHandler) route {
+	return a.partnerWrite(pattern, func(w http.ResponseWriter, r *http.Request, token string) {
+		if !native(r) {
+			writeError(w, r, http.StatusForbidden, "Request origin is not allowed", nil)
+			return
+		}
+		handler(w, r, token)
+	})
 }

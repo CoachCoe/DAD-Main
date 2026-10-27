@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -118,23 +119,73 @@ func (s PartnerApplicationService) Apply(ctx context.Context, id pgtype.UUID, in
 		return err
 	}
 	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		return applyPartner(ctx, queries.New(tx), params)
+	})
+}
+
+func applyPartner(ctx context.Context, q *queries.Queries, params queries.InsertPartnerApplicationParams) error {
+	if existing, err := q.PartnerApplicationByID(ctx, params.ID); err == nil {
+		if existing.Organization == params.Organization && existing.Website == params.Website && existing.Type == params.Type &&
+			existing.ContactName == params.ContactName && existing.Title == params.Title && existing.WorkEmail == params.WorkEmail &&
+			existing.Phone == params.Phone && existing.WorkforceSize == params.WorkforceSize {
+			return nil
+		}
+		return ErrPartnerApplication
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	err := q.InsertPartnerApplication(ctx, params)
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
+		return ErrPartnerApplication
+	}
+	return err
+}
+
+var applicationReceiptToken = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+
+const applicationReceiptLifetime = 30 * 24 * time.Hour
+
+func (s PartnerApplicationService) ApplyWithReceipt(ctx context.Context, id pgtype.UUID, in PartnerApplicationInput, receipt string) error {
+	if len(receipt) != 43 || !applicationReceiptToken.MatchString(receipt) {
+		return ErrPartnerApplication
+	}
+	now := time.Now().UTC()
+	params, err := in.validate(id, now)
+	if err != nil {
+		return err
+	}
+	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
 		q := queries.New(tx)
-		if existing, err := q.PartnerApplicationByID(ctx, id); err == nil {
-			if existing.Organization == params.Organization && existing.Website == params.Website && existing.Type == params.Type &&
-				existing.ContactName == params.ContactName && existing.Title == params.Title && existing.WorkEmail == params.WorkEmail &&
-				existing.Phone == params.Phone && existing.WorkforceSize == params.WorkforceSize {
-				return nil
-			}
-			return ErrPartnerApplication
-		} else if !errors.Is(err, pgx.ErrNoRows) {
+		if err := applyPartner(ctx, q, params); err != nil {
 			return err
 		}
-		err := q.InsertPartnerApplication(ctx, params)
+		n, err := q.AttachApplicationReceipt(ctx, queries.AttachApplicationReceiptParams{
+			ID: id, ReceiptHash: text(HashToken(receipt)), ReceiptExpiresAt: timestamp(now.Add(applicationReceiptLifetime)),
+		})
 		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
 			return ErrPartnerApplication
 		}
+		if err == nil && n != 1 {
+			err = ErrPartnerApplication
+		}
 		return err
 	})
+}
+
+type ApplicationStatus struct {
+	Organization string `json:"organization"`
+	Status       string `json:"status"`
+}
+
+func (s PartnerApplicationService) ApplicationStatus(ctx context.Context, receipt string) (ApplicationStatus, error) {
+	if !applicationReceiptToken.MatchString(receipt) {
+		return ApplicationStatus{}, ErrPartnerDenied
+	}
+	row, err := queries.New(s.DB).ApplicationStatusByReceipt(ctx, text(HashToken(receipt)))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ApplicationStatus{}, ErrPartnerDenied
+	}
+	return ApplicationStatus{Organization: row.Organization, Status: row.Status}, err
 }
 
 // Approve approves a pending application (§8), promotes its organization into

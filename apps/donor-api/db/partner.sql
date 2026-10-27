@@ -77,7 +77,7 @@ SELECT * FROM donor_partner_users WHERE partner_id=$1 AND NOT disabled ORDER BY 
 UPDATE donor_partner_users SET disabled=true,invite_token_hash=NULL,invite_expires_at=NULL WHERE partner_id=$1 AND id=$2;
 
 -- name: RevokePartnerUserSessions :exec
-UPDATE donor_partner_sessions SET revoked_at=$2 WHERE partner_user_id=$1 AND revoked_at IS NULL;
+UPDATE donor_partner_sessions SET revoked_at=$2,push_token=NULL,push_environment=NULL WHERE partner_user_id=$1 AND revoked_at IS NULL;
 
 -- name: InvitePartnerUser :one
 -- P-4: a partner admin invites a VIEWER (or ADMIN) by email; the signer of an
@@ -101,8 +101,8 @@ SET accepted_at=coalesce(accepted_at, $2), invite_token_hash=NULL, invite_expire
 WHERE id=$1;
 
 -- name: InsertPartnerSession :exec
-INSERT INTO donor_partner_sessions (id, partner_user_id, token_hash, expires_at, created_at)
-VALUES ($1,$2,$3,$4,$5);
+INSERT INTO donor_partner_sessions (id, partner_user_id, token_hash, expires_at, created_at, app)
+VALUES ($1,$2,$3,$4,$5,$6);
 
 -- name: AuthenticatedPartnerUser :one
 -- Resolves a live partner session to its user + org, rejecting expired/revoked
@@ -115,7 +115,7 @@ WHERE s.token_hash=$1 AND s.revoked_at IS NULL AND s.expires_at > sqlc.arg(as_of
   AND NOT u.disabled AND p.approved_at IS NOT NULL;
 
 -- name: RevokePartnerSession :exec
-UPDATE donor_partner_sessions SET revoked_at=$2 WHERE token_hash=$1 AND revoked_at IS NULL;
+UPDATE donor_partner_sessions SET revoked_at=$2,push_token=NULL,push_environment=NULL WHERE token_hash=$1 AND revoked_at IS NULL;
 
 -- name: PartnerSpendByCategory :many
 -- P-12: spend by category across a partner's linked initiatives (totals only).
@@ -311,3 +311,11 @@ UPDATE donor_partner_login_emails SET last_error=$2, available_at=$3 WHERE id=$1
 
 -- name: PartnerCompanyCode :one
 SELECT company_code FROM donor_partner_signups WHERE id=$1;
+
+-- name: AttachApplicationReceipt :execrows
+UPDATE donor_partner_applications SET receipt_hash=$2,receipt_expires_at=$3
+WHERE id=$1 AND (receipt_hash IS NULL OR receipt_hash=$2);
+
+-- name: ApplicationStatusByReceipt :one
+SELECT organization,status FROM donor_partner_applications
+WHERE receipt_hash=$1 AND receipt_expires_at>clock_timestamp();

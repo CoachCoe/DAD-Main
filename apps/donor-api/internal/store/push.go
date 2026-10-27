@@ -88,7 +88,18 @@ func (s PushService) RegisterDevice(ctx context.Context, token string, device Pu
 	if !slices.Contains(s.Platforms, device.Platform) {
 		return PushRegistration{}, ErrPushUnconfigured
 	}
-	return sessionWrite(ctx, s.DB, token, func(q *queries.Queries, user signedIn, _ time.Time) (PushRegistration, error) {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (PushRegistration, error) {
+		q := queries.New(tx)
+		if err := q.LockPushInstallation(ctx, device.Token); err != nil {
+			return PushRegistration{}, err
+		}
+		user, err := lockSignedIn(ctx, q, token)
+		if err != nil {
+			return PushRegistration{}, err
+		}
+		if err := q.ReleasePartnerPushToken(ctx, text(device.Token)); err != nil {
+			return PushRegistration{}, err
+		}
 		if err := q.ReleasePushToken(ctx, queries.ReleasePushTokenParams{PushToken: text(device.Token), ID: user.session}); err != nil {
 			return PushRegistration{}, err
 		}

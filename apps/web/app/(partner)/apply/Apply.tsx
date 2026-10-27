@@ -27,6 +27,7 @@ export default function Apply() {
   const heading = useFocusOnSuccess(done);
   const [error, setError] = useState("");
   const key = useRef<string | null>(null);
+  const receipt = useRef<string | null>(null);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -38,19 +39,24 @@ export default function Apply() {
     const body = frozen || { ...data, website, workforce_size: Number.parseInt(data.workforce_size, 10) || 0 };
     setFrozen(body);
     key.current ??= crypto.randomUUID();
+    receipt.current ??= btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))))
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
+      .replaceAll("=", "");
     setBusy(true);
     setError("");
     try {
-      await api("/donor/public/partner-apply", {
+      await api("/donor/partner/applications", {
         method: "POST",
         headers: { "Idempotency-Key": key.current },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ application: body, receipt: receipt.current }),
       });
       setDone(true);
     } catch (cause) {
       if (cause instanceof ApiError && [409, 422].includes(cause.status)) {
         setFrozen(null);
         key.current = null;
+        receipt.current = null;
         setError(failureMessage(cause, "Check the highlighted fields, then submit again."));
       } else setError(unconfirmedMessage(cause, "Your application is not confirmed. Retry the same form."));
     } finally {
@@ -66,6 +72,11 @@ export default function Apply() {
         Tell us about your organization. We review every application; once approved, you’ll receive a sign-in link to
         your partner dashboard.
       </p>
+      {!done && (
+        <p>
+          <Link href="/apply/status">Check an application submitted from this browser</Link>
+        </p>
+      )}
       {done ? (
         <section className="callout" aria-live="polite">
           <h2>Application received — pending review</h2>
@@ -76,7 +87,7 @@ export default function Apply() {
             if we need more information.
           </p>
           <p>
-            <Link href="/">Back to home</Link>
+            <Link href="/apply/status">Check application status</Link>
           </p>
         </section>
       ) : (

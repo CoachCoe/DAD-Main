@@ -10584,6 +10584,301 @@
      }
     }
    }
+  },
+  "/donor/partner/push-device": {
+   "post": {
+    "operationId": "partnerRegisterPushDevice",
+    "summary": "Partner app: Register this installation for app notifications",
+    "description": "Native requests only. Records the push token of the app installation behind the calling session, replacing any token the session held. Register at every launch, since platforms rotate tokens. A token another session holds, the donor's or anyone's, moves to this session: it names one installation. The token is removed when the session is signed out, revoked, or ends, so sign-in again means registering again. Notifications carry generic text, a `category` (`REFERRAL_CONVERTED`, `STREAK_AT_RISK`, or `STREAK_MILESTONE`) and an app `path` to open, never names or amounts; fetch details through the API. 503 with `PUSH_UNCONFIGURED` when this deployment does not deliver to the platform. 401 for a browser session's credential.",
+    "tags": [
+     "Account"
+    ],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "native"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "platform": {
+          "type": "string",
+          "enum": [
+           "IOS",
+           "ANDROID"
+          ]
+         },
+         "token": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 1024,
+          "description": "For iOS, the APNs device token as hex (either case); for Android, the FCM registration token."
+         },
+         "environment": {
+          "type": "string",
+          "enum": [
+           "SANDBOX",
+           "PRODUCTION"
+          ],
+          "default": "PRODUCTION",
+          "description": "iOS only: the APNs environment that issued the token (SANDBOX for development builds). Omit for Android."
+         }
+        },
+        "required": [
+         "platform",
+         "token"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "The session's registration after the request.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PushRegistration"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "413": {
+      "$ref": "#/components/responses/PayloadTooLarge"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/partner/push-device/unregister": {
+   "post": {
+    "operationId": "partnerUnregisterPushDevice",
+    "summary": "Partner app: Stop app notifications to this installation",
+    "description": "Native requests only. Removes the calling session's push token, if any; the session stays signed in.",
+    "tags": [
+     "Account"
+    ],
+    "security": [
+     {
+      "partnerCookieAuth": []
+     },
+     {
+      "partnerBearerAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "native"
+    ],
+    "responses": {
+     "200": {
+      "description": "The session's registration after the request.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/PushRegistration"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/partner/applications": {
+   "post": {
+    "operationId": "applyWithReceipt",
+    "summary": "Submit an application with a private status receipt",
+    "tags": [
+     "Public"
+    ],
+    "security": [],
+    "x-rate-limit": "visitor",
+    "x-clients": [
+     "browser"
+    ],
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/IdempotencyKey"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "application",
+         "receipt"
+        ],
+        "properties": {
+         "application": {
+          "type": "object",
+          "properties": {
+           "organization": {
+            "type": "string"
+           },
+           "website": {
+            "type": "string"
+           },
+           "type": {
+            "type": "string"
+           },
+           "contact_name": {
+            "type": "string"
+           },
+           "title": {
+            "type": "string"
+           },
+           "work_email": {
+            "type": "string"
+           },
+           "phone": {
+            "type": "string"
+           },
+           "workforce_size": {
+            "type": "integer"
+           }
+          },
+          "required": [
+           "organization",
+           "website",
+           "type",
+           "contact_name",
+           "title",
+           "work_email",
+           "phone",
+           "workforce_size"
+          ],
+          "additionalProperties": false
+         },
+         "receipt": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 43,
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "Generate 32 cryptographically random bytes and encode as unpadded base64url. Keep this value for idempotent retries. Browsers receive an HttpOnly receipt cookie; native clients store the receipt securely."
+         }
+        }
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "received": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "received"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/partner/application-status": {
+   "get": {
+    "operationId": "applicationStatus",
+    "summary": "Read the status of the application named by a private receipt",
+    "tags": [
+     "Partners"
+    ],
+    "security": [
+     {
+      "applicationCookieAuth": []
+     },
+     {
+      "applicationBearerAuth": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Application status only; no contact information or staff notes.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/ApplicationStatus"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
   }
  },
  "components": {
@@ -10621,6 +10916,17 @@
     "type": "http",
     "scheme": "bearer",
     "description": "Partner app session token, from POST /donor/partner/accept-invite sent as a native request. It lasts 12 hours. Accepted only on native requests (`X-DAD-Client: native`, no `Origin`, no `Cookie`), like bearerAuth. Never accepted for donor or staff routes."
+   },
+   "applicationCookieAuth": {
+    "type": "apiKey",
+    "in": "cookie",
+    "name": "dad_application_receipt",
+    "description": "A 30-day receipt scoped only to the submitted application status; it does not authenticate a partner user."
+   },
+   "applicationBearerAuth": {
+    "type": "http",
+    "scheme": "bearer",
+    "description": "The 32-byte base64url application receipt supplied at submission. Native requests only."
    }
   },
   "parameters": {
@@ -15115,6 +15421,27 @@
      "partner"
     ],
     "additionalProperties": false
+   },
+   "ApplicationStatus": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "organization",
+     "status"
+    ],
+    "properties": {
+     "organization": {
+      "type": "string"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "PENDING",
+       "APPROVED",
+       "REJECTED"
+      ]
+     }
+    }
    }
   }
  }

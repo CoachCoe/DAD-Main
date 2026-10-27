@@ -34,6 +34,13 @@ func queuePartnerMessage(
 	if err != nil {
 		return err
 	}
+	if kind == "METRICS_VERIFIED" || kind == "INITIATIVE_COMPLETE" {
+		if err := q.QueuePartnerPush(ctx, queries.QueuePartnerPushParams{
+			PartnerID: partner, Kind: kind, DedupKey: key, AsOf: timestamp(at),
+		}); err != nil {
+			return err
+		}
+	}
 	return q.QueuePartnerMessage(ctx, queries.QueuePartnerMessageParams{
 		ID: id, PartnerID: partner, Kind: kind, DedupKey: key, Context: data, AvailableAt: timestamp(at),
 	})

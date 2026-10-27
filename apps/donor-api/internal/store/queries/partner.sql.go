@@ -28,6 +28,42 @@ func (q *Queries) AcceptPartnerInvite(ctx context.Context, arg AcceptPartnerInvi
 	return err
 }
 
+const applicationStatusByReceipt = `-- name: ApplicationStatusByReceipt :one
+SELECT organization,status FROM donor_partner_applications
+WHERE receipt_hash=$1 AND receipt_expires_at>clock_timestamp()
+`
+
+type ApplicationStatusByReceiptRow struct {
+	Organization string `json:"organization"`
+	Status       string `json:"status"`
+}
+
+func (q *Queries) ApplicationStatusByReceipt(ctx context.Context, receiptHash pgtype.Text) (ApplicationStatusByReceiptRow, error) {
+	row := q.db.QueryRow(ctx, applicationStatusByReceipt, receiptHash)
+	var i ApplicationStatusByReceiptRow
+	err := row.Scan(&i.Organization, &i.Status)
+	return i, err
+}
+
+const attachApplicationReceipt = `-- name: AttachApplicationReceipt :execrows
+UPDATE donor_partner_applications SET receipt_hash=$2,receipt_expires_at=$3
+WHERE id=$1 AND (receipt_hash IS NULL OR receipt_hash=$2)
+`
+
+type AttachApplicationReceiptParams struct {
+	ID               pgtype.UUID        `json:"id"`
+	ReceiptHash      pgtype.Text        `json:"receipt_hash"`
+	ReceiptExpiresAt pgtype.Timestamptz `json:"receipt_expires_at"`
+}
+
+func (q *Queries) AttachApplicationReceipt(ctx context.Context, arg AttachApplicationReceiptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, attachApplicationReceipt, arg.ID, arg.ReceiptHash, arg.ReceiptExpiresAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const authenticatedPartnerUser = `-- name: AuthenticatedPartnerUser :one
 SELECT u.id, u.partner_id, u.email, u.name, u.role, u.invited_by, u.accepted_at, u.disabled, u.created_at, u.invite_token_hash, u.invite_expires_at, p.organization, p.approved_at
 FROM donor_partner_sessions s
@@ -287,8 +323,8 @@ func (q *Queries) InsertPartnerReport(ctx context.Context, arg InsertPartnerRepo
 }
 
 const insertPartnerSession = `-- name: InsertPartnerSession :exec
-INSERT INTO donor_partner_sessions (id, partner_user_id, token_hash, expires_at, created_at)
-VALUES ($1,$2,$3,$4,$5)
+INSERT INTO donor_partner_sessions (id, partner_user_id, token_hash, expires_at, created_at, app)
+VALUES ($1,$2,$3,$4,$5,$6)
 `
 
 type InsertPartnerSessionParams struct {
@@ -297,6 +333,7 @@ type InsertPartnerSessionParams struct {
 	TokenHash     string             `json:"token_hash"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	App           bool               `json:"app"`
 }
 
 func (q *Queries) InsertPartnerSession(ctx context.Context, arg InsertPartnerSessionParams) error {
@@ -306,6 +343,7 @@ func (q *Queries) InsertPartnerSession(ctx context.Context, arg InsertPartnerSes
 		arg.TokenHash,
 		arg.ExpiresAt,
 		arg.CreatedAt,
+		arg.App,
 	)
 	return err
 }
@@ -461,7 +499,7 @@ func (q *Queries) NextPartnerMessage(ctx context.Context, availableAt pgtype.Tim
 }
 
 const partnerApplicationByID = `-- name: PartnerApplicationByID :one
-SELECT id, organization, website, type, contact_name, title, work_email, phone, workforce_size, status, decided_by, decided_at, decision_reason, approved_partner_id, created_at, updated_at FROM donor_partner_applications WHERE id=$1 FOR UPDATE
+SELECT id, organization, website, type, contact_name, title, work_email, phone, workforce_size, status, decided_by, decided_at, decision_reason, approved_partner_id, created_at, updated_at, receipt_hash, receipt_expires_at FROM donor_partner_applications WHERE id=$1 FOR UPDATE
 `
 
 func (q *Queries) PartnerApplicationByID(ctx context.Context, id pgtype.UUID) (DonorPartnerApplication, error) {
@@ -484,6 +522,8 @@ func (q *Queries) PartnerApplicationByID(ctx context.Context, id pgtype.UUID) (D
 		&i.ApprovedPartnerID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ReceiptHash,
+		&i.ReceiptExpiresAt,
 	)
 	return i, err
 }
@@ -1026,7 +1066,7 @@ func (q *Queries) PartnersDueMonthlyReport(ctx context.Context, arg PartnersDueM
 }
 
 const pendingPartnerApplications = `-- name: PendingPartnerApplications :many
-SELECT id, organization, website, type, contact_name, title, work_email, phone, workforce_size, status, decided_by, decided_at, decision_reason, approved_partner_id, created_at, updated_at FROM donor_partner_applications
+SELECT id, organization, website, type, contact_name, title, work_email, phone, workforce_size, status, decided_by, decided_at, decision_reason, approved_partner_id, created_at, updated_at, receipt_hash, receipt_expires_at FROM donor_partner_applications
 WHERE status='PENDING'
 ORDER BY created_at ASC, id
 LIMIT 51 OFFSET $1::bigint
@@ -1059,6 +1099,8 @@ func (q *Queries) PendingPartnerApplications(ctx context.Context, pageOffset int
 			&i.ApprovedPartnerID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ReceiptHash,
+			&i.ReceiptExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1200,7 +1242,7 @@ func (q *Queries) RenderPartnerMessage(ctx context.Context, arg RenderPartnerMes
 }
 
 const revokePartnerSession = `-- name: RevokePartnerSession :exec
-UPDATE donor_partner_sessions SET revoked_at=$2 WHERE token_hash=$1 AND revoked_at IS NULL
+UPDATE donor_partner_sessions SET revoked_at=$2,push_token=NULL,push_environment=NULL WHERE token_hash=$1 AND revoked_at IS NULL
 `
 
 type RevokePartnerSessionParams struct {
@@ -1214,7 +1256,7 @@ func (q *Queries) RevokePartnerSession(ctx context.Context, arg RevokePartnerSes
 }
 
 const revokePartnerUserSessions = `-- name: RevokePartnerUserSessions :exec
-UPDATE donor_partner_sessions SET revoked_at=$2 WHERE partner_user_id=$1 AND revoked_at IS NULL
+UPDATE donor_partner_sessions SET revoked_at=$2,push_token=NULL,push_environment=NULL WHERE partner_user_id=$1 AND revoked_at IS NULL
 `
 
 type RevokePartnerUserSessionsParams struct {

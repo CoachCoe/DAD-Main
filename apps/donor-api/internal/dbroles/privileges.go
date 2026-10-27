@@ -187,6 +187,7 @@ var grants = map[string]map[Role]string{
 	"donor_staff_audit":      {API: "SELECT, INSERT", StaffCLI: "INSERT"},
 	"donor_staff_actions":    {API: "SELECT, INSERT, UPDATE"},
 	"donor_partner_signups": {
+		PushWorker:       "SELECT",
 		API:              "SELECT, INSERT, UPDATE",
 		MessageWorker:    "SELECT",
 		ProjectionWorker: "SELECT",
@@ -194,14 +195,22 @@ var grants = map[string]map[Role]string{
 	},
 	"donor_partner_applications": {API: "SELECT, INSERT, UPDATE"},
 	"donor_partner_users": {
+		ProjectionWorker: "SELECT",
+		PushWorker:       "SELECT",
 		API:              "SELECT, INSERT, UPDATE",
 		StaffCLI:         "SELECT (email, partner_id, disabled)",
 		MessageWorker:    "SELECT",
 		LoginEmailWorker: "SELECT, UPDATE (invite_token_hash, invite_expires_at)",
 	},
-	"donor_partner_sessions": {API: "SELECT, INSERT, UPDATE"},
+	"donor_partner_sessions": {API: "SELECT, INSERT, UPDATE", PushWorker: "SELECT, UPDATE", ProjectionWorker: "SELECT"},
 	"donor_partner_login_emails": {API: "SELECT, INSERT", LoginEmailWorker: "SELECT, UPDATE",
 		Monitor: "SELECT (attempts, available_at, completed_at)", Rekey: "SELECT (id, encrypted_token), UPDATE (encrypted_token)"},
+	"donor_partner_push_notifications": {
+		API:              "SELECT, INSERT",
+		ProjectionWorker: "INSERT",
+		PushWorker:       "SELECT, UPDATE",
+		Monitor:          "SELECT (attempts, available_at, completed_at, expires_at)",
+	},
 	"donor_partner_reports": {API: "SELECT, INSERT"},
 	"donor_partner_messages": {
 		API:              "SELECT, INSERT",

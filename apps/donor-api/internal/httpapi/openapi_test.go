@@ -92,11 +92,12 @@ func TestContractListsExactlyTheServedRoutes(t *testing.T) {
 
 func TestContractSecurityMatchesRouteAuth(t *testing.T) {
 	schemes := map[auth][]string{
-		noAuth:      {},
-		donorAuth:   {"bearerAuth", "cookieAuth"},
-		partnerAuth: {"partnerBearerAuth", "partnerCookieAuth"},
-		staffAuth:   {"staffCookieAuth"},
-		stripeAuth:  {"stripeSignature"},
+		applicationAuth: {"applicationBearerAuth", "applicationCookieAuth"},
+		noAuth:          {},
+		donorAuth:       {"bearerAuth", "cookieAuth"},
+		partnerAuth:     {"partnerBearerAuth", "partnerCookieAuth"},
+		staffAuth:       {"staffCookieAuth"},
+		stripeAuth:      {"stripeSignature"},
 	}
 	ops := loadContract(t).operations()
 	for _, route := range allRoutes() {
@@ -178,11 +179,14 @@ func (c *contract) lookup(pointer string) any {
 // properties, recursively, so a renamed or added field fails here first.
 func TestContractSchemasMatchGoTypes(t *testing.T) {
 	responses := map[string]any{
+		"GET /donor/partner/application-status":                      store.ApplicationStatus{},
 		"GET /donor/public/content":                                  store.PublicContent{},
 		"POST /donor/checkouts":                                      payments.CheckoutResult{},
 		"GET /donor/me/dashboard":                                    store.DonorDashboard{},
 		"GET /donor/me/profile":                                      store.Profile{},
 		"POST /donor/me/preferences":                                 store.Profile{},
+		"POST /donor/partner/push-device":                            store.PushRegistration{},
+		"POST /donor/partner/push-device/unregister":                 store.PushRegistration{},
 		"POST /donor/me/push-device":                                 store.PushRegistration{},
 		"POST /donor/me/push-device/unregister":                      store.PushRegistration{},
 		"GET /donor/me/conversions":                                  store.Conversions{},
@@ -249,6 +253,7 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		}{},
 	}
 	requests := map[string]any{
+		"POST /donor/partner/applications":                           applicationReceiptBody{},
 		"POST /donor/passkeys/sign-in":                               donorPasskeySignInBody{},
 		"POST /donor/me/passkeys/register":                           registerPasskeyBody{},
 		"POST /donor/checkouts":                                      checkoutBody{},

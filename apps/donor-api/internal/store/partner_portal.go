@@ -172,7 +172,7 @@ func (s PartnerPortalService) Invite(ctx context.Context, token, email, name, ro
 
 // AcceptInvite exchanges an emailed sign-in link, whether an invitation or a
 // requested sign-in, for a partner session token. Each link works once.
-func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string) (string, error) {
+func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string, app ...bool) (string, error) {
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (string, error) {
 		q := queries.New(tx)
 		user, err := q.PartnerUserByInvite(ctx, pgtype.Text{String: HashToken(invite), Valid: true})
@@ -189,12 +189,18 @@ func (s PartnerPortalService) AcceptInvite(ctx context.Context, invite string) (
 		if err = q.AcceptPartnerInvite(ctx, queries.AcceptPartnerInviteParams{ID: user.ID, AcceptedAt: timestamp(now)}); err != nil {
 			return "", err
 		}
-		return s.issueSession(ctx, q, user.ID, now)
+		return s.issueSession(ctx, q, user.ID, now, len(app) == 1 && app[0])
 	})
 }
 
 // issueSession mints a partner session token for a user.
-func (s PartnerPortalService) issueSession(ctx context.Context, q *queries.Queries, userID pgtype.UUID, now time.Time) (string, error) {
+func (s PartnerPortalService) issueSession(
+	ctx context.Context,
+	q *queries.Queries,
+	userID pgtype.UUID,
+	now time.Time,
+	app bool,
+) (string, error) {
 	sessionID, err := NewID()
 	if err != nil {
 		return "", err
@@ -205,7 +211,7 @@ func (s PartnerPortalService) issueSession(ctx context.Context, q *queries.Queri
 	}
 	if err = q.InsertPartnerSession(ctx, queries.InsertPartnerSessionParams{
 		ID: sessionID, PartnerUserID: userID, TokenHash: HashToken(token),
-		ExpiresAt: timestamp(now.Add(partnerSessionLifetime)), CreatedAt: timestamp(now),
+		ExpiresAt: timestamp(now.Add(partnerSessionLifetime)), CreatedAt: timestamp(now), App: app,
 	}); err != nil {
 		return "", err
 	}

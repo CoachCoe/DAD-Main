@@ -20,6 +20,22 @@ func (a *api) push() service {
 }
 
 func (a *api) registerPushDevice(w http.ResponseWriter, r *http.Request, session string) {
+	registerPush(w, r, session, a.Push, a.push())
+}
+
+func (a *api) partnerPush() service {
+	return service{a.PartnerPush != nil, "The partner portal is temporarily unavailable", readTimeout, partnerStatusCode}
+}
+
+func (a *api) registerPartnerPushDevice(w http.ResponseWriter, r *http.Request, session string) {
+	registerPush(w, r, session, a.PartnerPush, a.partnerPush())
+}
+
+func (a *api) unregisterPartnerPushDevice(w http.ResponseWriter, r *http.Request, session string) {
+	a.partnerPush().serve(w, r, func(ctx context.Context) (any, error) { return a.PartnerPush.UnregisterDevice(ctx, session) })
+}
+
+func registerPush(w http.ResponseWriter, r *http.Request, session string, source PushSource, svc service) {
 	var body struct {
 		Platform    *string         `json:"platform"`
 		Token       *string         `json:"token"`
@@ -34,7 +50,7 @@ func (a *api) registerPushDevice(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 	device := store.PushDevice{Platform: *body.Platform, Token: *body.Token, Environment: environment}
-	a.push().serve(w, r, func(ctx context.Context) (any, error) { return a.Push.RegisterDevice(ctx, session, device) })
+	svc.serve(w, r, func(ctx context.Context) (any, error) { return source.RegisterDevice(ctx, session, device) })
 }
 
 func (a *api) unregisterPushDevice(w http.ResponseWriter, r *http.Request, session string) {

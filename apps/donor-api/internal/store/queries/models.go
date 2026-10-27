@@ -291,6 +291,8 @@ type DonorPartnerApplication struct {
 	ApprovedPartnerID pgtype.UUID        `json:"approved_partner_id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ReceiptHash       pgtype.Text        `json:"receipt_hash"`
+	ReceiptExpiresAt  pgtype.Timestamptz `json:"receipt_expires_at"`
 }
 
 type DonorPartnerEmployee struct {
@@ -327,6 +329,20 @@ type DonorPartnerMessage struct {
 	Subject          pgtype.Text        `json:"subject"`
 	Body             pgtype.Text        `json:"body"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorPartnerPushNotification struct {
+	ID               pgtype.UUID        `json:"id"`
+	SessionID        pgtype.UUID        `json:"session_id"`
+	PartnerID        pgtype.UUID        `json:"partner_id"`
+	Kind             string             `json:"kind"`
+	DedupKey         string             `json:"dedup_key"`
+	AvailableAt      pgtype.Timestamptz `json:"available_at"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	Attempts         int32              `json:"attempts"`
+	LastError        pgtype.Text        `json:"last_error"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
 }
 
 type DonorPartnerSignup struct {

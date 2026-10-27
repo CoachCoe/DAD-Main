@@ -220,6 +220,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	portal := store.PartnerPortalService{DB: pool}
 	services.PartnerPortal = store.PartnerDashboardService{PartnerPortalService: portal}
 	services.PartnerApply = store.PartnerApplicationService{DB: pool}
+	services.ApplicationReceipts = store.PartnerApplicationService{DB: pool}
 	services.Dashboard = store.DashboardReader{DB: pool}
 	services.Account = store.AccountService{DB: pool}
 	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
@@ -241,6 +242,7 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin, FoundingClaims: foundingClaims}
 	services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
 	services.Push = store.PushService{DB: pool, Platforms: platforms}
+	services.PartnerPush = store.PartnerPushService{DB: pool, Platforms: platforms}
 	if webhookSecret != "" {
 		services.Webhook = payments.Receiver{Secret: webhookSecret, Inbox: store.StripeInbox{DB: pool}}
 	}

@@ -22,7 +22,7 @@ type PartnerApplySource interface {
 // PartnerPortalSource is the authenticated partner portal surface (§7.2/§7.3).
 type PartnerPortalSource interface {
 	RequestSignIn(ctx context.Context, email string) error
-	AcceptInvite(ctx context.Context, invite string) (string, error)
+	AcceptInvite(ctx context.Context, invite string, app ...bool) (string, error)
 	SignOut(ctx context.Context, token string) error
 	Users(ctx context.Context, token string) ([]store.PartnerUser, error)
 	Invite(ctx context.Context, token, email, name, role string) error
@@ -72,6 +72,8 @@ func partnerSession(r *http.Request) string {
 
 func partnerStatusCode(err error) (int, string) {
 	switch {
+	case errors.Is(err, store.ErrPushToken):
+		return http.StatusUnprocessableEntity, "Check the device token and try again"
 	case errors.Is(err, store.ErrPartnerDenied):
 		return http.StatusUnauthorized, "Partner sign-in required"
 	case errors.Is(err, store.ErrPartnerForbidden):
@@ -168,7 +170,7 @@ func (a *api) partnerAccept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.partnerPortal().serve(w, r, func(ctx context.Context) (any, error) {
-		token, err := a.PartnerPortal.AcceptInvite(ctx, body.Invite)
+		token, err := a.PartnerPortal.AcceptInvite(ctx, body.Invite, native(r))
 		if err != nil {
 			return nil, err
 		}

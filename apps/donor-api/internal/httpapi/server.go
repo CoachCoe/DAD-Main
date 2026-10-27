@@ -38,12 +38,13 @@ type Services struct {
 	Webhook  WebhookReceiver
 	// Partner portal: the public application, the authenticated
 	// partner session surface, and the staff-side partner administration.
-	PartnerApply    PartnerApplySource
-	PartnerPortal   PartnerPortalSource
-	StaffPartner    StaffPartnerSource
-	EmployeeDonor   EmployeeDonorSource
-	EmployeePartner EmployeePartnerSource
-	EmployeeStaff   EmployeeStaffSource
+	PartnerApply        PartnerApplySource
+	ApplicationReceipts ApplicationReceiptSource
+	PartnerPortal       PartnerPortalSource
+	StaffPartner        StaffPartnerSource
+	EmployeeDonor       EmployeeDonorSource
+	EmployeePartner     EmployeePartnerSource
+	EmployeeStaff       EmployeeStaffSource
 
 	Account         AccountSource
 	EmailConfigured bool
@@ -56,6 +57,7 @@ type Services struct {
 	Dashboard       DashboardSource
 	Recurring       RecurringSource
 	Push            PushSource
+	PartnerPush     PushSource
 	Wallet          *wallet.Issuer
 
 	Staff           StaffSource

@@ -21,7 +21,10 @@ it("submits a normalized application and shows the pending-review state", async 
   render(<Apply />);
   fill();
   await waitFor(() => expect(screen.getByRole("heading", { name: /pending review/i })).toBeInTheDocument());
-  const body = JSON.parse(fetch.mock.calls[0][1].body);
+  const submitted = JSON.parse(fetch.mock.calls[0][1].body);
+  const body = submitted.application;
+  expect(submitted.receipt).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  expect(fetch.mock.calls[0][0]).toBe("/api/donor/partner/applications");
   expect(body.website).toBe("https://delta.example");
   expect(body.workforce_size).toBe(500);
   expect(fetch.mock.calls[0][1].headers["Idempotency-Key"]).toBeTruthy();
