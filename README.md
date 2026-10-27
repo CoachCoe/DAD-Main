@@ -152,6 +152,12 @@ app's API types from the OpenAPI contract; commit each source with its generated
 `make check-generated` fails if either has drifted.
 Applied migrations are immutable and checksum-checked.
 
+With the iOS and Android toolchains and sibling checkouts installed,
+`make test-native-clients` proves both generated clients' session lifecycle against a
+temporary HTTPS Go API and the synthetic test database. See
+[native client acceptance](docs/mobile-foundation.md#real-native-client-acceptance)
+for the command, checkout overrides, and its provider/device acceptance boundary.
+
 The ATM acceptance ledger uses a dedicated [durable store and recovery
 procedure](docs/atm-ledger.md). `make test-ledger lint-ledger` validates its Worker,
 transactional storage, OIDC access, archive recovery and migration client. The original

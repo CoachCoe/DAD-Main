@@ -13,6 +13,9 @@ Their screens and platform interactions are separate from the Go financial domai
 - `mobile.openapi.json`: native-admitted mutations, donor-account and public
   initiative/event reads, and liveness,
   derived from the canonical API without rewriting schemas or response variants.
+- `swift.openapi.json`: the mobile API adapted for the pinned Apple generator, with
+  equivalent nullable object/scalar states and an explicit literal-null type override.
+- `DADNullValue.swift`: the strict Codable implementation for that override.
 - `tokens.json`: platform-neutral design values, with `schema_version`.
 - `tokens.ts`, `DADTokens.swift`, `DADTokens.kt`: generated platform values.
 - `links.json`: approved account, proof, referral, and notification destinations.
@@ -48,49 +51,66 @@ coordinated compatibility plan. Do not invent financial values for unknown serve
 
 ## Moving the apps from foundation 1 to 2
 
-Version 2 is the candidate for the expanded R1 donor and partner API; declaring the
-version does not publish it. Both native foundations currently pin release 1.0.0 at
-`5e237101c0ad81aa4675d16a94eb64863c5276b9`. Their claim, refresh, and logout shapes
-remain valid, but the profile response now includes identity, volunteer, ranking, and
-notification fields absent from that release. The pinned Swift decoder rejects those
-additional fields, so its profile preview cannot connect to the current backend.
-The Android profile adapter reads only email and public name and ignores these additions;
-that does not establish compatibility for the rest of the expanded contract.
+Version 2 contains the expanded R1 donor and partner API. Both native foundations
+pin its manifest and payload hashes, generate their scoped session clients, and admit
+`/account/gifts` for gift notifications. The bundle includes public initiative detail/spend
+and event detail/calendar reads for the next product screens.
 
-Before connecting either app to this backend, publish a checked version 2 release and
-update each app's vendored bundle and manifest lock in a reviewed change. Regenerate
-the scoped clients and test actual API responses for claim, profile, refresh, and logout,
-including expired access and revoked sessions. Keep those response fixtures tied to
-backend behavior so synthetic previews cannot conceal contract drift. Apps adding gift
-notifications must also handle `/account/gifts`, now present in both the account and
-notification link allowlists. Tests keep the Apple association paths aligned with the
-same policy.
-The bundle also includes public initiative detail/spend and event detail/calendar reads,
-so native clients can generate those R1 journeys from the same contract.
-
-Version 2 does not restore compatibility for an installed version 1 client. If one
-has been distributed against a real environment, preserve its response contract through
-an explicitly versioned API during migration; updating a bundle alone cannot repair an
-installed decoder. Future response additions also need installed-client tests before
-deployment, since strict generated decoders can turn an additive field into a breaking
-change.
+Version 1.0.0 at `5e237101c0ad81aa4675d16a94eb64863c5276b9` predates the identity,
+volunteer, ranking, and notification fields now returned by the profile endpoint. Its
+Swift decoder rejects those additional fields. Updating the foundation fixes new builds;
+it cannot repair an installed version 1 decoder. If a version 1 app has been distributed
+against a real environment, preserve its response contract through an explicitly
+versioned API during migration. Future response additions also need installed-client
+compatibility tests before deployment.
 
 ## Swift generator compatibility
 
 The compile probe in `contracts/mobile/swift` pins Apple's generator 1.14.1, runtime
 1.13.1, URLSession transport 1.3.2, and transitive dependencies in `Package.resolved`.
-It generates and compiles the actual mobile contract and tests session/profile decoding.
-This is a tooling probe, not an approved application SDK or an app-stack selection.
+It generates and compiles the bundled Swift input and tests session/profile decoding,
+unknown and populated financial states, recurring subscriptions, event reservations,
+and literal-null completed payment URLs.
 
-The generator emits unsupported-schema warnings for `anyOf` containing a standalone
-`type: null`, used by dashboard and recurring-gift states. It also emits unused public
-import warnings with Swift 6.4. No warning is suppressed. The canonical and mobile
-contracts retain these states unchanged. Before using this generator for affected
-features, resolve the nullable-schema issue with an upstream fix or explicitly tested
-client-side type overrides. See [Apple generator issue 817](https://github.com/apple/swift-openapi-generator/issues/817).
-Generated response decoding also enforces `additionalProperties: false`; adding response
-fields is therefore not automatically safe for installed generated clients. Client
-tolerance and supported-version compatibility tests must precede such backend changes.
+The canonical and mobile contracts preserve their original schemas. Apple's pinned
+generator skips standalone null branches, so `swift.openapi.json` expresses nullable
+object/scalar unions as nullable types. Referenced object fields and constraints are
+retained; nullable enums explicitly include null. A null-only payment URL uses the
+`DADLiteralNull: DADNullValue` type override from the probe's configuration. Its supported
+schema placeholder is only a generator input: the custom Codable type accepts and emits
+literal null and rejects every non-null value. Apps adding payment-update operations must
+include that override and the bundled source. The iOS session client currently filters
+out those unrelated operations.
+
+The probe no longer skips nullable fields. Unused public-import warnings emitted by the
+pinned generator with Swift 6.4 remain visible; no warning is suppressed.
+
+## Real native client acceptance
+
+With both native repos alongside this checkout, the normal native tooling installed,
+and a migrated synthetic database, run:
+
+```sh
+TEST_DATABASE_URL=postgresql://go_test:go_test@localhost:55440/donor_go make test-native-clients
+```
+
+`DAD_IOS_DIR`, `DAD_ANDROID_DIR`, and `DAD_SWIFT_BUILD` override the checkout/build paths.
+The command runs the backend's database-backed session lifecycle test, then holds open
+its test-only HTTPS server on loopback for the actual Swift URLSession and Kotlin Retrofit
+clients. Private temporary fixtures contain separate one-use proofs and the test server's
+certificate. The native test transports trust only that certificate; production trust
+configuration remains unchanged. The server exists only in the Go test binary, inherits
+the synthetic-database guard, uses the least-privilege API role, and calls no providers.
+
+Each client proves claim and profile decoding, single-use claim rejection, locally
+expired access triggering refresh and atomic replacement, rejection of replaced access,
+remote revocation clearing local credentials, and logout revoking both credentials.
+The opt-in Swift build flag and Gradle property compile these integration suites only
+for this command; ordinary unit tests retain their existing scope without skipped tests.
+The command stops the server and removes credential fixtures on completion or failure.
+Cross-repo CI needs authenticated access to all three pinned revisions before this can
+be a required hosted check. This local acceptance does not establish provider delivery,
+OS app-link association, or physical-device acceptance.
 
 ## Design source
 
