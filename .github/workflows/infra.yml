@@ -106,9 +106,10 @@ jobs:
         if: steps.oidc.outputs.configured == 'true'
         run: npx cdk diff -c env=staging
 
-  # Merge to dev -> staging deploy.
+  # Merge to dev -> staging deploy. Skipped (green) until the account is
+  # bootstrapped and INFRA_DEPLOY_ROLE_ARN is set; see infra/README.md.
   deploy-staging:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && vars.INFRA_DEPLOY_ROLE_ARN != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: staging
@@ -135,8 +136,9 @@ jobs:
   # environment in repo settings, not in YAML).
   deploy-production:
     if: >-
-      (github.event_name == 'release' && github.event.action == 'published') ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      vars.INFRA_DEPLOY_ROLE_ARN != '' &&
+      ((github.event_name == 'release' && github.event.action == 'published') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: production
@@ -160,7 +162,7 @@ jobs:
 
   # On-demand deploy to a chosen environment.
   deploy-dispatch:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && vars.INFRA_DEPLOY_ROLE_ARN != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: ${{ inputs.env }}
