@@ -19,6 +19,7 @@ const APP_PATHS = [
   "/account/payment-method",
   "/account/dashboard",
   "/account/profile",
+  "/account/gifts",
 ];
 
 /** DONOR_IOS_APP_ID, "<team ID>.<bundle ID>", fixed at build time. */

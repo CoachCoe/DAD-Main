@@ -22,7 +22,7 @@ in the first mobile product. Backend authorization remains authoritative. Native
 call the API host directly with `X-DAD-Client: native`, no cookies or Origin, and a bearer
 access token when authenticated. Browser-only giving and staff operations stay on the web.
 
-After checks pass on the release commit, tag it `mobile-foundation-v1.0.0` (using the
+After checks pass on the release commit, tag it `mobile-foundation-v2.0.0` (using the
 version in the file) and push that tag. The mobile-foundation workflow verifies the tag
 matches the declared version and publishes the individual files as GitHub Release assets.
 Existing release assets are never overwritten. The workflow also retains a candidate
@@ -36,7 +36,7 @@ the vendored contract without network access to this private repository. An auth
 maintainer can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v1.0.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
+gh release download mobile-foundation-v2.0.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
@@ -44,6 +44,33 @@ additions, and major versions for breaking contract/token/link changes. A mobile
 pins its dependency; changing the backend must preserve supported installed clients.
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
+
+## Moving the apps from foundation 1 to 2
+
+Version 2 is the candidate for the expanded R1 donor and partner API; declaring the
+version does not publish it. Both native foundations currently pin release 1.0.0 at
+`5e237101c0ad81aa4675d16a94eb64863c5276b9`. Their claim, refresh, and logout shapes
+remain valid, but the profile response now includes identity, volunteer, ranking, and
+notification fields absent from that release. The pinned Swift decoder rejects those
+additional fields, so its profile preview cannot connect to the current backend.
+The Android profile adapter reads only email and public name and ignores these additions;
+that does not establish compatibility for the rest of the expanded contract.
+
+Before connecting either app to this backend, publish a checked version 2 release and
+update each app's vendored bundle and manifest lock in a reviewed change. Regenerate
+the scoped clients and test actual API responses for claim, profile, refresh, and logout,
+including expired access and revoked sessions. Keep those response fixtures tied to
+backend behavior so synthetic previews cannot conceal contract drift. Apps adding gift
+notifications must also handle `/account/gifts`, now present in both the account and
+notification link allowlists. Tests keep the Apple association paths aligned with the
+same policy.
+
+Version 2 does not restore compatibility for an installed version 1 client. If one
+has been distributed against a real environment, preserve its response contract through
+an explicitly versioned API during migration; updating a bundle alone cannot repair an
+installed decoder. Future response additions also need installed-client tests before
+deployment, since strict generated decoders can turn an additive field into a breaking
+change.
 
 ## Swift generator compatibility
 
@@ -80,9 +107,10 @@ own business rules, API contracts, design values, and server integrations; clien
 owns native presentation, lifecycle, secure credential storage, and platform interaction.
 The final mobile feature subset and navigation remain subject to the mobile PRD.
 
-Once chosen, the first implementation should prove an authenticated read, single-flight
+The native foundations implement an authenticated read, single-flight
 refresh and atomic token replacement, cancellation/timeouts, revoked-session handling,
-and local credential cleanup on logout. A refresh response arriving after logout must
+and local credential cleanup on logout against synthetic transports. Real API and device
+acceptance must prove the same behavior. A refresh response arriving after logout must
 never restore the session. Secure persistence must avoid logs and backups of credentials;
 Android uses encryption keys protected by Keystore, iOS uses Keychain.
 
@@ -93,5 +121,7 @@ payloads select only approved relative destinations, never arbitrary URLs. OS as
 files require the final app identifiers and signing certificates, and a reachable direct
 API ingress is required for a real-device integration test. Neither is fabricated here.
 
-Analytics, production signing, camera/notification permission timing, offline financial
-mutations, and the final feature/navigation set require their own product decisions.
+Production signing, camera/notification permission timing, analytics activation, and
+real-device/provider acceptance remain open. The R1 PRD defines donor and partner scope;
+the native foundations do not yet implement those product journeys. Offline financial
+mutations require a separate design rather than replaying commands blindly.
