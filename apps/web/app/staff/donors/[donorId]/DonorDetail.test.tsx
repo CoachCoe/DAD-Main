@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import DonorDetail from "./DonorDetail";
@@ -259,4 +259,24 @@ it("names Stripe statuses in words", async () => {
     expect(await screen.findByText(new RegExp(`/month · ${words} · Next renewal`))).toBeVisible();
     unmount();
   }
+});
+
+it("keeps the repair confirmation visible after reloading the donor record", async () => {
+  const fetch = serve({
+    "/donor/staff/donors/donor-1": reply(200, detail),
+    "/donor/staff/me": reply(200, { ...actor, permissions: [...actor.permissions, "donor.recompute"] }),
+    "/donor/staff/donors/donor-1/actions": reply(200, { actions: [], next_offset: null }),
+    "/donor/staff/donors/donor-1/recognition/recompute": reply(200, { recomputed: true }),
+  });
+  render(<DonorDetail donor="donor-1" />);
+  fireEvent.click(await screen.findByText("Repair recognition after a system error"));
+  fireEvent.change(screen.getByLabelText("Reason for repair"), { target: { value: "Resolved system error DAD-123" } });
+  fireEvent.click(screen.getByRole("button", { name: "Recompute recognition" }));
+  await waitFor(() =>
+    expect(fetch.mock.calls.filter(([url]) => url.startsWith("/api/donor/staff/donors/donor-1?")).length).toBe(2),
+  );
+  expect(await screen.findByRole("heading", { name: "donor@example.org" })).toBeVisible();
+  expect(
+    screen.getByText("Recognition recomputed from recorded facts. The reason and result are in the audit log."),
+  ).toBeVisible();
 });

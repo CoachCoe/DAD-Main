@@ -78,7 +78,7 @@ func TestStaffPermissionMatrixAndExpiredSessions(t *testing.T) {
 	// Every permission any role carries, plus one that no role has, so the
 	// matrix also proves unknown permissions are denied.
 	allPermissions := []string{
-		"audit.read", "badge.manage", "content.publish", "data.export", "donor.read",
+		"audit.read", "badge.manage", "content.publish", "data.export", "donor.read", "donor.recompute",
 		"event.manage", "gift.cancel", "gift.refund", "initiative.manage", "message.resend",
 		"partner.manage", "report.read", "staff.manage",
 		"nonexistent.permission",
@@ -90,7 +90,7 @@ func TestStaffPermissionMatrixAndExpiredSessions(t *testing.T) {
 	wantPermissions := map[string]map[string]bool{
 		"SUPER_ADMIN": {
 			"audit.read": true, "badge.manage": true, "content.publish": true, "data.export": true,
-			"donor.read": true, "event.manage": true, "gift.cancel": true, "gift.refund": true,
+			"donor.read": true, "donor.recompute": true, "event.manage": true, "gift.cancel": true, "gift.refund": true,
 			"initiative.manage": true, "message.resend": true, "partner.manage": true,
 			"report.read": true, "staff.manage": true,
 		},
@@ -101,7 +101,7 @@ func TestStaffPermissionMatrixAndExpiredSessions(t *testing.T) {
 	// super-admin-only powers (PRD §8): no operator may ever hold these.
 	superAdminOnly := map[string]bool{
 		"gift.refund": true, "gift.cancel": true, "data.export": true,
-		"badge.manage": true, "staff.manage": true,
+		"badge.manage": true, "staff.manage": true, "donor.recompute": true,
 	}
 
 	for _, role := range []string{"SUPER_ADMIN", "OP_PARTNERSHIPS", "OP_GROWTH", "OP_IMPACT"} {

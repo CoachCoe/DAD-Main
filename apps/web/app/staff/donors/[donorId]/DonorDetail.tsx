@@ -8,6 +8,8 @@ import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 
+import { RecomputeRecognition } from "./RecomputeRecognition";
+
 const statusWords: Record<string, string> = {
   active: "Active",
   past_due: "Payment overdue",
@@ -23,6 +25,7 @@ export default function DonorDetail({ donor }: { donor: string }) {
   const id = encodeURIComponent(donor);
   const [gifts, setGifts] = useState(0);
   const [referrals, setReferrals] = useState(0);
+  const [repairStatus, setRepairStatus] = useState("");
   const path = `/donor/staff/donors/${id}?gifts_offset=${gifts}&referrals_offset=${referrals}`;
   const { resource, data, reload } = useApiResource(path, {
     load: async (signal) => {
@@ -70,6 +73,17 @@ export default function DonorDetail({ donor }: { donor: string }) {
             {detail.streak?.at_risk ? " · At risk" : ""}
           </p>
           {detail.streak && <p>Computed {formatDateTime(detail.streak.computed_at)}</p>}
+          {can("donor.recompute") && (
+            <RecomputeRecognition
+              donor={id}
+              onComplete={() => {
+                setRepairStatus(
+                  "Recognition recomputed from recorded facts. The reason and result are in the audit log.",
+                );
+                reload();
+              }}
+            />
+          )}
           <p>
             Referrer:{" "}
             {detail.referrer ? (
@@ -162,7 +176,7 @@ export default function DonorDetail({ donor }: { donor: string }) {
           <ActionHistory donor={id} />
         </>
       )}
-      <Announcer status={messages.status} alert={messages.alert} />
+      <Announcer status={repairStatus || messages.status} alert={messages.alert} />
       {(resource.state === "offline" || resource.state === "error") && (
         <button type="button" className="secondary" onClick={reload}>
           Retry loading

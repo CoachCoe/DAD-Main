@@ -41,6 +41,7 @@ var rolePermissions = map[string][]string{
 		"content.publish",
 		"data.export",
 		"donor.read",
+		"donor.recompute",
 		"event.manage",
 		"gift.cancel",
 		"gift.refund",

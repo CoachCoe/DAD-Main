@@ -254,6 +254,7 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 	}
 	requests := map[string]any{
 		"POST /donor/partner/applications":                           applicationReceiptBody{},
+		"POST /donor/staff/donors/{donor_id}/recognition/recompute":  recomputeRecognitionBody{},
 		"POST /donor/passkeys/sign-in":                               donorPasskeySignInBody{},
 		"POST /donor/me/passkeys/register":                           registerPasskeyBody{},
 		"POST /donor/checkouts":                                      checkoutBody{},

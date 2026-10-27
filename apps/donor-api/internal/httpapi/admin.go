@@ -12,6 +12,7 @@ import (
 )
 
 type AdminSource interface {
+	RecomputeRecognition(context.Context, string, pgtype.UUID, string) error
 	SearchDonors(context.Context, string, string, int64) (store.DonorSearch, error)
 	DonorDetail(context.Context, string, pgtype.UUID, int64, int64) (store.DonorDetail, error)
 	AuditEvents(context.Context, string, int64) (store.AuditPage, error)
@@ -133,4 +134,23 @@ func (a *api) resendMessage(w http.ResponseWriter, r *http.Request, session stri
 		return
 	}
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.ResendMessage(ctx, session, id, key) })
+}
+
+type recomputeRecognitionBody struct {
+	Reason string `json:"reason"`
+}
+
+func (a *api) recomputeRecognition(w http.ResponseWriter, r *http.Request, token string) {
+	id, ok := pathID(w, r, "donor_id")
+	if !ok {
+		return
+	}
+	var body recomputeRecognitionBody
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	svc := service{a.Admin != nil, staffUnavailable, staffTimeout, staffStatus}
+	svc.serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"recomputed": true}, a.Admin.RecomputeRecognition(ctx, token, id, body.Reason)
+	})
 }

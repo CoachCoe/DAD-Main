@@ -10929,6 +10929,100 @@
      }
     }
    }
+  },
+  "/donor/staff/donors/{donor_id}/recognition/recompute": {
+   "post": {
+    "operationId": "recomputeRecognition",
+    "summary": "Recompute derived recognition after a documented system error (super admin, audited)",
+    "tags": [
+     "Staff donors"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "parameters": [
+     {
+      "name": "donor_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed ID is 404, like an unknown one."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Recognition and its audit event committed together.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": false,
+         "required": [
+          "recomputed"
+         ],
+         "properties": {
+          "recomputed": {
+           "type": "boolean"
+          }
+         }
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Replays recorded facts without editing financial history or granting arbitrary continuity. Requires donor.recompute and a reason. Permanent earned badges and historical best streaks remain permanent.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "reason"
+        ],
+        "properties": {
+         "reason": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1000
+         }
+        }
+       }
+      }
+     }
+    }
+   }
   }
  },
  "components": {
