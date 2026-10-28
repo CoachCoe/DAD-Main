@@ -76,7 +76,9 @@ async function readBody(request: NextRequest): Promise<Uint8Array<ArrayBuffer> |
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
   const allowed =
-    path[0] === "donor" || ((request.method === "GET" || request.method === "HEAD") && publicRead.test(path.join("/")));
+    path[0] === "donor" ||
+    (request.method === "POST" && path.join("/") === "analytics/events") ||
+    ((request.method === "GET" || request.method === "HEAD") && publicRead.test(path.join("/")));
   if (!allowed || path.some((segment) => segment === "." || segment === ".." || /[\\/?#%]/.test(segment))) {
     return Response.json({ detail: "Not found" }, { status: 404 });
   }

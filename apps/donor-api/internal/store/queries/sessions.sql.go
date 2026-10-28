@@ -12,7 +12,7 @@ import (
 )
 
 const authenticatedDonor = `-- name: AuthenticatedDonor :one
-SELECT d.email, d.claimed_at, d.disabled, d.public_name, d.referral_code, d.id, d.created_at, d.account_role, d.zip, d.city, d.timezone, d.phone, d.company_code, s.id AS session_id, s.last_used_at FROM donors d JOIN donor_sessions s ON s.donor_id = d.id
+SELECT d.email, d.claimed_at, d.disabled, d.public_name, d.referral_code, d.id, d.created_at, d.account_role, d.zip, d.city, d.timezone, d.phone, d.company_code, d.full_name, s.id AS session_id, s.last_used_at FROM donors d JOIN donor_sessions s ON s.donor_id = d.id
 WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2
 AND d.disabled = false AND d.claimed_at IS NOT NULL
 `
@@ -45,6 +45,7 @@ func (q *Queries) AuthenticatedDonor(ctx context.Context, arg AuthenticatedDonor
 		&i.Donor.Timezone,
 		&i.Donor.Phone,
 		&i.Donor.CompanyCode,
+		&i.Donor.FullName,
 		&i.SessionID,
 		&i.LastUsedAt,
 	)
@@ -188,7 +189,7 @@ func (q *Queries) RecordSessionEvent(ctx context.Context, arg RecordSessionEvent
 }
 
 const refreshingSession = `-- name: RefreshingSession :one
-SELECT s.donor_id, s.token_hash, s.expires_at, s.revoked_at, s.id, s.created_at, s.client, s.device_name, s.platform, s.last_used_at, s.refresh_family_hash, s.refresh_hash, s.refresh_previous_hash, s.refreshed_at, s.refresh_expires_at, s.push_token, s.push_environment, d.disabled FROM donor_sessions s JOIN donors d ON d.id = s.donor_id
+SELECT s.donor_id, s.token_hash, s.expires_at, s.revoked_at, s.id, s.created_at, s.client, s.device_name, s.platform, s.last_used_at, s.refresh_family_hash, s.refresh_hash, s.refresh_previous_hash, s.refreshed_at, s.refresh_expires_at, s.push_token, s.push_environment, s.password_verified_at, d.disabled FROM donor_sessions s JOIN donors d ON d.id = s.donor_id
 WHERE s.refresh_family_hash = $1 FOR UPDATE OF s
 `
 
@@ -218,6 +219,7 @@ func (q *Queries) RefreshingSession(ctx context.Context, refreshFamilyHash pgtyp
 		&i.DonorSession.RefreshExpiresAt,
 		&i.DonorSession.PushToken,
 		&i.DonorSession.PushEnvironment,
+		&i.DonorSession.PasswordVerifiedAt,
 		&i.Disabled,
 	)
 	return i, err

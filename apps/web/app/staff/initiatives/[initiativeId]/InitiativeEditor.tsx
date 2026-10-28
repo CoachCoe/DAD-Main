@@ -139,8 +139,13 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
       setError("Enter the category total in dollars.");
       return;
     }
-    void run(form, "Spend saved.", () =>
-      post(`/${id}/spend`, { category: field(values, "category"), amount_minor: amount }),
+    void run(form, "Spend saved as a draft.", () =>
+      post(`/${id}/spend`, {
+        category: field(values, "category"),
+        amount_minor: amount,
+        verification_note: field(values, "verification_note"),
+        verified_on: field(values, "spend_verified_on"),
+      }),
     );
   }
 
@@ -363,7 +368,21 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
                 <ul>
                   {detail.spend.map((row) => (
                     <li key={row.category}>
-                      {row.category}: {formatMoney(row.amount_minor)}{" "}
+                      {row.category}: {formatMoney(row.amount_minor)} ·{" "}
+                      {row.publish_state === "DRAFT" ? "Draft" : "Published"}{" "}
+                      {row.publish_state === "DRAFT" && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() =>
+                            run(null, "Spend published.", () =>
+                              post(`/${id}/spend/publish`, { category: row.category }),
+                            )
+                          }
+                        >
+                          Publish {row.category}
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="link"
@@ -390,6 +409,14 @@ export default function InitiativeEditor({ initiative }: { initiative: string | 
                 <label>
                   Total in USD
                   <input name="amount" inputMode="decimal" required />
+                </label>
+                <label>
+                  Verification note
+                  <input name="verification_note" maxLength={2000} />
+                </label>
+                <label>
+                  Verified on
+                  <input name="spend_verified_on" type="date" />
                 </label>
                 <button className="button" type="submit" disabled={busy}>
                   Save spend

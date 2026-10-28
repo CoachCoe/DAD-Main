@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -192,6 +193,31 @@ func badgeWording(ctx context.Context, q *queries.Queries) ([]badges.Badge, erro
 	for i, b := range catalog {
 		if row, ok := custom[b.Code]; ok {
 			catalog[i].Title, catalog[i].Rule = row.Title, row.Body
+		}
+	}
+	rules, err := recognitionRules(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	for i, b := range catalog {
+		for _, r := range rules.Badges {
+			if r.Code != b.Code || r.Threshold == defaultBadgeRules[b.Code].Threshold {
+				continue
+			}
+			switch r.Signal {
+			case "referrals":
+				catalog[i].Rule = fmt.Sprintf("Bring in %d people who complete a gift", r.Threshold)
+			case "streak_days":
+				catalog[i].Rule = fmt.Sprintf("Reach a %d-day streak", r.Threshold)
+			case "checkins":
+				catalog[i].Rule = fmt.Sprintf("Check in at %d events", r.Threshold)
+			case "initiatives":
+				catalog[i].Rule = fmt.Sprintf("Fund %d distinct initiatives", r.Threshold)
+			case "city_rank":
+				catalog[i].Rule = fmt.Sprintf("Rank in the top %d in your city", r.Threshold)
+			case "national_percentile":
+				catalog[i].Rule = fmt.Sprintf("Rank in the top %d%% nationally", r.Threshold)
+			}
 		}
 	}
 	return catalog, nil

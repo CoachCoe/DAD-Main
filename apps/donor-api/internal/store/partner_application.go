@@ -244,6 +244,9 @@ func (s PartnerApplicationService) Approve(ctx context.Context, token string, ap
 			if err = queuePartnerLogin(ctx, q, admin, partnerLinkApproved, now); err != nil {
 				return pgtype.UUID{}, err
 			}
+			if err := recordServerEvent(ctx, q, pgtype.UUID{}, "partner_approved", "partner-approved:"+partnerID.String(), now); err != nil {
+				return pgtype.UUID{}, err
+			}
 			return partnerID, auditStaff(ctx, q, actor.ID, "partner.approved", appID.String(),
 				map[string]string{"partner_id": partnerID.String(), "organization": app.Organization}, now)
 		})
@@ -310,7 +313,19 @@ func (s PartnerApplicationService) Reject(ctx context.Context, token string, app
 }
 
 // LinkInitiative links an initiative to an approved partner org (§8/P-3). Audited.
-func (s PartnerApplicationService) LinkInitiative(ctx context.Context, token string, partnerID, initiativeID pgtype.UUID) error {
+func (s PartnerApplicationService) LinkInitiative(
+	ctx context.Context,
+	token string,
+	partnerID, initiativeID pgtype.UUID,
+	commitment ...int64,
+) error {
+	var amount pgtype.Int8
+	if len(commitment) > 1 || (len(commitment) == 1 && commitment[0] < 0) {
+		return ErrStaffInput
+	}
+	if len(commitment) == 1 {
+		amount = pgtype.Int8{Int64: commitment[0], Valid: true}
+	}
 	_, err := staffWrite(ctx, s.Staff, token, partnerPermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
@@ -322,7 +337,7 @@ func (s PartnerApplicationService) LinkInitiative(ctx context.Context, token str
 				return struct{}{}, pgx.ErrNoRows
 			}
 			linked, err := q.LinkInitiativeToPartner(ctx, queries.LinkInitiativeToPartnerParams{
-				ID: initiativeID, PartnerSignupID: partnerID, UpdatedAt: timestamp(now),
+				InitiativeID: initiativeID, PartnerID: partnerID, CommittedMinor: amount, UpdatedAt: timestamp(now),
 			})
 			if err != nil {
 				return struct{}{}, err

@@ -31,7 +31,9 @@ it("saves a badge's new wording and restores a milestone's default", async () =>
   const fetch = vi
     .fn()
     .mockImplementation(async (_url: string, init?: RequestInit) =>
-      init?.method === "POST" ? Response.json({ saved: true }) : Response.json(wording),
+      init?.method === "POST"
+        ? Response.json({ saved: true })
+        : Response.json(_url.endsWith("/rules") ? { badges: [], milestones: [7, 30] } : wording),
     );
   vi.stubGlobal("fetch", fetch);
   render(<Wording />);

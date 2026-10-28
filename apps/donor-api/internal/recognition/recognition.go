@@ -418,28 +418,28 @@ type StreakLadder struct {
 
 // nextLadderMilestone returns the first milestone strictly greater than days.
 // Past the fixed set the ladder continues every 365 days (PRD S-3 "+365").
-func nextLadderMilestone(days int64) (int64, bool) {
-	for _, m := range LadderMilestones {
+func nextMilestone(days int64, milestones []int64) (int64, bool) {
+	for _, m := range milestones {
 		if m > days {
 			return m, true
 		}
 	}
-	last := LadderMilestones[len(LadderMilestones)-1]
+	last := milestones[len(milestones)-1]
 	// Continue at 365-day steps beyond the final fixed milestone.
 	steps := (days-last)/365 + 1
 	return last + steps*365, true
 }
 
 // lastLadderMilestone returns the highest milestone at or below days, or 0.
-func lastLadderMilestone(days int64) int64 {
+func lastMilestone(days int64, milestones []int64) int64 {
 	var reached int64
-	for _, m := range LadderMilestones {
+	for _, m := range milestones {
 		if m <= days {
 			reached = m
 		}
 	}
-	if days >= LadderMilestones[len(LadderMilestones)-1] {
-		last := LadderMilestones[len(LadderMilestones)-1]
+	if days >= milestones[len(milestones)-1] {
+		last := milestones[len(milestones)-1]
 		reached = last + (days-last)/365*365
 	}
 	return reached
@@ -452,13 +452,16 @@ func lastLadderMilestone(days int64) int64 {
 // empty bar. The bar marks, for each of the last 30 days ending today, whether
 // the streak was already running on that day.
 func (s Streak) Ladder(asOf time.Time, zone *time.Location) StreakLadder {
+	return s.LadderWithMilestones(asOf, zone, LadderMilestones)
+}
+func (s Streak) LadderWithMilestones(asOf time.Time, zone *time.Location, milestones []int64) StreakLadder {
 	if s.Since == nil {
-		next := LadderMilestones[0]
+		next := milestones[0]
 		return StreakLadder{NextMilestone: &next, DaysToNext: &next, Bar: make([]bool, ladderBarDays)}
 	}
 	days := max(civilDay(asOf, zone)-civilDay(*s.Since, zone), 0)
-	ladder := StreakLadder{Days: days, LastMilestone: lastLadderMilestone(days)}
-	if next, ok := nextLadderMilestone(days); ok {
+	ladder := StreakLadder{Days: days, LastMilestone: lastMilestone(days, milestones)}
+	if next, ok := nextMilestone(days, milestones); ok {
 		toNext := next - days
 		ladder.NextMilestone = &next
 		ladder.DaysToNext = &toNext

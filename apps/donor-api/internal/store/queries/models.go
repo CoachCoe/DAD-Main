@@ -22,6 +22,7 @@ type Donor struct {
 	Timezone     pgtype.Text        `json:"timezone"`
 	Phone        pgtype.Text        `json:"phone"`
 	CompanyCode  pgtype.Text        `json:"company_code"`
+	FullName     pgtype.Text        `json:"full_name"`
 }
 
 type DonorAmountChange struct {
@@ -68,6 +69,7 @@ type DonorCheckout struct {
 	ReferralExpiresAt pgtype.Timestamptz `json:"referral_expires_at"`
 	ID                pgtype.UUID        `json:"id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	JourneyID         pgtype.UUID        `json:"journey_id"`
 }
 
 type DonorContentSource struct {
@@ -495,6 +497,7 @@ type DonorSession struct {
 	RefreshExpiresAt    pgtype.Timestamptz `json:"refresh_expires_at"`
 	PushToken           pgtype.Text        `json:"push_token"`
 	PushEnvironment     pgtype.Text        `json:"push_environment"`
+	PasswordVerifiedAt  pgtype.Timestamptz `json:"password_verified_at"`
 }
 
 type DonorStaff struct {

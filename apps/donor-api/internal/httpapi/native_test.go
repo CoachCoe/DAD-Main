@@ -353,6 +353,8 @@ func TestAppLogoutRevokesBearerWithoutCookies(t *testing.T) {
 // referral capture, partner applications, and the back office stay on the web.
 func TestOnlyDonorAccountRoutesAdmitTheApp(t *testing.T) {
 	entries := map[string]bool{
+		"POST /donor/signup":                   true,
+		"POST /donor/password/sign-in":         true,
 		"POST /donor/login":                    true,
 		"POST /donor/claim":                    true,
 		"POST /donor/refresh":                  true,

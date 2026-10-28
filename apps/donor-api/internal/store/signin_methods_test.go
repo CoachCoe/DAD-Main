@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -212,10 +213,22 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 		t.Fatalf("second sign-in via link failed: %v", err)
 	}
 
-	// A verified identity with no matching account is refused (no account creation).
-	orphan := oidc.SignStubToken("secret", oidc.Apple, "apple-sub-x", "com.dad.app", "nobody@example.org", time.Now().Add(time.Hour))
-	if _, err := svc.SignIn(ctx, oidc.Apple, orphan, Client{}); !errors.Is(err, ErrSignInCode) {
-		t.Fatalf("orphan identity = %v; want ErrSignInCode", err)
+	// A verified identity can create a new donor account.
+	orphan := oidc.SignStubToken(
+		"secret",
+		oidc.Apple,
+		"apple-sub-"+testID(t).String(),
+		"com.dad.app",
+		"new-"+testID(t).String()+"@example.org",
+		time.Now().Add(time.Hour),
+	)
+	newTokens, err := svc.SignIn(ctx, oidc.Apple, orphan, Client{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newProfile, err := (DonorService{DB: api}).Profile(ctx, newTokens.Access)
+	if err != nil || !strings.HasPrefix(newProfile.Email, "new-") {
+		t.Fatalf("new verified identity: %+v %v", newProfile, err)
 	}
 
 	// An unverifiable token is refused.

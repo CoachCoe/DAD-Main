@@ -394,7 +394,7 @@ func (s DonorService) DeleteAccount(ctx context.Context, token string) error {
 			return struct{}{}, err
 		}
 		for _, scrub := range []func(context.Context, pgtype.UUID) error{
-			q.DeleteDonorOIDCIdentities, q.DeleteDonorPreferences, q.CancelEmailChanges,
+			q.DeleteDonorAnalytics, q.DeleteDonorPassword, q.DeleteDonorOIDCIdentities, q.DeleteDonorPreferences, q.CancelEmailChanges,
 			q.ScrubDonorEmailChanges, q.DeleteEmployeeLink,
 		} {
 			if err := scrub(ctx, d.ID); err != nil {

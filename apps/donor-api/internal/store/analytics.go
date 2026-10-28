@@ -8,6 +8,7 @@ import (
 
 	"dad/donor-api/internal/analytics"
 	"dad/donor-api/internal/store/queries"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -28,6 +29,8 @@ type AnalyticsService struct{ DB *pgxpool.Pool }
 // Event is one client-submitted analytics event. OccurredAt is the client's
 // event time; Properties is the event's typed payload (may be empty).
 type Event struct {
+	ID         string
+	JourneyID  string
 	Name       string
 	OccurredAt time.Time
 	Properties map[string]string
@@ -63,7 +66,7 @@ func (s AnalyticsService) Record(ctx context.Context, source, token string, even
 		}
 	}
 
-	rows := make([]queries.InsertAnalyticsEventsParams, 0, len(events))
+	rows := make([]queries.InsertObservedEventParams, 0, len(events))
 	for _, e := range events {
 		if !analytics.Known(e.Name) {
 			return ErrAnalytics
@@ -85,14 +88,53 @@ func (s AnalyticsService) Record(ctx context.Context, source, token string, even
 			payload = encoded
 		}
 		id, err := NewID()
+		if e.ID != "" {
+			err = id.Scan(e.ID)
+			if err != nil || !ValidRequestID(id) {
+				return ErrAnalytics
+			}
+		}
+		var journey pgtype.UUID
+		if e.JourneyID != "" {
+			if journey.Scan(e.JourneyID) != nil || !ValidRequestID(journey) {
+				return ErrAnalytics
+			}
+		}
 		if err != nil {
 			return err
 		}
-		rows = append(rows, queries.InsertAnalyticsEventsParams{
+		rows = append(rows, queries.InsertObservedEventParams{JourneyID: journey,
 			ID: id, Name: e.Name, DonorID: donor, Source: source,
 			Properties: payload, OccurredAt: timestamp(e.OccurredAt),
 		})
 	}
-	_, err := queries.New(s.DB).InsertAnalyticsEvents(ctx, rows)
-	return err
+	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		for _, row := range rows {
+			if err := q.InsertObservedEvent(ctx, row); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// recordServerEvent lives in the same transaction as its authoritative fact.
+func recordServerEvent(ctx context.Context, q *queries.Queries, donor pgtype.UUID, name, key string, now time.Time) error {
+	id, err := NewID()
+	if err != nil {
+		return err
+	}
+	return q.InsertObservedEvent(
+		ctx,
+		queries.InsertObservedEventParams{
+			ID:         id,
+			DonorID:    donor,
+			Name:       name,
+			Source:     "SERVER",
+			Properties: []byte("{}"),
+			OccurredAt: timestamp(now),
+			DedupKey:   text(key),
+		},
+	)
 }

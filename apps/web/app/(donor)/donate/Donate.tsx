@@ -10,7 +10,7 @@ import { dailyGiftMinor, MAX_DAILY_DOLLARS, monthlyFraming } from "@/lib/money";
 const presets = [1, 3, 5];
 // Remembers this tab's last choice so cancelling Stripe checkout returns to it.
 const CHOICE_KEY = "dad.donate.choice";
-type Choice = { amount: string; email: string };
+type Choice = { amount: string; email: string; name?: string; zip?: string; city?: string };
 
 function remembered(): Choice | null {
   try {
@@ -23,6 +23,9 @@ function remembered(): Choice | null {
 
 export default function Donate() {
   const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
+  const [zip, setZip] = useState("");
+  const [city, setCity] = useState("");
   const [amount, setAmount] = useState("1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -36,6 +39,9 @@ export default function Donate() {
     if (choice) {
       setAmount(choice.amount);
       setEmail(choice.email);
+      setName(choice.name ?? "");
+      setZip(choice.zip ?? "");
+      setCity(choice.city ?? "");
     }
     // Returning with Back from Stripe can restore this page from the back/forward cache
     // mid-redirect; it must not stay stuck on "Opening secure checkout".
@@ -70,12 +76,15 @@ export default function Donate() {
       );
     const payload = JSON.stringify({
       email,
+      name,
+      zip,
+      city,
       amount_minor: minor,
       frequency: "MONTHLY",
     } satisfies RequestBody<"/donor/checkouts", "post">);
     if (attempt.current?.payload !== payload) attempt.current = { payload, key: crypto.randomUUID() };
     try {
-      sessionStorage.setItem(CHOICE_KEY, JSON.stringify({ amount, email } satisfies Choice));
+      sessionStorage.setItem(CHOICE_KEY, JSON.stringify({ amount, email, name, zip, city } satisfies Choice));
     } catch {}
     setBusy(true);
     let destination: URL;
@@ -147,6 +156,39 @@ export default function Donate() {
             </p>
           )}
         </fieldset>
+        <label>
+          Name
+          <input
+            autoComplete="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={150}
+            disabled={busy}
+            required
+          />
+        </label>
+        <label>
+          ZIP code
+          <input
+            autoComplete="postal-code"
+            value={zip}
+            onChange={(e) => setZip(e.target.value)}
+            pattern="[0-9]{5}(-[0-9]{4})?"
+            disabled={busy}
+            required
+          />
+        </label>
+        <label>
+          City
+          <input
+            autoComplete="address-level2"
+            value={city}
+            onChange={(e) => setCity(e.target.value)}
+            maxLength={80}
+            disabled={busy}
+            required
+          />
+        </label>
         <label>
           Email
           <input

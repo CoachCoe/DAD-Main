@@ -64,6 +64,12 @@ func claim(ctx context.Context, tx pgx.Tx, proof string, client Client) (Tokens,
 		return Tokens{}, queries.Donor{}, err
 	}
 	tokens, err := issueSession(ctx, q, donor.ID, client, now)
+	if err == nil {
+		err = q.MarkPasswordReauthenticated(
+			ctx,
+			queries.MarkPasswordReauthenticatedParams{TokenHash: HashToken(tokens.Access), PasswordVerifiedAt: timestamp(now)},
+		)
+	}
 	return tokens, donor, err
 }
 

@@ -209,9 +209,9 @@ func (s InitiativeService) Update(ctx context.Context, token string, id pgtype.U
 			// transition only, for a partner-owned initiative. Keyed per
 			// initiative so a later edit of an already-complete initiative does
 			// not re-notify.
-			if existing.Status != "COMPLETE" && params.Status == "COMPLETE" && params.PartnerSignupID.Valid {
+			if existing.Status != "COMPLETE" && params.Status == "COMPLETE" {
 				key := "partner-complete:" + id.String()
-				if err = queuePartnerMessage(ctx, q, params.PartnerSignupID, "INITIATIVE_COMPLETE", key, map[string]string{"initiative_id": id.String()}, now); err != nil {
+				if err = queueInitiativePartners(ctx, q, id, "INITIATIVE_COMPLETE", key, map[string]string{"initiative_id": id.String()}, now); err != nil {
 					return struct{}{}, err
 				}
 			}
@@ -313,7 +313,7 @@ func (s InitiativeService) PublishMetric(
 	_, err := staffWrite(ctx, s.Staff, token, initiativePermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
-			initiative, err := q.InitiativeByID(ctx, initiativeID)
+			_, err := q.InitiativeByID(ctx, initiativeID)
 			if err != nil {
 				return struct{}{}, err
 			}
@@ -337,9 +337,9 @@ func (s InitiativeService) PublishMetric(
 			// METRICS_VERIFIED partner email (§6.11): a verified figure for a
 			// partner's initiative went live. Keyed per (initiative, position) so
 			// republishing the same metric does not re-notify.
-			if initiative.PartnerSignupID.Valid {
+			{
 				key := "partner-metrics:" + initiativeID.String() + ":" + strconv.FormatInt(int64(position), 10)
-				if err = queuePartnerMessage(ctx, q, initiative.PartnerSignupID, "METRICS_VERIFIED", key, map[string]string{"initiative_id": initiativeID.String()}, now); err != nil {
+				if err = queueInitiativePartners(ctx, q, initiativeID, "METRICS_VERIFIED", key, map[string]string{"initiative_id": initiativeID.String()}, now); err != nil {
 					return struct{}{}, err
 				}
 			}
@@ -385,8 +385,11 @@ func (s InitiativeService) DeleteMetric(
 // SpendInput sets the running total for one spend category of an initiative
 // . Spend is category totals only — never line items (PRD §5.2).
 type SpendInput struct {
-	Category    string `json:"category"`
-	AmountMinor int64  `json:"amount_minor"`
+	Category         string `json:"category"`
+	AmountMinor      int64  `json:"amount_minor"`
+	VerificationNote string `json:"verification_note"`
+	VerifiedOn       string `json:"verified_on"`
+	PublishState     string `json:"publish_state"`
 }
 
 // SetSpend upserts the total for a spend category.
@@ -404,12 +407,19 @@ func (s InitiativeService) SetSpend(ctx context.Context, token string, initiativ
 			if _, err := q.InitiativeByID(ctx, initiativeID); err != nil {
 				return struct{}{}, err
 			}
-			id, err := NewID()
-			if err != nil {
-				return struct{}{}, err
+			var verified pgtype.Date
+			if len(in.VerificationNote) > 2000 || !plainText(in.VerificationNote, true) {
+				return struct{}{}, ErrStaffInput
 			}
-			if err = q.UpsertInitiativeSpend(ctx, queries.UpsertInitiativeSpendParams{
-				ID: id, InitiativeID: initiativeID, Category: in.Category, AmountMinor: in.AmountMinor, CreatedAt: timestamp(now),
+			if in.VerifiedOn != "" {
+				day, err := time.Parse(time.DateOnly, in.VerifiedOn)
+				if err != nil {
+					return struct{}{}, ErrStaffInput
+				}
+				verified = pgtype.Date{Time: day, Valid: true}
+			}
+			if err := q.SaveSpendDraft(ctx, queries.SaveSpendDraftParams{
+				InitiativeID: initiativeID, Category: in.Category, AmountMinor: in.AmountMinor, VerificationNote: in.VerificationNote, VerifiedOn: verified, UpdatedAt: timestamp(now),
 			}); err != nil {
 				return struct{}{}, err
 			}
@@ -436,6 +446,9 @@ func (s InitiativeService) DeleteSpend(
 	_, err := staffWrite(ctx, s.Staff, token, initiativePermission,
 		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
 			q := queries.New(tx)
+			if err := q.DeleteSpendDraft(ctx, queries.DeleteSpendDraftParams{InitiativeID: initiativeID, Category: category}); err != nil {
+				return struct{}{}, err
+			}
 			if err := q.DeleteInitiativeSpend(ctx, queries.DeleteInitiativeSpendParams{InitiativeID: initiativeID, Category: category}); err != nil {
 				return struct{}{}, err
 			}
@@ -478,4 +491,66 @@ func requireApprovalSource(ctx context.Context, q *queries.Queries, source pgtyp
 		return ErrStaffInput
 	}
 	return nil
+}
+
+func queueInitiativePartners(
+	ctx context.Context,
+	q *queries.Queries,
+	id pgtype.UUID,
+	kind, key string,
+	data map[string]string,
+	now time.Time,
+) error {
+	partners, err := q.InitiativePartners(ctx, id)
+	if err != nil {
+		return err
+	}
+	for _, p := range partners {
+		if err = queuePartnerMessage(ctx, q, p.PartnerID, kind, key+":"+p.PartnerID.String(), data, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s InitiativeService) PublishSpend(ctx context.Context, token string, id pgtype.UUID, category string) error {
+	_, err := staffWrite(
+		ctx,
+		s.Staff,
+		token,
+		initiativePermission,
+		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
+			q := queries.New(tx)
+			if _, err := q.LockInitiative(ctx, id); err != nil {
+				return struct{}{}, err
+			}
+			rowID, err := NewID()
+			if err != nil {
+				return struct{}{}, err
+			}
+			n, err := q.PublishSpendDraft(
+				ctx,
+				queries.PublishSpendDraftParams{ID: rowID, InitiativeID: id, Category: category, AsOf: timestamp(now)},
+			)
+			if err != nil {
+				return struct{}{}, err
+			}
+			if n == 0 {
+				return struct{}{}, ErrStaffInput
+			}
+			if err = q.DeleteSpendDraft(ctx, queries.DeleteSpendDraftParams{InitiativeID: id, Category: category}); err != nil {
+				return struct{}{}, err
+			}
+			return struct{}{}, auditStaff(
+				ctx,
+				q,
+				actor.ID,
+				"initiative.spend_published",
+				id.String(),
+				map[string]string{"category": category},
+				now,
+			)
+		},
+	)
+	return err
 }

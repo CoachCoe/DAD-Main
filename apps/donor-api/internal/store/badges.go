@@ -28,6 +28,7 @@ type BadgeView struct {
 	Title    string     `json:"title"`
 	Rule     string     `json:"rule"`
 	Perk     string     `json:"perk"`
+	Artwork  string     `json:"artwork"`
 	Earned   bool       `json:"earned"`
 	EarnedAt *time.Time `json:"earned_at,omitempty"`
 }
@@ -100,8 +101,15 @@ func awardBadges(ctx context.Context, q *queries.Queries, donor queries.Donor, n
 	if err != nil {
 		return err
 	}
-	for code := range badges.Evaluate(signals) {
-		if err := earnBadge(ctx, q, donor.ID, code, now); err != nil {
+	rules, err := recognitionRules(ctx, q)
+	if err != nil {
+		return err
+	}
+	for _, rule := range rules.Badges {
+		if !ruleEarned(rule, signals) {
+			continue
+		}
+		if err := earnBadge(ctx, q, donor.ID, rule.Code, now); err != nil {
 			return err
 		}
 	}
@@ -113,6 +121,9 @@ func awardBadges(ctx context.Context, q *queries.Queries, donor queries.Donor, n
 func earnBadge(ctx context.Context, q *queries.Queries, donor pgtype.UUID, code string, now time.Time) error {
 	earned, err := q.EarnBadge(ctx, queries.EarnBadgeParams{DonorID: donor, Code: code, EarnedAt: timestamp(now)})
 	if err != nil || earned == 0 {
+		return err
+	}
+	if err := recordServerEvent(ctx, q, donor, "badge_earned", "badge:"+donor.String()+":"+code, now); err != nil {
 		return err
 	}
 	return q.QueueBadgePush(ctx, queries.QueueBadgePushParams{
@@ -145,9 +156,17 @@ func (b BadgeService) Badges(ctx context.Context, token string) ([]BadgeView, er
 		if err != nil {
 			return nil, err
 		}
+		rules, err := recognitionRules(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		art := map[string]string{}
+		for _, rule := range rules.Badges {
+			art[rule.Code] = rule.Artwork
+		}
 		views := make([]BadgeView, 0, len(catalog))
 		for _, cat := range catalog {
-			v := BadgeView{Code: cat.Code, Title: cat.Title, Rule: cat.Rule, Perk: string(cat.Perk)}
+			v := BadgeView{Artwork: art[cat.Code], Code: cat.Code, Title: cat.Title, Rule: cat.Rule, Perk: string(cat.Perk)}
 			if at, ok := earned[cat.Code]; ok {
 				v.Earned = true
 				v.EarnedAt = at

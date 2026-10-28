@@ -6,6 +6,7 @@ import { Announcer } from "@/components/donor/Announcer";
 import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
+import { observe } from "@/lib/analytics";
 import type { Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import WalletButtons from "./WalletButtons";
@@ -38,6 +39,9 @@ function useScreenWakeLock(active: boolean) {
 
 export default function Code() {
   const { resource, data, failed, reload } = useApiResource<Schema<"Sharing">>("/donor/me/sharing");
+  useEffect(() => {
+    if (data?.link) observe("irl_code_shown");
+  }, [data?.link]);
   const [full, setFull] = useState(false);
   const [imageFailed, setImageFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);

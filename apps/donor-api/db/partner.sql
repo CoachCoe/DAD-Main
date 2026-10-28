@@ -42,15 +42,16 @@ SELECT id FROM donor_partner_signups WHERE id=$1 AND approved_at IS NOT NULL FOR
 -- initiatives. Rows without approved_at are R1 contact-form inquiries.
 SELECT p.id, p.organization, p.partner_type, p.company_code, p.workforce_size, p.match_rate_bp, p.match_cap_minor, p.approved_at,
   (SELECT count(*) FROM donor_partner_users u WHERE u.partner_id=p.id AND NOT u.disabled)::bigint AS user_count,
-  (SELECT count(*) FROM donor_initiatives i WHERE i.partner_signup_id=p.id)::bigint AS initiative_count
+  (SELECT count(*) FROM donor_initiatives i WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id))::bigint AS initiative_count
 FROM donor_partner_signups p
 WHERE p.approved_at IS NOT NULL
 ORDER BY p.organization, p.id
 LIMIT 51 OFFSET sqlc.arg(page_offset)::bigint;
 
 -- name: StaffPartnerInitiatives :many
-SELECT id, title, status, publish_state, committed_minor FROM donor_initiatives
-WHERE partner_signup_id=$1
+SELECT i.id, i.title, i.status, i.publish_state, ip.committed_minor
+FROM donor_initiatives i JOIN donor_initiative_partners ip ON ip.initiative_id=i.id
+WHERE ip.partner_id=$1
 ORDER BY title, id;
 
 -- name: SetPartnerMatch :execrows
@@ -67,7 +68,11 @@ WHERE id=$1 AND approved_at IS NOT NULL;
 
 -- name: LinkInitiativeToPartner :execrows
 -- §8/P-3: link an initiative to its partner org.
-UPDATE donor_initiatives SET partner_signup_id=$2, updated_at=$3 WHERE id=$1;
+INSERT INTO donor_initiative_partners(initiative_id,partner_id,committed_minor,updated_at)
+SELECT id, sqlc.arg(partner_id)::uuid, coalesce(sqlc.narg(committed_minor)::bigint, committed_minor), sqlc.arg(updated_at)::timestamptz
+FROM donor_initiatives WHERE id=sqlc.arg(initiative_id)::uuid
+ON CONFLICT(initiative_id,partner_id) DO UPDATE SET
+ committed_minor=coalesce(sqlc.narg(committed_minor)::bigint,donor_initiative_partners.committed_minor),updated_at=EXCLUDED.updated_at;
 
 -- name: PartnerUsersForPartner :many
 SELECT * FROM donor_partner_users WHERE partner_id=$1 AND NOT disabled ORDER BY created_at, id;
@@ -122,7 +127,7 @@ UPDATE donor_partner_sessions SET revoked_at=$2,push_token=NULL,push_environment
 SELECT s.category, sum(s.amount_minor)::bigint AS amount_minor
 FROM donor_initiative_spend s
 JOIN donor_initiatives i ON i.id = s.initiative_id
-WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED'
 GROUP BY s.category
 ORDER BY s.category;
 
@@ -135,26 +140,26 @@ SELECT
   p.workforce_size,
   p.description,
   (p.logo_png IS NOT NULL)::boolean AS has_logo,
-  EXISTS(SELECT 1 FROM donor_initiatives i WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED') AS committed_verified,
+  EXISTS(SELECT 1 FROM donor_initiatives i WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED') AS committed_verified,
   EXISTS(SELECT 1 FROM donor_initiative_spend s JOIN donor_initiatives i ON i.id=s.initiative_id
-    WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED') AS deployed_verified,
+    WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED') AS deployed_verified,
   EXISTS(SELECT 1 FROM donor_initiative_metrics m JOIN donor_initiatives i ON i.id=m.initiative_id
-    WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE') AS people_reached_verified,
-  coalesce((SELECT sum(i.committed_minor) FROM donor_initiatives i
-            WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
+    WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE') AS people_reached_verified,
+  coalesce((SELECT sum(ip.committed_minor) FROM donor_initiatives i JOIN donor_initiative_partners ip ON ip.initiative_id=i.id AND ip.partner_id=p.id
+            WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
             JOIN donor_initiatives i ON i.id=s.initiative_id
-            WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'), 0)::bigint AS deployed_minor,
+            WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED'), 0)::bigint AS deployed_minor,
   coalesce((SELECT sum(m.value) FROM donor_initiative_metrics m
             JOIN donor_initiatives i ON i.id=m.initiative_id
-            WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'
+            WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED'
               AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE'), 0)::bigint AS people_reached,
   (SELECT count(*) FROM donor_partner_employees e WHERE e.partner_id=p.id)::bigint AS employees_enrolled,
   (SELECT greatest(max(i.updated_at), max(m.updated_at), max(s.updated_at))
    FROM donor_initiatives i
    LEFT JOIN donor_initiative_metrics m ON m.initiative_id=i.id AND m.publish_state='PUBLISHED'
    LEFT JOIN donor_initiative_spend s ON s.initiative_id=i.id
-   WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED')::timestamptz AS updated_at
+   WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED')::timestamptz AS updated_at
 FROM donor_partner_signups p
 WHERE p.id=$1;
 
@@ -187,13 +192,13 @@ UPDATE donor_partner_signups SET logo_png=$2 WHERE id=$1 AND approved_at IS NOT 
 -- name: PartnerInitiativesList :many
 -- P-11: the partner's published initiatives with committed and deployed totals
 -- and when any of their figures last changed.
-SELECT i.id, i.title, i.summary, i.status, i.region, cardinality(i.counties)::int AS county_count, i.committed_minor,
+SELECT i.id, i.title, i.summary, i.status, i.region, cardinality(i.counties)::int AS county_count, (SELECT ip.committed_minor FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s WHERE s.initiative_id=i.id), 0)::bigint AS deployed_minor,
   greatest(i.updated_at,
     (SELECT max(m.updated_at) FROM donor_initiative_metrics m WHERE m.initiative_id=i.id AND m.publish_state='PUBLISHED'),
     (SELECT max(s.updated_at) FROM donor_initiative_spend s WHERE s.initiative_id=i.id))::timestamptz AS updated_at
 FROM donor_initiatives i
-WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED'
 ORDER BY i.status, i.title;
 
 -- name: PartnerInitiativeMetrics :many
@@ -201,7 +206,7 @@ ORDER BY i.status, i.title;
 SELECT m.initiative_id, m.label, m.value, m.unit, m.verified_on
 FROM donor_initiative_metrics m
 JOIN donor_initiatives i ON i.id = m.initiative_id
-WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED'
+WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED'
 ORDER BY m.initiative_id, m.position;
 
 -- name: PartnerInitiativeSpend :many
@@ -209,7 +214,7 @@ ORDER BY m.initiative_id, m.position;
 SELECT s.initiative_id, s.category, s.amount_minor
 FROM donor_initiative_spend s
 JOIN donor_initiatives i ON i.id = s.initiative_id
-WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED'
 ORDER BY s.initiative_id, s.category;
 
 -- name: QueuePartnerMessage :exec
@@ -251,7 +256,7 @@ SELECT id,organization,approved_at FROM donor_partner_signups WHERE id=$1;
 -- the dedup_key carries the period so each partner is mailed once per month.
 SELECT s.id FROM donor_partner_signups s
 WHERE s.approved_at IS NOT NULL
-AND EXISTS(SELECT 1 FROM donor_initiatives i WHERE i.partner_signup_id=s.id AND i.publish_state='PUBLISHED')
+AND EXISTS(SELECT 1 FROM donor_initiatives i WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=s.id) AND i.publish_state='PUBLISHED')
 AND NOT EXISTS(
     SELECT 1 FROM donor_partner_messages m
     WHERE m.partner_id=s.id AND m.kind='MONTHLY_REPORT'
@@ -319,3 +324,6 @@ WHERE id=$1 AND (receipt_hash IS NULL OR receipt_hash=$2);
 -- name: ApplicationStatusByReceipt :one
 SELECT organization,status FROM donor_partner_applications
 WHERE receipt_hash=$1 AND receipt_expires_at>clock_timestamp();
+
+-- name: InitiativePartners :many
+SELECT partner_id,committed_minor FROM donor_initiative_partners WHERE initiative_id=$1 ORDER BY partner_id;

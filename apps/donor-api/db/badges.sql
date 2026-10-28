@@ -66,3 +66,21 @@ DELETE FROM donor_recognition_wording WHERE kind=$1 AND key=$2;
 
 -- name: MilestoneWording :one
 SELECT title,body FROM donor_recognition_wording WHERE kind='MILESTONE' AND key=$1;
+
+-- name: LatestStreakReset :one
+SELECT max(reset_at)::timestamptz AS reset_at FROM donor_streak_resets WHERE donor_id=$1 AND reset_at<=sqlc.arg(as_of)::timestamptz;
+-- name: InsertStreakReset :exec
+INSERT INTO donor_streak_resets(id,donor_id,reset_at,actor_id,reason) VALUES($1,$2,$3,$4,$5);
+-- name: BadgeRules :many
+SELECT code,signal,threshold,artwork FROM donor_badge_rules ORDER BY code;
+-- name: SetBadgeRule :exec
+INSERT INTO donor_badge_rules(code,signal,threshold,artwork,updated_at,actor_id) VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT(code) DO UPDATE SET signal=EXCLUDED.signal,threshold=EXCLUDED.threshold,artwork=EXCLUDED.artwork,updated_at=EXCLUDED.updated_at,actor_id=EXCLUDED.actor_id;
+-- name: MilestoneRules :many
+SELECT days FROM donor_milestone_rules;
+-- name: SetMilestoneRules :exec
+INSERT INTO donor_milestone_rules(singleton,days,updated_at,actor_id) VALUES(true,$1,$2,$3)
+ON CONFLICT(singleton) DO UPDATE SET days=EXCLUDED.days,updated_at=EXCLUDED.updated_at,actor_id=EXCLUDED.actor_id;
+
+-- name: RefreshRecognitionSchedule :exec
+UPDATE donor_metric_projections SET next_refresh_at=least(next_refresh_at,$1);

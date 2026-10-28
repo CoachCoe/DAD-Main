@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dad/donor-api/internal/store"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AnalyticsSource interface {
@@ -35,6 +36,8 @@ func analyticsStatus(err error) (int, string) {
 func (a *api) ingestAnalytics(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Events []struct {
+			ID         string            `json:"id"`
+			JourneyID  string            `json:"journey_id"`
 			Name       string            `json:"name"`
 			OccurredAt time.Time         `json:"occurred_at"`
 			Properties map[string]string `json:"properties"`
@@ -45,7 +48,10 @@ func (a *api) ingestAnalytics(w http.ResponseWriter, r *http.Request) {
 	}
 	events := make([]store.Event, 0, len(body.Events))
 	for _, e := range body.Events {
-		events = append(events, store.Event{Name: e.Name, OccurredAt: e.OccurredAt, Properties: e.Properties})
+		events = append(
+			events,
+			store.Event{ID: e.ID, JourneyID: e.JourneyID, Name: e.Name, OccurredAt: e.OccurredAt, Properties: e.Properties},
+		)
 	}
 	source := "WEB"
 	if native(r) {
@@ -54,6 +60,12 @@ func (a *api) ingestAnalytics(w http.ResponseWriter, r *http.Request) {
 	a.analytics().serve(w, r, func(ctx context.Context) (any, error) {
 		if err := a.Analytics.Record(ctx, source, donorSession(r), events); err != nil {
 			return nil, err
+		}
+		if !native(r) && len(events) > 0 {
+			var journey pgtype.UUID
+			if journey.Scan(events[0].JourneyID) == nil && store.ValidRequestID(journey) {
+				a.setCookie(w, "dad_analytics_journey", journey.String(), 86400, http.SameSiteLaxMode)
+			}
 		}
 		return map[string]int{"accepted": len(events)}, nil
 	})

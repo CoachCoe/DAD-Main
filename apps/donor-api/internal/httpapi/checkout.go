@@ -16,6 +16,9 @@ type CheckoutSource interface {
 }
 
 type checkoutBody struct {
+	Name      string          `json:"name,omitempty"`
+	Zip       string          `json:"zip,omitempty"`
+	City      string          `json:"city,omitempty"`
 	Email     *string         `json:"email"`
 	Amount    *int64          `json:"amount_minor"`
 	Frequency json.RawMessage `json:"frequency"`
@@ -42,7 +45,10 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	request := payments.CheckoutRequest{
-		RequestID: key, Email: *body.Email, Amount: *body.Amount, Frequency: frequency,
+		Journey: cookieValue(
+			r,
+			"dad_analytics_journey",
+		), Name: body.Name, Zip: body.Zip, City: body.City, RequestID: key, Email: *body.Email, Amount: *body.Amount, Frequency: frequency,
 	}
 	if visitor := cookieValue(r, referralCookie); visitor != "" {
 		request.Visitor = &visitor

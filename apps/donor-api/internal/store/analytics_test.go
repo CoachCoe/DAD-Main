@@ -81,3 +81,23 @@ func TestAnalyticsRecord(t *testing.T) {
 		t.Errorf("anonymous WEB app_opened count = %d; want 2 (rejected batch stored nothing)", leaked)
 	}
 }
+
+func TestAnalyticsEventReplayIsIdempotent(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	api := as(t, dbroles.API)
+	s := AnalyticsService{DB: api}
+	id, journey := testID(t), testID(t)
+	t.Cleanup(func() { cleanExec(t, "DELETE FROM analytics_events WHERE id=$1", id) })
+	batch := []Event{{ID: id.String(), JourneyID: journey.String(), Name: "app_opened", OccurredAt: time.Now().UTC()}}
+	for range 2 {
+		if err := s.Record(ctx, "WEB", "", batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM analytics_events WHERE id=$1 AND journey_id=$2", id, journey).Scan(&count); err != nil ||
+		count != 1 {
+		t.Fatalf("duplicate observations: %d %v", count, err)
+	}
+}

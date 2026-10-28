@@ -1,3 +1,4 @@
+import { AnalyticsChoice } from "./AnalyticsChoice";
 import { DonorHeader } from "./DonorHeader";
 import { SiteFooter } from "./SiteFooter";
 
@@ -9,6 +10,7 @@ export function SiteFrame({ children }: { children: React.ReactNode }) {
       </a>
       <DonorHeader />
       <main id="main">{children}</main>
+      <AnalyticsChoice />
       <SiteFooter />
     </>
   );

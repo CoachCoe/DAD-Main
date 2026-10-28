@@ -703,8 +703,8 @@ the API only; without it the import answers 503 `FOUNDING_CLAIMS_UNCONFIGURED`. 
 granted the badge when the import finds their address, when they first give as a guest
 under it, or when they change their email to it. Grants survive a key change, but claims
 not yet granted no longer match under a new key, so re-import the file after changing it.
-Re-importing is safe and keeps each address's earliest sign-up. The projections worker
-deletes the claims 90 days after the Founding cutoff.
+Re-importing is safe and keeps each address's earliest sign-up. Qualifying claims have
+no redemption expiry; a later account claim still earns the badge.
 
 The enrolment CSV has headers only until R2. Keep exports private and apply an approved
 retention policy. Sensitive source documents have separate authenticated downloads.
@@ -831,9 +831,8 @@ for CPU. Keep results with the run's ticket, not in the repository.
 
 ## External acceptance
 
-Browser analytics/privacy decisions and manual assistive-technology acceptance are
-deferred by product agreement, as are native design deliverables and physical Wallet/QR
-acceptance. See [analytics](analytics.md) for the collection boundary and
+First-party browser analytics requires explicit user consent. Manual assistive-technology
+acceptance, native design deliverables, and physical Wallet/QR acceptance remain external. See [analytics](analytics.md) for the collection boundary and
 [design foundations](design-system.md) for the manual accessibility scope. These items
 remain unverified; deferral does not establish production acceptance.
 
@@ -1064,3 +1063,59 @@ current and best streaks, and rules version in the same transaction's audit even
 Payment history remains authoritative; permanent earned badges and historical bests
 are preserved. This operation repairs derived state after facts or code have been
 corrected. It does not provide an arbitrary manual continuity override.
+
+### Web signup and identity providers
+
+Donor signup collects a private name, email, ZIP, and city before emailing a
+single-use verification link. Existing donor profiles are not overwritten by an
+anonymous signup. After following the link, donors may set a password in their
+profile. Passwords use bcrypt at cost 12, accept 12–72 bytes, and are never logged.
+Changing a password requires the current password or an email proof completed in
+the same session within 15 minutes. The email sign-in flow is also password recovery.
+Account deletion removes the password hash and private signup name.
+
+The web Apple and Google authorization-code flows use these server-only variables:
+
+- `DONOR_OAUTH_APPLE_CLIENT_ID` and `DONOR_OAUTH_APPLE_CLIENT_SECRET` (Apple's signed
+  client-secret JWT, renewed before its expiry).
+- `DONOR_OAUTH_GOOGLE_CLIENT_ID` and `DONOR_OAUTH_GOOGLE_CLIENT_SECRET`.
+
+Register the exact redirect URLs `${DONOR_PUBLIC_ORIGIN}/account/oauth/apple` and
+`${DONOR_PUBLIC_ORIGIN}/account/oauth/google` with the providers. Include the web
+client IDs in the corresponding `DONOR_OIDC_*_CLIENT_ID` audience allowlists and use
+`DONOR_OIDC_MODE=live`. Apple requires HTTPS for its cross-site form-post callback.
+Each attempt has a short-lived HttpOnly state/nonce cookie; Google also uses PKCE.
+The Go verifier validates the resulting token's signature, issuer, audience, and
+expiry before issuing the normal HttpOnly donor session. Provider errors return a
+sign-in failure without logging codes, tokens, or response bodies. These flows need
+real-provider acceptance with the deployment's registered credentials.
+
+### Initiative co-funders and verified spending
+
+An initiative may have several approved co-funders, each with its own committed
+amount. Partnerships staff set the initiative ID and that partner's commitment in
+partner detail. Linking another partner preserves all existing links and amounts.
+Partner committed totals use those individual commitments; initiative metrics and
+category spending describe the whole initiative. Published metric/completion
+notifications fan out to every co-funder. The older optional primary-partner field
+remains compatible and adds a link without removing other co-funders.
+
+Spend changes are drafts. Impact Ops must supply a verification note and date and
+explicitly publish each category. An edit leaves the previously published total
+visible until the verified replacement is published. Verification evidence is kept
+with the published total. Existing published totals are preserved on migration;
+the migration does not manufacture historical verification evidence.
+
+### Recognition controls
+
+Super administrators can reset a donor's current streak with a reason. The reset is
+stored separately from gift facts and survives projection recomputation; giving
+history, historical best, and already earned badges are preserved. A future paid
+gift starts the new run. Repairing a faulty projection remains a separate action.
+
+Content administration includes badge names, rule text, numeric earning thresholds,
+PNG/JPEG artwork, and increasing streak milestone thresholds. Supported badge signals
+remain fixed; staff cannot supply executable rules. Changes are audited and schedule
+projection refreshes. Past awards remain permanent. Company month winners use combined
+active giving, matching the displayed leaderboard. Qualifying website-waitlist claims
+have no redemption expiry; only their keyed address hashes are retained.

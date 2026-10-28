@@ -233,7 +233,7 @@ func TestInitiativeSpendByCategoryTotalsAndPublishedOnlyRead(t *testing.T) {
 		{Category: "Logistics", AmountMinor: 40_00},
 		{Category: "Direct aid", AmountMinor: 150_00}, // upsert replaces 100_00
 	} {
-		if err := s.SetSpend(ctx, adminToken, id, in); err != nil {
+		if err := s.SetSpend(ctx, adminToken, id, SpendInput{Category: in.Category, AmountMinor: in.AmountMinor, VerificationNote: "Verified against finance records", VerifiedOn: "2026-10-01"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -243,6 +243,19 @@ func TestInitiativeSpendByCategoryTotalsAndPublishedOnlyRead(t *testing.T) {
 		t.Fatalf("draft initiative spend was readable: %v", err)
 	}
 
+	// Publishing the initiative cannot expose draft totals.
+	if err := s.Publish(ctx, adminToken, id); err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := reader.Spend(ctx, id)
+	if err != nil || hidden.TotalMinor != 0 {
+		t.Fatalf("draft spend leaked: %+v %v", hidden, err)
+	}
+	for _, category := range []string{"Direct aid", "Logistics"} {
+		if err := s.PublishSpend(ctx, adminToken, id, category); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Publish, then the read returns category totals + overall total.
 	if err := s.Publish(ctx, adminToken, id); err != nil {
 		t.Fatal(err)
