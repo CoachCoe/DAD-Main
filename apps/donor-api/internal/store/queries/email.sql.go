@@ -168,7 +168,7 @@ func (q *Queries) CompleteMessage(ctx context.Context, arg CompleteMessageParams
 }
 
 const donorPreference = `-- name: DonorPreference :one
-SELECT donor_id, version, referral_emails, marketing_emails, id, created_at, push_referral_converted, push_streak_at_risk, push_streak_milestone FROM donor_preferences WHERE donor_id=$1
+SELECT donor_id, version, referral_emails, marketing_emails, id, created_at, push_referral_converted, push_streak_at_risk, push_streak_milestone, rankings_opted_out, network_visible, volunteer, volunteer_interests, push_streak_lapsed, push_badge_earned, push_event_nearby, push_event_reminder, push_event_promoted, push_gift_processed FROM donor_preferences WHERE donor_id=$1
 `
 
 func (q *Queries) DonorPreference(ctx context.Context, donorID pgtype.UUID) (DonorPreference, error) {
@@ -184,6 +184,16 @@ func (q *Queries) DonorPreference(ctx context.Context, donorID pgtype.UUID) (Don
 		&i.PushReferralConverted,
 		&i.PushStreakAtRisk,
 		&i.PushStreakMilestone,
+		&i.RankingsOptedOut,
+		&i.NetworkVisible,
+		&i.Volunteer,
+		&i.VolunteerInterests,
+		&i.PushStreakLapsed,
+		&i.PushBadgeEarned,
+		&i.PushEventNearby,
+		&i.PushEventReminder,
+		&i.PushEventPromoted,
+		&i.PushGiftProcessed,
 	)
 	return i, err
 }

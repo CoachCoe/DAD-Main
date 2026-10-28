@@ -114,6 +114,21 @@ func textPointer(value pgtype.Text) *string {
 	return &value.String
 }
 
+func timePointer(value pgtype.Timestamptz) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
+}
+
+// rfc3339 formats a timestamp as staff input expects it, or "" when unset.
+func rfc3339(value pgtype.Timestamptz) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.Time.UTC().Format(time.RFC3339)
+}
+
 // signedIn is a donor authenticated by one of their sessions.
 type signedIn struct {
 	queries.Donor

@@ -43,6 +43,37 @@ func messageSuppression(
 		return referralSuppression(ctx, q, data, donor)
 	case "RECOVERY":
 		return recoverySuppression(ctx, q, data, donor, now)
+	case "LAPSED":
+		return lapsedSuppression(ctx, q, data, donor, now)
+	case eventPromotedCategory:
+		return reservationLapsed(ctx, q, data, donor)
+	}
+	return "", nil
+}
+
+// lapsedSuppression stops a streak-lapsed notice when the lapse did not happen
+// after all: the payment recovered or the gift was cancelled before grace ran
+// out. Once grace has ended on a still-FAILED period the lapse is real and the
+// notice stands. Like the recovery reminder it is a transactional status email
+// with no opt-out (only marketing and referral emails are opt-in).
+func lapsedSuppression(
+	ctx context.Context,
+	q *queries.Queries,
+	data payments.Object,
+	donor queries.Donor,
+	now time.Time,
+) (string, error) {
+	period, reason, err := failureResolved(ctx, q, data, donor, now)
+	if err != nil {
+		return "", err
+	}
+	if reason == "payment_recovered" || reason == "subscription_cancelled" {
+		return reason, nil
+	}
+	// The intent is available only at grace end, but guard against an early
+	// delivery: if grace has not elapsed the run has not lapsed yet.
+	if now.Sub(period.DueAt.Time) < recognition.Grace {
+		return "grace_not_ended", nil
 	}
 	return "", nil
 }
@@ -84,7 +115,8 @@ func referralLapsed(ctx context.Context, q *queries.Queries, data payments.Objec
 
 // recoverySuppression stops a failed-payment reminder once the payment
 // recovers, the gift is cancelled, grace ends, or a later reminder is due.
-// Reminders go out on the failure day and days 7 and 13 of the 14-day grace.
+// Reminders go out on the failure day and day 5 of the 7-day grace (PRD §6.11
+// "Streak at risk (grace day 5)"); the lapse at day 7 is a separate trigger.
 func recoverySuppression(
 	ctx context.Context,
 	q *queries.Queries,
@@ -98,13 +130,11 @@ func recoverySuppression(
 	}
 	elapsed := now.Sub(period.DueAt.Time)
 	latest := int64(0)
-	if elapsed >= 13*24*time.Hour {
-		latest = 13
-	} else if elapsed >= 7*24*time.Hour {
-		latest = 7
+	if elapsed >= 5*24*time.Hour {
+		latest = 5
 	}
 	day, err := data.Int("day")
-	if err != nil || (day != 0 && day != 7 && day != 13) {
+	if err != nil || (day != 0 && day != 5) {
 		return "", payments.ErrFacts
 	}
 	if day < latest {
@@ -155,6 +185,7 @@ func renderMessage(
 	ctx context.Context,
 	q *queries.Queries,
 	job queries.DonorMessage,
+	donor queries.Donor,
 	site publicSite,
 	now time.Time,
 ) (string, string, error) {
@@ -204,6 +235,28 @@ func renderMessage(
 		return "Your DAD test payment needs attention", "Your monthly test payment was declined. Your giving streak is at risk.\nThe recovery grace period ends " + iso(
 			period.DueAt.Time.Add(recognition.Grace),
 		) + ".\nUpdate your payment method securely: " + site.paymentMethod() + "\nIf signed out, request a sign-in link for the email used to give, then return to payment methods.\nUpdating a card does not itself confirm payment recovery. Stripe's retry sequence handles collection.\nThis essential payment notice concerns sandbox giving, not a real charge.\n", nil
+	case "LAPSED":
+		return "Your DAD giving streak has ended", "Your monthly test payment did not recover within the grace period, so your giving streak has reset to zero.\nYou can start a new streak any time — your next monthly test gift begins it.\nStart giving again securely: " + site.paymentMethod() + "\nIf signed out, request a sign-in link for the email used to give.\nThis is an essential status notice about sandbox giving, not a real charge.\n", nil
+	case eventPromotedCategory:
+		id, err := parseID(data.Text("event_id"))
+		if err != nil {
+			return "", "", err
+		}
+		event, err := q.EventByID(ctx, id)
+		if err != nil {
+			return "", "", err
+		}
+		return "You're off the waitlist for " + event.Title, renderPromotion(event, donor, site), nil
+	case eventCancelledCategory:
+		id, err := parseID(data.Text("event_id"))
+		if err != nil {
+			return "", "", err
+		}
+		event, err := q.EventByID(ctx, id)
+		if err != nil {
+			return "", "", err
+		}
+		return event.Title + " has been cancelled", renderCancellation(event, donor, site), nil
 	case "PASSKEY_ADDED":
 		added := data.Text("added_at")
 		if added == "" {
@@ -220,6 +273,36 @@ func renderMessage(
 	default:
 		return "", "", payments.ErrFacts
 	}
+}
+
+// renderCancellation tells a donor an event they signed up for will not go
+// ahead, with the time in their own zone when their ZIP gives one.
+func renderCancellation(event queries.DonorEvent, donor queries.Donor, site publicSite) string {
+	return "We're sorry: " + event.Title + ", planned for " + eventTime(event, donor) + ", has been cancelled.\n\n" +
+		"Your place has been released, so there is nothing you need to do.\n" +
+		"See other events near you: " + site.dashboard() + "\n"
+}
+
+// eventTime is when an event starts, in the donor's zone when known.
+func eventTime(event queries.DonorEvent, donor queries.Donor) string {
+	zone := time.UTC
+	if loc, err := time.LoadLocation(donor.Timezone.String); donor.Timezone.Valid && err == nil {
+		zone = loc
+	}
+	return event.StartsAt.Time.In(zone).Format("Monday, January 2, 2006 at 3:04 PM MST")
+}
+
+// renderPromotion tells a donor a waitlisted spot is now theirs.
+func renderPromotion(event queries.DonorEvent, donor queries.Donor, site publicSite) string {
+	where := event.Venue
+	if event.Address != "" {
+		where += ", " + event.Address
+	}
+	return "A spot opened up at " + event.Title + ", and it's yours: your reservation is confirmed.\n\n" +
+		"When: " + eventTime(event, donor) + "\n" +
+		"Where: " + where + "\n\n" +
+		"See the event and add it to your calendar: " + site.event(event.ID.String()) + "\n" +
+		"If you can no longer go, cancel there before it starts so the next person on the waitlist gets your spot.\n"
 }
 
 // deliveryLease reserves a claimed job while its send is in flight. It outlasts
@@ -285,7 +368,7 @@ func (w MessageWorker) prepare(ctx context.Context, site publicSite, now time.Ti
 		}
 		if err == nil && !job.Body.Valid {
 			var subject, body string
-			if subject, body, err = renderMessage(ctx, q, job, site, now); err == nil {
+			if subject, body, err = renderMessage(ctx, q, job, donor, site, now); err == nil {
 				err = q.RenderMessage(ctx, queries.RenderMessageParams{ID: job.ID, Subject: text(subject), Body: text(body)})
 			}
 		}

@@ -244,4 +244,7 @@ func TestAppSessionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect("refresh after the session expired", refresh(session.Refresh), http.StatusUnauthorized)
+	if directory := os.Getenv("DONOR_NATIVE_ACCEPTANCE_DIR"); directory != "" {
+		serveNativeClients(t, directory, pool, api)
+	}
 }

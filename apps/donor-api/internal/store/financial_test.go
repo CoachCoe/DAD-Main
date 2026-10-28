@@ -26,6 +26,21 @@ func mustExec(t *testing.T, tx queries.DBTX, sql string, args ...any) {
 	}
 }
 
+// cleanup runs sql as the database owner when the test ends.
+func cleanup(t *testing.T, sql string, args ...any) {
+	t.Helper()
+	t.Cleanup(func() { cleanExec(t, sql, args...) })
+}
+
+// cleanExec runs a cleanup statement as the database owner and reports a
+// failure, so a test never silently leaves rows behind for later tests.
+func cleanExec(t *testing.T, sql string, args ...any) {
+	t.Helper()
+	if _, err := database(t).Exec(context.Background(), sql, args...); err != nil {
+		t.Errorf("cleanup %q: %v", sql, err)
+	}
+}
+
 func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
@@ -88,14 +103,14 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 			g.referrer,
 		)
 	}
-	preparing, err := dashboard(ctx, q, referrerID, now)
+	preparing, err := dashboard(ctx, q, queries.Donor{ID: referrerID}, now)
 	if err != nil || preparing.State != "preparing" {
 		t.Fatalf("missing projection: %v %v", preparing, err)
 	}
 	if _, err = projectFacts(ctx, q, referrerID, now); err != nil {
 		t.Fatal(err)
 	}
-	missing, err := dashboard(ctx, q, referrerID, now)
+	missing, err := dashboard(ctx, q, queries.Donor{ID: referrerID}, now)
 	if err != nil || missing.Referrals != nil {
 		t.Fatal("missing referred history shown as zero")
 	}
@@ -107,13 +122,18 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 		!initial.FoundingAwardedAt.Valid {
 		t.Fatalf("wrong initial projection: %+v %v", initial, err)
 	}
-	view, err := dashboard(ctx, q, referrerID, now)
+	view, err := dashboard(ctx, q, queries.Donor{ID: referrerID}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
 	referrals := view.Referrals
 	if referrals == nil || referrals.IRL != 1 || referrals.Link != 0 || referrals.TotalMinor != 6000 {
 		t.Fatalf("wrong attribution: %v", referrals)
+	}
+	own, err := dashboard(ctx, q, queries.Donor{ID: donorID}, now)
+	if err != nil || own.Impact.GivenMinor == nil || *own.Impact.GivenMinor != 6000 || own.Impact.Currency != "USD" ||
+		own.Impact.InitiativesFunded != 0 || own.Impact.EventsVolunteered != 0 {
+		t.Fatalf("impact totals: %+v %v", own.Impact, err)
 	}
 	// A full refund breaks the current streak; the attained best and badge survive.
 	refund, event := testID(t), testID(t)
@@ -151,7 +171,7 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 		!refunded.FoundingAwardedAt.Time.Equal(initial.FoundingAwardedAt.Time) {
 		t.Fatalf("wrong refunded projection: %+v %v", refunded, err)
 	}
-	stale, err := dashboard(ctx, q, referrerID, now.Add(maxRefreshInterval))
+	stale, err := dashboard(ctx, q, queries.Donor{ID: referrerID}, now.Add(maxRefreshInterval))
 	if err != nil || stale.Referrals != nil || stale.Streak != nil {
 		t.Fatal("stale values exposed")
 	}
@@ -169,7 +189,7 @@ func TestFinancialHistoryProjectionAndDashboard(t *testing.T) {
 	}
 }
 
-func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
+func TestProjectionKeepsContinuityAndHistoricalBest(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	tx, err := pool.Begin(ctx)
@@ -180,7 +200,7 @@ func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
 	q := queries.New(tx)
 	donor, checkout, attempt := testID(t), testID(t), testID(t)
 	jan := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
-	feb, apr, jun := jan.AddDate(0, 1, 0), jan.AddDate(0, 3, 0), jan.AddDate(0, 5, 0)
+	feb, mar, apr := jan.AddDate(0, 1, 0), jan.AddDate(0, 2, 0), jan.AddDate(0, 3, 0)
 	mustExec(t, tx, "INSERT INTO donors(id,email) VALUES($1,$2)", donor, donor.String()+"@example.org")
 	mustExec(t, tx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency) VALUES($1,$2,3000,'MONTHLY')", checkout, donor)
 	mustExec(
@@ -198,26 +218,16 @@ func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
 		testID(t),
 		attempt,
 		donor,
-		jun,
 		apr,
-	)
-	mustExec(
-		t,
-		tx,
-		"INSERT INTO donor_pauses(id,donor_id,attempt_id,months,starts_at,resumes_at,confirmed_at) VALUES($1,$2,$3,2,$4,$5,$4)",
-		testID(t),
-		donor,
-		attempt,
-		feb,
-		apr,
+		mar,
 	)
 	var refundedGift pgtype.UUID
-	for i, due := range []time.Time{jan, apr, apr.AddDate(0, 1, 0)} {
+	for i, due := range []time.Time{jan, feb, mar} {
 		period, gift := testID(t), testID(t)
 		mustExec(
 			t,
 			tx,
-			"INSERT INTO donor_billing_periods(id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status) VALUES($1,$2,$3,$4,'sub_paused',$5,$6,'PAID')",
+			"INSERT INTO donor_billing_periods(id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status) VALUES($1,$2,$3,$4,'sub_fixture',$5,$6,'PAID')",
 			period,
 			donor,
 			checkout,
@@ -240,7 +250,7 @@ func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
 			refundedGift = gift
 		}
 	}
-	observed := jun.Add(-time.Hour)
+	observed := apr.Add(-time.Hour)
 	refund := testID(t)
 	mustExec(
 		t,
@@ -253,11 +263,11 @@ func TestProjectionKeepsPausedContinuityAndHistoricalBest(t *testing.T) {
 	)
 	got, err := projectFacts(ctx, q, donor, observed)
 	if err != nil || !got.CurrentStreak.Valid || got.CurrentStreak.Int32 != 1 || got.BestStreak != 3 {
-		t.Fatal("projection lost the attained best across a pause", got, err)
+		t.Fatal("projection lost the attained best after a mid-streak refund", got, err)
 	}
-	mustExec(t, tx, "UPDATE donor_subscriptions SET stops_at=$2 WHERE donor_id=$1", donor, jun)
-	got, err = projectFacts(ctx, q, donor, jun)
+	mustExec(t, tx, "UPDATE donor_subscriptions SET stops_at=$2 WHERE donor_id=$1", donor, apr)
+	got, err = projectFacts(ctx, q, donor, apr)
 	if err != nil || !got.CurrentStreak.Valid || got.CurrentStreak.Int32 != 0 || got.BestStreak != 3 {
-		t.Fatal("later cancellation changed the historical pause", got, err)
+		t.Fatal("later cancellation changed the historical best", got, err)
 	}
 }

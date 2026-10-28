@@ -12,18 +12,75 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Every PR runs in an ephemeral hosted environment, including fork PRs.
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      deploy: ${{ steps.filter.outputs.deploy }}
+      full: ${{ steps.filter.outputs.full }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          backend=false deploy=false full=false
+          # A push to an integration branch runs the full suite regardless of the
+          # diff: this is the landing run, and a skipped job there would leave a
+          # gap no later trigger fills.
+          if [ "$EVENT" = "push" ] && { [ "$REF" = "refs/heads/main" ] || [ "$REF" = "refs/heads/dev" ]; }; then
+            full=true backend=true deploy=true
+          else
+            # Resolve the comparison base: a PR diffs against its merge base, a
+            # branch push against its before-SHA (or HEAD~1 when that is unset,
+            # e.g. a new branch's first push).
+            if [ "$EVENT" = "pull_request" ] && [ -n "${BASE_SHA:-}" ]; then
+              git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+              base="$BASE_SHA"
+            elif [ -n "${BEFORE:-}" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              base="$BEFORE"
+            else
+              base="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+            fi
+            changed="$(git diff --name-only "$base" HEAD)"
+            echo "changed files vs $base:"; echo "$changed"
+            match() { echo "$changed" | grep -Eq "$1"; }
+            # backend: Go API, its migrations/sqlc/openapi, the web app (api runs
+            # check-generated which spans web typegen; browser is full-stack E2E),
+            # or the CI workflow itself.
+            if match '^apps/donor-api/|^apps/web/|^scripts/|^contracts/mobile/|^Makefile$|^\.github/workflows/ci\.yml$'; then backend=true; fi
+            # deploy: compose/env/ingress/scripts/Dockerfiles, or the CI workflow.
+            if match '^docker-compose|^\.env\..*\.example$|^scripts/|[Dd]ockerfile|^\.dockerignore$|^Makefile$|^deploy/nginx/|^\.github/workflows/ci\.yml$'; then deploy=true; fi
+          fi
+          {
+            echo "full=$full"
+            echo "backend=$backend"
+            echo "deploy=$deploy"
+          } >> "$GITHUB_OUTPUT"
+
   ledger:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: "24", cache: npm, cache-dependency-path: apps/atm-ledger/package-lock.json }
+        with: { node-version: "24" }
       - run: npm ci
         working-directory: apps/atm-ledger
       - run: make test-ledger lint-ledger
 
   api:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
@@ -44,7 +101,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27.2"
+          go-version: "1.27.3"
           cache-dependency-path: apps/donor-api/go.sum
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: "22", cache: npm, cache-dependency-path: apps/web/package-lock.json }
@@ -61,17 +118,22 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: "22", cache: npm, cache-dependency-path: apps/web/package-lock.json }
+        with: { node-version: "22" }
       - run: npm ci
         working-directory: apps/web
       - run: make test-web
       - run: make lint-web
 
   deploy:
+    needs: changes
+    if: needs.changes.outputs.deploy == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: "24" }
+      - run: make check-deploy-secrets
       - run: make lint-scripts
       - run: make check-ingress smoke-ingress
       - name: Validate production compose
@@ -83,6 +145,10 @@ jobs:
       - run: make check-images
 
   browser:
+    # GitHub-hosted: uses a Postgres service container (Linux-only Actions feature)
+    # and `playwright install --with-deps` (apt-get, Linux-only).
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -109,7 +175,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.27.2"
+          go-version: "1.27.3"
           cache-dependency-path: apps/donor-api/go.sum
       - run: make migrate
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0

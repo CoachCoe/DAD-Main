@@ -21,24 +21,47 @@ WITH projection AS (
     SELECT * FROM donor_metric_projections m WHERE m.donor_id=sqlc.arg(donor_id)::uuid
 ), candidates AS (
     SELECT p.referrer_id AS donor_id,'REFERRAL_CONVERTED' AS category,'push:referral:'||p.donor_id::text||':'||p.referrer_id::text||':'||p.referral_kind AS dedup_key,
-        json_build_object('referred_id',p.donor_id::text,'kind',p.referral_kind) AS context
+        json_build_object('referred_id',p.donor_id::text,'kind',p.referral_kind) AS context,
+        sqlc.arg(as_of)::timestamptz AS available_at
     FROM projection p WHERE p.referrer_id IS NOT NULL AND p.net_minor>0
     AND EXISTS(SELECT 1 FROM donor_gifts g WHERE g.stripe_object_id=p.first_gift_id
         AND greatest(g.paid_at,g.created_at)>sqlc.arg(recent_since)::timestamptz)
     UNION ALL
-    SELECT p.donor_id,'STREAK_AT_RISK','push:streak-at-risk:'||b.id::text,json_build_object('period_id',b.id::text)
+    SELECT p.donor_id,'STREAK_AT_RISK',
+        'push:streak-at-risk:'||b.id::text||CASE WHEN days.day=0 THEN '' ELSE ':5' END,
+        json_build_object('period_id',b.id::text,'day',days.day),
+        greatest(b.due_at+days.day*interval '24 hours',sqlc.arg(as_of)::timestamptz)
     FROM projection p CROSS JOIN LATERAL (
-        SELECT id,status FROM donor_billing_periods WHERE donor_id=p.donor_id AND due_at<=sqlc.arg(as_of)::timestamptz
+        SELECT id,status,due_at FROM donor_billing_periods WHERE donor_id=p.donor_id AND due_at<=sqlc.arg(as_of)::timestamptz
         ORDER BY due_at DESC LIMIT 1
-    ) b WHERE p.at_risk AND b.status='FAILED'
+    ) b CROSS JOIN (VALUES(0),(5)) AS days(day) WHERE p.at_risk AND b.status='FAILED'
+    UNION ALL
+    -- Streak lapsed (§6.11): the latest renewal failed and its 7-day grace has
+    -- fully elapsed with no recovery, so the run ended. Keyed by that period so
+    -- the lapse fires once; distinct from the at-risk reminders inside grace.
+    SELECT p.donor_id,'STREAK_LAPSED','push:streak-lapsed:'||b.id::text,json_build_object('period_id',b.id::text),sqlc.arg(as_of)::timestamptz
+    FROM projection p CROSS JOIN LATERAL (
+        SELECT id,status,due_at FROM donor_billing_periods WHERE donor_id=p.donor_id AND due_at<=sqlc.arg(as_of)::timestamptz
+        ORDER BY due_at DESC LIMIT 1
+    ) b WHERE b.status='FAILED' AND b.due_at + interval '7 days' <= sqlc.arg(as_of)::timestamptz
     UNION ALL
     SELECT sqlc.arg(donor_id)::uuid,'STREAK_MILESTONE',
         'push:streak-milestone:'||sqlc.arg(donor_id)::text||':'||floor(extract(epoch FROM sqlc.narg(run_started_at)::timestamptz))::bigint::text||':'||sqlc.narg(milestone)::integer::text,
-        json_build_object('months',sqlc.narg(milestone)::integer)
+        json_build_object('days',sqlc.narg(milestone)::integer),sqlc.arg(as_of)::timestamptz
     WHERE sqlc.narg(milestone)::integer IS NOT NULL AND sqlc.narg(run_started_at)::timestamptz IS NOT NULL
+    UNION ALL
+    SELECT g.donor_id,'GIFT_PROCESSED','push:gift:'||g.id::text,
+        json_build_object('gift_id',g.id::text),sqlc.arg(as_of)::timestamptz
+    FROM donor_gifts g WHERE g.donor_id=sqlc.arg(donor_id)::uuid
+      AND g.paid_at<=sqlc.arg(as_of)::timestamptz
+      AND greatest(g.paid_at,g.created_at)>sqlc.arg(recent_since)::timestamptz
 )
+-- The lifetime is a fixed span of seconds: a bare timestamptz difference
+-- normalises to an interval of whole days, and adding days back across a DST
+-- boundary shifts the instant by the offset, so a push scheduled past a
+-- transition would expire an hour early or late.
 INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
-SELECT gen_random_uuid(),c.donor_id,c.category,c.dedup_key,c.context,sqlc.arg(as_of)::timestamptz,sqlc.arg(expires_at)::timestamptz
+SELECT gen_random_uuid(),c.donor_id,c.category,c.dedup_key,c.context,c.available_at,c.available_at+make_interval(secs=>extract(epoch FROM sqlc.arg(expires_at)::timestamptz-sqlc.arg(as_of)::timestamptz))
 FROM candidates c
 WHERE EXISTS(SELECT 1 FROM donor_sessions s WHERE s.donor_id=c.donor_id AND s.push_token IS NOT NULL
     AND coalesce(s.refresh_expires_at,s.expires_at)>sqlc.arg(as_of)::timestamptz)

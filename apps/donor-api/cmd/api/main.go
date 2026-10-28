@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -22,8 +21,10 @@ import (
 	"dad/donor-api/internal/httpapi"
 	"dad/donor-api/internal/mail"
 	"dad/donor-api/internal/migrations"
+	"dad/donor-api/internal/oidc"
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/push"
+	"dad/donor-api/internal/sms"
 	"dad/donor-api/internal/store"
 	"dad/donor-api/internal/wallet"
 )
@@ -51,6 +52,23 @@ func trustedProxies(value string) ([]netip.Prefix, error) {
 		prefixes = append(prefixes, prefix.Masked())
 	}
 	return prefixes, nil
+}
+
+// allowSignInStubs lets a deployment off this machine, such as a shared test
+// environment, run the recording SMS stub or the HMAC OIDC stub.
+const allowSignInStubs = "DONOR_ALLOW_SIGN_IN_STUBS"
+
+// validateSignInStubs keeps the sign-in stubs, which accept forged tokens and
+// send no messages, to local runs unless a deployment opts in explicitly.
+func validateSignInStubs(phone *sms.Settings, social *oidc.Settings, origin string, getenv func(string) string) error {
+	stubbed := (phone != nil && phone.Provider == "stub") || (social != nil && social.Mode == "stub")
+	if !stubbed || payments.LocalOrigin(origin) || getenv(allowSignInStubs) == "true" {
+		return nil
+	}
+	return fmt.Errorf(
+		"DONOR_SMS_PROVIDER=stub and DONOR_OIDC_MODE=stub are for local runs; set %s=true only on a test deployment",
+		allowSignInStubs,
+	)
 }
 
 // validateStaffOrigin requires the back office, when enabled, to have its own
@@ -100,6 +118,17 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if services.Wallet, err = wallet.FromEnvironment(getenv, services.Origin); err != nil {
 		return services, release, err
 	}
+	smsSettings, err := sms.FromEnvironment(getenv)
+	if err != nil {
+		return services, release, fmt.Errorf("SMS sign-in: %w", err)
+	}
+	oidcSettings, err := oidc.FromEnvironment(getenv)
+	if err != nil {
+		return services, release, fmt.Errorf("OIDC sign-in: %w", err)
+	}
+	if err = validateSignInStubs(smsSettings, oidcSettings, services.Origin, getenv); err != nil {
+		return services, release, err
+	}
 	stripeKey, webhookSecret := getenv("STRIPE_SECRET_KEY"), getenv("STRIPE_WEBHOOK_SECRET")
 	if (stripeKey == "") != (webhookSecret == "") {
 		return services, release, errors.New("set both STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET, or neither")
@@ -120,13 +149,19 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	if err = validateStaffOrigin(services.StaffOrigin, services.Origin, getenv); err != nil {
 		return services, release, err
 	}
+	var foundingClaims store.FoundingClaimKey
+	if value := getenv("DONOR_FOUNDING_CLAIM_KEY"); value != "" {
+		if foundingClaims, err = store.ParseFoundingClaimKey(value); err != nil {
+			return services, release, fmt.Errorf("DONOR_FOUNDING_CLAIM_KEY %w", err)
+		}
+	}
 	var contentKeys credentials.Keyring
 	if value := getenv("DONOR_CONTENT_ENCRYPTION_KEY"); value != "" {
 		if contentKeys, err = credentials.ParseKeyring(value); err != nil {
 			return services, release, fmt.Errorf("DONOR_CONTENT_ENCRYPTION_KEY %w", err)
 		}
 	}
-	notifications, err := push.FromEnvironment(getenv)
+	platforms, err := push.RegistrationPlatforms(getenv)
 	if err != nil {
 		return services, release, err
 	}
@@ -143,8 +178,9 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		{"account email (SMTP settings)", email != nil},
 		{"staff back office (DONOR_STAFF_ORIGIN)", services.StaffOrigin != ""},
 		{"source documents (DONOR_CONTENT_ENCRYPTION_KEY)", contentKeys.Configured()},
-		{"iOS app notifications (DONOR_PUSH_APNS_*)", notifications.APNs != nil},
-		{"Android app notifications (DONOR_PUSH_FCM_KEY_FILE)", notifications.FCM != nil},
+		{"website waitlist Founding Donors (DONOR_FOUNDING_CLAIM_KEY)", len(foundingClaims) > 0},
+		{"iOS app notifications (DONOR_PUSH_PLATFORMS)", slices.Contains(platforms, push.IOS)},
+		{"Android app notifications (DONOR_PUSH_PLATFORMS)", slices.Contains(platforms, push.Android)},
 		{"donor passkeys (a DONOR_PUBLIC_ORIGIN host name, not an IP address)", passkeys},
 	} {
 		if !feature.enabled {
@@ -176,10 +212,20 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 	}
 	services.Ready = func(ctx context.Context) error { return migrations.Verify(ctx, pool) }
 	services.Content = store.ContentReader{DB: pool}
-	services.Partner = store.PartnerService{DB: pool}
+	services.InitiativeRead = store.InitiativeReader{DB: pool}
+	services.TodayInitiative = store.DonorInitiativeService{DB: pool}
+	services.EventRead = store.EventReader{DB: pool, SupportEmail: getenv("DONOR_SUPPORT_EMAIL")}
+	services.Reservations = store.ReservationService{DB: pool, CheckInSecret: getenv("DONOR_EVENT_CHECKIN_SECRET")}
+	services.EventCheckInSecret = getenv("DONOR_EVENT_CHECKIN_SECRET")
+	portal := store.PartnerPortalService{DB: pool}
+	services.PartnerPortal = store.PartnerDashboardService{PartnerPortalService: portal}
+	services.PartnerApply = store.PartnerApplicationService{DB: pool}
+	services.ApplicationReceipts = store.PartnerApplicationService{DB: pool}
 	services.Dashboard = store.DashboardReader{DB: pool}
 	services.Account = store.AccountService{DB: pool}
+	services.Passwords = store.PasswordService{DB: pool, FoundingClaims: foundingClaims}
 	services.Donor = store.DonorService{DB: pool, Origin: services.Origin}
+	services.Analytics = store.AnalyticsService{DB: pool}
 	if passkeys {
 		donorPasskeys, err := store.NewDonorPasskeyService(pool, services.Origin)
 		if err != nil {
@@ -188,17 +234,25 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		}
 		services.DonorPasskeys = donorPasskeys
 	}
-	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin}
+	if sender := sms.NewSender(smsSettings); sender != nil {
+		services.PhoneSignIn = store.PhoneService{DB: pool, Sender: sender}
+	}
+	if verifier := oidc.NewVerifier(oidcSettings); verifier != nil {
+		services.OIDCSignIn = store.OIDCService{DB: pool, Verifier: verifier, Settings: oidcSettings}
+	}
+	services.Checkout = store.CheckoutService{DB: pool, Gateway: gateway, Origin: services.Origin, FoundingClaims: foundingClaims}
 	services.Recurring = store.RecurringService{DB: pool, Gateway: gateway, Origin: services.Origin}
-	services.Push = store.PushService{DB: pool, Platforms: slices.Collect(maps.Keys(notifications.Providers()))}
+	services.Push = store.PushService{DB: pool, Platforms: platforms}
+	services.PartnerPush = store.PartnerPushService{DB: pool, Platforms: platforms}
 	if webhookSecret != "" {
 		services.Webhook = payments.Receiver{Secret: webhookSecret, Inbox: store.StripeInbox{DB: pool}}
 	}
 	if email != nil {
-		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKeys: email.EncryptionKeys}
+		services.EmailChange = store.EmailChangeService{DB: pool, EncryptionKeys: email.EncryptionKeys, FoundingClaims: foundingClaims}
 	}
+	var staff *store.StaffService
 	if services.StaffOrigin != "" {
-		staff, err := store.NewStaffService(pool, services.StaffOrigin)
+		staff, err = store.NewStaffService(pool, services.StaffOrigin)
 		if err != nil {
 			pool.Close()
 			return services, release, errors.New("staff configuration is invalid")
@@ -206,7 +260,20 @@ func configure(ctx context.Context, getenv func(string) string) (httpapi.Service
 		services.Staff, services.Admin, services.Exports = staff, staff, staff
 		services.StaffFinance = store.StaffFinanceService{Staff: staff, Gateway: gateway, Origin: services.Origin}
 		services.ContentAdmin = store.ContentService{Staff: staff, EncryptionKeys: contentKeys}
+		services.Wording = store.WordingService{Staff: staff}
+		services.FoundingClaims = store.FoundingClaimService{Staff: staff, Key: foundingClaims}
+		services.Initiatives = store.InitiativeService{Staff: staff}
+		services.Events = store.EventService{Staff: staff}
+		services.Reporting = &store.ReportingService{Staff: staff}
+		services.StaffPartner = store.PartnerApplicationService{DB: pool, Staff: staff}
 	}
+	employees := store.EmployeeService{DB: pool, Staff: staff}
+	services.EmployeeDonor, services.EmployeePartner = employees, employees
+	if staff != nil {
+		services.EmployeeStaff = employees
+	}
+	services.Badges = store.BadgeService{DB: pool, Staff: staff}
+	services.Network = store.NetworkService{DB: pool}
 	return services, pool.Close, nil
 }
 

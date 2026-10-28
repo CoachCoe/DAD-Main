@@ -3,11 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Page } from "@/components/donor/Page";
 import { ContentUnavailable, InitiativeFacts } from "@/components/donor/PublicContent";
-import { loadPublicContent } from "@/lib/publicContent";
+import { loadInitiative } from "@/lib/publicContent";
 
 async function initiative(slug: string) {
-  const content = await loadPublicContent();
-  return content && { found: content.initiatives.find((item) => item.slug === slug) };
+  const found = await loadInitiative(slug);
+  return found === null ? null : { found };
 }
 
 export async function generateMetadata({ params }: PageProps<"/initiatives/[slug]">): Promise<Metadata> {

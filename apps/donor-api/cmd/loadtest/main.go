@@ -73,13 +73,19 @@ type config struct {
 type fixture struct {
 	Sessions      []string `json:"sessions"`
 	ReferralCodes []string `json:"referral_codes"`
+	EventIDs      []string `json:"event_ids"`
 }
 
 // defaultMix approximates a referral spike: most traffic lands on referral
-// links, and a minority of donors check their recognition.
+// links, and a minority of donors check their recognition. The event-day and
+// engagement scenarios (events, event-detail, event-reserve, today-initiative,
+// team) default to 0 here and are turned on by the event-burst and
+// dashboard-soak mixes in the Makefile, so the referral-spike shape is
+// unchanged unless asked for.
 var defaultMix = map[string]int{
 	"referral-lookup": 30, "referral-capture": 12, "referral-missing": 3, "content": 15,
 	"dashboard": 18, "gifts": 7, "sharing": 5, "profile": 4, "recurring": 4, "annual-summary": 2,
+	"events": 0, "event-detail": 0, "event-reserve": 0, "today-initiative": 0, "team": 0,
 }
 
 // newRequest builds a request for a target parseTargets accepted, which
@@ -102,6 +108,7 @@ func seededMix(api, origin string, f fixture, weights map[string]int) ([]scenari
 		return nil, errors.New("the fixture holds no referral codes")
 	}
 	code := func(u *user) string { return url.PathEscape(f.ReferralCodes[u.r.IntN(len(f.ReferralCodes))]) }
+	event := func(u *user) string { return url.PathEscape(f.EventIDs[u.r.IntN(len(f.EventIDs))]) }
 	year := strconv.Itoa(time.Now().Year())
 	all := []scenario{
 		{name: "referral-lookup", expect: http.StatusOK, build: func(u *user) *http.Request {
@@ -132,6 +139,22 @@ func seededMix(api, origin string, f fixture, weights map[string]int) ([]scenari
 		{name: "profile", expect: http.StatusOK, signedIn: true, build: get(api + "/donor/me/profile")},
 		{name: "recurring", expect: http.StatusOK, signedIn: true, build: get(api + "/donor/me/recurring")},
 		{name: "annual-summary", expect: http.StatusOK, signedIn: true, build: get(api + "/donor/me/annual-summary/" + year)},
+		// Engagement reads: the dashboard soak exercises the daily-rotation
+		// lookup and the per-donor team leaderboard alongside the dashboard.
+		{name: "today-initiative", expect: http.StatusOK, signedIn: true, build: get(api + "/donor/me/today-initiative")},
+		{name: "team", expect: http.StatusOK, signedIn: true, build: get(api + "/donor/me/team")},
+		// Event-day spike: the near-city list, the public detail of a specific
+		// event, and reserving a seat (which takes the event row lock and runs
+		// the capacity/waitlist path — the real contention point on event day).
+		{name: "events", expect: http.StatusOK, signedIn: true, build: get(api + "/donor/me/events")},
+		{name: "event-detail", expect: http.StatusOK, build: func(u *user) *http.Request {
+			return newRequest(http.MethodGet, api+"/events/"+event(u), nil)
+		}},
+		{name: "event-reserve", expect: http.StatusOK, signedIn: true, build: func(u *user) *http.Request {
+			r := newRequest(http.MethodPost, api+"/donor/me/events/"+event(u)+"/reserve", nil)
+			r.Header.Set("Origin", origin)
+			return r
+		}},
 	}
 	var mix []scenario
 	for _, s := range all {
@@ -151,6 +174,15 @@ func seededMix(api, origin string, f fixture, weights map[string]int) ([]scenari
 	}
 	if len(mix) == 0 {
 		return nil, errors.New("the mix has no scenarios")
+	}
+	// The event scenarios index f.EventIDs; a mix that enables one needs a
+	// fixture that carries events (re-seed to refresh an older fixture).
+	if len(f.EventIDs) == 0 {
+		for _, s := range mix {
+			if s.name == "events" || s.name == "event-detail" || s.name == "event-reserve" {
+				return nil, fmt.Errorf("scenario %q needs event ids; the fixture holds none", s.name)
+			}
+		}
 	}
 	return mix, nil
 }

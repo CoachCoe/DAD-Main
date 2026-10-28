@@ -15,9 +15,10 @@ type CheckoutSource interface {
 	BeginCheckout(context.Context, payments.CheckoutRequest) (payments.CheckoutResult, error)
 }
 
-const minAmountMinor = 100
-
 type checkoutBody struct {
+	Name      string          `json:"name,omitempty"`
+	Zip       string          `json:"zip,omitempty"`
+	City      string          `json:"city,omitempty"`
 	Email     *string         `json:"email"`
 	Amount    *int64          `json:"amount_minor"`
 	Frequency json.RawMessage `json:"frequency"`
@@ -34,8 +35,8 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	frequency, ok := optional(body.Frequency, "MONTHLY")
-	if !ok || (frequency != "MONTHLY" && frequency != "ONE_TIME") || body.Email == nil || body.Amount == nil ||
-		utf8.RuneCountInString(*body.Email) > maxEmailRunes || !validAmount(*body.Amount) {
+	if !ok || frequency != "MONTHLY" || body.Email == nil || body.Amount == nil ||
+		utf8.RuneCountInString(*body.Email) > maxEmailRunes || !store.ValidGiftAmount(*body.Amount) {
 		invalidFields(w, r)
 		return
 	}
@@ -43,7 +44,12 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
 		return
 	}
-	request := payments.CheckoutRequest{RequestID: key, Email: *body.Email, Amount: *body.Amount, Frequency: frequency}
+	request := payments.CheckoutRequest{
+		Journey: cookieValue(
+			r,
+			"dad_analytics_journey",
+		), Name: body.Name, Zip: body.Zip, City: body.City, RequestID: key, Email: *body.Email, Amount: *body.Amount, Frequency: frequency,
+	}
 	if visitor := cookieValue(r, referralCookie); visitor != "" {
 		request.Visitor = &visitor
 	}
@@ -57,6 +63,8 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusConflict, "Checkout conflicts with an existing request", nil)
 	case errors.Is(err, store.ErrDenied):
 		writeError(w, r, http.StatusForbidden, "Giving is unavailable for this account", nil)
+	case errors.Is(err, store.EmailRoleError{}):
+		writeError(w, r, http.StatusConflict, "This email signs in to a DAD partner or staff account. Give with a different email.", nil)
 	case errors.Is(err, payments.ErrCheckoutInput):
 		invalidFields(w, r)
 	case err != nil:
@@ -65,5 +73,3 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, result)
 	}
 }
-
-func validAmount(minor int64) bool { return minor >= minAmountMinor && minor <= maxAmountMinor }

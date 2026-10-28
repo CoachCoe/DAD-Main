@@ -188,7 +188,7 @@ INSERT INTO donor_staff_invites(id,staff_id,token_hash,expires_at,pending_secret
 		t.Fatal(err)
 	}
 	var staff, credentialColumns, openSessions, openInvites int
-	if err = pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM donor_staff WHERE email='admin@example.org' AND role='ADMIN'),
+	if err = pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM donor_staff WHERE email='admin@example.org' AND role='SUPER_ADMIN'),
  (SELECT count(*) FROM information_schema.columns WHERE table_name IN ('donor_staff','donor_staff_invites') AND column_name IN ('password_hash','totp_secret','totp_counter','failures','locked_until','pending_secret')),
  (SELECT count(*) FROM donor_staff_sessions WHERE revoked_at IS NULL),
  (SELECT count(*) FROM donor_staff_invites WHERE consumed_at IS NULL)`).Scan(&staff, &credentialColumns, &openSessions, &openInvites); err != nil {

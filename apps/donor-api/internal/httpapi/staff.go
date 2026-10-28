@@ -33,6 +33,21 @@ const (
 	maxCredentialBytes = 64 << 10
 )
 
+// emailRoleDetail names the account that already holds an address, for staff
+// and partner admins adding a login (PRD §3: one email, one role).
+func emailRoleDetail(err error) string {
+	var held store.EmailRoleError
+	errors.As(err, &held)
+	switch held.Role {
+	case "DONOR":
+		return "This email already has a donor account. Use a different email for this login."
+	case "STAFF":
+		return "This email is a DAD staff login. Use a different email for this login."
+	default:
+		return "This email already signs in to a partner organization. Use a different email for this login."
+	}
+}
+
 func staffStatus(err error) (int, string) {
 	switch {
 	case errors.Is(err, store.ErrStaffDenied):
@@ -43,8 +58,12 @@ func staffStatus(err error) (int, string) {
 		return http.StatusUnprocessableEntity, "Invalid request fields"
 	case errors.Is(err, store.ErrStaffExists):
 		return http.StatusConflict, "A staff account with this email already exists"
+	case errors.Is(err, store.ErrBoardApprovalRequired):
+		return http.StatusConflict, "Record the initiative's board approval before publishing it"
 	case errors.Is(err, store.ErrStaffConflict):
 		return http.StatusConflict, "Staff access changed or conflicts with this request"
+	case errors.Is(err, store.EmailRoleError{}):
+		return http.StatusConflict, emailRoleDetail(err)
 	case errors.Is(err, pgx.ErrNoRows):
 		return http.StatusNotFound, "Record not found"
 	default:
@@ -56,7 +75,17 @@ func (a *api) staff() service {
 	return service{a.Staff != nil, staffUnavailable, readTimeout, staffStatus}
 }
 
-func validRole(role string) bool { return role == "ADMIN" || role == "FINANCE" || role == "SUPPORT" }
+// validRole gates the role a staff invite or role-change may set (PRD §8). The
+// bootstrap super admin is created out-of-band (StaffService.Bootstrap), so a
+// super admin can be assigned here too when promoting an operator.
+func validRole(role string) bool {
+	switch role {
+	case "SUPER_ADMIN", "OP_PARTNERSHIPS", "OP_GROWTH", "OP_IMPACT":
+		return true
+	default:
+		return false
+	}
+}
 
 func (a *api) invitationURL(token string) string {
 	return a.StaffOrigin + "/staff/activate#token=" + token

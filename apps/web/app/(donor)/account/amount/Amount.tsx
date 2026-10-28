@@ -7,20 +7,22 @@ import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { ApiError, api, type RequestBody, type Schema, unconfirmedMessage } from "@/lib/api";
 import { formatDate } from "@/lib/dates";
-import { formatMoney, MAX_GIFT_MINOR, MIN_GIFT_MINOR, monthlyFraming, parseDollars } from "@/lib/money";
+import { dailyGiftMinor, formatMoney, MAX_DAILY_DOLLARS, monthlyFraming } from "@/lib/money";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
 
 type Change = Schema<"AmountChange">;
 
-const validAmount = (minor: number | null) =>
-  minor !== null && minor >= MIN_GIFT_MINOR && minor <= MAX_GIFT_MINOR ? minor : null;
+const presets = [1, 3, 5];
+
+/** The daily dollars a monthly amount stands for, or "" when it predates the daily rule. */
+const dailyInput = (minor: number) => (dailyGiftMinor(String(minor / 3000)) === minor ? String(minor / 3000) : "");
 
 const confirmedCopy = (change: Change) =>
   `Last amount change confirmed: ${formatMoney(change.amount_minor)}/month from ${formatDate(change.effective_at)}.`;
 
 export default function Amount() {
-  const [amount, setAmount] = useState("30");
+  const [amount, setAmount] = useState("1");
   const [confirmation, setConfirmation] = useState<Change | null>(null);
   const [requestKey, setRequestKey] = useState<string | null>(null);
   const [signedOut, setSignedOut] = useState(false);
@@ -33,7 +35,7 @@ export default function Amount() {
         setError("");
         setAmountInvalid(false);
         if (value.state !== "ready") return;
-        setAmount((value.amount_minor / 100).toFixed(2));
+        setAmount(dailyInput(value.amount_minor));
         if (value.change && !value.change.confirmed) {
           setConfirmation(value.change);
           setRequestKey(value.change.request_id);
@@ -47,7 +49,7 @@ export default function Amount() {
   const [busy, setBusy] = useState(false);
   const amountInput = useRef<HTMLInputElement>(null);
   const step = useStepFocus(confirmation !== null);
-  const typed = validAmount(parseDollars(amount));
+  const typed = dailyGiftMinor(amount);
   const messages = resourceMessages(resource, {
     loading: "Checking monthly giving…",
     failure: "We could not load amount changes right now. Please refresh in a moment.",
@@ -59,15 +61,13 @@ export default function Amount() {
     setMessage("");
     setAmountInvalid(false);
     if (data?.state !== "ready") return;
-    const minor = parseDollars(amount);
+    const minor = dailyGiftMinor(amount);
     const problem =
       minor === null
-        ? "Enter a dollar amount with up to two decimal places."
+        ? `Enter a whole number of dollars a day from $1 to $${MAX_DAILY_DOLLARS}. Larger gifts are arranged with DAD directly.`
         : minor === data.amount_minor
-          ? "That is already your monthly amount. Choose a different one."
-          : validAmount(minor) === null
-            ? "Choose a monthly amount between $1 and $999,999.99."
-            : "";
+          ? "That is already your daily gift. Choose a different one."
+          : "";
     if (problem || minor === null) {
       setError(problem);
       setAmountInvalid(true);
@@ -102,7 +102,7 @@ export default function Amount() {
       setData({ ...data, amount_minor: result.amount_minor, change: result });
       setConfirmation(null);
       setRequestKey(null);
-      setAmount((result.amount_minor / 100).toFixed(2));
+      setAmount(dailyInput(result.amount_minor));
       if (result.confirmed) setMessage(confirmedCopy(result));
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) setSignedOut(true);
@@ -117,7 +117,7 @@ export default function Amount() {
   return (
     <Page
       eyebrow="My account"
-      title="Change monthly amount"
+      title="Change your daily gift"
       back={{ href: "/account/recurring", label: "Manage monthly giving" }}
     >
       {signedOut || resource.state === "signedOut" ? (
@@ -126,20 +126,20 @@ export default function Amount() {
         <>
           {data?.state === "unavailable" && (
             <p>
-              Your monthly amount can’t be changed right now. Changes are available for an active gift that isn’t paused
-              or ending.
+              Your monthly amount can’t be changed right now. Changes are available for an active gift that isn’t
+              ending.
             </p>
           )}
           {data?.state === "ready" && (
             <>
               <p className="lead">
-                Your next monthly amount: <GiftFraming minor={data.amount_minor} />
+                Your gift from the next billing date: <GiftFraming minor={data.amount_minor} />
               </p>
               {data.change?.confirmed && !message && <p>{confirmedCopy(data.change)}</p>}
               {confirmation ? (
                 <div className="callout">
                   <h2 ref={step.heading} tabIndex={-1}>
-                    Confirm new monthly amount
+                    Confirm your new daily gift
                   </h2>
                   <p>
                     From <GiftFraming minor={confirmation.previous_minor} /> to{" "}
@@ -166,29 +166,28 @@ export default function Amount() {
               ) : (
                 <form onSubmit={review}>
                   <div className="presets">
-                    {[3000, 9000, 15000].map((minor) => {
-                      const framing = monthlyFraming(minor);
-                      const value = (minor / 100).toFixed(2);
+                    {presets.map((dollars) => {
+                      const framing = monthlyFraming(dailyGiftMinor(String(dollars)) ?? 0);
                       return (
                         <button
-                          key={minor}
+                          key={dollars}
                           type="button"
-                          aria-pressed={parseDollars(amount) === minor}
+                          aria-pressed={amount.trim() === String(dollars)}
                           onClick={() => {
-                            setAmount(value);
+                            setAmount(String(dollars));
                             setAmountInvalid(false);
                           }}
                         >
-                          <span>{framing.monthly}</span> · <span>{framing.daily}</span>
+                          <span>{framing.daily}</span> · <span>{framing.monthly}</span>
                         </button>
                       );
                     })}
                   </div>
                   <label>
-                    Monthly amount in USD
+                    Dollars a day
                     <input
                       ref={amountInput}
-                      inputMode="decimal"
+                      inputMode="numeric"
                       value={amount}
                       required
                       aria-invalid={amountInvalid || undefined}
@@ -205,7 +204,7 @@ export default function Amount() {
                     </p>
                   )}
                   <button type="submit" ref={step.trigger} className="button">
-                    Review amount change
+                    Review change
                   </button>
                 </form>
               )}

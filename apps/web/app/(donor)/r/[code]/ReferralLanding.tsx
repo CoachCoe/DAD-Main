@@ -62,8 +62,7 @@ export default function ReferralLanding({
     await Promise.race([capture.current, new Promise((resolve) => setTimeout(resolve, 4000))]);
     window.location.assign("/donate");
   }
-  // Always name the owner of the opened code. The capture's public_name describes an
-  // earlier first-touch credit, which stays with that referrer and is not this page's to show.
+  // Keep the server-rendered owner of the opened code; a capture response must not rename the invitation.
   const name = referrer.state === "found" ? referrer.name : null;
   const unavailable = referrer.state === "unavailable" || (referrer.state === "unknown" && result?.captured === false);
 
@@ -85,7 +84,7 @@ export default function ReferralLanding({
       <p className="lead">Join a growing circle of people giving together. DAD launches in April 2027.</p>
       <div className="callout highlight">
         <GiftFraming minor={3000} />
-        <p>Monthly giving is the default. One-time gifts are welcome too.</p>
+        <p>Monthly giving, about a dollar a day.</p>
       </div>
       <Announcer status={leaving ? "Saving your referral…" : ""} alert={error} />
       {error ? (
@@ -110,7 +109,7 @@ export default function ReferralLanding({
 function About() {
   return (
     <>
-      <p>A first gift before launch earns a permanent Founding Donor badge.</p>
+      <p>A first gift completed before 1 January 2027 (New York time) earns a permanent Founding Donor badge.</p>
       <p className="note">This is a sandbox preview. No real donation is collected or live badge awarded.</p>
     </>
   );

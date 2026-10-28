@@ -40,6 +40,9 @@ func inviteStaff(ctx context.Context, q *queries.Queries, actor pgtype.UUID, ema
 	if err != nil {
 		return "", err
 	}
+	if err = reserveEmailIdentity(ctx, q, canonical, identityStaff, pgtype.UUID{}); err != nil {
+		return "", err
+	}
 	if _, err = q.InsertStaff(ctx, queries.InsertStaffParams{ID: id, Email: canonical, Name: identity.TrimSpace(name), Role: role}); err != nil {
 		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
 			return "", ErrStaffExists
@@ -71,7 +74,7 @@ func (s *StaffService) Bootstrap(ctx context.Context, email, name string) (strin
 		if len(rows) > 0 {
 			return "", ErrStaffConflict
 		}
-		return inviteStaff(ctx, q, pgtype.UUID{}, email, name, "ADMIN", time.Now().UTC())
+		return inviteStaff(ctx, q, pgtype.UUID{}, email, name, superAdminRole, time.Now().UTC())
 	})
 }
 
@@ -128,7 +131,7 @@ func (s *StaffService) ChangeAccess(ctx context.Context, token string, targetID 
 		for _, row := range rows {
 			if row.DonorStaff.ID == targetID {
 				target = row
-			} else if row.DonorStaff.Role == "ADMIN" && !row.DonorStaff.Disabled && row.Active {
+			} else if row.DonorStaff.Role == superAdminRole && !row.DonorStaff.Disabled && row.Active {
 				otherAdmins++
 			}
 		}
@@ -159,7 +162,7 @@ func (s *StaffService) Recover(ctx context.Context, email string) (string, error
 		}
 		var target queries.LockStaffAccountsRow
 		for _, row := range rows {
-			if row.DonorStaff.Email == canonical && row.DonorStaff.Role == "ADMIN" && !row.DonorStaff.Disabled {
+			if row.DonorStaff.Email == canonical && row.DonorStaff.Role == superAdminRole && !row.DonorStaff.Disabled {
 				target = row
 			}
 		}

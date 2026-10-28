@@ -1,7 +1,12 @@
 .git
 .github
 .claude
+.kiro
 .agents
+.codex
+.aws
+certs
+**/.DS_Store
 .worktrees
 docs
 *.log

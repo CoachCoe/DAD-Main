@@ -59,7 +59,7 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 		owner,
 	)
 	q := queries.New(tx)
-	result, err := dashboard(ctx, q, owner, now)
+	result, err := dashboard(ctx, q, queries.Donor{ID: owner}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 	} {
 		mustExec(t, tx, "SAVEPOINT invalid_projection")
 		mustExec(t, tx, "UPDATE donor_metric_projections SET "+modification+" WHERE donor_id=$1", first)
-		result, err = dashboard(ctx, q, owner, now)
+		result, err = dashboard(ctx, q, queries.Donor{ID: owner}, now)
 		if err != nil || result.Referrals != nil {
 			t.Fatal("incomplete aggregate exposed", modification, result, err)
 		}
@@ -111,7 +111,7 @@ func TestDashboardAggregateNeverInventsTotalsFromIncompleteOrOverflowingFacts(t 
 			int64(math.MaxInt64),
 			owner,
 		)
-		result, err = dashboard(ctx, q, owner, now)
+		result, err = dashboard(ctx, q, queries.Donor{ID: owner}, now)
 		if err != nil || result.Referrals != nil {
 			t.Fatal("overflowing aggregate exposed", result, err)
 		}
@@ -154,7 +154,7 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 		mustExec(
 			t,
 			tx,
-			"INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'ONE_TIME',$3,'LINK',$4)",
+			"INSERT INTO donor_checkouts(id,donor_id,amount_minor,frequency,referrer_id,referral_kind,referral_expires_at) VALUES($1,$2,3000,'MONTHLY',$3,'LINK',$4)",
 			id,
 			id,
 			owner,
@@ -164,7 +164,7 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 	mustExec(
 		t,
 		tx,
-		"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$2,$3,3000,'USD','ONE_TIME',$4,$5,'LINK')",
+		"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,referrer_id,referral_kind) VALUES($1,$2,$2,$3,3000,'USD','MONTHLY',$4,$5,'LINK')",
 		testID(t),
 		giver,
 		"pi_"+giver.String(),
@@ -172,7 +172,7 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 		owner,
 	)
 	q := queries.New(tx)
-	if result, err := dashboard(ctx, q, owner, now); err != nil || result.Referrals != nil {
+	if result, err := dashboard(ctx, q, queries.Donor{ID: owner}, now); err != nil || result.Referrals != nil {
 		t.Fatalf("totals shown while a referred gift awaits projection: %+v %v", result.Referrals, err)
 	}
 	mustExec(
@@ -187,7 +187,7 @@ func TestDashboardWaitsForReferredGiftsToBeProjected(t *testing.T) {
 	// production; this test drives the referred rows by direct SQL, so set the
 	// owner's totals to what that projection would write (Link 1, 3000).
 	mustExec(t, tx, "UPDATE donor_metric_projections SET referred_link_count=1,referred_link_minor=3000 WHERE donor_id=$1", owner)
-	result, err := dashboard(ctx, q, owner, now)
+	result, err := dashboard(ctx, q, queries.Donor{ID: owner}, now)
 	if err != nil || result.Referrals == nil || result.Referrals.Link != 1 || result.Referrals.TotalMinor != 3000 {
 		t.Fatalf("an unpaid referred checkout held back the totals: %+v %v", result.Referrals, err)
 	}
@@ -202,11 +202,11 @@ func TestDashboardJSONContract(t *testing.T) {
 		want  string
 	}{
 		{DonorDashboard{Mode: "test", State: "preparing"}, `{"mode":"test","state":"preparing"}`},
-		{DonorDashboard{Mode: "test", State: "ready", ComputedAt: at}, `{"computed_at":"2027-01-02T03:04:05Z","founding_donor":false,"mode":"test","referrals":null,"state":"ready","streak":null}`},
+		{DonorDashboard{Mode: "test", State: "ready", ComputedAt: at}, `{"computed_at":"2027-01-02T03:04:05Z","founding_donor":false,"mode":"test","referrals":null,"state":"ready","streak":null,"rank":null,"network":null,"impact":{"given_minor":null,"currency":"","initiatives_funded":0,"events_volunteered":0}}`},
 		{DonorDashboard{Mode: "test", State: "ready", ComputedAt: at, FoundingDonor: true,
 			Referrals: &ReferralSummary{Link: 1, IRL: 2, LinkMinor: 300, IRLMinor: 400, TotalMinor: 700, Currency: "USD"},
 			Streak:    &StreakSummary{Current: 3, AtRisk: true, GraceEndsAt: &grace}},
-			`{"computed_at":"2027-01-02T03:04:05Z","founding_donor":true,"mode":"test","referrals":{"currency":"USD","irl":2,"irl_minor":400,"link":1,"link_minor":300,"total_minor":700},"state":"ready","streak":{"at_risk":true,"current":3,"grace_ends_at":"2027-01-16T03:04:05Z"}}`},
+			`{"computed_at":"2027-01-02T03:04:05Z","founding_donor":true,"mode":"test","referrals":{"currency":"USD","irl":2,"irl_minor":400,"link":1,"link_minor":300,"total_minor":700},"state":"ready","streak":{"at_risk":true,"current":3,"grace_ends_at":"2027-01-16T03:04:05Z"},"rank":null,"network":null,"impact":{"given_minor":null,"currency":"","initiatives_funded":0,"events_volunteered":0}}`},
 	} {
 		got, err := json.Marshal(c.board)
 		if err != nil || string(got) != c.want {

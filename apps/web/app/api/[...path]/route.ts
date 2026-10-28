@@ -47,6 +47,9 @@ const HOP_BY_HOP = new Set([
 // body is consumed, so an early 401 or 422 would surface as an unreachable API.
 const MAX_BODY_BYTES = 10 << 20;
 
+const publicRecord = "[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}";
+const publicRead = new RegExp(`^(?:events/${publicRecord}(?:/calendar\\.ics)?|initiatives/${publicRecord}/spend)$`);
+
 // Counted as it arrives, since a chunked body declares no length.
 async function readBody(request: NextRequest): Promise<Uint8Array<ArrayBuffer> | null> {
   if (Number(request.headers.get("content-length") ?? 0) > MAX_BODY_BYTES) return null;
@@ -72,7 +75,11 @@ async function readBody(request: NextRequest): Promise<Uint8Array<ArrayBuffer> |
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
-  if (path[0] !== "donor" || path.some((segment) => segment === "." || segment === ".." || /[\\/?#%]/.test(segment))) {
+  const allowed =
+    path[0] === "donor" ||
+    (request.method === "POST" && path.join("/") === "analytics/events") ||
+    ((request.method === "GET" || request.method === "HEAD") && publicRead.test(path.join("/")));
+  if (!allowed || path.some((segment) => segment === "." || segment === ".." || /[\\/?#%]/.test(segment))) {
     return Response.json({ detail: "Not found" }, { status: 404 });
   }
   const target = new URL(`${donorApiBase()}/${path.map(encodeURIComponent).join("/")}`);

@@ -26,6 +26,25 @@ import (
 	"time"
 )
 
+func TestRegistrationPlatformsDoesNotLoadDeliveryKeys(t *testing.T) {
+	getenv := func(name string) string {
+		return map[string]string{"DONOR_PUSH_PLATFORMS": ",IOS,ANDROID,IOS", "DONOR_PUSH_APNS_KEY_FILE": "/nonexistent/apns.p8", "DONOR_PUSH_FCM_KEY_FILE": "/nonexistent/firebase.json"}[name]
+	}
+	got, err := RegistrationPlatforms(getenv)
+	if err != nil || !reflect.DeepEqual(got, []string{IOS, Android}) {
+		t.Fatalf("registration loaded private credentials: %v %v", got, err)
+	}
+	if _, err := FromEnvironment(getenv); err == nil {
+		t.Fatal("delivery accepted missing private keys")
+	}
+	if _, err := RegistrationPlatforms(func(string) string { return "WEB" }); err == nil {
+		t.Fatal("unknown registration platform accepted")
+	}
+	if got, err := RegistrationPlatforms(func(string) string { return "none" }); err != nil || len(got) != 0 {
+		t.Fatalf("disabled registration: %v %v", got, err)
+	}
+}
+
 var notification = Notification{
 	ID: "5f0c6b1e-8d2a-4c3b-9e4f-1a2b3c4d5e6f", Category: "REFERRAL_CONVERTED",
 	Title: "A Link Referral just gave", Body: "Someone you invited made their first gift.",

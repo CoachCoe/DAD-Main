@@ -30,7 +30,9 @@ const (
 const (
 	donorCookie    = "dad_donor_session"
 	staffCookie    = "dad_staff_session"
+	partnerCookie  = "dad_partner_session"
 	referralCookie = "dad_referral"
+	companyCookie  = "dad_company"
 )
 
 // classifier maps a service error to a public status and message.
@@ -42,10 +44,11 @@ type classifier func(error) (int, string)
 type featureOff struct{ code, detail string }
 
 var (
-	paymentsOff      = featureOff{"PAYMENTS_UNCONFIGURED", "Payments are not set up in this environment"}
-	emailOff         = featureOff{"EMAIL_UNCONFIGURED", "Account email is not set up in this environment"}
-	sourceStorageOff = featureOff{"SOURCE_STORAGE_UNCONFIGURED", "Source document storage is not set up in this environment"}
-	pushOff          = featureOff{"PUSH_UNCONFIGURED", "App notifications are not set up for this platform in this environment"}
+	paymentsOff       = featureOff{"PAYMENTS_UNCONFIGURED", "Payments are not set up in this environment"}
+	emailOff          = featureOff{"EMAIL_UNCONFIGURED", "Account email is not set up in this environment"}
+	sourceStorageOff  = featureOff{"SOURCE_STORAGE_UNCONFIGURED", "Source document storage is not set up in this environment"}
+	pushOff           = featureOff{"PUSH_UNCONFIGURED", "App notifications are not set up for this platform in this environment"}
+	foundingClaimsOff = featureOff{"FOUNDING_CLAIMS_UNCONFIGURED", "Waitlist imports are not set up in this environment"}
 )
 
 func (f featureOff) write(w http.ResponseWriter) {
@@ -61,6 +64,8 @@ func unconfigured(err error) (featureOff, bool) {
 		return sourceStorageOff, true
 	case errors.Is(err, store.ErrPushUnconfigured):
 		return pushOff, true
+	case errors.Is(err, store.ErrFoundingClaimsUnconfigured):
+		return foundingClaimsOff, true
 	}
 	return featureOff{}, false
 }

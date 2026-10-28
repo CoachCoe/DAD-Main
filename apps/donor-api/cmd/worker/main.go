@@ -105,15 +105,24 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		gateway.UseBudget(store.StripeBudget{DB: pool, PerSecond: ceiling})
 		events := store.EventWorker{DB: pool, Gateway: gateway}
 		backfill := &store.AnchorBackfill{DB: pool, Gateway: gateway}
+		reversals := store.DeletedAccountReversals{DB: pool, Gateway: gateway}
 		return func(ctx context.Context) (bool, error) {
 			worked, err := events.ProcessNext(ctx)
 			if worked || err != nil {
+				return worked, err
+			}
+			if worked, err = reversals.RunNext(ctx, time.Now().UTC()); worked || err != nil {
 				return worked, err
 			}
 			return backfill.SyncNext(ctx, time.Now().UTC())
 		}, nil
 	case "projections":
 		retention := &store.TouchRetention{DB: pool}
+		rankings := store.RankingService{DB: pool}
+		reminders := store.EventReminderService{DB: pool}
+		monthlyPartners := store.PartnerMonthlyService{DB: pool}
+		nearby := store.EventAlertService{DB: pool}
+		teamMonths := store.TeamMonthService{DB: pool}
 		return func(ctx context.Context) (bool, error) {
 			now := time.Now().UTC()
 			purged, err := retention.PurgeNext(ctx, now)
@@ -121,7 +130,32 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 				return false, err
 			}
 			processed, err := store.RefreshDueProjections(ctx, pool, now, store.ProjectionBatch)
-			return purged || processed > 0, err
+			if err != nil {
+				return purged || processed > 0, err
+			}
+			// Periodic, throttled global ranking rollup (PRD §6.4, risk #6).
+			ranked, err := rankings.RefreshIfDue(ctx, now)
+			if err != nil {
+				return purged || processed > 0 || ranked, err
+			}
+			alerted, err := nearby.QueueNext(ctx, now)
+			if err != nil {
+				return purged || processed > 0 || ranked, err
+			}
+			// Event reminder sweeps (E-7); idempotent per window, so a frequent
+			// sweep is cheap and each 24h/2h window fires once.
+			remind, err := reminders.QueueDueReminders(ctx, now)
+			if err != nil {
+				return purged || processed > 0 || ranked || alerted || remind > 0, err
+			}
+			// Monthly partner report sweep (§6.11); idempotent per partner per
+			// calendar month via the intent's dedup key.
+			monthly, err := monthlyPartners.QueueDueMonthly(ctx, now)
+			if err != nil {
+				return purged || processed > 0 || ranked || remind > 0 || alerted || monthly > 0, err
+			}
+			teams, err := teamMonths.CloseDue(ctx, now)
+			return purged || processed > 0 || ranked || remind > 0 || alerted || monthly > 0 || teams > 0, err
 		}, nil
 	case "push":
 		config, err := push.FromEnvironment(getenv)
@@ -138,7 +172,16 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 			}
 		}
 		worker := store.PushWorker{DB: pool, Providers: providers}
-		return func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }, nil
+		partner := store.PartnerPushWorker{DB: pool, Providers: providers}
+		return func(ctx context.Context) (bool, error) {
+			now := time.Now().UTC()
+			donorWorked, err := worker.DeliverNext(ctx, now)
+			if err != nil {
+				return donorWorked, err
+			}
+			partnerWorked, err := partner.DeliverNext(ctx, now)
+			return donorWorked || partnerWorked, err
+		}, nil
 	}
 	settings, err := mail.FromEnvironment(getenv)
 	if err != nil || settings == nil {
@@ -153,16 +196,30 @@ func stepFor(kind string, pool *pgxpool.Pool, getenv func(string) string) (func(
 		return nil, configError("DONOR_SMTP_CA could not be loaded")
 	}
 	transport := mail.SMTPTransport{Settings: *settings, RootCAs: roots}
-	var worker deliverer
+	var queues []deliverer
 	switch kind {
 	case "email-changes":
-		worker = store.EmailChangeWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+		queues = []deliverer{store.EmailChangeWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}}
 	case "login-email":
-		worker = store.LoginEmailWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+		queues = []deliverer{
+			store.LoginEmailWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport},
+			store.PartnerLoginEmailWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport},
+		}
 	default:
-		worker = store.MessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport}
+		queues = []deliverer{
+			store.MessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport},
+			store.PartnerMessageWorker{DB: pool, Settings: *settings, Origin: origin, Transport: transport},
+		}
 	}
-	return func(ctx context.Context) (bool, error) { return worker.DeliverNext(ctx, time.Now().UTC()) }, nil
+	return func(ctx context.Context) (bool, error) {
+		now := time.Now().UTC()
+		for _, queue := range queues {
+			if worked, err := queue.DeliverNext(ctx, now); worked || err != nil {
+				return worked, err
+			}
+		}
+		return false, nil
+	}, nil
 }
 
 func main() {

@@ -9,6 +9,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"dad/donor-api/internal/store/queries"
 )
 
 func TestBillingHistoryPreservesFailuresRecoveryAndReplay(t *testing.T) {
@@ -83,6 +85,14 @@ func TestBillingHistoryPreservesFailuresRecoveryAndReplay(t *testing.T) {
 			if err := rows.Err(); err != nil || !slices.Equal(statuses, []string{"FAILED", "FAILED", "PAID"}) {
 				t.Fatalf("history lost or duplicated: %v %v", statuses, err)
 			}
+			rows.Close()
+			churn, err := queries.New(f.service.DB).
+				ReportInvoluntaryChurn(ctx, queries.ReportInvoluntaryChurnParams{StartAt: timestamp(start), EndAt: timestamp(start.Add(24 * time.Hour)), Cutoff: timestamp(time.Now().UTC())})
+			if err != nil || churn.FailedPeriods != 1 || churn.LostMinor != 3000 || churn.RecoveredPeriods != 1 ||
+				churn.RecoveredMinor != 3000 ||
+				churn.RecoveredWithinGrace != 0 {
+				t.Fatalf("late recovery must retain its failure, once, in either delivery order: %+v %v", churn, err)
+			}
 		})
 	}
 }
@@ -94,8 +104,8 @@ func TestBillingHistoryExportsVerifiedFactsWithFinancialPermission(t *testing.T)
 	start := time.Now().UTC().Add(-24 * time.Hour)
 	f.receiveAt(t, "invoice.payment_failed", invoice(checkout.CheckoutID, "in_export_"+f.donorID.String(), start, false), start)
 	f.process(t)
-	_, finance := staffFixture(t, f.db, "FINANCE")
-	_, support := staffFixture(t, f.db, "SUPPORT")
+	_, finance := staffFixture(t, f.db, "SUPER_ADMIN")
+	_, support := staffFixture(t, f.db, "OP_PARTNERSHIPS")
 	s := &StaffService{DB: f.service.DB}
 	if err := s.Export(ctx, support, "billing-history", io.Discard); !errors.Is(err, ErrStaffForbidden) {
 		t.Fatalf("support exported billing history: %v", err)

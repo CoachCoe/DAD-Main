@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import Inquiries from "./Inquiries";
+import Partners from "./Partners";
 
-export const metadata: Metadata = { title: "Partner inquiries" };
+export const metadata: Metadata = { title: "Partners" };
 
 export default function Page() {
-  return <Inquiries />;
+  return <Partners />;
 }

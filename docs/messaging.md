@@ -8,7 +8,7 @@ configured provider before enabling live donations. SMTP delivery is at least on
 |---|---|---|---|
 | Gift receipt | Successful gift; giving donor | Essential financial record; no marketing content | `internal/store/receipts.go` and `messages.go` |
 | Annual summary | Prior calendar year has gifts; giving donor | Essential financial record | `internal/store/receipts.go` and `outbox.go` |
-| Payment recovery | Failed renewal, then days 7 and 13; giving donor | Essential payment notice; stop after recovery or cancellation | `internal/store/messages.go` and `outbox.go` |
+| Payment recovery | Failed renewal, then day 5 of the 7-day grace window; giving donor | Essential payment notice; stop after recovery or cancellation | `internal/store/messages.go` and `outbox.go` |
 | Referral converted | First qualifying referred gift; direct referrer | Optional; recheck referral-email preference before sending | `internal/store/messages.go` |
 | Account claim/sign-in | Requested access or initial checkout claim; address owner | Essential authentication; single-use link, 15-minute expiry | `internal/store/email.go` |
 | Email change | Signed-in request, then current-address confirmation; current/new address respectively | Essential security confirmation; two single-use proofs, each valid 15 minutes | `internal/store/email_change_delivery.go` |
@@ -30,11 +30,17 @@ name no one and no amount, and open the given app path.
 
 | Notification | Trigger and audience | Text | Opens |
 |---|---|---|---|
+| Gift processed | Recent verified gift; giving donor, once per gift | "Your gift was processed" / "Your test gift was processed. Open the app to see your giving history." | `/account/gifts` |
 | Referral converted | First qualifying referred gift; direct referrer | "Your invitation worked" / "Someone you invited through a Link Referral (an IRL Referral) just made their first test gift." | `/account/dashboard` |
-| Streak at risk | Failed latest renewal while the streak is at risk, once per period; giving donor | "Your giving streak is at risk" / "Your monthly test payment was declined. Update your payment method to keep your streak going." | `/account/payment-method` |
-| Streak milestone | Streak reaches 3 or 6 months, a year, or a further year, once per run; giving donor | "6 months in a row" / "You have given every month for 6 months. Thank you for keeping your test gifts going." | `/account/dashboard` |
+| Streak at risk | Failed latest renewal while the streak is at risk, initially and on grace day 5; giving donor | "Your giving streak is at risk" / "Your monthly test payment was declined. Update your payment method to keep your streak going." | `/account/payment-method` |
+| Streak milestone | Streak reaches an R1 day milestone, once per run; giving donor | "100-day streak" / "You have kept your giving streak going for 100 days. Thank you for showing up every day." | `/account/dashboard` |
 
-A notification not sent within 24 hours is dropped rather than shown late.
+A notification not sent within 24 hours of becoming available is dropped rather than shown late.
+The day-five reminder is queued with the failure, waits until five days after its due time,
+and is suppressed after recovery, cancellation, or grace expiry. A pending initial reminder
+is superseded once day five is due. Gift-processed notifications recheck the choice and
+verified gift at delivery; a full refund suppresses them. Email receipts remain essential
+when the donor turns off gift-processed pushes.
 
 ## Prepared enrolment confirmation
 

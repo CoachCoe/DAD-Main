@@ -11,6 +11,47 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const anonymizeDonor = `-- name: AnonymizeDonor :exec
+UPDATE donors SET
+	email = 'deleted-' || id::text || '@deleted.invalid',
+	public_name = NULL,
+ full_name = NULL,
+	referral_code = NULL,
+	zip = NULL,
+	city = NULL,
+	timezone = NULL,
+	phone = NULL,
+	company_code = NULL,
+	disabled = true
+WHERE id = $1
+`
+
+// Scrub personal data from the donor row in place, keeping the id the financial
+// ledger references. email is NOT NULL UNIQUE so it becomes a unique non-routable
+// placeholder rather than null; every other personal field is cleared and the
+// account is disabled so it can no longer be used.
+func (q *Queries) AnonymizeDonor(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, anonymizeDonor, id)
+	return err
+}
+
+const bindDonorCompanyCode = `-- name: BindDonorCompanyCode :exec
+UPDATE donors SET company_code=$2 WHERE id=$1 AND company_code IS NULL
+`
+
+type BindDonorCompanyCodeParams struct {
+	ID          pgtype.UUID `json:"id"`
+	CompanyCode pgtype.Text `json:"company_code"`
+}
+
+// Record the captured company code on the donor at first gift, only if one is
+// not already set (first bind wins; the touch's last-touch rule already chose
+// which code that is).
+func (q *Queries) BindDonorCompanyCode(ctx context.Context, arg BindDonorCompanyCodeParams) error {
+	_, err := q.db.Exec(ctx, bindDonorCompanyCode, arg.ID, arg.CompanyCode)
+	return err
+}
+
 const capturedReferrerName = `-- name: CapturedReferrerName :one
 SELECT d.public_name FROM donors d JOIN donor_referral_touches t ON t.referrer_id=d.id
 WHERE t.token_hash=$1 AND d.disabled=false
@@ -21,6 +62,105 @@ func (q *Queries) CapturedReferrerName(ctx context.Context, tokenHash string) (p
 	var public_name pgtype.Text
 	err := row.Scan(&public_name)
 	return public_name, err
+}
+
+const companyTouchByToken = `-- name: CompanyTouchByToken :one
+SELECT id, token_hash, company_code, touched_at, expires_at, created_at
+FROM donor_company_touches WHERE token_hash=$1
+`
+
+type CompanyTouchByTokenRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	TokenHash   string             `json:"token_hash"`
+	CompanyCode string             `json:"company_code"`
+	TouchedAt   pgtype.Timestamptz `json:"touched_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CompanyTouchByToken(ctx context.Context, tokenHash string) (CompanyTouchByTokenRow, error) {
+	row := q.db.QueryRow(ctx, companyTouchByToken, tokenHash)
+	var i CompanyTouchByTokenRow
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.CompanyCode,
+		&i.TouchedAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteDonorOIDCIdentities = `-- name: DeleteDonorOIDCIdentities :exec
+DELETE FROM donor_oidc_identities WHERE donor_id=$1
+`
+
+func (q *Queries) DeleteDonorOIDCIdentities(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDonorOIDCIdentities, donorID)
+	return err
+}
+
+const deleteDonorPassword = `-- name: DeleteDonorPassword :exec
+DELETE FROM donor_passwords WHERE donor_id=$1
+`
+
+func (q *Queries) DeleteDonorPassword(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDonorPassword, donorID)
+	return err
+}
+
+const deleteDonorPreferences = `-- name: DeleteDonorPreferences :exec
+DELETE FROM donor_preferences WHERE donor_id=$1
+`
+
+func (q *Queries) DeleteDonorPreferences(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDonorPreferences, donorID)
+	return err
+}
+
+const deleteEmployeeLink = `-- name: DeleteEmployeeLink :exec
+DELETE FROM donor_partner_employees WHERE donor_id = $1
+`
+
+func (q *Queries) DeleteEmployeeLink(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteEmployeeLink, donorID)
+	return err
+}
+
+const deletePhoneCode = `-- name: DeletePhoneCode :exec
+DELETE FROM donor_phone_codes WHERE phone=$1
+`
+
+func (q *Queries) DeletePhoneCode(ctx context.Context, phone string) error {
+	_, err := q.db.Exec(ctx, deletePhoneCode, phone)
+	return err
+}
+
+const donorByPhone = `-- name: DonorByPhone :one
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name FROM donors WHERE phone=$1 AND disabled=false
+`
+
+func (q *Queries) DonorByPhone(ctx context.Context, phone pgtype.Text) (Donor, error) {
+	row := q.db.QueryRow(ctx, donorByPhone, phone)
+	var i Donor
+	err := row.Scan(
+		&i.Email,
+		&i.ClaimedAt,
+		&i.Disabled,
+		&i.PublicName,
+		&i.ReferralCode,
+		&i.ID,
+		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
+		&i.CompanyCode,
+		&i.FullName,
+	)
+	return i, err
 }
 
 const donorGiftsPage = `-- name: DonorGiftsPage :many
@@ -77,28 +217,118 @@ func (q *Queries) DonorGiftsPage(ctx context.Context, arg DonorGiftsPageParams) 
 	return items, nil
 }
 
-const insertReferralTouch = `-- name: InsertReferralTouch :exec
-INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES($1,$2,$3,$4,$5,$6)
+const donorPassword = `-- name: DonorPassword :one
+SELECT password_hash FROM donor_passwords WHERE donor_id=$1
 `
 
-type InsertReferralTouchParams struct {
-	ID         pgtype.UUID        `json:"id"`
-	TokenHash  string             `json:"token_hash"`
-	ReferrerID pgtype.UUID        `json:"referrer_id"`
-	Kind       string             `json:"kind"`
-	TouchedAt  pgtype.Timestamptz `json:"touched_at"`
-	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+func (q *Queries) DonorPassword(ctx context.Context, donorID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, donorPassword, donorID)
+	var password_hash string
+	err := row.Scan(&password_hash)
+	return password_hash, err
 }
 
-func (q *Queries) InsertReferralTouch(ctx context.Context, arg InsertReferralTouchParams) error {
-	_, err := q.db.Exec(ctx, insertReferralTouch,
+const insertOIDCIdentity = `-- name: InsertOIDCIdentity :exec
+INSERT INTO donor_oidc_identities (id, donor_id, provider, subject, last_used_at)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertOIDCIdentityParams struct {
+	ID         pgtype.UUID        `json:"id"`
+	DonorID    pgtype.UUID        `json:"donor_id"`
+	Provider   string             `json:"provider"`
+	Subject    string             `json:"subject"`
+	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
+}
+
+func (q *Queries) InsertOIDCIdentity(ctx context.Context, arg InsertOIDCIdentityParams) error {
+	_, err := q.db.Exec(ctx, insertOIDCIdentity,
 		arg.ID,
-		arg.TokenHash,
-		arg.ReferrerID,
-		arg.Kind,
-		arg.TouchedAt,
-		arg.ExpiresAt,
+		arg.DonorID,
+		arg.Provider,
+		arg.Subject,
+		arg.LastUsedAt,
 	)
+	return err
+}
+
+const markPasswordReauthenticated = `-- name: MarkPasswordReauthenticated :exec
+UPDATE donor_sessions SET password_verified_at=$2 WHERE token_hash=$1
+`
+
+type MarkPasswordReauthenticatedParams struct {
+	TokenHash          string             `json:"token_hash"`
+	PasswordVerifiedAt pgtype.Timestamptz `json:"password_verified_at"`
+}
+
+func (q *Queries) MarkPasswordReauthenticated(ctx context.Context, arg MarkPasswordReauthenticatedParams) error {
+	_, err := q.db.Exec(ctx, markPasswordReauthenticated, arg.TokenHash, arg.PasswordVerifiedAt)
+	return err
+}
+
+const oIDCIdentity = `-- name: OIDCIdentity :one
+SELECT id, donor_id, provider, subject, created_at, last_used_at FROM donor_oidc_identities
+WHERE provider=$1 AND subject=$2
+`
+
+type OIDCIdentityParams struct {
+	Provider string `json:"provider"`
+	Subject  string `json:"subject"`
+}
+
+func (q *Queries) OIDCIdentity(ctx context.Context, arg OIDCIdentityParams) (DonorOidcIdentity, error) {
+	row := q.db.QueryRow(ctx, oIDCIdentity, arg.Provider, arg.Subject)
+	var i DonorOidcIdentity
+	err := row.Scan(
+		&i.ID,
+		&i.DonorID,
+		&i.Provider,
+		&i.Subject,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+	)
+	return i, err
+}
+
+const passwordReauthentication = `-- name: PasswordReauthentication :one
+SELECT EXISTS(SELECT 1 FROM donor_sessions WHERE token_hash=$1 AND password_verified_at>$2::timestamptz-interval '15 minutes')
+`
+
+type PasswordReauthenticationParams struct {
+	TokenHash string             `json:"token_hash"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+}
+
+func (q *Queries) PasswordReauthentication(ctx context.Context, arg PasswordReauthenticationParams) (bool, error) {
+	row := q.db.QueryRow(ctx, passwordReauthentication, arg.TokenHash, arg.AsOf)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const phoneCode = `-- name: PhoneCode :one
+SELECT phone, code_hash, attempts, expires_at, created_at FROM donor_phone_codes WHERE phone=$1 FOR UPDATE
+`
+
+func (q *Queries) PhoneCode(ctx context.Context, phone string) (DonorPhoneCode, error) {
+	row := q.db.QueryRow(ctx, phoneCode, phone)
+	var i DonorPhoneCode
+	err := row.Scan(
+		&i.Phone,
+		&i.CodeHash,
+		&i.Attempts,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const purgeCompanyTouches = `-- name: PurgeCompanyTouches :exec
+DELETE FROM donor_company_touches WHERE expires_at<=$1
+`
+
+func (q *Queries) PurgeCompanyTouches(ctx context.Context, expiresAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, purgeCompanyTouches, expiresAt)
 	return err
 }
 
@@ -160,10 +390,36 @@ func (q *Queries) PurgeReferralTouches(ctx context.Context, arg PurgeReferralTou
 	return items, nil
 }
 
+const recordDonorDeletion = `-- name: RecordDonorDeletion :exec
+INSERT INTO donor_deletions (donor_id, deleted_at) VALUES ($1, $2)
+ON CONFLICT (donor_id) DO NOTHING
+`
+
+type RecordDonorDeletionParams struct {
+	DonorID   pgtype.UUID        `json:"donor_id"`
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+}
+
+func (q *Queries) RecordDonorDeletion(ctx context.Context, arg RecordDonorDeletionParams) error {
+	_, err := q.db.Exec(ctx, recordDonorDeletion, arg.DonorID, arg.DeletedAt)
+	return err
+}
+
+const recordPhoneCodeAttempt = `-- name: RecordPhoneCodeAttempt :exec
+UPDATE donor_phone_codes SET attempts=attempts+1 WHERE phone=$1
+`
+
+func (q *Queries) RecordPhoneCodeAttempt(ctx context.Context, phone string) error {
+	_, err := q.db.Exec(ctx, recordPhoneCodeAttempt, phone)
+	return err
+}
+
 const recordPreferenceConsent = `-- name: RecordPreferenceConsent :exec
 INSERT INTO donor_preference_events(id,donor_id,version,referral_emails,marketing_emails,
- push_referral_converted,push_streak_at_risk,push_streak_milestone,consent_version,source)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'account')
+ push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,
+ volunteer,volunteer_interests,consent_version,push_streak_lapsed,push_badge_earned,
+ push_event_nearby,push_event_reminder,push_event_promoted,push_gift_processed,source)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'account')
 `
 
 type RecordPreferenceConsentParams struct {
@@ -175,7 +431,17 @@ type RecordPreferenceConsentParams struct {
 	PushReferralConverted pgtype.Bool `json:"push_referral_converted"`
 	PushStreakAtRisk      pgtype.Bool `json:"push_streak_at_risk"`
 	PushStreakMilestone   pgtype.Bool `json:"push_streak_milestone"`
+	RankingsOptedOut      pgtype.Bool `json:"rankings_opted_out"`
+	NetworkVisible        pgtype.Bool `json:"network_visible"`
+	Volunteer             pgtype.Bool `json:"volunteer"`
+	VolunteerInterests    []string    `json:"volunteer_interests"`
 	ConsentVersion        string      `json:"consent_version"`
+	PushStreakLapsed      pgtype.Bool `json:"push_streak_lapsed"`
+	PushBadgeEarned       pgtype.Bool `json:"push_badge_earned"`
+	PushEventNearby       pgtype.Bool `json:"push_event_nearby"`
+	PushEventReminder     pgtype.Bool `json:"push_event_reminder"`
+	PushEventPromoted     pgtype.Bool `json:"push_event_promoted"`
+	PushGiftProcessed     pgtype.Bool `json:"push_gift_processed"`
 }
 
 func (q *Queries) RecordPreferenceConsent(ctx context.Context, arg RecordPreferenceConsentParams) error {
@@ -188,7 +454,17 @@ func (q *Queries) RecordPreferenceConsent(ctx context.Context, arg RecordPrefere
 		arg.PushReferralConverted,
 		arg.PushStreakAtRisk,
 		arg.PushStreakMilestone,
+		arg.RankingsOptedOut,
+		arg.NetworkVisible,
+		arg.Volunteer,
+		arg.VolunteerInterests,
 		arg.ConsentVersion,
+		arg.PushStreakLapsed,
+		arg.PushBadgeEarned,
+		arg.PushEventNearby,
+		arg.PushEventReminder,
+		arg.PushEventPromoted,
+		arg.PushGiftProcessed,
 	)
 	return err
 }
@@ -213,7 +489,7 @@ func (q *Queries) ReferralTouchByToken(ctx context.Context, tokenHash string) (D
 }
 
 const referrerByCode = `-- name: ReferrerByCode :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false
 `
 
 func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) (Donor, error) {
@@ -227,17 +503,30 @@ func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) 
 		&i.ReferralCode,
 		&i.ID,
 		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
+		&i.CompanyCode,
+		&i.FullName,
 	)
 	return i, err
 }
 
 const savePreference = `-- name: SavePreference :exec
 INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,
- push_referral_converted,push_streak_at_risk,push_streak_milestone)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(donor_id) DO UPDATE
+ push_referral_converted,push_streak_at_risk,push_streak_milestone,rankings_opted_out,network_visible,
+ volunteer,volunteer_interests,push_streak_lapsed,push_badge_earned,
+ push_event_nearby,push_event_reminder,push_event_promoted,push_gift_processed)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT(donor_id) DO UPDATE
 SET version=EXCLUDED.version,referral_emails=EXCLUDED.referral_emails,marketing_emails=EXCLUDED.marketing_emails,
  push_referral_converted=EXCLUDED.push_referral_converted,push_streak_at_risk=EXCLUDED.push_streak_at_risk,
- push_streak_milestone=EXCLUDED.push_streak_milestone
+ push_streak_milestone=EXCLUDED.push_streak_milestone,rankings_opted_out=EXCLUDED.rankings_opted_out,
+ network_visible=EXCLUDED.network_visible,volunteer=EXCLUDED.volunteer,volunteer_interests=EXCLUDED.volunteer_interests,
+ push_streak_lapsed=EXCLUDED.push_streak_lapsed,push_badge_earned=EXCLUDED.push_badge_earned,
+ push_event_nearby=EXCLUDED.push_event_nearby,push_event_reminder=EXCLUDED.push_event_reminder,
+ push_event_promoted=EXCLUDED.push_event_promoted,push_gift_processed=EXCLUDED.push_gift_processed
 `
 
 type SavePreferenceParams struct {
@@ -249,6 +538,16 @@ type SavePreferenceParams struct {
 	PushReferralConverted bool        `json:"push_referral_converted"`
 	PushStreakAtRisk      bool        `json:"push_streak_at_risk"`
 	PushStreakMilestone   bool        `json:"push_streak_milestone"`
+	RankingsOptedOut      bool        `json:"rankings_opted_out"`
+	NetworkVisible        bool        `json:"network_visible"`
+	Volunteer             bool        `json:"volunteer"`
+	VolunteerInterests    []string    `json:"volunteer_interests"`
+	PushStreakLapsed      bool        `json:"push_streak_lapsed"`
+	PushBadgeEarned       bool        `json:"push_badge_earned"`
+	PushEventNearby       bool        `json:"push_event_nearby"`
+	PushEventReminder     bool        `json:"push_event_reminder"`
+	PushEventPromoted     bool        `json:"push_event_promoted"`
+	PushGiftProcessed     bool        `json:"push_gift_processed"`
 }
 
 func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) error {
@@ -261,12 +560,22 @@ func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) 
 		arg.PushReferralConverted,
 		arg.PushStreakAtRisk,
 		arg.PushStreakMilestone,
+		arg.RankingsOptedOut,
+		arg.NetworkVisible,
+		arg.Volunteer,
+		arg.VolunteerInterests,
+		arg.PushStreakLapsed,
+		arg.PushBadgeEarned,
+		arg.PushEventNearby,
+		arg.PushEventReminder,
+		arg.PushEventPromoted,
+		arg.PushGiftProcessed,
 	)
 	return err
 }
 
 const saveSharing = `-- name: SaveSharing :one
-UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at
+UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name
 `
 
 type SaveSharingParams struct {
@@ -286,6 +595,206 @@ func (q *Queries) SaveSharing(ctx context.Context, arg SaveSharingParams) (Donor
 		&i.ReferralCode,
 		&i.ID,
 		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
+		&i.CompanyCode,
+		&i.FullName,
 	)
 	return i, err
+}
+
+const saveSignupProfile = `-- name: SaveSignupProfile :exec
+UPDATE donors SET full_name=$2,zip=$3,city=$4,timezone=$5 WHERE id=$1
+`
+
+type SaveSignupProfileParams struct {
+	ID       pgtype.UUID `json:"id"`
+	FullName pgtype.Text `json:"full_name"`
+	Zip      pgtype.Text `json:"zip"`
+	City     pgtype.Text `json:"city"`
+	Timezone pgtype.Text `json:"timezone"`
+}
+
+func (q *Queries) SaveSignupProfile(ctx context.Context, arg SaveSignupProfileParams) error {
+	_, err := q.db.Exec(ctx, saveSignupProfile,
+		arg.ID,
+		arg.FullName,
+		arg.Zip,
+		arg.City,
+		arg.Timezone,
+	)
+	return err
+}
+
+const scrubDonorEmailChanges = `-- name: ScrubDonorEmailChanges :exec
+UPDATE donor_email_changes SET
+	old_email = 'deleted-old-' || id::text || '@deleted.invalid',
+	new_email = 'deleted-new-' || id::text || '@deleted.invalid',
+	encrypted_token = NULL
+WHERE donor_id = $1
+`
+
+func (q *Queries) ScrubDonorEmailChanges(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, scrubDonorEmailChanges, donorID)
+	return err
+}
+
+const scrubDonorSessionDevices = `-- name: ScrubDonorSessionDevices :exec
+UPDATE donor_sessions SET device_name = NULL WHERE donor_id = $1
+`
+
+func (q *Queries) ScrubDonorSessionDevices(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, scrubDonorSessionDevices, donorID)
+	return err
+}
+
+const setDonorPassword = `-- name: SetDonorPassword :exec
+INSERT INTO donor_passwords(donor_id,password_hash,updated_at) VALUES($1,$2,$3)
+ON CONFLICT(donor_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,updated_at=EXCLUDED.updated_at
+`
+
+type SetDonorPasswordParams struct {
+	DonorID      pgtype.UUID        `json:"donor_id"`
+	PasswordHash string             `json:"password_hash"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) SetDonorPassword(ctx context.Context, arg SetDonorPasswordParams) error {
+	_, err := q.db.Exec(ctx, setDonorPassword, arg.DonorID, arg.PasswordHash, arg.UpdatedAt)
+	return err
+}
+
+const touchOIDCIdentity = `-- name: TouchOIDCIdentity :exec
+UPDATE donor_oidc_identities SET last_used_at=$2 WHERE id=$1
+`
+
+type TouchOIDCIdentityParams struct {
+	ID         pgtype.UUID        `json:"id"`
+	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
+}
+
+func (q *Queries) TouchOIDCIdentity(ctx context.Context, arg TouchOIDCIdentityParams) error {
+	_, err := q.db.Exec(ctx, touchOIDCIdentity, arg.ID, arg.LastUsedAt)
+	return err
+}
+
+const updateDonorProfile = `-- name: UpdateDonorProfile :one
+UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name
+`
+
+type UpdateDonorProfileParams struct {
+	ID       pgtype.UUID `json:"id"`
+	Zip      pgtype.Text `json:"zip"`
+	City     pgtype.Text `json:"city"`
+	Timezone pgtype.Text `json:"timezone"`
+	Phone    pgtype.Text `json:"phone"`
+}
+
+// Replace the donor's self-service identity fields. account_role is deliberately
+// never written here: a role is fixed at row creation and immutable (PRD §3).
+func (q *Queries) UpdateDonorProfile(ctx context.Context, arg UpdateDonorProfileParams) (Donor, error) {
+	row := q.db.QueryRow(ctx, updateDonorProfile,
+		arg.ID,
+		arg.Zip,
+		arg.City,
+		arg.Timezone,
+		arg.Phone,
+	)
+	var i Donor
+	err := row.Scan(
+		&i.Email,
+		&i.ClaimedAt,
+		&i.Disabled,
+		&i.PublicName,
+		&i.ReferralCode,
+		&i.ID,
+		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
+		&i.CompanyCode,
+		&i.FullName,
+	)
+	return i, err
+}
+
+const upsertCompanyTouch = `-- name: UpsertCompanyTouch :exec
+INSERT INTO donor_company_touches (id, token_hash, company_code, touched_at, expires_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (token_hash) DO UPDATE
+SET company_code=EXCLUDED.company_code, touched_at=EXCLUDED.touched_at, expires_at=EXCLUDED.expires_at
+`
+
+type UpsertCompanyTouchParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	TokenHash   string             `json:"token_hash"`
+	CompanyCode string             `json:"company_code"`
+	TouchedAt   pgtype.Timestamptz `json:"touched_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+}
+
+// Last touch wins: a new company code for the same visitor token overwrites the
+// code, time and expiry recorded for that token.
+func (q *Queries) UpsertCompanyTouch(ctx context.Context, arg UpsertCompanyTouchParams) error {
+	_, err := q.db.Exec(ctx, upsertCompanyTouch,
+		arg.ID,
+		arg.TokenHash,
+		arg.CompanyCode,
+		arg.TouchedAt,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const upsertPhoneCode = `-- name: UpsertPhoneCode :exec
+INSERT INTO donor_phone_codes (phone, code_hash, attempts, expires_at)
+VALUES ($1, $2, 0, $3)
+ON CONFLICT (phone) DO UPDATE SET code_hash=EXCLUDED.code_hash, attempts=0, expires_at=EXCLUDED.expires_at, created_at=now()
+`
+
+type UpsertPhoneCodeParams struct {
+	Phone     string             `json:"phone"`
+	CodeHash  string             `json:"code_hash"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+// Last request wins: a new code for the same phone overwrites the pending one
+// and resets the attempt counter.
+func (q *Queries) UpsertPhoneCode(ctx context.Context, arg UpsertPhoneCodeParams) error {
+	_, err := q.db.Exec(ctx, upsertPhoneCode, arg.Phone, arg.CodeHash, arg.ExpiresAt)
+	return err
+}
+
+const upsertReferralTouch = `-- name: UpsertReferralTouch :exec
+INSERT INTO donor_referral_touches (id,token_hash,referrer_id,kind,touched_at,expires_at) VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT (token_hash) DO UPDATE SET referrer_id=EXCLUDED.referrer_id,kind=EXCLUDED.kind,touched_at=EXCLUDED.touched_at,expires_at=EXCLUDED.expires_at
+`
+
+type UpsertReferralTouchParams struct {
+	ID         pgtype.UUID        `json:"id"`
+	TokenHash  string             `json:"token_hash"`
+	ReferrerID pgtype.UUID        `json:"referrer_id"`
+	Kind       string             `json:"kind"`
+	TouchedAt  pgtype.Timestamptz `json:"touched_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+}
+
+// Last-touch attribution: a visitor's most recent valid code wins (PRD R-4),
+// so a new code overwrites the referrer, kind and window recorded for the
+// token rather than preserving the earlier touch.
+func (q *Queries) UpsertReferralTouch(ctx context.Context, arg UpsertReferralTouchParams) error {
+	_, err := q.db.Exec(ctx, upsertReferralTouch,
+		arg.ID,
+		arg.TokenHash,
+		arg.ReferrerID,
+		arg.Kind,
+		arg.TouchedAt,
+		arg.ExpiresAt,
+	)
+	return err
 }

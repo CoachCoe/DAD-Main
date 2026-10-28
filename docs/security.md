@@ -1,7 +1,8 @@
 # R1 security controls
 
-Donors authenticate through single-use, 15-minute email proof, or a passkey they added
-while signed in, and hashed, revocable sessions: a 30-day cookie in browsers, a rotating token pair in the app. Staff sign in with individual passkeys (WebAuthn, verified by
+Donors authenticate through single-use, 15-minute email proof, a passkey they added
+while signed in, a one-time SMS code, or Apple or Google sign-in, and hold hashed,
+revocable sessions: a 30-day cookie in browsers, a rotating token pair in the app. Staff sign in with individual passkeys (WebAuthn, verified by
 go-webauthn) and receive eight-hour hashed sessions. Donor and staff cookies are
 separate, HttpOnly, and Secure on HTTPS. Staff cookies use SameSite=Strict; donor cookies
 use Lax. Anonymous login responses do not reveal whether an address exists, and a donor receives at
@@ -51,7 +52,42 @@ remove their passkeys on the profile, where an ID that is not theirs is not foun
 Completing an email change removes every passkey with every session, because the email is
 the account's root credential; signing out everywhere keeps them.
 
-The R2 donor app uses neither cookies nor Origin. It sends `X-DAD-Client: native` on
+Phone sign-in sends a six-digit code to a phone already saved on an account. The code is
+stored hashed, expires after 10 minutes, and allows five attempts. A wrong guess commits
+while holding the code lock, before the request is rejected, so concurrent guesses cannot
+exceed the budget. A replacement is limited to one a minute per phone across API replicas;
+an immediate retry preserves the existing code and attempt count. Changing or removing a
+phone, or deleting its account, invalidates its pending code. Requesting a code answers the same whether or not the number has an account, and
+a wrong, expired, or exhausted code and an unknown number all fail with one message.
+Apple and Google sign-in verify the ID token's RS256 signature against the provider's
+published keys, then its issuer, audience, expiry, and issue time, then sign in the donor
+already linked to that subject or, on first use, the donor with the token's email,
+recording the link. The authorized presenter must be a configured client, and a token
+with multiple audiences must name one. The email is used only when the provider marks it
+verified. Google must also be authoritative for the address: Gmail or a token with a
+Workspace hosted-domain claim. Google can mark an external mailbox verified without
+proving its current ownership, so that address cannot create a link; use email sign-in
+instead. An established provider-subject link still works without the email claim.
+A verified identity with no account
+fails like a wrong code; accounts are created only by giving. Both methods stay off until
+their provider is configured ([operations](operations.md#phone-and-social-sign-in)); the
+recording stubs for development must never be configured in production.
+
+Partner portal users are separate from donors and staff and cannot give. They sign in
+through emailed single-use links: 15 minutes for a link they request, seven days for an
+approval or invitation. A user holds one live link at a time, and a link replaced before
+delivery is never sent. Requesting a link never reveals whether the address belongs to a
+partner. Sessions last 12 hours, in the `dad_partner_session` cookie or as a bearer token
+in the app, and removing a user revokes their sessions. Administrators alone invite and
+remove users, edit the organization profile, and export reports.
+Redemption locks the invitation so concurrent exchanges create one session. Removing a
+user also invalidates their unused link; a later invitation cannot revive it. Partner
+administration and staff changes to partner users serialize on the organization, then
+recheck the caller's access before writing. An administrator cannot demote themselves by
+reinviting their own address as a viewer. Approval and rejection lock the application,
+so competing staff decisions cannot create duplicate organizations.
+
+The donor app uses neither cookies nor Origin. It sends `X-DAD-Client: native` on
 every request and authenticates with `Authorization: Bearer <access token>`. A request
 is native only when it has that header and neither an `Origin` nor a `Cookie` header;
 any other request is a browser request, whose Authorization header is ignored and whose
@@ -128,7 +164,8 @@ Staff recovery/role changes revoke sessions and preserve the last active adminis
 Browser mutations require the exact Origin of their surface: the public origin for donor
 and public routes, the staff origin for staff routes. Requests, pages, uploads, passkey
 responses, exports, and provider calls have bounded sizes or timeouts. The Next proxy
-exposes only `/donor/*`; it is not an arbitrary HTTP proxy.
+exposes `/donor/*` and the exact public event-detail, calendar, and initiative-spend
+GET/HEAD paths. Other paths and public mutations are refused before contacting the API.
 
 Browsers reach the web service only through nginx ([edge](edge.md)). It accepts TLS 1.2
 and 1.3 for the configured public and staff hosts only, serves back-office paths only on
@@ -167,19 +204,22 @@ key is rotated without downtime by putting a new key first, re-encrypting stored
 with `rekey`, and then removing the old key ([operations](operations.md#encryption-keys)).
 Every key in a list is validated at startup, and errors name the variable and position,
 never the key. A retired key still opens backups taken before its rotation, so it is kept
-in the secret store only as long as those backups and destroyed with them. No lookup uses
-a keyed hash; stored token hashes are unkeyed SHA-256 of random secrets.
+in the secret store only as long as those backups and destroyed with them. Session and
+proof lookups use unkeyed SHA-256 of random secrets. Website-waitlist claims instead use
+a keyed hash of the normalized email address, with a separate Founding Donor claim key.
 
 The frontend restricts connections to its own origin, denies framing, uses no-referrer,
 and disables camera, microphone, and geolocation. Production CSP excludes unsafe-eval.
-Account and staff pages render per request with a nonce-based `'strict-dynamic'` script
+Account, partner-portal, and staff pages render per request with a nonce-based `'strict-dynamic'` script
 policy set in `proxy.ts`; public pages keep a static policy that permits inline scripts
 so they can be cached. Each response carries exactly one policy. Public links into donor
-accounts use full-document navigation to install the nonce policy; staff entry is a
+accounts and the partner portal use full-document navigation to install the nonce policy; staff entry is a
 direct document load on the staff host. Any new public link into account routes must use
 a native anchor rather than client routing. Both origins are compiled into the web build,
 so its host routing and headers always agree. User content must never be inserted as
-raw HTML. Account tokens use fragments removed before network requests.
+raw HTML. Email proof tokens use fragments removed before network requests. Donor and
+partner email proofs require an explicit confirmation before exchange; visiting a link
+alone does not consume it or replace the browser's account.
 
 ## Dependency advisory boundary
 

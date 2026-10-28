@@ -16,6 +16,13 @@ type Donor struct {
 	ReferralCode pgtype.Text        `json:"referral_code"`
 	ID           pgtype.UUID        `json:"id"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	AccountRole  string             `json:"account_role"`
+	Zip          pgtype.Text        `json:"zip"`
+	City         pgtype.Text        `json:"city"`
+	Timezone     pgtype.Text        `json:"timezone"`
+	Phone        pgtype.Text        `json:"phone"`
+	CompanyCode  pgtype.Text        `json:"company_code"`
+	FullName     pgtype.Text        `json:"full_name"`
 }
 
 type DonorAmountChange struct {
@@ -62,6 +69,7 @@ type DonorCheckout struct {
 	ReferralExpiresAt pgtype.Timestamptz `json:"referral_expires_at"`
 	ID                pgtype.UUID        `json:"id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	JourneyID         pgtype.UUID        `json:"journey_id"`
 }
 
 type DonorContentSource struct {
@@ -71,6 +79,19 @@ type DonorContentSource struct {
 	EncryptedData []byte             `json:"encrypted_data"`
 	ID            pgtype.UUID        `json:"id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorDeletedAccountReversal struct {
+	ID          pgtype.UUID        `json:"id"`
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	Kind        string             `json:"kind"`
+	Target      string             `json:"target"`
+	AmountMinor pgtype.Int8        `json:"amount_minor"`
+	Attempts    int32              `json:"attempts"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	LastError   pgtype.Text        `json:"last_error"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type DonorEmailChange struct {
@@ -89,6 +110,46 @@ type DonorEmailChange struct {
 	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
 }
 
+type DonorEvent struct {
+	ID             pgtype.UUID        `json:"id"`
+	Slug           string             `json:"slug"`
+	Title          string             `json:"title"`
+	Type           string             `json:"type"`
+	Description    string             `json:"description"`
+	Venue          string             `json:"venue"`
+	Address        string             `json:"address"`
+	City           string             `json:"city"`
+	Zip            string             `json:"zip"`
+	StartsAt       pgtype.Timestamptz `json:"starts_at"`
+	EndsAt         pgtype.Timestamptz `json:"ends_at"`
+	Capacity       int32              `json:"capacity"`
+	PublishState   string             `json:"publish_state"`
+	PublishedAt    pgtype.Timestamptz `json:"published_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	QualifyingPerk string             `json:"qualifying_perk"`
+	CancelledAt    pgtype.Timestamptz `json:"cancelled_at"`
+	BookingOpensAt pgtype.Timestamptz `json:"booking_opens_at"`
+}
+
+type DonorEventAlertJob struct {
+	EventID     pgtype.UUID        `json:"event_id"`
+	LastDonorID pgtype.UUID        `json:"last_donor_id"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DonorEventReservation struct {
+	ID          pgtype.UUID        `json:"id"`
+	EventID     pgtype.UUID        `json:"event_id"`
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	Status      string             `json:"status"`
+	ReservedAt  pgtype.Timestamptz `json:"reserved_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	CheckedInAt pgtype.Timestamptz `json:"checked_in_at"`
+}
+
 type DonorGift struct {
 	DonorID               pgtype.UUID        `json:"donor_id"`
 	CheckoutID            pgtype.UUID        `json:"checkout_id"`
@@ -103,6 +164,42 @@ type DonorGift struct {
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	ReferrerID            pgtype.UUID        `json:"referrer_id"`
 	ReferralKind          pgtype.Text        `json:"referral_kind"`
+}
+
+type DonorInitiative struct {
+	ID                    pgtype.UUID        `json:"id"`
+	Slug                  string             `json:"slug"`
+	Title                 string             `json:"title"`
+	Summary               string             `json:"summary"`
+	Type                  string             `json:"type"`
+	Location              string             `json:"location"`
+	Region                string             `json:"region"`
+	Counties              []string           `json:"counties"`
+	StartedOn             pgtype.Date        `json:"started_on"`
+	Status                string             `json:"status"`
+	CommittedMinor        int64              `json:"committed_minor"`
+	PartnerSignupID       pgtype.UUID        `json:"partner_signup_id"`
+	PublishState          string             `json:"publish_state"`
+	PublishedAt           pgtype.Timestamptz `json:"published_at"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	InRotation            bool               `json:"in_rotation"`
+	BoardApprovalSourceID pgtype.UUID        `json:"board_approval_source_id"`
+	BoardApprovedOn       pgtype.Date        `json:"board_approved_on"`
+}
+
+type DonorInitiativeMetric struct {
+	ID               pgtype.UUID        `json:"id"`
+	InitiativeID     pgtype.UUID        `json:"initiative_id"`
+	Position         int32              `json:"position"`
+	Label            string             `json:"label"`
+	Value            int64              `json:"value"`
+	Unit             string             `json:"unit"`
+	VerificationNote string             `json:"verification_note"`
+	VerifiedOn       pgtype.Date        `json:"verified_on"`
+	PublishState     string             `json:"publish_state"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type DonorLoginEmail struct {
@@ -144,27 +241,110 @@ type DonorMessage struct {
 }
 
 type DonorMetricProjection struct {
-	DonorID           pgtype.UUID        `json:"donor_id"`
-	ReferrerID        pgtype.UUID        `json:"referrer_id"`
-	ReferralKind      pgtype.Text        `json:"referral_kind"`
-	FirstGiftID       pgtype.Text        `json:"first_gift_id"`
-	NetMinor          pgtype.Int8        `json:"net_minor"`
-	FoundingAwardedAt pgtype.Timestamptz `json:"founding_awarded_at"`
-	BestStreak        int32              `json:"best_streak"`
-	CurrentStreak     pgtype.Int4        `json:"current_streak"`
-	AtRisk            bool               `json:"at_risk"`
-	GraceEndsAt       pgtype.Timestamptz `json:"grace_ends_at"`
-	ComputedAt        pgtype.Timestamptz `json:"computed_at"`
-	NextRefreshAt     pgtype.Timestamptz `json:"next_refresh_at"`
+	DonorID             pgtype.UUID        `json:"donor_id"`
+	ReferrerID          pgtype.UUID        `json:"referrer_id"`
+	ReferralKind        pgtype.Text        `json:"referral_kind"`
+	FirstGiftID         pgtype.Text        `json:"first_gift_id"`
+	NetMinor            pgtype.Int8        `json:"net_minor"`
+	FoundingAwardedAt   pgtype.Timestamptz `json:"founding_awarded_at"`
+	BestStreak          int32              `json:"best_streak"`
+	CurrentStreak       pgtype.Int4        `json:"current_streak"`
+	AtRisk              bool               `json:"at_risk"`
+	GraceEndsAt         pgtype.Timestamptz `json:"grace_ends_at"`
+	ComputedAt          pgtype.Timestamptz `json:"computed_at"`
+	NextRefreshAt       pgtype.Timestamptz `json:"next_refresh_at"`
+	ID                  pgtype.UUID        `json:"id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	RefreshFailures     int32              `json:"refresh_failures"`
+	RefreshError        pgtype.Text        `json:"refresh_error"`
+	RulesVersion        int32              `json:"rules_version"`
+	ReferredLinkCount   int64              `json:"referred_link_count"`
+	ReferredIrlCount    int64              `json:"referred_irl_count"`
+	ReferredLinkMinor   int64              `json:"referred_link_minor"`
+	ReferredIrlMinor    int64              `json:"referred_irl_minor"`
+	StreakSince         pgtype.Timestamptz `json:"streak_since"`
+	CurrentMonthlyMinor int64              `json:"current_monthly_minor"`
+	Active              bool               `json:"active"`
+}
+
+type DonorOidcIdentity struct {
+	ID         pgtype.UUID        `json:"id"`
+	DonorID    pgtype.UUID        `json:"donor_id"`
+	Provider   string             `json:"provider"`
+	Subject    string             `json:"subject"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	LastUsedAt pgtype.Timestamptz `json:"last_used_at"`
+}
+
+type DonorPartnerApplication struct {
 	ID                pgtype.UUID        `json:"id"`
+	Organization      string             `json:"organization"`
+	Website           string             `json:"website"`
+	Type              string             `json:"type"`
+	ContactName       string             `json:"contact_name"`
+	Title             string             `json:"title"`
+	WorkEmail         string             `json:"work_email"`
+	Phone             string             `json:"phone"`
+	WorkforceSize     int32              `json:"workforce_size"`
+	Status            string             `json:"status"`
+	DecidedBy         pgtype.UUID        `json:"decided_by"`
+	DecidedAt         pgtype.Timestamptz `json:"decided_at"`
+	DecisionReason    string             `json:"decision_reason"`
+	ApprovedPartnerID pgtype.UUID        `json:"approved_partner_id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	RefreshFailures   int32              `json:"refresh_failures"`
-	RefreshError      pgtype.Text        `json:"refresh_error"`
-	RulesVersion      int32              `json:"rules_version"`
-	ReferredLinkCount int64              `json:"referred_link_count"`
-	ReferredIrlCount  int64              `json:"referred_irl_count"`
-	ReferredLinkMinor int64              `json:"referred_link_minor"`
-	ReferredIrlMinor  int64              `json:"referred_irl_minor"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ReceiptHash       pgtype.Text        `json:"receipt_hash"`
+	ReceiptExpiresAt  pgtype.Timestamptz `json:"receipt_expires_at"`
+}
+
+type DonorPartnerEmployee struct {
+	DonorID    pgtype.UUID        `json:"donor_id"`
+	PartnerID  pgtype.UUID        `json:"partner_id"`
+	TeamID     pgtype.UUID        `json:"team_id"`
+	EnrolledAt pgtype.Timestamptz `json:"enrolled_at"`
+}
+
+type DonorPartnerLoginEmail struct {
+	ID             pgtype.UUID        `json:"id"`
+	PartnerUserID  pgtype.UUID        `json:"partner_user_id"`
+	Kind           string             `json:"kind"`
+	EncryptedToken []byte             `json:"encrypted_token"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	Attempts       int32              `json:"attempts"`
+	LastError      pgtype.Text        `json:"last_error"`
+	AvailableAt    pgtype.Timestamptz `json:"available_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorPartnerMessage struct {
+	ID               pgtype.UUID        `json:"id"`
+	PartnerID        pgtype.UUID        `json:"partner_id"`
+	Kind             string             `json:"kind"`
+	DedupKey         string             `json:"dedup_key"`
+	Context          []byte             `json:"context"`
+	AvailableAt      pgtype.Timestamptz `json:"available_at"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	Attempts         int32              `json:"attempts"`
+	LastError        pgtype.Text        `json:"last_error"`
+	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
+	Subject          pgtype.Text        `json:"subject"`
+	Body             pgtype.Text        `json:"body"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type DonorPartnerPushNotification struct {
+	ID               pgtype.UUID        `json:"id"`
+	SessionID        pgtype.UUID        `json:"session_id"`
+	PartnerID        pgtype.UUID        `json:"partner_id"`
+	Kind             string             `json:"kind"`
+	DedupKey         string             `json:"dedup_key"`
+	AvailableAt      pgtype.Timestamptz `json:"available_at"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	Attempts         int32              `json:"attempts"`
+	LastError        pgtype.Text        `json:"last_error"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	SuppressedReason pgtype.Text        `json:"suppressed_reason"`
 }
 
 type DonorPartnerSignup struct {
@@ -177,6 +357,29 @@ type DonorPartnerSignup struct {
 	ConsentVersion string             `json:"consent_version"`
 	ID             pgtype.UUID        `json:"id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
+	PartnerType    string             `json:"partner_type"`
+	WorkforceSize  int32              `json:"workforce_size"`
+	MatchRateBp    int32              `json:"match_rate_bp"`
+	MatchCapMinor  int64              `json:"match_cap_minor"`
+	CompanyCode    pgtype.Text        `json:"company_code"`
+	LogoUrl        string             `json:"logo_url"`
+	Description    string             `json:"description"`
+	LogoPng        []byte             `json:"logo_png"`
+}
+
+type DonorPartnerUser struct {
+	ID              pgtype.UUID        `json:"id"`
+	PartnerID       pgtype.UUID        `json:"partner_id"`
+	Email           string             `json:"email"`
+	Name            string             `json:"name"`
+	Role            string             `json:"role"`
+	InvitedBy       pgtype.UUID        `json:"invited_by"`
+	AcceptedAt      pgtype.Timestamptz `json:"accepted_at"`
+	Disabled        bool               `json:"disabled"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	InviteTokenHash pgtype.Text        `json:"invite_token_hash"`
+	InviteExpiresAt pgtype.Timestamptz `json:"invite_expires_at"`
 }
 
 type DonorPasskey struct {
@@ -196,17 +399,6 @@ type DonorPasskey struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
-type DonorPause struct {
-	DonorID     pgtype.UUID        `json:"donor_id"`
-	AttemptID   pgtype.UUID        `json:"attempt_id"`
-	Months      int32              `json:"months"`
-	StartsAt    pgtype.Timestamptz `json:"starts_at"`
-	ResumesAt   pgtype.Timestamptz `json:"resumes_at"`
-	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
-	ID          pgtype.UUID        `json:"id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
 type DonorPaymentUpdate struct {
 	DonorID         pgtype.UUID        `json:"donor_id"`
 	AttemptID       pgtype.UUID        `json:"attempt_id"`
@@ -220,6 +412,14 @@ type DonorPaymentUpdate struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type DonorPhoneCode struct {
+	Phone     string             `json:"phone"`
+	CodeHash  string             `json:"code_hash"`
+	Attempts  int32              `json:"attempts"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type DonorPreference struct {
 	DonorID               pgtype.UUID        `json:"donor_id"`
 	Version               int32              `json:"version"`
@@ -230,6 +430,16 @@ type DonorPreference struct {
 	PushReferralConverted bool               `json:"push_referral_converted"`
 	PushStreakAtRisk      bool               `json:"push_streak_at_risk"`
 	PushStreakMilestone   bool               `json:"push_streak_milestone"`
+	RankingsOptedOut      bool               `json:"rankings_opted_out"`
+	NetworkVisible        bool               `json:"network_visible"`
+	Volunteer             bool               `json:"volunteer"`
+	VolunteerInterests    []string           `json:"volunteer_interests"`
+	PushStreakLapsed      bool               `json:"push_streak_lapsed"`
+	PushBadgeEarned       bool               `json:"push_badge_earned"`
+	PushEventNearby       bool               `json:"push_event_nearby"`
+	PushEventReminder     bool               `json:"push_event_reminder"`
+	PushEventPromoted     bool               `json:"push_event_promoted"`
+	PushGiftProcessed     bool               `json:"push_gift_processed"`
 }
 
 type DonorPushNotification struct {
@@ -269,15 +479,6 @@ type DonorRefund struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
-type DonorResumption struct {
-	DonorID     pgtype.UUID        `json:"donor_id"`
-	PauseID     pgtype.UUID        `json:"pause_id"`
-	NextRenewal pgtype.Timestamptz `json:"next_renewal"`
-	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
-	ID          pgtype.UUID        `json:"id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
 type DonorSession struct {
 	DonorID             pgtype.UUID        `json:"donor_id"`
 	TokenHash           string             `json:"token_hash"`
@@ -296,6 +497,7 @@ type DonorSession struct {
 	RefreshExpiresAt    pgtype.Timestamptz `json:"refresh_expires_at"`
 	PushToken           pgtype.Text        `json:"push_token"`
 	PushEnvironment     pgtype.Text        `json:"push_environment"`
+	PasswordVerifiedAt  pgtype.Timestamptz `json:"password_verified_at"`
 }
 
 type DonorStaff struct {

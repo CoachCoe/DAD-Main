@@ -18,6 +18,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  logging: { incomingRequests: { ignore: [/\/account\/oauth\//] } },
   poweredByHeader: false,
   // The static headers below are fixed at build time, so proxy.ts gets the same origins
   // compiled in rather than reading a server environment that could disagree.
@@ -51,7 +52,7 @@ const nextConfig: NextConfig = {
       // proxy.ts sets a nonce policy on these instead. Browsers enforce every CSP header they
       // receive, so this one must not reach those responses as well.
       {
-        source: "/((?!(?:account|staff)(?:/|$)).*)",
+        source: "/((?!(?:account|partner|staff)(?:/|$)).*)",
         headers: [{ key: "Content-Security-Policy", value: contentSecurityPolicy() }],
       },
     ];

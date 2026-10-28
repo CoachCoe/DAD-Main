@@ -17,6 +17,8 @@ LOADTEST = cd apps/donor-api && go run ./cmd/loadtest -api "$(LOAD_API)" -fixtur
 .PHONY: check-ingress smoke-ingress check-images generate check-generated loadtest-seeded
 .PHONY: deploy-build deploy-up deploy-smoke deploy-down deploy-logs
 .PHONY: generate-mobile check-mobile bundle-mobile
+.PHONY: test-native-clients
+.PHONY: check-deploy-secrets
 
 install:
 	cd apps/donor-api && go mod download
@@ -58,6 +60,12 @@ generate-mobile:
 check-mobile:
 	node scripts/mobile-foundation.mjs check
 	node --test scripts/mobile-foundation.test.mjs
+
+test-native-clients:
+	bash scripts/check-native-clients.sh
+
+check-deploy-secrets:
+	node --test scripts/check-deploy-secrets.test.mjs
 
 bundle-mobile: check-mobile
 	node scripts/mobile-foundation.mjs bundle "$${MOBILE_BUNDLE_DIR:?set MOBILE_BUNDLE_DIR outside the repository}"
@@ -130,6 +138,12 @@ seed:
 loadtest-seeded:
 	$(LOADTEST) -duration 60s -concurrency 256 -max-p99 250ms
 	$(LOADTEST) -duration 5m -concurrency 32 -max-p99 100ms
+	$(LOADTEST) -duration 60s -concurrency 256 \
+		-mix "referral-lookup=0,referral-capture=0,referral-missing=0,content=0,dashboard=0,gifts=0,sharing=0,profile=0,recurring=0,annual-summary=0,events=55,event-detail=45" \
+		-max-p99 400ms
+	$(LOADTEST) -duration 5m -concurrency 32 \
+		-mix "referral-lookup=0,referral-capture=0,referral-missing=0,content=0,gifts=0,sharing=0,profile=0,recurring=0,annual-summary=0,dashboard=40,today-initiative=30,team=30" \
+		-max-p99 150ms
 
 deploy-build:
 	./scripts/deploy.sh build

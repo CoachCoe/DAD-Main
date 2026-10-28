@@ -87,7 +87,7 @@ export interface paths {
         put?: never;
         /**
          * Start a guest Stripe Checkout
-         * @description Web only: giving stays on the website. Reads the `dad_referral` cookie for attribution. 403 also means giving is unavailable for this account. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.
+         * @description Web only: giving stays on the website. Reads the `dad_referral` cookie for attribution. 403 also means giving is unavailable for this account. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor. Refused with 409 when the email signs in to a DAD partner or staff account: one email holds one role, so such a person gives with a different email.
          */
         post: operations["beginCheckout"];
         delete?: never;
@@ -117,7 +117,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/public/partner-signup": {
+    "/donor/company/{code}": {
         parameters: {
             query?: never;
             header?: never;
@@ -126,8 +126,31 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Partner contact form */
-        post: operations["partnerSignup"];
+        /**
+         * Record a company-code visit
+         * @description Web only. Records a pre-signup visit through an employer's company code on the HttpOnly `dad_company` cookie (30 days, last touch wins). It binds when the donor proves account ownership in that browser; a guest checkout cannot change an employer based on email alone. The code is normalised to upper case. The response never reveals whether the code resolves to a partner. This browser cookie alone does not survive an app install; native clients can enter the code after sign-in.
+         */
+        post: operations["captureCompany"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/analytics/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record analytics events
+         * @description Ingests a batch of §9 analytics events from any platform into the shared append-only stream. Authenticated-or-anonymous: a valid donor session attributes the events, otherwise they are recorded anonymously (events before sign-in are expected). The platform source is the native client's `X-DAD-Platform` header, or WEB for a browser. The whole batch is rejected (422) if any event has an unknown name or an invalid property payload. Batch size is capped at 100.
+         */
+        post: operations["ingestAnalytics"];
         delete?: never;
         options?: never;
         head?: never;
@@ -358,7 +381,31 @@ export interface paths {
         /** Profile and notification preferences */
         get: operations["profile"];
         put?: never;
-        post?: never;
+        /**
+         * Save identity profile fields
+         * @description Replaces the donor's self-service identity fields. `timezone` is derived from `zip` (US ZIP to IANA zone) and is never accepted from the client; `account_role` is immutable and cannot be set here. A field sent empty clears its stored value; a blank `zip` clears the derived `timezone` with it. 422 for an invalid ZIP, phone, or city.
+         */
+        post: operations["saveProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete this donor account
+         * @description Erases the donor's personal data and signs them out everywhere. Personal fields and personal records (passkeys, social sign-in links, notification preferences, sessions and push registrations) are removed; the gift and billing ledger is retained for legal and tax records and carries no personal data. The deletion is irreversible. A browser's session cookie is cleared in the response. Refused with 409 while a monthly gift is still set to renew, or a checkout is still open, so a deleted account is never charged.
+         */
+        post: operations["deleteAccount"];
         delete?: never;
         options?: never;
         head?: never;
@@ -375,8 +422,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Save notification preferences
-         * @description Replaces every notification choice at once. 409 when `version` is stale: re-read the profile and retry.
+         * Save preferences
+         * @description Saves the donor's notification, rankings, network and volunteer choices. The required fields are always replaced; an optional field left out keeps its saved value. 409 when `version` is stale: re-read the profile and retry.
          */
         post: operations["savePreferences"];
         delete?: never;
@@ -638,54 +685,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/me/recurring/pause": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Pause offer: 1, 2, or 3 skipped renewals with exact dates
-         * @description Served from the subscription as last synced from Stripe by verified webhooks and recurring commands; it never calls Stripe. The matching POST checks current Stripe state and answers 409 when the offer no longer matches it. 409 here when the stored billing dates are inconsistent.
-         */
-        get: operations["pauseOptions"];
-        put?: never;
-        /**
-         * Pause renewals
-         * @description Idempotent. Echo the values the matching GET returned; 409 when they no longer match current billing. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.
-         */
-        post: operations["pauseRecurring"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/donor/me/recurring/resume": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Resume offer
-         * @description Served from the subscription as last synced from Stripe by verified webhooks and recurring commands; it never calls Stripe. The matching POST checks current Stripe state and answers 409 when the offer no longer matches it.
-         */
-        get: operations["resumeOptions"];
-        put?: never;
-        /**
-         * Resume a pause early
-         * @description Idempotent. Echo the values the matching GET returned; 409 when they no longer match current billing. 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.
-         */
-        post: operations["resumeRecurring"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/donor/me/payment-method": {
         parameters: {
             query?: never;
@@ -875,7 +874,7 @@ export interface paths {
         put?: never;
         /**
          * Invite a staff member
-         * @description 409 when a staff account with this email already exists.
+         * @description 409 when a staff account with this email already exists. Refused with 409 when the email already has a donor or partner login (one email, one role).
          */
         post: operations["inviteStaff"];
         delete?: never;
@@ -1037,23 +1036,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/staff/enrolments": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Recipient enrolment queue (inactive until R2) */
-        get: operations["enrolments"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/donor/staff/donors/{donor_id}/claim-email": {
         parameters: {
             query?: never;
@@ -1194,8 +1176,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Partner inquiries */
-        get: operations["partnerInquiries"];
+        /** Approved partner organizations */
+        get: operations["staffPartners"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1248,7 +1230,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Publish initiatives and ledger
+         * Publish the ledger
          * @description A refused publication answers 422 `{"detail":"The spreadsheet has problems","errors":[{sheet,row,column,reason}]}` listing every problem found.
          */
         post: operations["publish"];
@@ -1272,6 +1254,66 @@ export interface paths {
          * @description Issues a usernameless WebAuthn challenge that any of the donor's passkeys for the public origin may answer, in a browser or, through its associated domain, the app. Pass `options` to `PublicKeyCredential.parseRequestOptionsFromJSON` and `navigator.credentials.get`, then answer within five minutes. No body.
          */
         post: operations["beginDonorPasskeySignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/phone/sign-in/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a phone sign-in code
+         * @description Sends a one-time SMS code to a donor's phone. The response is always `{"sent": true}` and never reveals whether the phone has an account. 503 with this method unavailable when the deployment has no SMS provider configured.
+         */
+        post: operations["beginPhoneSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/phone/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Finish a phone sign-in
+         * @description Verifies the SMS code and signs the donor in. 401 covers a wrong, expired, or over-tried code and a phone with no account alike, so none reveals whether an account exists. 503 when no SMS provider is configured.
+         */
+        post: operations["finishPhoneSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/oidc/{provider}/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Sign in with Apple or Google
+         * @description Verifies a provider id_token and signs in the donor it belongs to. The identity is matched by a prior link, else by the token's verified email against an existing account (which records the link). 401 covers an unverifiable token and a verified identity with no matching account alike; account creation happens in the giving flow, not here. 503 when the provider is not configured.
+         */
+        post: operations["oidcSignIn"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1375,6 +1417,1475 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/staff/initiatives": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Initiatives, drafts included, newest first */
+        get: operations["staffInitiatives"];
+        put?: never;
+        /** Create a draft initiative */
+        post: operations["createInitiative"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/initiatives/{initiative_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An initiative with every metric and its spend */
+        get: operations["staffInitiative"];
+        put?: never;
+        /**
+         * Update a draft initiative
+         * @description 409 when the edit would remove a published initiative's board approval.
+         */
+        post: operations["updateInitiative"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/initiatives/{initiative_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish an initiative
+         * @description 409 when the initiative has no board approval.
+         */
+        post: operations["publishInitiative"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/initiatives/{initiative_id}/metrics/{position}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upsert a headline metric */
+        post: operations["setInitiativeMetric"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/initiatives/{initiative_id}/metrics/{position}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish a verified metric */
+        post: operations["publishInitiativeMetric"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/initiatives/{initiative_id}/metrics/{position}/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delete a headline metric */
+        post: operations["deleteInitiativeMetric"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/initiatives/{initiative_id}/spend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set a spend category total */
+        post: operations["setInitiativeSpend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/initiatives/{initiative_id}/spend/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Delete a spend category */
+        post: operations["deleteInitiativeSpend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A published event's detail page (E-3) */
+        get: operations["eventDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events/{event_id}/calendar.ics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download a published event as an .ics calendar file (E-6) */
+        get: operations["eventCalendar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/initiatives/{initiative_id}/spend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Published initiative spend by category */
+        get: operations["initiativeSpend"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/today-initiative": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The donor's initiative of the day */
+        get: operations["todayInitiative"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Events, drafts and cancellations included, latest start first */
+        get: operations["staffEvents"];
+        put?: never;
+        /** Create a draft event */
+        post: operations["createEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An event with its RSVPs and waitlist */
+        get: operations["staffEvent"];
+        put?: never;
+        /** Update a draft event */
+        post: operations["updateEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish a draft event */
+        post: operations["publishEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Upcoming events in and near the donor's city (E-2) */
+        get: operations["donorEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/guests/{donor_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add a donor to an event's guest list (E-5) */
+        post: operations["addEventGuest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/guests/{donor_id}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a donor from an event's guest list (E-5) */
+        post: operations["removeEventGuest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/check-in-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get an event's QR check-in token for the venue (E-8) */
+        post: operations["eventCheckInToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/events/check-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check in at an event by scanning its QR token (E-8)
+         * @description Checks the signed-in donor in from the QR code shown at the venue (E-8). Accepted only between the event's start and end, and only for a donor holding a reserved seat, not a waitlist place; 422 otherwise. A second scan succeeds with `already_checked_in`.
+         */
+        post: operations["checkInEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/events/invite-only": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Invite-only events the donor can see (E-5) */
+        get: operations["inviteOnlyEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A donor's view of one event, enforcing the E-5 gate */
+        get: operations["donorEventDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/events/{event_id}/reserve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reserve a spot (or join the waitlist) at an event (E-4)
+         * @description Refused with 409 once the event has started or been cancelled, or before booking opens to this donor: Team Captains may reserve from 48 hours before booking_opens_at, everyone else from it.
+         */
+        post: operations["reserveEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/events/{event_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a reservation; promotes the waitlist head (E-4/E-9) */
+        post: operations["cancelEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/network": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The donor's referral network (N-1..N-3) */
+        get: operations["donorNetwork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/badges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The donor's badge wall
+         * @description All 24 badges in catalog order with the donor's earned state. Earned badges show in color; an unearned one shows greyed with its `rule` (B-1). Badges are earned when the donor's facts change and stay earned (B-2).
+         */
+        get: operations["donorBadges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/donors/{donor_id}/badges/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Grant a badge (super-admin) */
+        post: operations["grantBadge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/donors/{donor_id}/badges/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke a badge (super-admin) */
+        post: operations["revokeBadge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/public/partner-apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit a partner application */
+        post: operations["partnerApply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Email a partner portal sign-in link
+         * @description 503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address belongs to a partner user. Each enabled user of an approved partner with this email receives a single-use link that expires after 15 minutes; at most one a minute and five an hour are sent per user.
+         */
+        post: operations["partnerRequestSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/accept-invite": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange an emailed partner sign-in link for a session
+         * @description The link (`/partner/accept#token=…`) comes from an approval, an invitation, or POST /donor/partner/sign-in. It is single-use: approval and invitation links expire after 7 days, requested links after 15 minutes. A browser receives an HttpOnly session cookie and `signed_in`; the app, sending a native request, receives the bearer `session` instead.
+         */
+        post: operations["partnerAcceptInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Partner dashboard overview tiles
+         * @description Every figure is published and verified; nothing is estimated. Employee enrollment is null while fewer than 5 employees are linked (EM-3), and its percentage also without a workforce size. `updated_at` is when any figure last changed, null before a published initiative. `role` is the caller's own (ADMIN or VIEWER).
+         */
+        get: operations["partnerOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/initiatives": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Partner's published initiatives
+         * @description Published co-initiatives, active first, each with every published verified headline metric in display order, its spend by category, and when its figures last changed.
+         */
+        get: operations["partnerInitiatives"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/spend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Partner spend by category */
+        get: operations["partnerSpend"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List partner portal users */
+        get: operations["partnerUsers"];
+        put?: never;
+        /**
+         * Invite a partner portal user
+         * @description Admin only. Emails the person a single-use invitation link that expires after 7 days. Re-inviting an existing user refreshes their role and re-enables them. Refused with 409 when the email already has a donor or staff login, or signs in to another partner organization (one email, one role).
+         */
+        post: operations["partnerInviteUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Previous report exports */
+        get: operations["partnerExports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/report.pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download the branded impact report */
+        get: operations["partnerReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/company-code.svg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Company code QR code
+         * @description The IRL version of the partner's company code (EM-1): a QR code of `/c/{company code}` on the public site, which saves the code before an employee gives. Any partner role. 404 before the partner has a code.
+         */
+        get: operations["partnerCompanyCode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/users/{userID}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a partner portal user */
+        post: operations["partnerRemoveUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/sign-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign out of the partner portal */
+        post: operations["partnerSignOut"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pending partner applications */
+        get: operations["staffPartnerPending"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{appID}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a partner application
+         * @description Refused with 409 when the applicant's work email already has a donor or staff login, or signs in to another partner organization (one email, one role).
+         */
+        post: operations["staffPartnerApprove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{appID}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject a partner application */
+        post: operations["staffPartnerReject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partnerID}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Link an initiative to a partner */
+        post: operations["staffPartnerLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partnerID}/match": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set a partner's match terms */
+        post: operations["staffPartnerMatch"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/employer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Link to an employer by company code */
+        post: operations["employeeEnroll"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/team": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The donor's employer and team
+         * @description The signed-in donor's employer and team, and their company's team leaderboard (EM-5, teams with fewer than 5 members left out). An unlinked donor gets empty fields.
+         */
+        get: operations["employeeTeam"];
+        put?: never;
+        /** Join or create a team */
+        post: operations["employeeJoinTeam"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/our-people": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Our People aggregate (k-anonymised)
+         * @description Totals for the partner's linked employees (P-13): giving net of refunds, this calendar year's match owed (`matched_minor`), average current streak in days, volunteer minutes from event check-ins, and the number of teams. While fewer than 5 employees are linked every figure is 0 and `suppressed` is true (EM-3); individuals are never returned.
+         */
+        get: operations["employeeOurPeople"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Team leaderboard (teams under 5 suppressed)
+         * @description The company team leaderboard (EM-5), ranked by combined active giving (annualized pledges of members whose gift is current). Teams with fewer than 5 members are left out.
+         */
+        get: operations["employeeTeams"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/workforce": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Update workforce size */
+        post: operations["employeeWorkforce"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update organization profile
+         * @description Replaces the organization's name and description (§7.2). Partner administrators only; viewers get 403. Both are trimmed; the name must be 1 to 200 characters and the description at most 4000.
+         */
+        post: operations["partnerSaveProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partnerID}/match-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Match owed/paid for a year */
+        get: operations["staffPartnerMatchStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partnerID}/match-payment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record an offline match payment */
+        post: operations["staffPartnerMatchPayment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Success metrics report */
+        get: operations["staffReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partnerID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A partner's linked initiatives, match terms, and users */
+        get: operations["staffPartnerDetail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partnerID}/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite a user to a partner organization
+         * @description Emails the invitee a sign-in link. Re-inviting an existing address refreshes its role and re-enables a removed user. Refused with 409 when the email already has a donor or staff login, or signs in to another partner organization (one email, one role).
+         */
+        post: operations["staffPartnerInviteUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partnerID}/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a partner organization's logo */
+        get: operations["staffPartnerLogo"];
+        put?: never;
+        /**
+         * Upload or remove a partner organization's logo
+         * @description Staff with partnerships access set the logo while enrolling an approved partner. The partner's administrators can replace it from the portal. Audited.
+         */
+        post: operations["staffPartnerSaveLogo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/partners/{partnerID}/users/{userID}/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a partner user and end their sessions */
+        post: operations["staffPartnerRemoveUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/initiatives/{initiative_id}/rotation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Include or exclude an initiative from the daily rotation */
+        post: operations["setInitiativeRotation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel an event and notify everyone holding a place
+         * @description Releases every seat and waitlist place and queues an email and a push to each donor who held one. Repeating it is a no-op. 409 once the event has ended.
+         */
+        post: operations["cancelStaffEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/attendees/{donor_id}/check-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check an attendee in by hand
+         * @description The fallback to QR check-in. The donor must hold a seat, and it is accepted from an hour before the start until the end (422 otherwise). Checking in twice is a no-op.
+         */
+        post: operations["staffEventCheckIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/events/{event_id}/check-in.svg": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The venue check-in QR code as SVG (E-8)
+         * @description Encodes the same token as POST /donor/staff/events/{event_id}/check-in-token, for staff to print or display. 503 when the deployment has no check-in secret.
+         */
+        get: operations["eventCheckInQR"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/reports/{report_id}/report.pdf": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download an immutable retained export owned by this partner */
+        get: operations["partnerRetainedReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the organization logo */
+        get: operations["partnerLogo"];
+        put?: never;
+        /**
+         * Upload or remove a partner logo (admin only)
+         * @description Shown on the partner dashboard and included in new PDF reports. Partner administrators only; viewers get 403.
+         */
+        post: operations["partnerSaveLogo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/content/wording": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Badge and milestone wording */
+        get: operations["recognitionWording"];
+        put?: never;
+        /**
+         * Change a badge's or milestone's wording
+         * @description Replaces the words only; how badges and milestones are earned does not change. An empty title and text restore the default.
+         */
+        post: operations["setRecognitionWording"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/founding-claims": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import website waitlist Founding Donor claims
+         * @description D-6. `claims_csv` has the header `email,signed_up_on,source`; `signed_up_on` is a date before the Founding cutoff and `source` is WAITLIST or WEBSITE_DONOR. At most 4 MB and 50,000 rows. Only an HMAC of each address under `DONOR_FOUNDING_CLAIM_KEY` is stored; without the key the import answers 503 `FOUNDING_CLAIMS_UNCONFIGURED`. A donor is granted Founding Donor when the import finds their address, when they first give as a guest under it, or when they change their email to it, until 90 days after the cutoff. Importing an address again keeps its earliest sign-up. A refused import answers 422 `{"detail":"The spreadsheet has problems","errors":[{sheet,row,column,reason}]}` and stores nothing.
+         */
+        post: operations["importFoundingClaims"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/initiatives": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Published initiatives
+         * @description Active initiatives first. Cacheable for a minute.
+         */
+        get: operations["publishedInitiatives"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/initiatives/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One published initiative */
+        get: operations["publishedInitiative"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/events/{event_id}/calendar.ics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download an authorized event as an .ics calendar file, including invite-only events */
+        get: operations["donorEventCalendar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/push-device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Partner app: Register this installation for app notifications
+         * @description Native requests only. Records the push token of the app installation behind the calling session, replacing any token the session held. Register at every launch, since platforms rotate tokens. A token another session holds, the donor's or anyone's, moves to this session: it names one installation. The token is removed when the session is signed out, revoked, or ends, so sign-in again means registering again. Notifications carry generic text, a `category` (`REFERRAL_CONVERTED`, `STREAK_AT_RISK`, or `STREAK_MILESTONE`) and an app `path` to open, never names or amounts; fetch details through the API. 503 with `PUSH_UNCONFIGURED` when this deployment does not deliver to the platform. 401 for a browser session's credential.
+         */
+        post: operations["partnerRegisterPushDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/push-device/unregister": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Partner app: Stop app notifications to this installation
+         * @description Native requests only. Removes the calling session's push token, if any; the session stays signed in.
+         */
+        post: operations["partnerUnregisterPushDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/applications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit an application with a private status receipt */
+        post: operations["applyWithReceipt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/partner/application-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the status of the application named by a private receipt */
+        get: operations["applicationStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/donors/{donor_id}/recognition/recompute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recompute derived recognition after a documented system error (super admin, audited)
+         * @description Replays recorded facts without editing financial history or granting arbitrary continuity. Requires donor.recompute and a reason. Permanent earned badges and historical best streaks remain permanent.
+         */
+        post: operations["recomputeRecognition"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/initiatives/{initiative_id}/spend/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish a verified category total */
+        post: operations["publishInitiativeSpend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/donors/{donor_id}/recognition/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * /donor/staff/donors/{donor_id}/recognition/reset
+         * @description Replays recorded facts without editing financial history or granting arbitrary continuity. Requires donor.recompute and a reason. Permanent earned badges and historical best streaks remain permanent.
+         */
+        post: operations["postDonorStaffDonorsDonorIdRecognitionReset"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/content/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** /donor/staff/content/rules */
+        get: operations["getDonorStaffContentRules"];
+        put?: never;
+        /**
+         * /donor/staff/content/rules
+         * @description Replaces the words only; how badges and milestones are earned does not change. An empty title and text restore the default.
+         */
+        post: operations["postDonorStaffContentRules"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/signup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * /donor/signup
+         * @description 503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address exists. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim.
+         */
+        post: operations["postDonorSignup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/password/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * /donor/password/sign-in
+         * @description Verifies the SMS code and signs the donor in. 401 covers a wrong, expired, or over-tried code and a phone with no account alike, so none reveals whether an account exists. 503 when no SMS provider is configured.
+         */
+        post: operations["postDonorPasswordSignIn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * /donor/me/password
+         * @description Saves the donor's notification, rankings, network and volunteer choices. The required fields are always replaced; an optional field left out keeps its saved value. 409 when `version` is stale: re-read the profile and retry.
+         */
+        post: operations["postDonorMePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1423,8 +2934,6 @@ export interface components {
         PublicContent: {
             /** @description Publication cadence label. */
             cadence: string | null;
-            /** @description Published initiatives, in spreadsheet order. */
-            initiatives: components["schemas"]["Initiative"][];
             /** @description Published impact ledger figures, in spreadsheet order. */
             ledger: components["schemas"]["LedgerFigure"][];
             /**
@@ -1438,14 +2947,6 @@ export interface components {
             published_at?: string;
             /** @enum {string} */
             state: "unpublished" | "published";
-        };
-        Initiative: {
-            slug: string;
-            title: string;
-            summary: string;
-            partner: string;
-            /** Format: date */
-            planned_start: string;
         };
         LedgerFigure: {
             /** @description Unique within the publication. */
@@ -1491,12 +2992,14 @@ export interface components {
             total_minor: number;
         };
         StreakSummary: {
-            /** @description A renewal failed and is inside its 14-day grace period. */
+            /** @description A renewal failed and is inside its 7-day grace period. */
             at_risk: boolean;
             /** Format: int32 */
             current: number;
             /** Format: date-time */
             grace_ends_at: string | null;
+            /** @description Day-based streak card (PRD S-2/S-3); absent when there is no streak. */
+            ladder?: components["schemas"]["StreakLadder"] | null;
         };
         /** @description A null `referrals` or `streak` means the figure is not currently known; never show it as zero. */
         DonorDashboard: {
@@ -1520,25 +3023,60 @@ export interface components {
             /** @constant */
             state: "ready";
             streak: components["schemas"]["StreakSummary"] | null;
+            /** @description The donor's own ranking (S-4), or null when unranked. */
+            rank: components["schemas"]["Ranking"] | null;
+            /** @description The donor's active-network headline (I-2), or null when they have no active referrals. */
+            network: components["schemas"]["NetworkCard"] | null;
+            impact: components["schemas"]["ImpactSummary"];
         };
         Profile: {
             /** Format: email */
             email: string;
             public_name: string | null;
+            /**
+             * @description The principal's role, fixed at account creation and immutable.
+             * @enum {string}
+             */
+            account_role: "DONOR" | "PARTNER";
+            zip: string | null;
+            city: string | null;
+            /** @description IANA zone derived from the ZIP; drives day-level streak state in the donor's own day. */
+            timezone: string | null;
+            phone: string | null;
             referral_emails: boolean;
             marketing_emails: boolean;
             /** @description App notification when someone the donor invited makes their first gift. Starts on: the device's notification permission is the opt-in. */
             push_referral_converted: boolean;
             /** @description App notification when a declined monthly payment puts the donor's giving streak at risk. Starts on. */
             push_streak_at_risk: boolean;
-            /** @description App notification when the donor's giving streak reaches 3 or 6 months, a year, or each further year. Starts on. */
+            /** @description App notification when the donor's giving streak has lapsed after the grace period on a failed monthly payment. Starts on. */
+            push_streak_lapsed: boolean;
+            /** @description App notification when the donor's giving streak reaches an R1 day milestone. Starts on. */
             push_streak_milestone: boolean;
+            /** @description App notification when the donor earns a new badge. Starts on. */
+            push_badge_earned: boolean;
+            /** @description App notification when an event is published near a volunteer (E-1). Sent only while `volunteer` is on. */
+            push_event_nearby: boolean;
+            /** @description App notification 24 hours and 2 hours before an event the donor reserved. */
+            push_event_reminder: boolean;
+            /** @description App notification when the donor moves off an event waitlist. */
+            push_event_promoted: boolean;
+            /** @description When true the donor is excluded from national/city rankings and from everyone's ranking denominator. Default off (ranked). */
+            rankings_opted_out: boolean;
+            /** @description When true the donor appears by name in their referrer's invitee list; otherwise they are counted anonymously (N-3). On by default: visibility is opt-out (§10). */
+            network_visible: boolean;
+            /** @description When true the donor is in the volunteer pool and receives event alerts (E-1). Default off. */
+            volunteer: boolean;
+            /** @description Event interests the donor picked when opting in as a volunteer (E-1); empty when none chosen. */
+            volunteer_interests: string[];
             /**
              * Format: int32
              * @description Optimistic concurrency version; send it back when saving preferences.
              */
             version: number;
             consent_version: string;
+            /** @description App notification when a verified gift is processed. Starts on. */
+            push_gift_processed: boolean;
         };
         /** @description The calling session's push registration. */
         PushRegistration: {
@@ -1744,20 +3282,11 @@ export interface components {
              * @description Subscription attempt ID used by recurring commands.
              */
             id: string;
-            /** @description The confirmed pause, or null when none is in effect or scheduled. */
-            pause: components["schemas"]["PauseWindow"] | null;
             /** Format: date-time */
             period_end: string;
             status: string;
             /** Format: date-time */
             stops_at: string | null;
-        };
-        /** @description Renewals from starts_at are skipped until giving resumes at resumes_at. */
-        PauseWindow: {
-            /** Format: date-time */
-            resumes_at: string;
-            /** Format: date-time */
-            starts_at: string;
         };
         RecurringDetails: {
             /**
@@ -1808,61 +3337,6 @@ export interface components {
             /** Format: uuid */
             subscription_id: string;
         };
-        PauseOption: {
-            /** Format: int32 */
-            months: number;
-            /** Format: date-time */
-            resumes_at: string;
-            /** Format: date-time */
-            starts_at: string;
-        };
-        PauseView: {
-            confirmed: boolean;
-            /** Format: int32 */
-            months: number;
-            /** Format: uuid */
-            request_id: string;
-            /** Format: date-time */
-            resumes_at: string;
-            /** Format: date-time */
-            starts_at: string;
-        };
-        PauseOptions: {
-            options: components["schemas"]["PauseOption"][];
-            pause: components["schemas"]["PauseView"] | null;
-            state: string;
-            /** Format: uuid */
-            subscription_id?: string;
-        };
-        ResumeOptions: {
-            /** @constant */
-            state: "unavailable";
-        } | {
-            /** Format: date-time */
-            next_renewal: string;
-            /** Format: date-time */
-            original_resume: string;
-            /** Format: uuid */
-            pause_id: string;
-            /**
-             * @description An offer to resume at the next renewal.
-             * @constant
-             */
-            state: "ready";
-        } | {
-            confirmed: boolean;
-            /** Format: date-time */
-            next_renewal: string;
-            /** Format: uuid */
-            pause_id: string;
-            /** Format: uuid */
-            request_id: string;
-            /**
-             * @description A resumption already requested.
-             * @constant
-             */
-            state: "saved";
-        };
         PaymentMethodStatus: {
             /** Format: date-time */
             completed_at: string | null;
@@ -1873,18 +3347,6 @@ export interface components {
             mode: "test";
             /** @enum {string} */
             status: "NONE" | "PENDING" | "OPEN" | "APPLIED" | "EXPIRED" | "CANCELLED";
-        };
-        PauseResult: {
-            pause: components["schemas"]["PauseView"];
-        };
-        Resumption: {
-            confirmed: boolean;
-            /** Format: date-time */
-            next_renewal: string;
-            /** Format: uuid */
-            pause_id: string;
-            /** Format: uuid */
-            request_id: string;
         };
         PaymentUpdate: {
             /**
@@ -1933,7 +3395,7 @@ export interface components {
             email: string;
             name: string;
             /** @enum {string} */
-            role: "ADMIN" | "FINANCE" | "SUPPORT";
+            role: "SUPER_ADMIN" | "OP_PARTNERSHIPS" | "OP_GROWTH" | "OP_IMPACT";
             disabled: boolean;
             active: boolean;
             permissions: string[];
@@ -2107,11 +3569,6 @@ export interface components {
         PendingAction: {
             action: components["schemas"]["StaffAction"] | null;
         };
-        Enrolments: {
-            /** @description Always empty until R2. */
-            enrolments: unknown[];
-            state: string;
-        };
         QueuedMessage: {
             /** Format: uuid */
             id: string;
@@ -2198,45 +3655,12 @@ export interface components {
             /** Format: uuid */
             publication_id: string;
         };
-        PartnerSignup: {
-            /** Format: date-time */
-            at: string;
-            /** Format: email */
-            email: string;
-            /** Format: uuid */
-            id: string;
-            message: string;
-            name: string;
-            organization: string;
-            website: string;
-        };
-        PartnerPage: {
-            /**
-             * Format: int64
-             * @description Offset of the next page, or null on the last page.
-             */
-            next_offset: number | null;
-            signups: components["schemas"]["PartnerSignup"][];
-        };
         PublicationRequest: {
-            /** @description Initiatives spreadsheet export (CSV). */
-            initiatives_csv?: string;
             /** @description Impact ledger spreadsheet export (CSV). */
             ledger_csv?: string;
             /** Format: date */
             as_of?: string;
             cadence?: string;
-        };
-        PartnerRequest: {
-            organization: string;
-            name: string;
-            /** Format: email */
-            email: string;
-            /** @description Optional HTTPS URL. */
-            website?: string;
-            message?: string;
-            /** @constant */
-            contact_consent: true;
         };
         /** @description A passkey the donor can sign in with. Credential material is never returned. */
         PasskeyInfo: {
@@ -2265,8 +3689,690 @@ export interface components {
             /** @description PublicKeyCredentialCreationOptionsJSON. */
             options: Record<string, unknown>;
         };
+        InitiativeInput: {
+            slug: string;
+            title: string;
+            summary: string;
+            type: string;
+            location: string;
+            region: string;
+            counties: string[];
+            /** Format: date */
+            started_on: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "COMPLETE";
+            /** Format: int64 */
+            committed_minor: number;
+            partner_signup_id: string;
+            /** @description The stored content source recording the board's approval, or empty. Set with board_approved_on; publishing requires both. */
+            board_approval_source_id: string;
+            /** @description The date the board approved it (YYYY-MM-DD, not in the future), or empty. */
+            board_approved_on: string;
+        };
+        MetricInput: {
+            position: number;
+            label: string;
+            /** Format: int64 */
+            value: number;
+            /** @enum {string} */
+            unit: "USD_CENTS" | "PEOPLE" | "INITIATIVES" | "PARTNERS";
+            verification_note: string;
+            verified_on: string;
+        };
+        SpendInput: {
+            category: string;
+            /** Format: int64 */
+            amount_minor: number;
+            verification_note: string;
+            verified_on: string;
+            publish_state: string;
+        };
+        DeleteSpendRequest: {
+            category: string;
+        };
+        SpendCategory: {
+            category: string;
+            /** Format: int64 */
+            amount_minor: number;
+        };
+        InitiativeSpend: {
+            initiative_id: string;
+            /** Format: int64 */
+            total_minor: number;
+            categories: components["schemas"]["SpendCategory"][];
+        };
+        TodayMetric: {
+            label: string;
+            /** Format: int64 */
+            value: number;
+            /** @enum {string} */
+            unit: "USD_CENTS" | "PEOPLE" | "INITIATIVES" | "PARTNERS";
+            verified_on: string;
+        };
+        TodayInitiative: {
+            initiative_id: string;
+            slug: string;
+            title: string;
+            summary: string;
+            region: string;
+            location: string;
+            /** @description The kind of work, e.g. PROGRAM. */
+            type: string;
+            /** Format: date */
+            started_on: string;
+            metrics: components["schemas"]["TodayMetric"][];
+            /** Format: int64 */
+            distinct_shown: number;
+        };
+        StreakLadder: {
+            /** Format: int64 */
+            days: number;
+            /** Format: int64 */
+            last_milestone: number;
+            /** Format: int64 */
+            next_milestone: number | null;
+            /** Format: int64 */
+            days_to_next: number | null;
+            bar: boolean[];
+        };
+        BadgeView: {
+            code: string;
+            title: string;
+            /** @description How the badge is earned, shown on an unearned badge (B-1). */
+            rule: string;
+            perk: string;
+            earned: boolean;
+            /** Format: date-time */
+            earned_at?: string | null;
+            artwork: string;
+        };
+        BadgeList: {
+            badges: components["schemas"]["BadgeView"][];
+        };
+        BadgeCodeRequest: {
+            code: string;
+        };
+        Ranking: {
+            /** @description Top-percentile bucket; 1 = top 1%. */
+            national_percentile: number;
+            city: string | null;
+            city_rank: number | null;
+            /** Format: date-time */
+            computed_at: string;
+        };
+        /** @description Dashboard headline for the donor's referral network (I-2). */
+        NetworkCard: {
+            /**
+             * Format: int64
+             * @description Number of still-active donors the donor brought in.
+             */
+            active_count: number;
+            /**
+             * Format: int64
+             * @description Combined annualized giving of those active donors (monthly pledge x 12), in minor units.
+             */
+            annualized_minor: number;
+            currency: string;
+        };
+        /** @description The next referral tier the donor has not yet reached (N-2). */
+        NetworkMilestone: {
+            label: string;
+            /** Format: int64 */
+            target: number;
+            /** Format: int64 */
+            remaining: number;
+        };
+        /** @description One opted-in person the donor brought in (N-3). */
+        NetworkInvitee: {
+            /** @description First name + last initial, as the invitee chose to display it. */
+            name: string;
+            /** @description Whether the invitee is still giving. */
+            active: boolean;
+        };
+        /** @description The donor's referral-network view (N-1..N-3). */
+        NetworkSummary: {
+            /** Format: int64 */
+            active_count: number;
+            /** Format: int64 */
+            annualized_minor: number;
+            /** @description Null once every referral tier is reached. */
+            next_milestone: components["schemas"]["NetworkMilestone"] | null;
+            invitees: components["schemas"]["NetworkInvitee"][];
+            /**
+             * Format: int64
+             * @description Active referrals who did not opt in to being named; counted but not listed.
+             */
+            anonymous_active: number;
+        };
+        /** @description One event as a donor sees it (E-3). */
+        EventView: {
+            id: string;
+            slug: string;
+            title: string;
+            /** @enum {string} */
+            type: "VOLUNTEER" | "COMMUNITY" | "INVITE_ONLY";
+            description: string;
+            venue: string;
+            address: string;
+            city: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            /**
+             * Format: int32
+             * @description Number of spots; 0 means uncapped.
+             */
+            capacity: number;
+            /** @description Spots remaining (capacity minus reserved), floored at 0; null when uncapped. */
+            spots_left: number | null;
+            /** @description The signed-in donor's own status for this event; null on an anonymous read or no active reservation. */
+            reservation_status: ("RESERVED" | "WAITLISTED") | null;
+            /** @description "Invitation earned at ..." for an INVITE_ONLY event unlocked by a badge perk (E-5); null otherwise. */
+            invitation_note: string | null;
+            /** @description mailto link to report an issue about this event to DAD (E-10); null when no support email is configured. */
+            report_issue_url: string | null;
+            /** @description The event was cancelled; it can no longer be reserved and every place was released. */
+            cancelled: boolean;
+            /** @description When reservations open to everyone; null when they opened at publication. */
+            booking_opens_at: string | null;
+            /** @description True while the signed-in donor, a Team Captain, may reserve before booking opens to everyone (B-3). Always false on the public read. */
+            early_booking: boolean;
+        };
+        /** @description The outcome of a reserve or cancel (E-4). */
+        ReservationResult: {
+            /** @enum {string} */
+            status: "RESERVED" | "WAITLISTED" | "CANCELLED";
+        };
+        /** @description The outcome of a QR check-in (E-8). */
+        CheckInResult: {
+            event_id: string;
+            checked_in: boolean;
+            already_checked_in: boolean;
+        };
+        /** @description A staff create/update of an event's editable fields (E-3). */
+        EventInput: {
+            slug?: string;
+            title?: string;
+            /** @enum {string} */
+            type?: "VOLUNTEER" | "COMMUNITY" | "INVITE_ONLY";
+            description?: string;
+            venue?: string;
+            address?: string;
+            city?: string;
+            zip?: string;
+            /** Format: date-time */
+            starts_at?: string;
+            /** Format: date-time */
+            ends_at?: string;
+            /** Format: int32 */
+            capacity?: number;
+            /**
+             * @description Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event.
+             * @enum {string}
+             */
+            qualifying_perk?: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
+            /** @description When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3). */
+            booking_opens_at?: string;
+        };
+        ReportMetric: {
+            /** @description Whether the server can compute this metric. */
+            available: boolean;
+            /** @description Why the metric is unavailable, when available is false. */
+            reason?: string;
+            /** Format: int64 */
+            value: number;
+        };
+        ReportSourceConversions: {
+            /** @description Frozen attribution source: DIRECT, LINK or IRL. */
+            source: string;
+            /** @description Gift frequency: MONTHLY or ONE_TIME. */
+            frequency: string;
+            /** Format: int64 */
+            donors: number;
+            /**
+             * Format: int64
+             * @description Gross collected cents for these first gifts.
+             */
+            gross_minor: number;
+        };
+        ReportGiftMix: {
+            /** @description Gift frequency: MONTHLY or ONE_TIME. */
+            frequency: string;
+            /** Format: int64 */
+            gifts: number;
+            /**
+             * Format: int64
+             * @description Collected cents.
+             */
+            collected_minor: number;
+        };
+        ReportViralCoefficient: {
+            /**
+             * Format: int64
+             * @description Donors who referred at least one donor in the window.
+             */
+            cohort: number;
+            /** Format: int64 */
+            gross_conversions: number;
+            /** Format: int64 */
+            qualified_conversions: number;
+        };
+        ReportInvoluntaryChurn: {
+            /** Format: int64 */
+            failed_periods: number;
+            /**
+             * Format: int64
+             * @description Scheduled cents lost to failed renewals past the retry deadline.
+             */
+            lost_minor: number;
+            /** Format: int64 */
+            recovered_periods: number;
+            /**
+             * Format: int64
+             * @description Cents recovered against the failed-period cohort.
+             */
+            recovered_minor: number;
+            /** @description False when source facts cannot establish the requested metric. */
+            available: boolean;
+            reason?: string;
+            /** Format: int64 */
+            missing_history: number;
+            /** Format: int64 */
+            recovered_within_grace: number;
+        };
+        /** @description Historical first-recurring-gift cohort survival at 30, 90, 180 and 365 local calendar days. Legacy M3/M6 fields alias 90/180-day eligible and retained counts. Unknown history is explicit. */
+        ReportRetention: {
+            /** Format: int64 */
+            reached_m3: number;
+            /** Format: int64 */
+            retained_m3: number;
+            /** Format: int64 */
+            reached_m6: number;
+            /** Format: int64 */
+            retained_m6: number;
+            /** @description False when source facts cannot establish the requested metric. */
+            available: boolean;
+            reason?: string;
+            milestones: components["schemas"]["ReportRetentionMilestone"][];
+        };
+        /** @description Landing-to-first-gift timing. Unavailable until consented landing-to-checkout linkage exists; account creation is never substituted. */
+        ReportTimeToFirstGift: {
+            /** Format: int64 */
+            sample: number;
+            /** Format: int64 */
+            median_seconds: number;
+            /** @description False when source facts cannot establish the requested metric. */
+            available: boolean;
+            reason?: string;
+        };
+        Report: {
+            /**
+             * Format: date-time
+             * @description Inclusive window start (UTC).
+             */
+            period_start: string;
+            /**
+             * Format: date-time
+             * @description Exclusive window end (UTC); also the observation cutoff.
+             */
+            period_end: string;
+            /**
+             * Format: date-time
+             * @description As-of time the metrics were computed against (UTC).
+             */
+            observation_cutoff: string;
+            /** @description Always UTC. */
+            timezone: string;
+            /** @description Discloses the committed-facts coverage boundary. */
+            coverage_note: string;
+            /** Format: int64 */
+            founding_donors: number;
+            first_gift_by_source: components["schemas"]["ReportSourceConversions"][];
+            gift_mix: components["schemas"]["ReportGiftMix"][];
+            viral_coefficient: components["schemas"]["ReportViralCoefficient"];
+            /** Format: int64 */
+            referral_link_minor: number;
+            /** Format: int64 */
+            referral_irl_minor: number;
+            involuntary_churn: components["schemas"]["ReportInvoluntaryChurn"];
+            time_to_first_gift: components["schemas"]["ReportTimeToFirstGift"];
+            retention: components["schemas"]["ReportRetention"];
+            seven_day_share_rate: components["schemas"]["ReportMetric"];
+        };
+        TeamLeaderboardRow: {
+            team_id: string;
+            name: string;
+            /** Format: int64 */
+            active_givers: number;
+            /** Format: int64 */
+            annualized_minor: number;
+            /** Format: int64 */
+            avg_streak_days: number;
+            /** Format: int64 */
+            volunteer_minutes: number;
+        };
+        StaffPartner: {
+            /** Format: uuid */
+            id: string;
+            organization: string;
+            type: string;
+            /** @description Empty for an org approved before company codes existed. */
+            company_code: string;
+            workforce_size: number;
+            /** @description Match rate in basis points; 10000 matches dollar for dollar. */
+            match_rate_bp: number;
+            match_cap_minor: number;
+            /** Format: date-time */
+            approved_at: string;
+            /** @description Active portal users. */
+            user_count: number;
+            initiative_count: number;
+        };
+        StaffPartnerPage: {
+            partners: components["schemas"]["StaffPartner"][];
+            next_offset: number | null;
+        };
+        StaffPartnerDetail: {
+            /** Format: uuid */
+            id: string;
+            organization: string;
+            type: string;
+            /** @description Empty for an org approved before company codes existed. */
+            company_code: string;
+            workforce_size: number;
+            /** @description Match rate in basis points; 10000 matches dollar for dollar. */
+            match_rate_bp: number;
+            match_cap_minor: number;
+            /** Format: date-time */
+            approved_at: string;
+            /** @description Active portal users. */
+            user_count: number;
+            initiative_count: number;
+            website: string;
+            /** @description Whether a logo is stored; read it from the logo path. */
+            has_logo: boolean;
+            initiatives: {
+                /** Format: uuid */
+                id: string;
+                title: string;
+                status: string;
+                /** @enum {string} */
+                publish_state: "DRAFT" | "PUBLISHED";
+                committed_minor: number;
+            }[];
+            users: {
+                /** Format: uuid */
+                id: string;
+                email: string;
+                name: string;
+                /** @enum {string} */
+                role: "ADMIN" | "VIEWER";
+                /** @description Whether the user has signed in at least once. */
+                accepted: boolean;
+            }[];
+        };
+        StaffInitiative: {
+            slug: string;
+            title: string;
+            summary: string;
+            type: string;
+            location: string;
+            region: string;
+            counties: string[];
+            /** Format: date */
+            started_on: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "COMPLETE";
+            /** Format: int64 */
+            committed_minor: number;
+            partner_signup_id: string;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            publish_state: "DRAFT" | "PUBLISHED";
+            published_at: string | null;
+            /** @description Whether the daily rotation may show it once published and active (§8 Content). */
+            in_rotation: boolean;
+            /** Format: date-time */
+            updated_at: string;
+            /** @description The stored content source recording the board's approval, or empty. Set with board_approved_on; publishing requires both. */
+            board_approval_source_id: string;
+            /** @description The date the board approved it (YYYY-MM-DD, not in the future), or empty. */
+            board_approved_on: string;
+        };
+        StaffInitiativePage: {
+            initiatives: components["schemas"]["StaffInitiative"][];
+            next_offset: number | null;
+        };
+        StaffInitiativeMetric: {
+            position: number;
+            label: string;
+            /** Format: int64 */
+            value: number;
+            /** @enum {string} */
+            unit: "USD_CENTS" | "PEOPLE" | "INITIATIVES" | "PARTNERS";
+            verification_note: string;
+            verified_on: string;
+            /** @enum {string} */
+            publish_state: "DRAFT" | "PUBLISHED";
+        };
+        StaffInitiativeDetail: {
+            slug: string;
+            title: string;
+            summary: string;
+            type: string;
+            location: string;
+            region: string;
+            counties: string[];
+            /** Format: date */
+            started_on: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "COMPLETE";
+            /** Format: int64 */
+            committed_minor: number;
+            partner_signup_id: string;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            publish_state: "DRAFT" | "PUBLISHED";
+            published_at: string | null;
+            /** @description Whether the daily rotation may show it once published and active (§8 Content). */
+            in_rotation: boolean;
+            /** Format: date-time */
+            updated_at: string;
+            metrics: components["schemas"]["StaffInitiativeMetric"][];
+            spend: components["schemas"]["SpendInput"][];
+            /** @description The stored content source recording the board's approval, or empty. Set with board_approved_on; publishing requires both. */
+            board_approval_source_id: string;
+            /** @description The date the board approved it (YYYY-MM-DD, not in the future), or empty. */
+            board_approved_on: string;
+        };
+        /** @description An event as staff manage it, drafts and cancellations included. */
+        StaffEvent: {
+            slug: string;
+            title: string;
+            /** @enum {string} */
+            type: "VOLUNTEER" | "COMMUNITY" | "INVITE_ONLY";
+            description: string;
+            venue: string;
+            address: string;
+            city: string;
+            zip: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: int32 */
+            capacity: number;
+            /**
+             * @description Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event.
+             * @enum {string}
+             */
+            qualifying_perk: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
+            /** @description When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3). */
+            booking_opens_at: string;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            publish_state: "DRAFT" | "PUBLISHED";
+            cancelled_at: string | null;
+            /** Format: int64 */
+            reserved: number;
+            /** Format: int64 */
+            waitlisted: number;
+            /**
+             * Format: int64
+             * @description Seat holders checked in by QR or by staff.
+             */
+            checked_in: number;
+        };
+        StaffEventPage: {
+            events: components["schemas"]["StaffEvent"][];
+            next_offset: number | null;
+        };
+        EventAttendee: {
+            /** Format: uuid */
+            donor_id: string;
+            email: string;
+            public_name: string;
+            /** @enum {string} */
+            status: "RESERVED" | "WAITLISTED";
+            /** Format: date-time */
+            reserved_at: string;
+            checked_in_at: string | null;
+        };
+        /** @description The RSVPs screen: seats in booking order, then the waitlist in promotion order. */
+        StaffEventDetail: {
+            slug: string;
+            title: string;
+            /** @enum {string} */
+            type: "VOLUNTEER" | "COMMUNITY" | "INVITE_ONLY";
+            description: string;
+            venue: string;
+            address: string;
+            city: string;
+            zip: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: int32 */
+            capacity: number;
+            /**
+             * @description Badge perk that unlocks an INVITE_ONLY event (E-5); empty for guest-list-only or a non-invite event.
+             * @enum {string}
+             */
+            qualifying_perk: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
+            /** @description When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3). */
+            booking_opens_at: string;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            publish_state: "DRAFT" | "PUBLISHED";
+            cancelled_at: string | null;
+            /** Format: int64 */
+            reserved: number;
+            /** Format: int64 */
+            waitlisted: number;
+            /**
+             * Format: int64
+             * @description Seat holders checked in by QR or by staff.
+             */
+            checked_in: number;
+            attendees: components["schemas"]["EventAttendee"][];
+        };
+        /** @description The donor's own impact totals (I-1, I-3). */
+        ImpactSummary: {
+            /** @description Total given since joining, net of refunds; null while it is being recomputed. */
+            given_minor: number | null;
+            /** @enum {string} */
+            currency: "USD";
+            /**
+             * Format: int64
+             * @description Distinct initiatives the donor has been shown (A-4).
+             */
+            initiatives_funded: number;
+            /**
+             * Format: int64
+             * @description Events the donor checked in at.
+             */
+            events_volunteered: number;
+        };
+        ReportRetentionMilestone: {
+            /** Format: int32 */
+            days: number;
+            /** Format: int64 */
+            eligible: number;
+            /** Format: int64 */
+            retained: number;
+            /** Format: int64 */
+            unknown: number;
+        };
+        WordingEntry: {
+            key: string;
+            title: string;
+            text: string;
+            default_title: string;
+            default_text: string;
+            custom: boolean;
+        };
+        /** @description Badge and streak-milestone wording. A badge's text is the rule shown while it is unearned; a milestone's is its notification body. */
+        RecognitionWording: {
+            badges: components["schemas"]["WordingEntry"][];
+            milestones: components["schemas"]["WordingEntry"][];
+        };
+        /** @description A published initiative. */
+        PublicInitiative: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            title: string;
+            summary: string;
+            type: string;
+            location: string;
+            /** @enum {string} */
+            status: "ACTIVE" | "COMPLETE";
+            /**
+             * Format: date
+             * @description When it started, or is planned to start when in the future
+             */
+            started_on: string;
+            /** @description The approved partner's name, or null when none is linked */
+            partner: string | null;
+        };
+        ApplicationStatus: {
+            organization: string;
+            /** @enum {string} */
+            status: "PENDING" | "APPROVED" | "REJECTED";
+        };
+        BadgeRule: {
+            code: string;
+            signal: string;
+            /** Format: int64 */
+            threshold: number;
+            artwork: string;
+        };
+        RecognitionRules: {
+            badges: components["schemas"]["BadgeRule"][];
+            milestones: number[];
+        };
     };
     responses: {
+        /** @description Signed in. */
+        SignedIn: {
+            headers: {
+                /** @description Browser requests only. */
+                "Set-Cookie"?: string;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": {
+                    /** @constant */
+                    signed_in: true;
+                } | components["schemas"]["NativeSession"];
+            };
+        };
         /** @description The request could not be verified. */
         BadRequest: {
             headers: {
@@ -2496,14 +4602,17 @@ export interface operations {
                     email: string;
                     /**
                      * Format: int64
-                     * @description Integer USD cents.
+                     * @description The monthly charge in integer USD cents: a whole number of dollars a day from $1 to $30, times 30 (3000 to 90000 in steps of 3000).
                      */
                     amount_minor: number;
                     /**
                      * @description Defaults to MONTHLY when omitted; null is invalid.
                      * @enum {string}
                      */
-                    frequency?: "MONTHLY" | "ONE_TIME";
+                    frequency?: "MONTHLY";
+                    name?: string;
+                    zip?: string;
+                    city?: string;
                 };
             };
         };
@@ -2597,19 +4706,19 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
-    partnerSignup: {
+    captureCompany: {
         parameters: {
             query?: never;
-            header: {
-                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            header?: never;
+            path: {
+                /** @description Company code; any other form is 404. */
+                code: string;
             };
-            path?: never;
             cookie?: never;
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PartnerRequest"];
+                "application/json": Record<string, unknown>;
             };
         };
         responses: {
@@ -2620,15 +4729,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @constant */
-                        received: true;
-                        /** @constant */
-                        mode: "test";
+                        /** @description False when the visit did not start or keep a company-code window. */
+                        captured: boolean;
                     };
                 };
             };
             403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
+            404: components["responses"]["NotFound"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    ingestAnalytics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    events: {
+                        /**
+                         * @description A §9 taxonomy event name.
+                         * @enum {string}
+                         */
+                        name: "app_opened" | "role_selected" | "signup_started" | "signup_completed" | "attribution_captured" | "gift_started" | "gift_completed" | "gift_failed" | "gift_recovered" | "gift_lapsed" | "amount_changed" | "gift_cancelled" | "account_deleted" | "invite_shared" | "irl_code_shown" | "referral_converted" | "badge_earned" | "milestone_reached" | "rankings_toggled" | "volunteer_opted_in" | "event_viewed" | "event_reserved" | "event_waitlisted" | "event_checked_in" | "team_created" | "team_joined" | "partner_signup_submitted" | "partner_approved" | "partner_report_exported" | "push_opened";
+                        /**
+                         * Format: date-time
+                         * @description Client event time (RFC 3339). Rejected if missing or implausibly in the future.
+                         */
+                        occurred_at: string;
+                        /** @description Typed payload for the events that carry one: attribution_captured requires {source: link|IRL|company}, invite_shared requires {channel}, push_opened requires {type}. All other events take no properties. */
+                        properties?: {
+                            [key: string]: string;
+                        };
+                        /** Format: uuid */
+                        id?: string;
+                        /** Format: uuid */
+                        journey_id?: string;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description The batch was accepted. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Number of events stored. */
+                        accepted: number;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
@@ -3005,6 +5166,76 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
+    saveProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description US ZIP (`12345` or `12345-6789`). Empty clears the ZIP and derived timezone. */
+                    zip?: string;
+                    /** @description Display city. Empty clears it. */
+                    city?: string;
+                    /** @description E.164 phone, e.g. `+14155550123`. Empty clears it. */
+                    phone?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Profile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteAccount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The account was deleted. */
+            200: {
+                headers: {
+                    /** @description Browser requests only: clears the session cookie. */
+                    "Set-Cookie"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        deleted: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
     savePreferences: {
         parameters: {
             query?: never;
@@ -3025,6 +5256,16 @@ export interface operations {
                     push_referral_converted: boolean;
                     push_streak_at_risk: boolean;
                     push_streak_milestone: boolean;
+                    push_streak_lapsed?: boolean;
+                    push_badge_earned?: boolean;
+                    push_event_nearby?: boolean;
+                    push_event_reminder?: boolean;
+                    push_event_promoted?: boolean;
+                    rankings_opted_out?: boolean;
+                    network_visible?: boolean;
+                    volunteer?: boolean;
+                    volunteer_interests?: string[];
+                    push_gift_processed?: boolean;
                 };
             };
         };
@@ -3438,9 +5679,15 @@ export interface operations {
                 "application/json": {
                     /** Format: uuid */
                     subscription_id: string;
-                    /** Format: int64 */
+                    /**
+                     * Format: int64
+                     * @description The monthly charge in integer USD cents: a whole number of dollars a day from $1 to $30, times 30 (3000 to 90000 in steps of 3000).
+                     */
                     amount_minor: number;
-                    /** Format: int64 */
+                    /**
+                     * Format: int64
+                     * @description The amount the next renewal would charge, which may predate the daily rule.
+                     */
                     previous_minor: number;
                     /** Format: date-time */
                     effective_at: string;
@@ -3455,135 +5702,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AmountChange"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            415: components["responses"]["UnsupportedMediaType"];
-            422: components["responses"]["Unprocessable"];
-            429: components["responses"]["TooManyRequests"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    pauseOptions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PauseOptions"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            409: components["responses"]["Conflict"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    pauseRecurring: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** Format: uuid */
-                    subscription_id: string;
-                    /** Format: int32 */
-                    months: number;
-                    /** Format: date-time */
-                    starts_at: string;
-                    /** Format: date-time */
-                    resumes_at: string;
-                };
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PauseResult"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
-            413: components["responses"]["PayloadTooLarge"];
-            415: components["responses"]["UnsupportedMediaType"];
-            422: components["responses"]["Unprocessable"];
-            429: components["responses"]["TooManyRequests"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    resumeOptions: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ResumeOptions"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    resumeRecurring: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
-                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    /** Format: uuid */
-                    pause_id: string;
-                    /** Format: date-time */
-                    next_renewal: string;
-                };
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Resumption"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -3907,7 +6025,7 @@ export interface operations {
                     email: string;
                     name: string;
                     /** @enum {string} */
-                    role: "ADMIN" | "FINANCE" | "SUPPORT";
+                    role: "SUPER_ADMIN" | "OP_PARTNERSHIPS" | "OP_GROWTH" | "OP_IMPACT";
                 };
             };
         };
@@ -4011,7 +6129,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    role: "ADMIN" | "FINANCE" | "SUPPORT";
+                    role: "SUPER_ADMIN" | "OP_PARTNERSHIPS" | "OP_GROWTH" | "OP_IMPACT";
                 };
             };
         };
@@ -4212,29 +6330,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             422: components["responses"]["Unprocessable"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    enrolments: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Enrolments"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -4526,7 +6621,7 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
-    partnerInquiries: {
+    staffPartners: {
         parameters: {
             query?: {
                 /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
@@ -4544,7 +6639,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PartnerPage"];
+                    "application/json": components["schemas"]["StaffPartnerPage"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -4665,6 +6760,111 @@ export interface operations {
                 };
             };
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    beginPhoneSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description E.164 phone, e.g. +14155550123. */
+                    phone: string;
+                };
+            };
+        };
+        responses: {
+            /** @description A code was requested (sent only if the phone matches an account). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        sent: true;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    finishPhoneSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    phone: string;
+                    /** @description The 6-digit code from the SMS. */
+                    code: string;
+                    /** @description Native requests only, optional. Ignored for browser requests. */
+                    device_name?: string;
+                    /**
+                     * @description Native requests only, optional. Ignored for browser requests.
+                     * @enum {string}
+                     */
+                    platform?: "IOS" | "ANDROID";
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["SignedIn"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    oidcSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: "apple" | "google";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The provider's id_token (JWT) from the native or web sign-in SDK. */
+                    id_token: string;
+                    /** @description Native requests only, optional. Ignored for browser requests. */
+                    device_name?: string;
+                    /**
+                     * @description Native requests only, optional. Ignored for browser requests.
+                     * @enum {string}
+                     */
+                    platform?: "IOS" | "ANDROID";
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["SignedIn"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
@@ -4825,6 +7025,2858 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffInitiatives: {
+        parameters: {
+            query?: {
+                /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffInitiativePage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    createInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InitiativeInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                initiative_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffInitiativeDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    updateInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                initiative_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InitiativeInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    publishInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                initiative_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    setInitiativeMetric: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                initiative_id: string;
+                /** @description Headline-metric slot 0-5. */
+                position: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    publishInitiativeMetric: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                initiative_id: string;
+                /** @description Headline-metric slot 0-5. */
+                position: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteInitiativeMetric: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                initiative_id: string;
+                /** @description Headline-metric slot 0-5. */
+                position: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    setInitiativeSpend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                initiative_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpendInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    deleteInitiativeSpend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                initiative_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteSpendRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    eventDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown or draft one. */
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventView"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    eventCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed, unknown, draft, or invite-only id is 404. */
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An iCalendar document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/calendar": string;
+                };
+            };
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    initiativeSpend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                initiative_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InitiativeSpend"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    todayInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodayInitiative"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffEvents: {
+        parameters: {
+            query?: {
+                /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
+                offset?: components["parameters"]["Offset"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffEventPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    createEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EventInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffEventDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    updateEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EventInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    publishEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    donorEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        events: components["schemas"]["EventView"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    addEventGuest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    removeEventGuest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    eventCheckInToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        token: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    checkInEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The event's QR check-in token. */
+                    token: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckInResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    inviteOnlyEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        events: components["schemas"]["EventView"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    donorEventDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventView"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    reserveEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    cancelEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReservationResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    donorNetwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NetworkSummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    donorBadges: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BadgeList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    grantBadge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BadgeCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    revokeBadge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BadgeCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerApply: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    organization: string;
+                    website: string;
+                    type: string;
+                    contact_name: string;
+                    title: string;
+                    work_email: string;
+                    phone: string;
+                    workforce_size: number;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        received: true;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerRequestSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: email */
+                    email: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Accepted, whether or not the address belongs to a partner user. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerAcceptInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    invite: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Native requests only. */
+                        session?: string;
+                        /** @description Browser requests only. */
+                        signed_in?: boolean;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        organization: string;
+                        /** @description The organization's description, as its administrators wrote it (§7.2). */
+                        description: string;
+                        /** @enum {string} */
+                        role: "ADMIN" | "VIEWER";
+                        company_code: string;
+                        /** Format: int64 */
+                        committed_minor: number;
+                        /** Format: int64 */
+                        deployed_minor: number;
+                        deployed_percent: number;
+                        /** Format: int64 */
+                        people_reached: number;
+                        /** Format: int64 */
+                        employees_enrolled: number | null;
+                        workforce_size: number;
+                        enrolled_percent: number | null;
+                        /** Format: date-time */
+                        updated_at: string | null;
+                        has_logo: boolean;
+                        committed_verified: boolean;
+                        deployed_verified: boolean;
+                        people_reached_verified: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerInitiatives: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        initiatives: {
+                            id: string;
+                            title: string;
+                            summary: string;
+                            /** @enum {string} */
+                            status: "ACTIVE" | "COMPLETE";
+                            region: string;
+                            county_count: number;
+                            /** Format: int64 */
+                            committed_minor: number;
+                            /** Format: int64 */
+                            deployed_minor: number;
+                            metrics: {
+                                label: string;
+                                /** Format: int64 */
+                                value: number;
+                                /** @enum {string} */
+                                unit: "USD_CENTS" | "PEOPLE" | "INITIATIVES" | "PARTNERS";
+                                /** Format: date */
+                                verified_on: string;
+                            }[];
+                            spend: {
+                                category: string;
+                                /** Format: int64 */
+                                amount_minor: number;
+                            }[];
+                            /** Format: date-time */
+                            updated_at: string;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerSpend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        categories: {
+                            category: string;
+                            /** Format: int64 */
+                            amount_minor: number;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        users: {
+                            id: string;
+                            email: string;
+                            name: string;
+                            role: string;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerInviteUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    name: string;
+                    role: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        invited: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerExports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        exports: {
+                            id: string;
+                            /** Format: int64 */
+                            committed_minor: number;
+                            /** Format: int64 */
+                            deployed_minor: number;
+                            /** Format: int64 */
+                            people_reached: number;
+                            exported_by: string;
+                            /** Format: date-time */
+                            created_at: string;
+                            downloadable: boolean;
+                            people_reached_verified: boolean;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branded impact report PDF */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerCompanyCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/svg+xml": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerRemoveUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, unknown>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        removed: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerSignOut: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, unknown>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        signed_out: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerPending: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        applications: {
+                            id: string;
+                            organization: string;
+                            website: string;
+                            type: string;
+                            contact_name: string;
+                            title: string;
+                            work_email: string;
+                            phone: string;
+                            workforce_size: number;
+                            status: string;
+                            decision_reason: string;
+                            approved_partner_id: string | null;
+                        }[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerApprove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                appID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, unknown>;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        partner_id: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerReject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                appID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        rejected: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    initiative_id: string;
+                    /** Format: int64 */
+                    committed_minor?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        linked: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerMatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    match_rate_bp: number;
+                    /** Format: int64 */
+                    match_cap_minor: number;
+                    workforce_size: number;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        saved: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    employeeEnroll: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    company_code: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        organization: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    employeeTeam: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        partner_id: string;
+                        organization: string;
+                        team_id?: string;
+                        team_name?: string;
+                        leaderboard: components["schemas"]["TeamLeaderboardRow"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    employeeJoinTeam: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        team_id: string;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    employeeOurPeople: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: int64 */
+                        enrolled: number;
+                        workforce_size: number;
+                        /** Format: int64 */
+                        given_minor: number;
+                        /** Format: int64 */
+                        matched_minor: number;
+                        /** Format: int64 */
+                        avg_streak_days: number;
+                        /** Format: int64 */
+                        volunteer_minutes: number;
+                        /** Format: int64 */
+                        teams: number;
+                        suppressed: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    employeeTeams: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        teams: components["schemas"]["TeamLeaderboardRow"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    employeeWorkforce: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    workforce_size: number;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        saved: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerSaveProfile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    organization: string;
+                    description: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        saved: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerMatchStatus: {
+        parameters: {
+            query: {
+                year: number;
+            };
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        year: number;
+                        match_rate_bp: number;
+                        /** Format: int64 */
+                        match_cap_minor: number;
+                        /** Format: int64 */
+                        gifts_minor: number;
+                        /** Format: int64 */
+                        owed_minor: number;
+                        /** Format: int64 */
+                        paid_minor: number;
+                        /** Format: int64 */
+                        outstanding_minor: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerMatchPayment: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Version-4 UUID identifying this offline payment. Reuse the same key and payload after an uncertain result. Reusing it with another payload returns 409. Omission remains compatible with older clients but cannot deduplicate a retry. */
+                "Idempotency-Key"?: string;
+            };
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    year: number;
+                    /** Format: int64 */
+                    amount_minor: number;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        recorded: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The request key already identifies a different payment. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffReport: {
+        parameters: {
+            query: {
+                /** @description Inclusive window start, RFC3339 (UTC). */
+                start: string;
+                /** @description Exclusive window end and observation cutoff, RFC3339 (UTC). */
+                end: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Report"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerDetail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaffPartnerDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerInviteUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    name: string;
+                    /** @enum {string} */
+                    role: "ADMIN" | "VIEWER";
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        invited: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The logo as a PNG */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerSaveLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Base64 PNG/JPEG, at most 256 KiB and 512 by 512 pixels. Empty explicitly removes the logo. Stored as PNG without metadata. */
+                    data_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        saved: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffPartnerRemoveUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                partnerID: string;
+                userID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        removed: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    setInitiativeRotation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                initiative_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    in_rotation: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        in_rotation: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    cancelStaffEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        cancelled: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    staffEventCheckIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        checked_in: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    eventCheckInQR: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/svg+xml": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerRetainedReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branded impact report PDF */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The logo as a PNG */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerSaveLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Base64 PNG/JPEG, at most 256 KiB and 512 by 512 pixels. Empty explicitly removes the logo. Stored as PNG without metadata. */
+                    data_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        saved: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    recognitionWording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecognitionWording"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    setRecognitionWording: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "BADGE" | "MILESTONE";
+                    /** @description Badge code, or a milestone's day count */
+                    key: string;
+                    title: string;
+                    text: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        saved: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    importFoundingClaims: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    claims_csv: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description Distinct addresses in the file */
+                        rows: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    publishedInitiatives: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicInitiative"][];
+                };
+            };
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    publishedInitiative: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A draft or unknown slug is 404. */
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicInitiative"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    donorEventCalendar: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed, unknown, draft, cancelled, or unauthorized event is 404. */
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An iCalendar document. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/calendar": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerRegisterPushDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    platform: "IOS" | "ANDROID";
+                    /** @description For iOS, the APNs device token as hex (either case); for Android, the FCM registration token. */
+                    token: string;
+                    /**
+                     * @description iOS only: the APNs environment that issued the token (SANDBOX for development builds). Omit for Android.
+                     * @default PRODUCTION
+                     * @enum {string}
+                     */
+                    environment?: "SANDBOX" | "PRODUCTION";
+                };
+            };
+        };
+        responses: {
+            /** @description The session's registration after the request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushRegistration"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    partnerUnregisterPushDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The session's registration after the request. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PushRegistration"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    applyWithReceipt: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    application: {
+                        organization: string;
+                        website: string;
+                        type: string;
+                        contact_name: string;
+                        title: string;
+                        work_email: string;
+                        phone: string;
+                        workforce_size: number;
+                    };
+                    /** @description Generate 32 cryptographically random bytes and encode as unpadded base64url. Keep this value for idempotent retries. Browsers receive an HttpOnly receipt cookie; native clients store the receipt securely. */
+                    receipt: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        received: true;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    applicationStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Application status only; no contact information or staff notes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApplicationStatus"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    recomputeRecognition: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Recognition and its audit event committed together. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        recomputed: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    publishInitiativeSpend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                initiative_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteSpendRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, unknown>;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    postDonorStaffDonorsDonorIdRecognitionReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A malformed ID is 404, like an unknown one. */
+                donor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    reason: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Recognition and its audit event committed together. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        reset: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    getDonorStaffContentRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecognitionRules"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    postDonorStaffContentRules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecognitionRules"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @constant */
+                        saved: true;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    postDonorSignup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    email: string;
+                    zip: string;
+                    city: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Accepted, whether or not the address has an account. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        message: string;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    postDonorPasswordSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    email: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            200: components["responses"]["SignedIn"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    postDonorMePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    current_password?: string;
+                    password: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        saved: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };

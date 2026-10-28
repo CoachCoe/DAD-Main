@@ -25,13 +25,37 @@ export function formatDollars(minor: number, currency = "USD"): string {
   return formatter(currency, minor % 100 === 0 ? 0 : 2).format(minor / 100);
 }
 
-/** The monthly charge and its daily framing, which must always be shown at equal weight. */
-export function monthlyFraming(minor: number): { monthly: string; daily: string } {
-  return { monthly: `${formatDollars(minor)}/month`, daily: `about ${formatDollars(Math.round(minor / 30))} a day` };
+/** A gift is whole dollars a day, billed monthly as the daily amount × 30, up to $30 a day (G-1, G-2). */
+export const BILLING_DAYS = 30;
+export const MAX_DAILY_DOLLARS = 30;
+const DAY_MINOR = 100 * BILLING_DAYS;
+
+/** Whether a monthly amount is a gift a donor can choose today. */
+export function isGiftAmount(minor: number): boolean {
+  return (
+    Number.isInteger(minor) && minor >= DAY_MINOR && minor <= MAX_DAILY_DOLLARS * DAY_MINOR && minor % DAY_MINOR === 0
+  );
 }
 
-export const MIN_GIFT_MINOR = 100;
-export const MAX_GIFT_MINOR = 99_999_999;
+/** The monthly charge for a typed whole-dollar daily amount ("3" or "$3"), or null outside $1–$30 a day. */
+export function dailyGiftMinor(input: string): number | null {
+  const match = /^\$?(\d{1,2})$/.exec(input.trim());
+  if (!match) return null;
+  const minor = Number(match[1]) * DAY_MINOR;
+  return isGiftAmount(minor) ? minor : null;
+}
+
+/**
+ * The monthly charge and its daily framing, which must always be shown at equal weight. A gift
+ * recorded before the daily rule may not divide evenly, so its daily figure is approximate.
+ */
+export function monthlyFraming(minor: number): { monthly: string; daily: string } {
+  const daily = minor % BILLING_DAYS === 0 && (minor / BILLING_DAYS) % 100 === 0;
+  return {
+    monthly: `${formatDollars(minor)}/month`,
+    daily: `${daily ? "" : "about "}${formatDollars(Math.round(minor / BILLING_DAYS))} a day`,
+  };
+}
 
 /**
  * Parses a typed dollar amount into exact integer cents. Accepts what people naturally type

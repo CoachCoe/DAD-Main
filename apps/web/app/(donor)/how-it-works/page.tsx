@@ -17,9 +17,9 @@ export default function HowItWorks() {
       </p>
       <h2>Giving</h2>
       <p>
-        Choose recurring or one-time giving on the web, without creating an account first. Recurring giving suggests
-        about a dollar a day, billed as $30/month, and $90, $150, or an amount you choose work too: the monthly amount
-        is what your card is charged. One-time gifts are welcome too.
+        Give monthly on the web, without creating an account first. Giving suggests about a dollar a day, billed as
+        $30/month, and $90, $150, or an amount you choose up to $900/month work too: the monthly amount is what your
+        card is charged.
       </p>
       <h2>Your circle</h2>
       <p>
@@ -33,12 +33,14 @@ export default function HowItWorks() {
       </p>
       <h2>Streaks and recognition</h2>
       <p>
-        Successful monthly gifts build your streak; one-time gifts contribute money but do not. A failed renewal has 14
-        days to recover before your active streak resets. Pausing for up to three months freezes your streak; it
-        continues when monthly giving resumes. Cancellation ends it at the first skipped renewal. Your historical best
-        stays recorded.
+        Successful monthly gifts keep your streak growing in local calendar days. A failed renewal has 7 days to recover
+        before your active streak resets. Cancellation ends it at the first skipped renewal. Your historical best stays
+        recorded.
       </p>
-      <p>DAD launches on 22 April 2027. A first gift completed before launch earns a permanent Founding Donor badge.</p>
+      <p>
+        DAD launches on 22 April 2027. A first gift completed before 1 January 2027 (New York time) earns a permanent
+        Founding Donor badge.
+      </p>
       <h2>Clear records, honest limits</h2>
       <p>
         The impact ledger is updated by staff on a stated cadence. Figures carry an as-of date, illustrative figures are
@@ -46,9 +48,9 @@ export default function HowItWorks() {
       </p>
       <h2>Programs start at launch</h2>
       <p>
-        This donor release does not enrol recipients or send money to them. Aid programs begin at launch, when
-        recipients and partners get their own accounts and the DAD donor app arrives for iOS and Android. Until then,
-        partners can register interest with the website form.
+        This donor release does not enrol recipients or send money to them. Aid programs begin at launch. Partners can
+        apply now; approved partners use the partner portal to manage their profile, initiatives, employee giving, and
+        reports. Donor apps for iOS and Android are being developed separately.
       </p>
       <p className="note">
         This environment is a sandbox preview using Stripe test payments. No real donation is collected.
@@ -62,7 +64,9 @@ export default function HowItWorks() {
         </Link>
       </div>
       <p>
-        <Link href="/partners">Partner interest form</Link>
+        <Link href="/apply">Partner application</Link>
+        {" · "}
+        <a href="/partner/sign-in">Partner sign-in</a>
       </p>
     </Page>
   );

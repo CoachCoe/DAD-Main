@@ -33,7 +33,7 @@ it("holds a tap made before the referral is saved, rather than losing the attrib
   expect(screen.getByRole("status")).toHaveTextContent("Saving your referral…");
 });
 
-it("never names an earlier first-touch referrer returned by the capture", async () => {
+it("does not let a capture response rename the server-rendered invitation", async () => {
   let captured = () => {};
   const applied = new Promise<void>((resolve) => {
     captured = resolve;
@@ -44,7 +44,7 @@ it("never names an earlier first-touch referrer returned by the capture", async 
       ok: true,
       json: async () => {
         captured();
-        return { captured: true, public_name: "Earlier Referrer" };
+        return { captured: true, public_name: "Unexpected Name" };
       },
     }),
   );
@@ -52,7 +52,7 @@ it("never names an earlier first-touch referrer returned by the capture", async 
   await applied;
   await act(async () => {});
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Sam invited you to DAD");
-  expect(screen.queryByText(/Earlier Referrer/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Unexpected Name/)).not.toBeInTheDocument();
 });
 
 it("leads with the unavailable message for a replaced code", async () => {

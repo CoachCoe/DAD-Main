@@ -45,6 +45,47 @@ it.each(["203.0.113.1", "2001:db8::1", "203.0.113.1, 203.0.113.2", "unknown"])(
 
 const context = (...path: string[]) => ({ params: Promise.resolve({ path }) });
 
+const publicID = "40fd6316-889e-4cf0-b5df-81b589a390b3";
+
+it.each([
+  ["events", publicID],
+  ["events", publicID, "calendar.ics"],
+  ["initiatives", publicID, "spend"],
+])("relays the published read at %j", async (...path) => {
+  vi.stubEnv("DONOR_API_BASE_URL", "http://api.test:8002");
+  const fetch = vi.fn().mockResolvedValue(new Response("published", { status: 200 }));
+  vi.stubGlobal("fetch", fetch);
+  const response = await GET(new NextRequest(`http://localhost:3000/api/${path.join("/")}`), context(...path));
+  expect(response.status).toBe(200);
+  expect(await response.text()).toBe("published");
+  expect(fetch.mock.calls[0][0].href).toBe(`http://api.test:8002/${path.join("/")}`);
+});
+
+it.each([
+  ["events"],
+  ["events", publicID, "check-in"],
+  ["events", publicID, "attendees"],
+  ["initiatives", publicID],
+  ["initiatives", publicID, "metrics"],
+  ["analytics", "events"],
+])("keeps unpublished proxy paths closed: %j", async (...path) => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  expect((await GET(new NextRequest("http://localhost:3000/api/x"), context(...path))).status).toBe(404);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("refuses mutations through the public event read proxy", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const response = await POST(
+    new NextRequest(`http://localhost:3000/api/events/${publicID}`, { method: "POST", body: "{}" }),
+    context("events", publicID),
+  );
+  expect(response.status).toBe(404);
+  expect(fetch).not.toHaveBeenCalled();
+});
+
 it.each([
   [["claims"]],
   [["staff", "donor"]],
@@ -85,7 +126,7 @@ it("forwards only the allowlisted request headers", async () => {
         authorization: "Bearer stolen",
         "x-dad-client": "native",
         "x-forwarded-host": "evil.example",
-        "x-staff-role": "ADMIN",
+        "x-staff-role": "SUPER_ADMIN",
         forwarded: "for=1.2.3.4",
         host: "evil.example",
       },

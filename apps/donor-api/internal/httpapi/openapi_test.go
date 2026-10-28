@@ -92,10 +92,12 @@ func TestContractListsExactlyTheServedRoutes(t *testing.T) {
 
 func TestContractSecurityMatchesRouteAuth(t *testing.T) {
 	schemes := map[auth][]string{
-		noAuth:     {},
-		donorAuth:  {"bearerAuth", "cookieAuth"},
-		staffAuth:  {"staffCookieAuth"},
-		stripeAuth: {"stripeSignature"},
+		applicationAuth: {"applicationBearerAuth", "applicationCookieAuth"},
+		noAuth:          {},
+		donorAuth:       {"bearerAuth", "cookieAuth"},
+		partnerAuth:     {"partnerBearerAuth", "partnerCookieAuth"},
+		staffAuth:       {"staffCookieAuth"},
+		stripeAuth:      {"stripeSignature"},
 	}
 	ops := loadContract(t).operations()
 	for _, route := range allRoutes() {
@@ -177,11 +179,14 @@ func (c *contract) lookup(pointer string) any {
 // properties, recursively, so a renamed or added field fails here first.
 func TestContractSchemasMatchGoTypes(t *testing.T) {
 	responses := map[string]any{
+		"GET /donor/partner/application-status":                      store.ApplicationStatus{},
 		"GET /donor/public/content":                                  store.PublicContent{},
 		"POST /donor/checkouts":                                      payments.CheckoutResult{},
 		"GET /donor/me/dashboard":                                    store.DonorDashboard{},
 		"GET /donor/me/profile":                                      store.Profile{},
 		"POST /donor/me/preferences":                                 store.Profile{},
+		"POST /donor/partner/push-device":                            store.PushRegistration{},
+		"POST /donor/partner/push-device/unregister":                 store.PushRegistration{},
 		"POST /donor/me/push-device":                                 store.PushRegistration{},
 		"POST /donor/me/push-device/unregister":                      store.PushRegistration{},
 		"GET /donor/me/conversions":                                  store.Conversions{},
@@ -195,12 +200,8 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/me/annual-summary/{year}":                        store.AnnualSummary{},
 		"GET /donor/me/recurring":                                    store.RecurringDetails{},
 		"GET /donor/me/recurring/amount":                             store.AmountOptions{},
-		"GET /donor/me/recurring/pause":                              store.PauseOptions{},
-		"GET /donor/me/recurring/resume":                             store.ResumeOptions{},
 		"GET /donor/me/payment-method":                               store.PaymentMethodStatus{},
 		"POST /donor/me/recurring/cancel":                            store.RecurringDetails{},
-		"POST /donor/me/recurring/pause":                             store.PauseResult{},
-		"POST /donor/me/recurring/resume":                            store.Resumption{},
 		"POST /donor/me/recurring/amount":                            store.AmountChange{},
 		"POST /donor/me/payment-method/setup":                        store.PaymentUpdate{},
 		"POST /donor/passkeys/sign-in/options":                       store.Ceremony{},
@@ -220,7 +221,6 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/staff/donors/{donor_id}/actions":                 store.ActionPage{},
 		"GET /donor/staff/donors/{donor_id}/actions/pending":         store.PendingAction{},
 		"GET /donor/staff/audit":                                     store.AuditPage{},
-		"GET /donor/staff/enrolments":                                store.Enrolments{},
 		"POST /donor/staff/messages/{message_id}/resend":             store.QueuedMessage{},
 		"GET /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund":  store.RefundQuote{},
 		"POST /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund": store.StaffRefund{},
@@ -228,18 +228,37 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/staff/donors/{donor_id}/cancellation":           store.StaffCancellation{},
 		"GET /donor/staff/exports":                                   store.ExportDatasets{},
 		"GET /donor/staff/content":                                   store.ContentInventory{},
-		"GET /donor/staff/partners":                                  store.PartnerPage{},
+		"GET /donor/staff/events":                                    store.StaffEventPage{},
+		"GET /donor/staff/events/{event_id}":                         store.StaffEventDetail{},
+		"GET /donor/staff/initiatives":                               store.StaffInitiativePage{},
+		"GET /donor/staff/initiatives/{initiative_id}":               store.StaffInitiativeDetail{},
+		"GET /donor/staff/partners":                                  store.StaffPartnerPage{},
+		"GET /donor/staff/partners/{partnerID}":                      store.StaffPartnerDetail{},
 		"POST /donor/staff/content/sources":                          store.StoredSource{},
 		"POST /donor/staff/content/publish":                          store.Publication{},
+		"GET /initiatives/{initiative_id}/spend":                     store.InitiativeSpend{},
+		"GET /donor/me/today-initiative":                             store.TodayInitiative{},
+		"GET /donor/me/network":                                      store.NetworkSummary{},
+		"GET /events/{event_id}":                                     store.EventView{},
+		"GET /donor/me/events/{event_id}":                            store.EventView{},
+		"POST /donor/me/events/check-in":                             store.CheckInResult{},
+		"GET /donor/partner/overview":                                store.PartnerOverview{},
+		"GET /donor/partner/our-people":                              store.PartnerOurPeople{},
+		"GET /donor/me/team":                                         store.DonorTeam{},
+		"GET /donor/me/badges": struct {
+			Badges []store.BadgeView `json:"badges"`
+		}{},
+		"GET /donor/partner/initiatives": struct {
+			Initiatives []store.PartnerInitiative `json:"initiatives"`
+		}{},
 	}
 	requests := map[string]any{
+		"POST /donor/partner/applications":                           applicationReceiptBody{},
+		"POST /donor/staff/donors/{donor_id}/recognition/recompute":  recomputeRecognitionBody{},
 		"POST /donor/passkeys/sign-in":                               donorPasskeySignInBody{},
 		"POST /donor/me/passkeys/register":                           registerPasskeyBody{},
 		"POST /donor/checkouts":                                      checkoutBody{},
-		"POST /donor/public/partner-signup":                          store.PartnerRequest{},
 		"POST /donor/me/recurring/cancel":                            cancelBody{},
-		"POST /donor/me/recurring/pause":                             pauseBody{},
-		"POST /donor/me/recurring/resume":                            resumeBody{},
 		"POST /donor/me/recurring/amount":                            amountBody{},
 		"POST /donor/staff/sign-in":                                  passkeyBody{},
 		"POST /donor/staff/activate/options":                         invitationTokenBody{},
@@ -249,6 +268,10 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund": refundBody{},
 		"POST /donor/staff/donors/{donor_id}/cancellation":           staffCancelBody{},
 		"POST /donor/staff/content/publish":                          store.PublicationRequest{},
+		"POST /donor/me/events/check-in":                             checkInBody{},
+		"POST /donor/staff/events":                                   store.EventInput{},
+		"POST /donor/staff/events/{event_id}":                        store.EventInput{},
+		"POST /donor/public/partner-apply":                           store.PartnerApplicationInput{},
 	}
 	c := loadContract(t)
 	ops := c.operations()

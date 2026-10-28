@@ -33,14 +33,14 @@ func TestFinancialOutboxDeduplicationYearBoundaryAndRollback(t *testing.T) {
 		mustExec(
 			t,
 			tx,
-			`INSERT INTO donor_checkouts (id,donor_id,amount_minor,currency,frequency) VALUES ($1,$2,3000,'USD','ONE_TIME')`,
+			`INSERT INTO donor_checkouts (id,donor_id,amount_minor,currency,frequency) VALUES ($1,$2,3000,'USD','MONTHLY')`,
 			draft,
 			id,
 		)
 		mustExec(
 			t,
 			tx,
-			`INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES ($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)`,
+			`INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES ($1,$2,$3,$4,3000,'USD','MONTHLY',$5)`,
 			gift,
 			id,
 			draft,
@@ -78,6 +78,8 @@ func TestFinancialOutboxDeduplicationYearBoundaryAndRollback(t *testing.T) {
 		}
 	}
 	var count int
+	// RECEIPT + ANNUAL(2026) + REFERRAL + RECOVERY(day 0) + RECOVERY(day 5)
+	// + LAPSED (the FAILED period also queues the grace-end lapse notice).
 	if err = tx.QueryRow(ctx, "SELECT count(*) FROM donor_messages WHERE donor_id=$1 OR donor_id=$2", id, referrer).Scan(&count); err != nil ||
 		count != 7 {
 		t.Fatalf("wrong outbox cardinality: %d %v", count, err)
@@ -136,13 +138,13 @@ func TestFinancialOutboxBatchesLongHistoryAndExcludesFutureGifts(t *testing.T) {
 	mustExec(
 		t,
 		tx,
-		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')",
+		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','MONTHLY')",
 		checkout,
 		id,
 	)
 	now := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
 	mustExec(t, tx, `INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at)
- SELECT gen_random_uuid(),$1,$2,'pi_'||($1::uuid)::text||'_'||n,3000,'USD','ONE_TIME',$3::timestamptz+n*interval '1 minute' FROM generate_series(-999,1) n`, id, checkout, now)
+ SELECT gen_random_uuid(),$1,$2,'pi_'||($1::uuid)::text||'_'||n,3000,'USD','MONTHLY',$3::timestamptz+n*interval '1 minute' FROM generate_series(-999,1) n`, id, checkout, now)
 	actAs(t, tx, dbroles.ProjectionWorker)
 	db := &countedOutbox{DBTX: tx}
 	for i := range 2 {

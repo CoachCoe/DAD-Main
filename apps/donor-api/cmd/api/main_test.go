@@ -11,6 +11,8 @@ import (
 
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/dbroles/dbrolestest"
+	"dad/donor-api/internal/oidc"
+	"dad/donor-api/internal/sms"
 )
 
 func TestTrustedProxiesAcceptsProxyNetworksAndRefusesOpenRanges(t *testing.T) {
@@ -55,9 +57,19 @@ func TestConfigureRejectsInvalidEnvironmentBeforeTheDatabase(t *testing.T) {
 		{"local staff on the public host", map[string]string{"DONOR_STAFF_ORIGIN": "http://localhost:3001"}},
 		{"content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "short"}},
 		{"retired content key", map[string]string{"DONOR_CONTENT_ENCRYPTION_KEY": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=,short"}},
+		{"short waitlist key", map[string]string{"DONOR_FOUNDING_CLAIM_KEY": "c2hvcnQ="}},
 		{"partial SMTP", map[string]string{"DONOR_SMTP_HOST": "smtp.example.org"}},
 		{"partial APNs", map[string]string{"DONOR_PUSH_APNS_TEAM_ID": "TEAM123456"}},
 		{"unreadable FCM key", map[string]string{"DONOR_PUSH_FCM_KEY_FILE": "/nonexistent/firebase.json"}},
+		{"SMS stub off this machine", map[string]string{
+			"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_SMS_PROVIDER": "stub", "DONOR_SMS_FROM": "DAD",
+		}},
+		{"OIDC stub off this machine", map[string]string{
+			"DONOR_PUBLIC_ORIGIN": "https://dad.example.org", "DONOR_OIDC_MODE": "stub", "DONOR_OIDC_STUB_KEY": "k",
+			"DONOR_OIDC_GOOGLE_CLIENT_ID": "g.apps",
+		}},
+		{"invalid SMS settings", map[string]string{"DONOR_SMS_PROVIDER": "twilio"}},
+		{"invalid OIDC settings", map[string]string{"DONOR_OIDC_MODE": "live"}},
 	} {
 		getenv := func(name string) string { return cmp.Or(tc.env[name], base[name]) }
 		_, release, err := configure(context.Background(), getenv)
@@ -125,6 +137,33 @@ func TestConfigureOffersDonorPasskeysOnlyOnAHostName(t *testing.T) {
 		release()
 		if err != nil || (services.DonorPasskeys != nil) != want {
 			t.Errorf("%s: got passkeys %v, err %v; want passkeys %v", origin, services.DonorPasskeys != nil, err, want)
+		}
+	}
+}
+
+func TestSignInStubsNeedALocalOriginOrAnOptIn(t *testing.T) {
+	smsStub := &sms.Settings{Provider: "stub", Sender: "DAD"}
+	oidcStub := &oidc.Settings{Mode: "stub", StubKey: "k", ClientIDs: map[oidc.Provider][]string{oidc.Google: {"g"}}}
+	none := func(string) string { return "" }
+	optIn := func(name string) string { return map[string]string{allowSignInStubs: "true"}[name] }
+	for _, tc := range []struct {
+		name   string
+		sms    *sms.Settings
+		oidc   *oidc.Settings
+		origin string
+		getenv func(string) string
+		ok     bool
+	}{
+		{"SMS stub locally", smsStub, nil, "http://localhost:3000", none, true},
+		{"OIDC stub on a local name", nil, oidcStub, "http://dad.localhost:3000", none, true},
+		{"SMS stub off this machine", smsStub, nil, "https://dad.example.org", none, false},
+		{"OIDC stub off this machine", nil, oidcStub, "https://dad.example.org", none, false},
+		{"stubs opted in", smsStub, oidcStub, "https://test.dad.example.org", optIn, true},
+		{"real providers", &sms.Settings{Provider: "twilio"}, &oidc.Settings{Mode: "live"}, "https://dad.example.org", none, true},
+		{"nothing configured", nil, nil, "https://dad.example.org", none, true},
+	} {
+		if err := validateSignInStubs(tc.sms, tc.oidc, tc.origin, tc.getenv); (err == nil) != tc.ok {
+			t.Errorf("%s: err = %v, want ok=%v", tc.name, err, tc.ok)
 		}
 	}
 }

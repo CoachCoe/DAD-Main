@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 	"time"
+
+	"dad/donor-api/internal/store"
 )
 
 var asOf = time.Date(2026, 10, 7, 15, 4, 5, 0, time.UTC)
@@ -30,15 +32,13 @@ func TestGenerateIsDeterministic(t *testing.T) {
 
 func TestPopulationHasALaunchShape(t *testing.T) {
 	pop := generate(50000, 0, 1, asOf)
-	var oneTime, abandoned, monthly, monthly30, referred, sharers, referrers, heavy, periods, failed int
+	var abandoned, monthly, monthly30, referred, sharers, referrers, heavy, periods, failed int
 	var mostReferrals int64
-	var longest, atRisk, paused, cancelled, pastDue, refunds int
+	var longest, atRisk, cancelled, pastDue, refunds int
 	for _, d := range pop.donors {
 		switch first := d.checkouts[0]; {
 		case first.status == "EXPIRED":
 			abandoned++
-		case first.frequency == "ONE_TIME":
-			oneTime++
 		default:
 			monthly++
 			if first.amount == 3000 {
@@ -74,9 +74,6 @@ func TestPopulationHasALaunchShape(t *testing.T) {
 					refunds++
 				}
 			}
-			if c.pause != nil {
-				paused++
-			}
 			if c.sub != nil && c.sub.status == "canceled" {
 				cancelled++
 			} else if c.sub != nil && c.sub.status == "past_due" {
@@ -86,8 +83,7 @@ func TestPopulationHasALaunchShape(t *testing.T) {
 	}
 	share := func(n int) float64 { return float64(n) / float64(len(pop.donors)) }
 	for name, check := range map[string]struct{ got, want, tolerance float64 }{
-		"monthly":      {share(monthly), 1 - abandonedShare - oneTimeShare, 0.02},
-		"one-time":     {share(oneTime), oneTimeShare, 0.02},
+		"monthly":      {share(monthly), 1 - abandonedShare, 0.02},
 		"abandoned":    {share(abandoned), abandonedShare, 0.01},
 		"$30 monthly":  {float64(monthly30) / float64(monthly), 0.60, 0.02},
 		"referred":     {share(referred), 0.40, 0.08},
@@ -101,12 +97,11 @@ func TestPopulationHasALaunchShape(t *testing.T) {
 	if share(referrers) > 0.2 || heavy == 0 || mostReferrals < 200 {
 		t.Errorf("referrals are not heavy-tailed: %d referrers, %d with 100+, most %d", referrers, heavy, mostReferrals)
 	}
-	if longest < 20 || atRisk == 0 || paused == 0 || cancelled == 0 || pastDue == 0 || refunds == 0 {
+	if longest < 20 || atRisk == 0 || cancelled == 0 || pastDue == 0 || refunds == 0 {
 		t.Errorf(
-			"missing recognition edge cases: longest streak %d, %d at risk, %d paused, %d cancelled, %d past due, %d refunds",
+			"missing recognition edge cases: longest streak %d, %d at risk, %d cancelled, %d past due, %d refunds",
 			longest,
 			atRisk,
-			paused,
 			cancelled,
 			pastDue,
 			refunds,
@@ -136,7 +131,7 @@ func TestFactsKeepTheSchemaAndDomainRules(t *testing.T) {
 		monthly := 0
 		for _, c := range d.checkouts {
 			unique(ids, c.id.Bytes)
-			if c.amount < 100 || (c.referrer == nil) != (c.kind == "") || c.referrer == d {
+			if !store.ValidGiftAmount(c.amount) || (c.referrer == nil) != (c.kind == "") || c.referrer == d {
 				t.Fatalf("checkout for donor %d breaks a checkout constraint", d.index)
 			}
 			if c.referrer != nil && !c.referrer.sharingAt.Before(c.expiresAt.Add(-referralWindow)) {
@@ -175,10 +170,6 @@ func TestFactsKeepTheSchemaAndDomainRules(t *testing.T) {
 			if s := c.sub; s != nil && s.status == "canceled" && s.stopsAt.IsZero() {
 				t.Fatalf("cancelled subscription for donor %d keeps renewing", d.index)
 			}
-			if p := c.pause; p != nil &&
-				(p.months < 1 || p.months > 3 || p.resumes.Sub(p.starts) < time.Duration(p.months)*28*day || p.resumes.Sub(p.starts) > time.Duration(p.months)*31*day) {
-				t.Fatalf("pause for donor %d skips the wrong renewals", d.index)
-			}
 		}
 		if monthly > 1 || d.streak < 0 {
 			t.Fatalf("donor %d has %d monthly subscriptions and streak %d", d.index, monthly, d.streak)
@@ -215,5 +206,135 @@ func TestReferralCodesFollowInfluence(t *testing.T) {
 	}
 	if len(codes) != fixtureCodes || visits[top.code] < 10 || len(visits) < 100 {
 		t.Fatalf("codes do not follow influence: %d codes, %d distinct, top sharer %d", len(codes), len(visits), visits[top.code])
+	}
+}
+
+// TestEngagementLayerKeepsItsConstraints checks the partners/employees/events/
+// reservations the engagement layer adds satisfy the schema and domain rules
+// the event, partner and employee reads depend on.
+func TestEngagementLayerKeepsItsConstraints(t *testing.T) {
+	pop := generate(20000, 0, 7, asOf)
+	if len(pop.partners) != partnerCount || len(pop.initiatives) != initiativeCount || len(pop.events) != eventCount {
+		t.Fatalf("engagement sizes: %d partners, %d initiatives, %d events", len(pop.partners), len(pop.initiatives), len(pop.events))
+	}
+
+	ids := map[[16]byte]bool{}
+	codes := map[string]bool{}
+	unique := func(id [16]byte) {
+		if ids[id] {
+			t.Fatalf("duplicate engagement identifier %x", id)
+		}
+		ids[id] = true
+	}
+
+	oneEmployer := map[[16]byte]bool{} // a donor belongs to at most one partner
+	var employees, onTeam int
+	for _, p := range pop.partners {
+		unique(p.id.Bytes)
+		if p.companyCode == "" || codes[p.companyCode] || p.workforce < 0 || p.matchRateBP < 0 || p.matchCap < 0 {
+			t.Fatalf("partner %d breaks a signup constraint", p.index)
+		}
+		codes[p.companyCode] = true
+		if (p.matchRateBP == 0) != (p.matchCap == 0) {
+			t.Fatalf("partner %d has a match rate/cap mismatch", p.index)
+		}
+		teamIDs := map[[16]byte]bool{}
+		for _, tm := range p.teams {
+			unique(tm.id.Bytes)
+			teamIDs[tm.id.Bytes] = true
+		}
+		for _, e := range p.employees {
+			if e.donor.claimedAt.IsZero() {
+				t.Fatalf("an unclaimed donor was linked to partner %d", p.index)
+			}
+			if oneEmployer[e.donor.id.Bytes] {
+				t.Fatalf("donor %d is linked to two partners", e.donor.index)
+			}
+			oneEmployer[e.donor.id.Bytes] = true
+			if e.team != nil {
+				if !teamIDs[e.team.id.Bytes] {
+					t.Fatalf("employee of partner %d is on another partner's team", p.index)
+				}
+				onTeam++
+			}
+			if e.enrolledAt.Before(e.donor.claimedAt) || e.enrolledAt.After(pop.now) {
+				t.Fatalf("employee enrolment for donor %d is out of range", e.donor.index)
+			}
+			employees++
+		}
+	}
+	if employees == 0 || onTeam == 0 {
+		t.Fatalf("no employees (%d) or none on a team (%d)", employees, onTeam)
+	}
+
+	var publishedMetrics int
+	for _, in := range pop.initiatives {
+		unique(in.id.Bytes)
+		if len(in.metrics) < 2 || len(in.metrics) > 5 || in.committed < 0 {
+			t.Fatalf("initiative %d breaks a metric-count or committed constraint", in.index)
+		}
+		for pos, m := range in.metrics {
+			unique(m.id.Bytes)
+			if m.pos != pos || m.pos < 0 || m.pos >= 6 {
+				t.Fatalf("initiative %d metric position %d is out of range", in.index, m.pos)
+			}
+			publishedMetrics++
+		}
+	}
+	if publishedMetrics == 0 {
+		t.Fatal("no published initiative metrics")
+	}
+
+	var reservations, waitlisted, checkedIn, pastEvents, upcoming int
+	for _, ev := range pop.events {
+		unique(ev.id.Bytes)
+		if !ev.endsAt.After(ev.startsAt) || ev.capacity < 0 || ev.publishedAt.After(pop.now) {
+			t.Fatalf("event %d breaks a window/capacity/publish constraint", ev.index)
+		}
+		if ev.endsAt.After(pop.now) {
+			upcoming++
+		} else {
+			pastEvents++
+		}
+		donors := map[[16]byte]bool{}
+		for _, r := range ev.reservations {
+			unique(r.id.Bytes)
+			if donors[r.donor.id.Bytes] {
+				t.Fatalf("donor %d has two reservations at event %d", r.donor.index, ev.index)
+			}
+			donors[r.donor.id.Bytes] = true
+			if r.status != "RESERVED" && r.status != "WAITLISTED" {
+				t.Fatalf("event %d reservation has status %q", ev.index, r.status)
+			}
+			if r.status == "WAITLISTED" {
+				waitlisted++
+				if ev.capacity == 0 {
+					t.Fatalf("event %d has an uncapped waitlist", ev.index)
+				}
+			}
+			if !r.checkedIn.IsZero() {
+				checkedIn++
+				if r.status != "RESERVED" || ev.endsAt.After(pop.now) {
+					t.Fatalf("event %d has a check-in that is not a finished reservation", ev.index)
+				}
+				if r.checkedIn.Before(ev.startsAt) || r.checkedIn.After(ev.endsAt) {
+					t.Fatalf("event %d check-in is outside the event window", ev.index)
+				}
+			}
+			reservations++
+		}
+	}
+	if reservations == 0 || waitlisted == 0 || checkedIn == 0 || pastEvents == 0 || upcoming == 0 {
+		t.Fatalf(
+			"missing engagement edge cases: %d reservations, %d waitlisted, %d checked in, %d past, %d upcoming events",
+			reservations, waitlisted, checkedIn, pastEvents, upcoming,
+		)
+	}
+
+	// Determinism: the same seed reproduces the engagement layer.
+	other := generate(20000, 0, 7, asOf)
+	if len(other.partners) != len(pop.partners) || other.partners[0].id != pop.partners[0].id ||
+		len(other.events[0].reservations) != len(pop.events[0].reservations) {
+		t.Fatal("engagement layer is not reproducible from the seed")
 	}
 }

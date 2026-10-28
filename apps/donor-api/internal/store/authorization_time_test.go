@@ -43,7 +43,7 @@ func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 				}
 				expire, subject = "UPDATE donor_sessions SET expires_at=now() WHERE donor_id=$1", donorID
 			} else {
-				staffID, staffToken := staffFixture(t, pool, "FINANCE")
+				staffID, staffToken := staffFixture(t, pool, "SUPER_ADMIN")
 				resolve = func(tx pgx.Tx) error {
 					_, _, err := lockStaffDonor(ctx, queries.New(tx), staffToken, "gift.refund", donorID)
 					return err
@@ -72,6 +72,38 @@ func TestOwnerSessionIsRecheckedAfterLock(t *testing.T) {
 			}
 			if err = <-done; !errors.Is(err, ErrDenied) && !errors.Is(err, ErrStaffDenied) {
 				t.Fatalf("session expired during lock wait was accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestCeremonyExpiryUsesDatabaseClock(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	q := queries.New(as(t, dbroles.API))
+	for _, kind := range []string{"donor", "staff"} {
+		t.Run(kind, func(t *testing.T) {
+			token := mustNewID(t).String()
+			table := "donor_ceremonies"
+			if kind == "staff" {
+				table = "donor_staff_ceremonies"
+			}
+			mustExec(
+				t,
+				pool,
+				"INSERT INTO "+table+"(token_hash,kind,session,expires_at) VALUES($1,'SIGN_IN','{}',now()-interval '1 minute')",
+				HashToken(token),
+			)
+			t.Cleanup(func() { cleanExec(t, "DELETE FROM "+table+" WHERE token_hash=$1", HashToken(token)) })
+			laggingClock := time.Now().Add(-time.Hour)
+			var err error
+			if kind == "staff" {
+				_, _, err = takeCeremony(ctx, q, token, "SIGN_IN", laggingClock)
+			} else {
+				_, _, err = takeDonorCeremony(ctx, q, token, "SIGN_IN", laggingClock)
+			}
+			if !errors.Is(err, ErrStaffDenied) && !errors.Is(err, ErrPasskeyDenied) {
+				t.Fatalf("expired ceremony accepted with a lagging API clock: %v", err)
 			}
 		})
 	}
@@ -120,10 +152,10 @@ func TestProofExpiryIsCheckedAfterWaitingForOwnerLock(t *testing.T) {
 				}
 				redeem = func(tx pgx.Tx) error { _, _, err := claim(ctx, tx, proof, Client{}); return err }
 				expire = func() {
-					mustExec(t, lock, "UPDATE donor_login_links SET expires_at=$2 WHERE donor_id=$1", id, time.Now().UTC())
+					mustExec(t, lock, "UPDATE donor_login_links SET expires_at=clock_timestamp() WHERE donor_id=$1", id)
 				}
 			} else {
-				id, _ := staffFixture(t, pool, "SUPPORT")
+				id, _ := staffFixture(t, pool, "OP_PARTNERSHIPS")
 				t.Cleanup(func() {
 					if _, err := pool.Exec(context.Background(), "DELETE FROM donor_staff_invites WHERE staff_id=$1", id); err != nil {
 						t.Error(err)
@@ -138,7 +170,7 @@ func TestProofExpiryIsCheckedAfterWaitingForOwnerLock(t *testing.T) {
 				}
 				redeem = func(tx pgx.Tx) error { _, _, err := staffInvitation(ctx, queries.New(tx), proof); return err }
 				expire = func() {
-					mustExec(t, lock, "UPDATE donor_staff_invites SET expires_at=$2 WHERE staff_id=$1", id, time.Now().UTC())
+					mustExec(t, lock, "UPDATE donor_staff_invites SET expires_at=clock_timestamp() WHERE staff_id=$1", id)
 				}
 			}
 			tx, err := api.Begin(ctx)

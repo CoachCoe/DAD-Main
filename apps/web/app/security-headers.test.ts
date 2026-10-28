@@ -47,11 +47,18 @@ describe("security headers", () => {
     ["http://127.0.0.1:3000", "/account"],
     ["http://127.0.0.1:3000", "/account/dashboard"],
     ["http://127.0.0.1:3000", "/Account/dashboard"],
+    ["http://127.0.0.1:3000", "/partner"],
+    ["http://127.0.0.1:3000", "/partner/sign-in"],
+    ["http://127.0.0.1:3000", "/partner/accept"],
+    ["http://127.0.0.1:3000", "/Partner/sign-in"],
+    ["http://127.0.0.1:3000", "/partners"],
+    ["http://127.0.0.1:3000", "/apply"],
     ["http://127.0.0.1:3000", "/staff"],
     ["http://staff.localhost:3000", "/staff"],
     ["http://staff.localhost:3000", "/staff/sign-in"],
     ["http://staff.localhost:3000", "/staff/donors/abc"],
     ["http://staff.localhost:3000", "/account/dashboard"],
+    ["http://staff.localhost:3000", "/partner"],
     ["http://staff.localhost:3000", "/ledger"],
   ])("gives %s%s exactly one content security policy", async (origin, path) => {
     // Browsers enforce every CSP header they receive, so the static policy must stay off

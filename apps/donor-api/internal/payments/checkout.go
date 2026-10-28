@@ -27,7 +27,13 @@ var (
 	ErrListPageCap = errors.New("listing exceeded its page cap; split the range")
 )
 
+// CheckoutRequest is a guest gift. Visitor is an anonymous referral touch.
 type CheckoutRequest struct {
+	Session   string
+	Journey   string
+	Name      string
+	Zip       string
+	City      string
 	RequestID pgtype.UUID
 	Email     string
 	Amount    int64
@@ -71,6 +77,12 @@ func ValidateOrigin(origin string) error {
 		return fmt.Errorf("must be written as browsers send it: %s", canonical)
 	}
 	return nil
+}
+
+// LocalOrigin reports whether a valid origin names this machine.
+func LocalOrigin(origin string) bool {
+	u, err := url.Parse(origin)
+	return err == nil && loopback(u.Hostname())
 }
 
 // loopback reports a name browsers always resolve to this machine. Every

@@ -44,6 +44,9 @@ type Client struct {
 	App      bool
 	Device   string
 	Platform string // IOS, ANDROID, or empty
+	// CompanyToken is a company touch from the browser completing sign-in.
+	CompanyToken string
+	JourneyID    string
 }
 
 // Tokens are a new session's credentials and how long each lasts. A browser
@@ -109,6 +112,15 @@ func issueSession(ctx context.Context, q *queries.Queries, donor pgtype.UUID, cl
 	if err = q.InsertSession(ctx, session); err != nil {
 		return Tokens{}, err
 	}
+	if _, err = bindCompanyCode(ctx, q, donor, client.CompanyToken, now); err != nil {
+		return Tokens{}, err
+	}
+	var journey pgtype.UUID
+	if journey.Scan(client.JourneyID) == nil && journey.Valid {
+		if err = q.BindAnalyticsJourney(ctx, queries.BindAnalyticsJourneyParams{JourneyID: journey, DonorID: donor}); err != nil {
+			return Tokens{}, err
+		}
+	}
 	return tokens, sessionEvent(ctx, q, donor, id, "SIGNED_IN")
 }
 
@@ -158,7 +170,11 @@ func (s AccountService) Refresh(ctx context.Context, token string) (Tokens, erro
 		if err != nil {
 			return err
 		}
-		session, now := row.DonorSession, time.Now().UTC()
+		clock, err := q.DatabaseNow(ctx)
+		if err != nil {
+			return err
+		}
+		session, now := row.DonorSession, clock.Time
 		if row.Disabled || session.RevokedAt.Valid || !session.RefreshExpiresAt.Time.After(now) {
 			return ErrDenied
 		}

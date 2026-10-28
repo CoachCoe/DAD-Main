@@ -84,7 +84,7 @@ func TestClaimProjectionFailureRollsBackProofAndSession(t *testing.T) {
 	now := time.Now().UTC()
 	proof := link(t, pool, id, now)
 	checkout, gift := testID(t), testID(t)
-	if _, err := pool.Exec(ctx, `INSERT INTO donor_checkouts (id,donor_id,amount_minor,currency,frequency) VALUES ($1,$2,3000,'USD','ONE_TIME')`, checkout, id); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO donor_checkouts (id,donor_id,amount_minor,currency,frequency) VALUES ($1,$2,3000,'USD','MONTHLY')`, checkout, id); err != nil {
 		t.Fatal(err)
 	}
 	// Corrupt historical facts must not leave a half-claimed account behind.
@@ -103,7 +103,7 @@ func TestClaimProjectionFailureRollsBackProofAndSession(t *testing.T) {
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_sessions WHERE donor_id=$1", id).Scan(&count); err != nil || count != 0 {
 		t.Fatal("failed claim inserted session")
 	}
-	if _, err := pool.Exec(ctx, "UPDATE donor_gifts SET frequency='ONE_TIME' WHERE id=$1", gift); err != nil {
+	if _, err := pool.Exec(ctx, "UPDATE donor_gifts SET frequency='MONTHLY' WHERE id=$1", gift); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.ClaimAccount(ctx, proof, "", Client{}); err != nil {

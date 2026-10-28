@@ -74,7 +74,7 @@ it("never shows a transport error to a donor", () => {
 });
 
 it("keeps an uncertain command's statement while explaining the failure", () => {
-  const statement = "Pause is not confirmed. Retry the same request.";
+  const statement = "Cancellation is not confirmed. Retry the same request.";
   expect(unconfirmedMessage(new TypeError("Failed to fetch"), statement)).toBe(`${statement} ${OFFLINE_MESSAGE}`);
   expect(unconfirmedMessage(new ApiError("Slow down", 429), statement)).toBe(`${statement} ${RATE_LIMITED_MESSAGE}`);
   expect(unconfirmedMessage(new ApiError("Internal", 503), statement)).toBe(statement);

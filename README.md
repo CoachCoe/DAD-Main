@@ -1,9 +1,12 @@
 # DAD — donor release
 
-The R1 donor application for Dynamic Aid Delivery: guest giving, direct Link and IRL
-referrals, a donor dashboard, recurring-gift controls, and an audited staff back office.
-The backend is Go, the web application is TypeScript/Next.js, and persistence is
-PostgreSQL. Licensed under MIT.
+The R1 application for Dynamic Aid Delivery: guest giving, direct Link and IRL
+referrals, a donor dashboard with streak recognition, badges, rankings and network
+milestones, funded initiatives with a daily rotation, events and volunteering, recurring-gift
+controls, a partner portal, employee giving with matching and teams, and an audited staff
+back office. The backend is Go, the web application is TypeScript/Next.js, and persistence is
+PostgreSQL; a generated OpenAPI contract and a shared mobile-foundation bundle back the
+web client and the native iOS and Android clients from one source of truth. Licensed under MIT.
 
 **This build accepts Stripe test payments only.** Live donations, approved tax receipts,
 Wallet passes, and release acceptance are not established by running it locally. See
@@ -11,12 +14,14 @@ Wallet passes, and release acceptance are not established by running it locally.
 Optional [Wallet signing](docs/wallet.md), [analytics definitions](docs/analytics.md),
 and [shared design values](docs/design-system.md) have separate setup and acceptance boundaries.
 
-R1 is a donor product. It does not deliver aid, assess recipients, run AI services, or
-publish blockchain transactions. The enrolment export is an inactive R2 stub.
+R1 raises and recognises recurring giving and routes it to funded initiatives. It does not
+itself deliver aid, assess recipients, run AI services, or publish blockchain transactions,
+and no money moves for employer matching inside the app — the match owed is computed and an
+administrator records payment received out of band.
 
 ## Local setup
 
-Requires Go 1.27.2, Node 22.19+ (or Node 24), npm, and Docker Compose, which runs
+Requires Go 1.27.3, Node 22.19+ (or Node 24), npm, and Docker Compose, which runs
 PostgreSQL 16 on 127.0.0.1.
 Commands below run from the repository root. The local database uses port 55432.
 
@@ -118,7 +123,7 @@ DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" make test-browser-e2e
 
 Browser tests run against `next dev` by default; set `E2E_PRODUCTION=1` to run them
 against a production build (`npm run build && npm start`), where account and staff pages
-use the nonce-based CSP. Next allows
+use the nonce-based CSP, as do partner-portal pages. Next allows
 one dev server per checkout, so stop any running `make web` first. Staff pages are tested
 on `DONOR_STAFF_ORIGIN` (default http://staff.localhost:3000) with Chromium's virtual
 authenticator; the staff journey provisions or recovers `e2e.administrator@example.org`
@@ -147,15 +152,23 @@ app's API types from the OpenAPI contract; commit each source with its generated
 `make check-generated` fails if either has drifted.
 Applied migrations are immutable and checksum-checked.
 
+With the iOS and Android toolchains and sibling checkouts installed,
+`make test-native-clients` proves both generated clients' session lifecycle against a
+temporary HTTPS Go API and the synthetic test database. See
+[native client acceptance](docs/mobile-foundation.md#real-native-client-acceptance)
+for the command, checkout overrides, and its provider/device acceptance boundary.
+
 The ATM acceptance ledger uses a dedicated [durable store and recovery
 procedure](docs/atm-ledger.md). `make test-ledger lint-ledger` validates its Worker,
 transactional storage, OIDC access, archive recovery and migration client. The original
 Git ledger history is retained as an archive tag; workflows require durable publication.
 
 Capacity is measured against a seeded, disposable deployment: `make seed` fills a
-dedicated database with 50,000 synthetic donors and writes a private fixture of session
-tokens and referral codes, and `make loadtest-seeded` runs a referral-spike burst and soak
-against an API serving it. See [operations](docs/operations.md#load-testing-with-representative-data)
+dedicated database with 50,000 synthetic donors — with their partners, employees, teams,
+initiatives, events and reservations — and writes a private fixture of session tokens,
+referral codes and event ids, and `make loadtest-seeded` runs a referral-spike burst and
+soak, an event-day burst, and a dashboard soak against an API serving it. See
+[operations](docs/operations.md#load-testing-with-representative-data)
 for the guard, the mix, budgets, and reading results. For a quick check of a few
 endpoints, `-url` reads a comma-separated list in equal measure:
 
@@ -185,7 +198,8 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 - `apps/donor-api/api`: the OpenAPI contract for web and native clients, checked by tests.
 - `apps/donor-api/testdata`: recognition scenarios and fixtures shared by tests.
 - `apps/donor-api/tools`: a module pinning the staticcheck build `make lint-go` runs.
-- `apps/web`: public website, donor account, staff interface, browser and unit tests.
+- `apps/web`: public website, donor account, partner portal, staff console, browser and unit tests.
+- `contracts/mobile`: the generated mobile-foundation bundle the native iOS and Android clients build against, checked by `make check-mobile`.
 - `deploy/nginx`: the production ingress configuration.
 - `scripts`: deployment, backup, restore verification, and ingress checks.
 - `docs`: product rules, architecture, operations, and security guidance.

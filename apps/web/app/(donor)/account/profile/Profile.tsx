@@ -4,11 +4,23 @@ import Link from "next/link";
 import { useCallback, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
+import { PasswordAccess } from "@/components/donor/PasswordAccess";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { ApiError, api, failureMessage, type RequestBody, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { Passkeys } from "./Passkeys";
 import { Sessions } from "./Sessions";
+
+/** Volunteer interests offered on the web (E-1). A saved interest outside this list is kept. */
+export const volunteerInterests: Record<string, string> = {
+  "food-security": "Food banks and meal programs",
+  mentoring: "Mentoring and tutoring",
+  "community-cleanup": "Community clean-ups",
+  housing: "Housing and shelter",
+  "fundraising-events": "Fundraising events",
+};
+
+const field = (form: FormData, name: string) => String(form.get(name) ?? "").trim();
 
 export default function Profile() {
   const [signedOut, setSignedOut] = useState(false);
@@ -19,6 +31,7 @@ export default function Profile() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [newEmail, setNewEmail] = useState("");
+  const [deleted, setDeleted] = useState(false);
   const markSignedOut = useCallback(() => setSignedOut(true), []);
   const messages = resourceMessages(resource, {
     loading: "Loading profile…",
@@ -52,11 +65,50 @@ export default function Profile() {
             push_referral_converted: data.push_referral_converted,
             push_streak_at_risk: data.push_streak_at_risk,
             push_streak_milestone: data.push_streak_milestone,
+            push_streak_lapsed: data.push_streak_lapsed,
+            push_badge_earned: data.push_badge_earned,
+            push_gift_processed: data.push_gift_processed,
+            push_event_nearby: data.push_event_nearby,
+            push_event_reminder: data.push_event_reminder,
+            push_event_promoted: data.push_event_promoted,
+            rankings_opted_out: data.rankings_opted_out,
+            network_visible: data.network_visible,
+            volunteer: data.volunteer,
+            volunteer_interests: data.volunteer_interests,
           } satisfies RequestBody<"/donor/me/preferences", "post">),
         }),
       );
-      setMessage("Notification preferences saved.");
+      setMessage("Preferences saved.");
     }, "Preferences were not confirmed. Refresh to check the saved choices before retrying.");
+  };
+  const saveDetails = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    run(async () => {
+      setData(
+        await api<Schema<"Profile">>("/donor/me/profile", {
+          method: "POST",
+          body: JSON.stringify({
+            zip: field(form, "zip"),
+            city: field(form, "city"),
+            phone: field(form, "phone"),
+          } satisfies RequestBody<"/donor/me/profile", "post">),
+        }),
+      );
+      setMessage("Your details were saved.");
+    }, "Your details were not saved. Please retry in a moment.");
+  };
+  const toggleInterest = (interest: string, chosen: boolean) => {
+    if (!data) return;
+    const others = data.volunteer_interests.filter((saved) => saved !== interest);
+    setData({ ...data, volunteer_interests: chosen ? [...others, interest] : others });
+  };
+  const deleteAccount = () => {
+    if (!window.confirm("Delete your DAD account? This can’t be undone.")) return;
+    run(async () => {
+      await api("/donor/me/delete", { method: "POST" });
+      setDeleted(true);
+    }, "Your account was not deleted. Please retry in a moment.");
   };
   const changeEmail = (event: React.FormEvent) => {
     event.preventDefault();
@@ -87,7 +139,12 @@ export default function Profile() {
       title="Profile and notifications"
       back={{ href: "/account/dashboard", label: "My dashboard" }}
     >
-      {signedOut || resource.state === "signedOut" ? (
+      {deleted ? (
+        <p role="status">
+          Your account has been deleted. Your personal details are gone; the gift records the law requires are kept
+          without them.
+        </p>
+      ) : signedOut || resource.state === "signedOut" ? (
         <SignInPrompt>Sign in to manage your profile</SignInPrompt>
       ) : (
         <>
@@ -105,6 +162,41 @@ export default function Profile() {
                   </span>
                 </li>
               </ul>
+              <form onSubmit={saveDetails} key={`${data.zip}-${data.city}-${data.phone}`}>
+                <fieldset disabled={busy}>
+                  <legend>Your details</legend>
+                  <label>
+                    ZIP code
+                    <input
+                      name="zip"
+                      inputMode="numeric"
+                      autoComplete="postal-code"
+                      pattern="[0-9]{5}(-[0-9]{4})?"
+                      maxLength={10}
+                      defaultValue={data.zip ?? ""}
+                    />
+                  </label>
+                  <label>
+                    City
+                    <input name="city" autoComplete="address-level2" maxLength={80} defaultValue={data.city ?? ""} />
+                  </label>
+                  <label>
+                    Phone
+                    <input
+                      name="phone"
+                      type="tel"
+                      autoComplete="tel"
+                      placeholder="+14155550123"
+                      pattern="\+[1-9][0-9]{1,14}"
+                      defaultValue={data.phone ?? ""}
+                    />
+                  </label>
+                  <button className="secondary" type="submit">
+                    Save details
+                  </button>
+                </fieldset>
+              </form>
+              <p className="note">Your ZIP code sets your city for events and rankings, and your time zone.</p>
               <form onSubmit={save}>
                 <fieldset disabled={busy}>
                   <legend>Optional email notifications</legend>
@@ -155,11 +247,110 @@ export default function Profile() {
                     />{" "}
                     When my giving streak reaches a milestone
                   </label>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={data.push_streak_lapsed}
+                      onChange={(event) => setData({ ...data, push_streak_lapsed: event.target.checked })}
+                    />{" "}
+                    When my giving streak ends
+                  </label>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={data.push_gift_processed}
+                      onChange={(event) => setData({ ...data, push_gift_processed: event.target.checked })}
+                    />{" "}
+                    When my gift is processed
+                  </label>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={data.push_badge_earned}
+                      onChange={(event) => setData({ ...data, push_badge_earned: event.target.checked })}
+                    />{" "}
+                    When I earn a badge
+                  </label>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={data.push_event_reminder}
+                      onChange={(event) => setData({ ...data, push_event_reminder: event.target.checked })}
+                    />{" "}
+                    Before an event I signed up for
+                  </label>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={data.push_event_promoted}
+                      onChange={(event) => setData({ ...data, push_event_promoted: event.target.checked })}
+                    />{" "}
+                    When a waitlist spot opens for me
+                  </label>
+                  {data.volunteer && (
+                    <label className="choice">
+                      <input
+                        type="checkbox"
+                        checked={data.push_event_nearby}
+                        onChange={(event) => setData({ ...data, push_event_nearby: event.target.checked })}
+                      />{" "}
+                      When a volunteer event is announced near me
+                    </label>
+                  )}
                 </fieldset>
                 <p className="note">
                   App notifications reach only phones where you signed in to the DAD app and allowed its notifications.
                   They start on and never show names or amounts.
                 </p>
+                <fieldset disabled={busy}>
+                  <legend>Rankings and network</legend>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={!data.rankings_opted_out}
+                      onChange={(event) => setData({ ...data, rankings_opted_out: !event.target.checked })}
+                    />{" "}
+                    Rank my giving streak nationally and in my city
+                  </label>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={data.network_visible}
+                      onChange={(event) => setData({ ...data, network_visible: event.target.checked })}
+                    />{" "}
+                    Show my public nickname to the person who invited me
+                  </label>
+                </fieldset>
+                <p className="note">
+                  Only you see your own rank; no one sees a list of names. When hidden, you’re counted in your inviter’s
+                  network without your nickname.
+                </p>
+                <fieldset disabled={busy}>
+                  <legend>Volunteering</legend>
+                  <label className="choice">
+                    <input
+                      type="checkbox"
+                      checked={data.volunteer}
+                      onChange={(event) => setData({ ...data, volunteer: event.target.checked })}
+                    />{" "}
+                    I volunteer
+                  </label>
+                  {data.volunteer && (
+                    <fieldset>
+                      <legend>What interests you?</legend>
+                      {Object.entries(volunteerInterests).map(([interest, label]) => (
+                        <label className="choice" key={interest}>
+                          <input
+                            type="checkbox"
+                            checked={data.volunteer_interests.includes(interest)}
+                            onChange={(event) => toggleInterest(interest, event.target.checked)}
+                          />{" "}
+                          {label}
+                        </label>
+                      ))}
+                    </fieldset>
+                  )}
+                </fieldset>
                 <button className="button" disabled={busy} type="submit">
                   {busy ? "Saving…" : "Save preferences"}
                 </button>
@@ -188,6 +379,7 @@ export default function Profile() {
                   </button>
                 </form>
               </details>
+              <PasswordAccess setup />
               <Passkeys onSignedOut={markSignedOut} />
               <Sessions onSignedOut={markSignedOut} />
               <button type="button" className="secondary" disabled={busy} onClick={logout}>
@@ -201,6 +393,17 @@ export default function Profile() {
                 </p>
                 <button type="button" className="secondary danger" disabled={busy} onClick={logoutAll}>
                   Confirm sign out everywhere
+                </button>
+              </details>
+              <details>
+                <summary>Delete account</summary>
+                <p>
+                  Deleting your account removes your personal details, passkeys, sessions and preferences, and gives up
+                  your places at upcoming events. Gift records the law requires are kept without your details. If your
+                  monthly gift is still set to renew, <Link href="/account/recurring">cancel it</Link> first.
+                </p>
+                <button type="button" className="secondary danger" disabled={busy} onClick={deleteAccount}>
+                  Delete my account
                 </button>
               </details>
             </>

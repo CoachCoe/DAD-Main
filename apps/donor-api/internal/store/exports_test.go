@@ -21,19 +21,20 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, admin := staffFixture(t, pool, "ADMIN")
-	_, support := staffFixture(t, pool, "SUPPORT")
-	_, finance := staffFixture(t, pool, "FINANCE")
+	actor, admin := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	id, _ := donor(t, pool)
 	if _, err := pool.Exec(ctx, "UPDATE donors SET public_name=$2 WHERE id=$1", id, " \t=HYPERLINK(\"https://example.invalid\")"); err != nil {
 		t.Fatal(err)
 	}
 	s := &StaffService{DB: api}
+	// data.export (CSV of donor/gift/staff data) is a §8 "donors & money" power:
+	// super-admin only. An operator is denied every dataset.
 	if err := s.Export(ctx, support, "donors", io.Discard); !errors.Is(err, ErrStaffForbidden) {
-		t.Fatal("support exported donors", err)
+		t.Fatal("operator exported donors", err)
 	}
-	if err := s.Export(ctx, finance, "staff", io.Discard); !errors.Is(err, ErrStaffForbidden) {
-		t.Fatal("finance exported staff", err)
+	if err := s.Export(ctx, support, "staff", io.Discard); !errors.Is(err, ErrStaffForbidden) {
+		t.Fatal("operator exported staff", err)
 	}
 	for name, dataset := range exportDatasets {
 		var body bytes.Buffer
@@ -43,9 +44,6 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 		rows, err := csv.NewReader(&body).ReadAll()
 		if err != nil || len(rows) == 0 || !slices.Equal(rows[0], strings.Fields(dataset.fields)) {
 			t.Fatalf("%s: invalid CSV %v", name, err)
-		}
-		if name == "enrolments" && len(rows) != 1 {
-			t.Fatal("inactive enrolment export has records")
 		}
 		if name == "referrals" && !slices.Contains(rows[0], "referral_kind") {
 			t.Fatal("referral type omitted")
@@ -79,7 +77,7 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 			}
 		}
 	}
-	if err := s.Export(ctx, admin, "enrolments", failedExportWriter{}); !errors.Is(err, io.ErrClosedPipe) {
+	if err := s.Export(ctx, admin, "audit", failedExportWriter{}); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatal("writer failure swallowed", err)
 	}
 	var incomplete int
@@ -92,7 +90,7 @@ func TestExportsEnforcePermissionsEscapeFormulasAndAuditFailures(t *testing.T) {
 func TestReferralExportCarriesTheReferralTypeOnEveryRow(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
-	actor, admin := staffFixture(t, pool, "ADMIN")
+	actor, admin := staffFixture(t, pool, "SUPER_ADMIN")
 	referrer, _ := donor(t, pool)
 	kinds := map[string]string{}
 	for _, kind := range []string{"LINK", "IRL"} {

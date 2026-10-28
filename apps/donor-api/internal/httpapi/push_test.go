@@ -66,6 +66,32 @@ func TestPushDeviceRoutesAdmitOnlyTheApp(t *testing.T) {
 	}
 }
 
+func TestPartnerPushRoutesRequireNativePartnerAuthentication(t *testing.T) {
+	for _, path := range []string{"/donor/partner/push-device", "/donor/partner/push-device/unregister"} {
+		devices := &pushDevices{}
+		server := NewServer("", Services{PartnerPush: devices})
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, appRequest("POST", path, deviceBody))
+		if response.Code != http.StatusOK || len(devices.devices)+devices.unregister != 1 {
+			t.Fatalf("native partner %s: %d %s", path, response.Code, response.Body)
+		}
+		for _, cookie := range []string{donorCookie, partnerCookie} {
+			r := httptest.NewRequest("POST", path, strings.NewReader(deviceBody))
+			r.Header.Set("Origin", testPublicOrigin)
+			r.AddCookie(&http.Cookie{Name: cookie, Value: appSession})
+			response = httptest.NewRecorder()
+			server.Handler.ServeHTTP(response, r)
+			want := http.StatusUnauthorized
+			if cookie == partnerCookie {
+				want = http.StatusForbidden
+			}
+			if response.Code != want || len(devices.devices)+devices.unregister != 1 {
+				t.Fatalf("browser %s with %s: %d", path, cookie, response.Code)
+			}
+		}
+	}
+}
+
 func TestPushDeviceRegistrationValidatesAndReportsConfiguration(t *testing.T) {
 	devices := &pushDevices{}
 	server := NewServer("", Services{Push: devices})

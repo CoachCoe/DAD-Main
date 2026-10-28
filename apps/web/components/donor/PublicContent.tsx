@@ -65,7 +65,7 @@ export function Ledger({ content }: { content: Schema<"PublicContent"> }) {
   );
 }
 
-export function InitiativeList({ initiatives }: { initiatives: Schema<"Initiative">[] }) {
+export function InitiativeList({ initiatives }: { initiatives: Schema<"PublicInitiative">[] }) {
   if (!initiatives.length)
     return (
       <p className="callout">
@@ -86,15 +86,18 @@ export function InitiativeList({ initiatives }: { initiatives: Schema<"Initiativ
   );
 }
 
-export function InitiativeFacts({ initiative }: { initiative: Schema<"Initiative"> }) {
+export function InitiativeFacts({ initiative }: { initiative: Schema<"PublicInitiative"> }) {
+  const planned = initiative.started_on > new Date().toISOString().slice(0, 10);
   return (
     <>
       <p>{initiative.summary}</p>
       <p>
-        Partner: {initiative.partner}. Planned start:{" "}
-        <time dateTime={initiative.planned_start}>{formatDay(initiative.planned_start)}</time>.
+        {initiative.partner && <>Partner: {initiative.partner}. </>}
+        {planned ? "Planned start" : "Started"}:{" "}
+        <time dateTime={initiative.started_on}>{formatDay(initiative.started_on)}</time>.
+        {initiative.status === "COMPLETE" && " Complete."}
       </p>
-      <p>Planned initiative. Programs open at launch; this is not a recipient enrolment form.</p>
+      {planned && <p>Planned initiative. Programs open at launch; this is not a recipient enrolment form.</p>}
     </>
   );
 }

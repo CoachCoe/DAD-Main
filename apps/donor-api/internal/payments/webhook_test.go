@@ -28,19 +28,53 @@ func event() map[string]any {
 	return map[string]any{
 		"object":      "event",
 		"id":          "evt_test",
-		"type":        "payment_intent.succeeded",
+		"type":        "invoice.payment_succeeded",
 		"api_version": APIVersion,
 		"created":     1700000000,
 		"livemode":    false,
 		"data": map[string]any{
 			"object": map[string]any{
-				"id":              "pi_test",
-				"metadata":        map[string]any{"dad_checkout_id": checkoutID, "private": "must disappear"},
-				"customer":        "cus_private",
-				"description":     "private description",
-				"currency":        "usd",
-				"status":          "succeeded",
-				"amount_received": int64(9007199254740993),
+				"id":             "in_test",
+				"customer":       "cus_private",
+				"description":    "private description",
+				"currency":       "usd",
+				"status":         "paid",
+				"billing_reason": "subscription_cycle",
+				"parent": map[string]any{
+					"subscription_details": map[string]any{
+						"subscription": "sub_test",
+						"metadata":     map[string]any{"dad_checkout_id": checkoutID, "private": "must disappear"},
+					},
+				},
+				"status_transitions": map[string]any{"paid_at": 1700000001},
+				"lines": map[string]any{
+					"has_more": false,
+					"data": []any{
+						map[string]any{
+							"amount":      3000,
+							"currency":    "usd",
+							"description": "private line",
+							"period":      map[string]any{"start": 1700000000, "end": 1702592000},
+							"parent": map[string]any{
+								"type":                      "subscription_item_details",
+								"subscription_item_details": map[string]any{"subscription": "sub_test", "proration": false},
+							},
+						},
+					},
+				},
+				"payments": map[string]any{
+					"has_more": false,
+					"data": []any{
+						map[string]any{
+							"status":      "paid",
+							"amount_paid": 3000,
+							"currency":    "usd",
+							"invoice":     "in_test",
+							"livemode":    false,
+							"payment":     map[string]any{"type": "payment_intent", "payment_intent": "pi_test"},
+						},
+					},
+				},
 			},
 		},
 	}
@@ -56,11 +90,11 @@ func TestSignedWebhookAndMinimalFacts(t *testing.T) {
 		t.Fatalf("valid event: %v", err)
 	}
 	data := string(verified.Data())
-	if !strings.Contains(data, "9007199254740993") || strings.Contains(data, "private") || strings.Contains(data, "customer") ||
-		strings.Contains(data, "metadata") {
+	if !strings.Contains(data, "sub_test") || strings.Contains(data, "private") || strings.Contains(data, "cus_private") ||
+		strings.Contains(data, "description") {
 		t.Fatalf("lossy or non-minimal facts: %s", data)
 	}
-	if verified.ID() != "evt_test" || verified.Kind() != "payment_intent.succeeded" || verified.OccurredAt().Unix() != 1700000000 {
+	if verified.ID() != "evt_test" || verified.Kind() != "invoice.payment_succeeded" || verified.OccurredAt().Unix() != 1700000000 {
 		t.Fatal("envelope changed")
 	}
 	copied := verified.Data()
@@ -99,12 +133,13 @@ func TestIgnoredAndMalformedEvents(t *testing.T) {
 	}
 	input = event()
 	obj := input["data"].(map[string]any)["object"].(map[string]any)
-	delete(obj, "metadata")
+	details := obj["parent"].(map[string]any)["subscription_details"].(map[string]any)
+	delete(details, "metadata")
 	body, signature = signed(t, input, time.Now())
 	if result, err := verifyEvent(body, signature, testSecret); err != nil || result != nil {
 		t.Fatal("unrelated account payment not ignored")
 	}
-	obj["metadata"] = map[string]any{"dad_checkout_id": "not-a-uuid"}
+	details["metadata"] = map[string]any{"dad_checkout_id": "not-a-uuid"}
 	body, signature = signed(t, input, time.Now())
 	if _, err := verifyEvent(body, signature, testSecret); !errors.Is(err, ErrEventShape) {
 		t.Fatal("bad UUID accepted")

@@ -38,7 +38,7 @@ func (s *sessionDonor) Profile(_ context.Context, token string) (store.Profile, 
 	return store.Profile{Email: "donor@example.org"}, s.check(token)
 }
 
-func (s *sessionDonor) SavePreferences(_ context.Context, token string, _ store.Preferences) (store.Profile, error) {
+func (s *sessionDonor) SavePreferences(_ context.Context, token string, _ store.PreferenceChange) (store.Profile, error) {
 	return store.Profile{Email: "donor@example.org"}, s.check(token)
 }
 
@@ -349,25 +349,33 @@ func TestAppLogoutRevokesBearerWithoutCookies(t *testing.T) {
 	}
 }
 
-// The app may call donor account routes only; giving, referral capture,
-// partner signup, and the back office stay on the web.
+// The app may call donor account and partner portal routes only; giving,
+// referral capture, partner applications, and the back office stay on the web.
 func TestOnlyDonorAccountRoutesAdmitTheApp(t *testing.T) {
 	entries := map[string]bool{
+		"POST /donor/signup":                   true,
+		"POST /donor/password/sign-in":         true,
 		"POST /donor/login":                    true,
 		"POST /donor/claim":                    true,
 		"POST /donor/refresh":                  true,
 		"POST /donor/email-change/confirm":     true,
 		"POST /donor/passkeys/sign-in/options": true,
 		"POST /donor/passkeys/sign-in":         true,
+		"POST /donor/phone/sign-in/options":    true,
+		"POST /donor/phone/sign-in":            true,
+		"POST /donor/oidc/{provider}/sign-in":  true,
 		"POST /donor/logout":                   true,
 		"POST /donor/logout-all":               true,
+		"POST /analytics/events":               true,
+		"POST /donor/partner/sign-in":          true,
+		"POST /donor/partner/accept-invite":    true,
 	}
 	server := NewServer("", Services{})
 	for _, route := range allRoutes() {
 		if !strings.HasPrefix(route.pattern, "POST ") || route.auth == stripeAuth {
 			continue
 		}
-		admitted := entries[route.pattern] || strings.HasPrefix(route.pattern, "POST /donor/me/")
+		admitted := entries[route.pattern] || strings.HasPrefix(route.pattern, "POST /donor/me/") || route.auth == partnerAuth
 		response := httptest.NewRecorder()
 		server.Handler.ServeHTTP(response, appRequest("POST", routeRequest(route.pattern, "").URL.Path, "{}"))
 		if got := response.Code != http.StatusForbidden; got != admitted {

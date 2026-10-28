@@ -108,6 +108,11 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 			"DELETE FROM donor_messages WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_login_emails WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_gifts WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
+			"DELETE FROM donor_billing_observations WHERE period_id IN (SELECT id FROM donor_billing_periods WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[])))",
+			"DELETE FROM donor_billing_periods WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
+			"DELETE FROM donor_recurring_reservations WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
+			"DELETE FROM donor_subscription_leases WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
+			"DELETE FROM donor_subscriptions WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_stripe_checkouts WHERE checkout_id IN (SELECT id FROM donor_checkouts WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[])))",
 			"DELETE FROM donor_checkouts WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
 			"DELETE FROM donor_metric_projections WHERE donor_id IN (SELECT id FROM donors WHERE email=ANY($1::text[]))",
@@ -246,7 +251,7 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 		nil,
 		409,
 	)
-	checkoutBody := map[string]any{"email": guestEmail, "amount_minor": 3000, "frequency": "ONE_TIME"}
+	checkoutBody := map[string]any{"email": guestEmail, "amount_minor": 3000, "frequency": "MONTHLY"}
 	body = call(guest, "POST", "/donor/checkouts", checkoutBody, map[string]string{"Idempotency-Key": requestID.String()}, 201)
 	var checkout payments.CheckoutResult
 	if err = json.Unmarshal(body, &checkout); err != nil {
@@ -257,23 +262,63 @@ func TestHTTPGuestReferralCheckoutWebhookEmailClaimAndReceipt(t *testing.T) {
 		t.Fatal("checkout retry changed response")
 	}
 	now := time.Now()
+	invoiceID := "in_" + requestID.String()
+	start := now.Add(-24 * time.Hour)
+	invoiceObject := map[string]any{
+		"id":               invoiceID,
+		"status":           "paid",
+		"currency":         "usd",
+		"amount_paid":      3000,
+		"amount_due":       3000,
+		"total":            3000,
+		"starting_balance": 0,
+		"ending_balance":   0,
+		"billing_reason":   "subscription_cycle",
+		"parent": map[string]any{
+			"subscription_details": map[string]any{
+				"subscription": "sub_" + checkout.CheckoutID,
+				"metadata":     map[string]any{"dad_checkout_id": checkout.CheckoutID},
+			},
+		},
+		"status_transitions": map[string]any{"paid_at": start.Add(time.Hour).Unix()},
+		"lines": map[string]any{
+			"has_more": false,
+			"data": []any{
+				map[string]any{
+					"amount":   3000,
+					"currency": "usd",
+					"period":   map[string]any{"start": start.Unix(), "end": start.Add(30 * 24 * time.Hour).Unix()},
+					"parent": map[string]any{
+						"type":                      "subscription_item_details",
+						"subscription_item_details": map[string]any{"subscription": "sub_" + checkout.CheckoutID, "proration": false},
+					},
+				},
+			},
+		},
+		"payments": map[string]any{
+			"has_more": false,
+			"data": []any{
+				map[string]any{
+					"status":      "paid",
+					"amount_paid": 3000,
+					"currency":    "usd",
+					"invoice":     invoiceID,
+					"livemode":    false,
+					"payment":     map[string]any{"type": "payment_intent", "payment_intent": "pi_" + invoiceID},
+				},
+			},
+		},
+	}
 	raw, err := json.Marshal(
 		map[string]any{
 			"id":          eventID,
 			"object":      "event",
-			"type":        "payment_intent.succeeded",
+			"type":        "invoice.payment_succeeded",
 			"api_version": payments.APIVersion,
 			"livemode":    false,
 			"created":     now.Unix(),
 			"data": map[string]any{
-				"object": map[string]any{
-					"id":              "pi_" + requestID.String(),
-					"object":          "payment_intent",
-					"status":          "succeeded",
-					"currency":        "usd",
-					"amount_received": 3000,
-					"metadata":        map[string]any{"dad_checkout_id": checkout.CheckoutID},
-				},
+				"object": invoiceObject,
 			},
 		},
 	)

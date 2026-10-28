@@ -27,18 +27,6 @@ INSERT INTO donor_cancellations(id,donor_id,attempt_id,confirmed_period_end,crea
 -- name: CompleteCancellation :exec
 UPDATE donor_cancellations SET completed_at=$2 WHERE id=$1;
 
--- name: PauseByID :one
-SELECT * FROM donor_pauses WHERE id=$1;
-
--- name: InsertPause :exec
-INSERT INTO donor_pauses(id,donor_id,attempt_id,months,starts_at,resumes_at,created_at) VALUES($1,$2,$3,$4,$5,$6,$7);
-
--- name: ResumptionByID :one
-SELECT * FROM donor_resumptions WHERE id=$1;
-
--- name: InsertResumption :exec
-INSERT INTO donor_resumptions(id,donor_id,pause_id,next_renewal,created_at) VALUES($1,$2,$3,$4,$5);
-
 -- name: AmountChangeByID :one
 SELECT * FROM donor_amount_changes WHERE id=$1;
 

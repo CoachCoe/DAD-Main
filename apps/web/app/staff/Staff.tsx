@@ -22,7 +22,7 @@ export default function Staff({ q }: { q: string | null }) {
   const [done, setDone] = useState("");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState("SUPPORT");
+  const [role, setRole] = useState("OP_PARTNERSHIPS");
   const [busy, setBusy] = useState(false);
   const messages = resourceMessages(resource, {
     loading: "Checking staff access…",
@@ -95,10 +95,21 @@ export default function Staff({ q }: { q: string | null }) {
               {actor.permissions.includes("content.publish") && (
                 <>
                   <Link href="/staff/content">Publish spreadsheet content</Link>
-                  <Link href="/staff/partners">Partner inquiries</Link>
+                  <Link href="/staff/content/wording">Badge and milestone wording</Link>
                 </>
               )}
+              {actor.permissions.includes("initiative.manage") && <Link href="/staff/initiatives">Initiatives</Link>}
+              {actor.permissions.includes("event.manage") && <Link href="/staff/events">Events</Link>}
               {actor.permissions.includes("audit.read") && <Link href="/staff/audit">Audit history</Link>}
+              {actor.permissions.includes("badge.manage") && (
+                <Link href="/staff/founding-claims">Waitlist Founding Donors</Link>
+              )}
+              {actor.permissions.includes("partner.manage") && (
+                <>
+                  <Link href="/staff/partners">Partners</Link>
+                  <Link href="/staff/partners/pending">Partner applications</Link>
+                </>
+              )}
             </nav>
             <Form action="/staff" role="search">
               <label>
@@ -163,9 +174,10 @@ export default function Staff({ q }: { q: string | null }) {
                                 <label>
                                   New role for {account.name}
                                   <select name="role" defaultValue={account.role}>
-                                    <option>SUPPORT</option>
-                                    <option>FINANCE</option>
-                                    <option>ADMIN</option>
+                                    <option>SUPER_ADMIN</option>
+                                    <option>OP_PARTNERSHIPS</option>
+                                    <option>OP_GROWTH</option>
+                                    <option>OP_IMPACT</option>
                                   </select>
                                 </label>
                                 <p>A role change ends existing sessions and requires a new sign-in.</p>
@@ -232,9 +244,10 @@ export default function Staff({ q }: { q: string | null }) {
                     <label>
                       Role
                       <select value={role} onChange={(event) => setRole(event.target.value)}>
-                        <option>SUPPORT</option>
-                        <option>FINANCE</option>
-                        <option>ADMIN</option>
+                        <option>SUPER_ADMIN</option>
+                        <option>OP_PARTNERSHIPS</option>
+                        <option>OP_GROWTH</option>
+                        <option>OP_IMPACT</option>
                       </select>
                     </label>
                     <button type="submit" className="button">

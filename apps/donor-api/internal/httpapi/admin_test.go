@@ -126,6 +126,8 @@ func TestStaffErrorsMapToStatuses(t *testing.T) {
 		{store.ErrStaffInput, 422, "Invalid request fields"},
 		{store.ErrStaffExists, 409, "A staff account with this email already exists"},
 		{store.ErrStaffConflict, 409, "Staff access changed or conflicts with this request"},
+		{store.EmailRoleError{Role: "DONOR"}, 409, "This email already has a donor account. Use a different email for this login."},
+		{store.EmailRoleError{Role: "PARTNER"}, 409, "This email already signs in to a partner organization. Use a different email for this login."},
 	} {
 		if status, detail := staffStatus(tc.err); status != tc.status || detail != tc.detail {
 			t.Errorf("%v: got %d %q, want %d %q", tc.err, status, detail, tc.status, tc.detail)

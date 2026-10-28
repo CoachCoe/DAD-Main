@@ -3,9 +3,9 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -89,7 +89,18 @@ func (s PushService) RegisterDevice(ctx context.Context, token string, device Pu
 	if !slices.Contains(s.Platforms, device.Platform) {
 		return PushRegistration{}, ErrPushUnconfigured
 	}
-	return sessionWrite(ctx, s.DB, token, func(q *queries.Queries, user signedIn, _ time.Time) (PushRegistration, error) {
+	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (PushRegistration, error) {
+		q := queries.New(tx)
+		if err := q.LockPushInstallation(ctx, device.Token); err != nil {
+			return PushRegistration{}, err
+		}
+		user, err := lockSignedIn(ctx, q, token)
+		if err != nil {
+			return PushRegistration{}, err
+		}
+		if err := q.ReleasePartnerPushToken(ctx, text(device.Token)); err != nil {
+			return PushRegistration{}, err
+		}
 		if err := q.ReleasePushToken(ctx, queries.ReleasePushTokenParams{PushToken: text(device.Token), ID: user.session}); err != nil {
 			return PushRegistration{}, err
 		}
@@ -129,9 +140,19 @@ func queuePushIntents(ctx context.Context, q *queries.Queries, p projection, now
 		ExpiresAt:   timestamp(now.Add(pushLifetime)),
 		RecentSince: timestamp(now.Add(-pushLifetime)),
 	}
-	if p.CurrentStreak.Valid && p.streakSince != nil && recognition.Milestone(int64(p.CurrentStreak.Int32)) {
-		params.Milestone = pgtype.Int4{Int32: p.CurrentStreak.Int32, Valid: true}
-		params.RunStartedAt = timestamp(*p.streakSince)
+	if p.CurrentStreak.Valid && p.streakSince != nil {
+		run := recognition.Streak{Since: p.streakSince}
+		ladder, err := configuredLadder(ctx, q, run, now, p.zone)
+		if err != nil {
+			return err
+		}
+		if reached := ladder.LastMilestone; reached > 0 && now.Sub(run.Reaches(reached, p.zone)) < pushLifetime {
+			if err := recordServerEvent(ctx, q, p.DonorID, "milestone_reached", "milestone:"+p.DonorID.String()+":"+p.streakSince.String()+":"+fmt.Sprint(reached), run.Reaches(reached, p.zone)); err != nil {
+				return err
+			}
+			params.Milestone = pgtype.Int4{Int32: int32(reached), Valid: true}
+			params.RunStartedAt = timestamp(*p.streakSince)
+		}
 	}
 	return q.QueuePushIntents(ctx, params)
 }
@@ -166,9 +187,39 @@ func pushSuppression(
 			return "opted_out", nil
 		}
 		return referralLapsed(ctx, q, data, donor)
+	case "GIFT_PROCESSED":
+		if !pref.PushGiftProcessed {
+			return "opted_out", nil
+		}
+		giftID, err := parseID(data.Text("gift_id"))
+		if err != nil {
+			return "", err
+		}
+		gift, err := q.ReceiptGift(ctx, queries.ReceiptGiftParams{ID: giftID, DonorID: donor.ID, PaidAt: timestamp(now)})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "gift_unavailable", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		refunds, err := q.ReceiptRefunds(ctx, gift.ID)
+		if err != nil {
+			return "", err
+		}
+		record, err := giftRecord(gift, refunds)
+		if err != nil {
+			return "", err
+		}
+		if record.Net == 0 {
+			return "gift_refunded", nil
+		}
+		return "", nil
 	case "STREAK_AT_RISK":
 		if !pref.PushStreakAtRisk {
 			return "opted_out", nil
+		}
+		if _, present := data["day"]; present {
+			return recoverySuppression(ctx, q, data, donor, now)
 		}
 		_, reason, err := failureResolved(ctx, q, data, donor, now)
 		return reason, err
@@ -176,20 +227,101 @@ func pushSuppression(
 		if !pref.PushStreakMilestone {
 			return "opted_out", nil
 		}
-		months, err := data.Int("months")
+		days, err := data.Int("days")
 		if err != nil {
-			return "", payments.ErrFacts
+			return "superseded", nil
 		}
 		current, err := q.Projection(ctx, donor.ID)
 		if err != nil {
 			return "", err
 		}
-		if int64(current.CurrentStreak.Int32) < months {
+		if !current.StreakSince.Valid {
+			return "streak_ended", nil
+		}
+		run := recognition.Streak{Since: &current.StreakSince.Time}
+		if run.Ladder(now, recognition.Zone(donor.Timezone.String)).Days < days {
 			return "streak_ended", nil
 		}
 		return "", nil
+	case "STREAK_LAPSED":
+		if !pref.PushStreakLapsed {
+			return "opted_out", nil
+		}
+		// The lapse holds unless the donor recovered: if the failed period that
+		// ended the run is no longer FAILED (payment recovered), the lapse news
+		// is stale. A cancelled subscription or ended grace does not un-lapse.
+		_, reason, err := failureResolved(ctx, q, data, donor, now)
+		if err != nil {
+			return "", err
+		}
+		if reason == "payment_recovered" || reason == "subscription_cancelled" {
+			return reason, nil
+		}
+		return "", nil
+	case "BADGE_EARNED":
+		if !pref.PushBadgeEarned {
+			return "opted_out", nil
+		}
+		// The earn is permanent, but an admin may have revoked it between queue
+		// and send (B-4); a revoked badge reads as unearned, so do not announce it.
+		code := data.Text("code")
+		if code == "" {
+			return "", payments.ErrFacts
+		}
+		earned, err := q.BadgeEarned(ctx, queries.BadgeEarnedParams{DonorID: donor.ID, Code: code})
+		if err != nil {
+			return "", err
+		}
+		if !earned {
+			return "badge_revoked", nil
+		}
+		return "", nil
+	case "EVENT_PROMOTED":
+		if !pref.PushEventPromoted {
+			return "opted_out", nil
+		}
+		return reservationLapsed(ctx, q, data, donor)
+	case "EVENT_REMINDER":
+		if !pref.PushEventReminder {
+			return "opted_out", nil
+		}
+		return reservationLapsed(ctx, q, data, donor)
+	case eventNearbyCategory:
+		if !pref.Volunteer || !pref.PushEventNearby {
+			return "opted_out", nil
+		}
+		event, err := parseID(data.Text("event_id"))
+		if err != nil {
+			return "", err
+		}
+		e, err := q.EventByID(ctx, event)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return "", err
+		}
+		if err != nil || e.CancelledAt.Valid || e.PublishState != "PUBLISHED" {
+			return "event_withdrawn", nil
+		}
+		return "", nil
+	case eventCancelledCategory:
+		return "", nil
 	}
 	return "", payments.ErrFacts
+}
+
+// reservationLapsed reports why a notice about the donor's seat at an event no
+// longer applies: they cancelled it or are back on the waitlist. These notices
+// concern a reservation the donor made, so unlike new-event alerts they do not
+// depend on the volunteer opt-in (E-1).
+func reservationLapsed(ctx context.Context, q *queries.Queries, data payments.Object, donor queries.Donor) (string, error) {
+	event, err := parseID(data.Text("event_id"))
+	if err != nil {
+		return "", err
+	}
+	reservation, err := q.ReservationFor(ctx, queries.ReservationForParams{EventID: event, DonorID: donor.ID})
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && reservation.Status != reservationReserved) {
+		return "reservation_released", nil
+	}
+	return "", err
 }
 
 // pushContent is what a notification says. It names no one and no amount:
@@ -209,22 +341,46 @@ func pushContent(job queries.DonorPushNotification) (push.Notification, error) {
 		}
 		n.Title = "Your invitation worked"
 		n.Body = "Someone you invited through " + channel + " just made their first test gift."
+	case "GIFT_PROCESSED":
+		if data.Text("gift_id") == "" {
+			return n, payments.ErrFacts
+		}
+		n.Title, n.Path = "Your gift was processed", "/account/gifts"
+		n.Body = "Your test gift was processed. Open the app to see your giving history."
 	case "STREAK_AT_RISK":
 		n.Title, n.Path = "Your giving streak is at risk", paymentMethodPath
 		n.Body = "Your monthly test payment was declined. Update your payment method to keep your streak going."
 	case "STREAK_MILESTONE":
-		months, err := data.Int("months")
-		if err != nil || !recognition.Milestone(months) {
+		days, err := data.Int("days")
+		if err != nil || days < 1 || days > 1000000 {
 			return n, payments.ErrFacts
 		}
-		span := strconv.FormatInt(months, 10) + " months"
-		if months == 12 {
-			span = "1 year"
-		} else if months > 12 {
-			span = strconv.FormatInt(months/12, 10) + " years"
+		n.Title, n.Body = milestoneWording(days)
+	case "EVENT_PROMOTED":
+		n.Title = "A spot opened up"
+		n.Body = "You are off the waitlist — your spot at an upcoming event is confirmed. Open the app for details."
+	case eventNearbyCategory:
+		n.Title = "A new event near you"
+		n.Body = "A volunteer event was just announced near you. Open the app for the details."
+	case eventCancelledCategory:
+		n.Title = "An event was cancelled"
+		n.Body = "An event you signed up for has been cancelled. Open the app for the details."
+	case "EVENT_REMINDER":
+		n.Title = "Your event is coming up"
+		if data.Text("window") == "2h" {
+			n.Body = "An event you reserved starts in about 2 hours. Open the app for the details."
+		} else {
+			n.Body = "An event you reserved is tomorrow. Open the app for the details."
 		}
-		n.Title = span + " in a row"
-		n.Body = "You have given every month for " + span + ". Thank you for keeping your test gifts going."
+	case "STREAK_LAPSED":
+		n.Title, n.Path = "Your giving streak ended", paymentMethodPath
+		n.Body = "Your monthly test payment did not recover in time, so your streak reset. Start a new streak whenever you are ready."
+	case "BADGE_EARNED":
+		if data.Text("code") == "" {
+			return n, payments.ErrFacts
+		}
+		n.Title = "You earned a new badge"
+		n.Body = "You just earned a badge for your giving. Open the app to see it."
 	default:
 		return n, payments.ErrFacts
 	}
@@ -312,6 +468,9 @@ func (w PushWorker) claim(ctx context.Context, now time.Time) (*pushJob, bool, e
 		var note push.Notification
 		if err == nil && reason == "" {
 			note, err = pushContent(row)
+			if err == nil && row.Category == "STREAK_MILESTONE" {
+				err = customMilestone(ctx, q, row, &note)
+			}
 		}
 		if err != nil {
 			if !messageDataError(err) {

@@ -10,7 +10,6 @@ import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 export default function Content() {
   const { resource, data, reload } = useApiResource<Schema<"ContentInventory">>("/donor/staff/content");
   const [source, setSource] = useState<File | null>(null);
-  const [initiatives, setInitiatives] = useState<File | null>(null);
   const [ledger, setLedger] = useState<File | null>(null);
   const [asOf, setAsOf] = useState("");
   const [cadence, setCadence] = useState("");
@@ -58,9 +57,9 @@ export default function Content() {
   }
   async function publish(event: React.FormEvent) {
     event.preventDefault();
-    if (!initiatives || !ledger || !confirmed || busy) return;
-    if (initiatives.size > 512 * 1024 || ledger.size > 512 * 1024) {
-      setError("Each CSV must be at most 512 KB.");
+    if (!ledger || !confirmed || busy) return;
+    if (ledger.size > 512 * 1024) {
+      setError("The CSV must be at most 512 KB.");
       return;
     }
     setBusy(true);
@@ -71,7 +70,6 @@ export default function Content() {
       const result = await api<Schema<"Publication">>("/donor/staff/content/publish", {
         method: "POST",
         body: JSON.stringify({
-          initiatives_csv: await initiatives.text(),
           ledger_csv: await ledger.text(),
           as_of: asOf,
           cadence,
@@ -85,7 +83,7 @@ export default function Content() {
       setError(
         rejected(
           cause,
-          "Publication was not confirmed. Check column headers, uploaded source IDs, dates, units, and illustrative flags; refresh history before retrying.",
+          "Publication was not confirmed. Check column headers, uploaded source IDs, units, and illustrative flags; refresh history before retrying.",
         ),
       );
     } finally {
@@ -95,11 +93,12 @@ export default function Content() {
   return (
     <Page wide eyebrow="Staff" back={{ href: "/staff", label: "Staff back office" }} title="Spreadsheet publication">
       <p>
-        <Link href="/staff/exports">Exports</Link>
+        <Link href="/staff/exports">Exports</Link> ·{" "}
+        <Link href="/staff/content/wording">Badge and milestone wording</Link>
       </p>
       <p>
-        Edit approved content in the source spreadsheet, then import its CSV export. This publishes one complete
-        snapshot of planned initiatives and the static ledger.
+        Edit approved figures in the source spreadsheet, then import its CSV export. This publishes one complete
+        snapshot of the impact ledger. Initiatives are edited in <Link href="/staff/initiatives">Initiatives</Link>.
       </p>
       {resource.state === "signedOut" && (
         <p>
@@ -138,23 +137,12 @@ export default function Content() {
           <form onSubmit={publish}>
             <fieldset disabled={busy}>
               <legend>Publish approved spreadsheet snapshot</legend>
-              <p>Initiative CSV columns:</p>
-              <pre>slug,title,summary,partner,planned_start,board_approval_source_id,approved_on</pre>
               <p>Ledger CSV columns:</p>
               <pre>metric,value,unit,source_id,illustrative</pre>
               <p>
                 Units: USD_CENTS, PEOPLE, INITIATIVES, PARTNERS. Values are nonnegative integers. Illustrative must be
                 true or false; real figures require a stored source ID. Empty sheets must retain their column headers.
               </p>
-              <label>
-                Initiatives CSV
-                <input
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={(event) => setInitiatives(event.target.files?.[0] || null)}
-                  required
-                />
-              </label>
               <label>
                 Ledger CSV
                 <input
@@ -185,8 +173,7 @@ export default function Content() {
                   onChange={(event) => setConfirmed(event.target.checked)}
                   required
                 />{" "}
-                I checked board approvals, source documents, illustrative labels, and the as-of date. Publish this
-                snapshot publicly.
+                I checked source documents, illustrative labels, and the as-of date. Publish this snapshot publicly.
               </label>
               <button type="submit" className="button">
                 Confirm publication

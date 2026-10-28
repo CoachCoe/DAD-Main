@@ -24,7 +24,9 @@ type DashboardSource interface {
 
 type DonorSource interface {
 	Profile(context.Context, string) (store.Profile, error)
-	SavePreferences(context.Context, string, store.Preferences) (store.Profile, error)
+	SaveProfile(context.Context, string, store.ProfileUpdate) (store.Profile, error)
+	DeleteAccount(context.Context, string) error
+	SavePreferences(context.Context, string, store.PreferenceChange) (store.Profile, error)
 	Sessions(context.Context, string) (store.Sessions, error)
 	SignOutSession(context.Context, string, pgtype.UUID) (store.Sessions, error)
 	SignOutOthers(context.Context, string) (store.Sessions, error)
@@ -33,6 +35,7 @@ type DonorSource interface {
 	SaveSharing(context.Context, string, string, bool) (store.Sharing, error)
 	ReferrerName(context.Context, string) (string, error)
 	CaptureReferral(context.Context, string, string, string, time.Time) (store.ReferralCapture, error)
+	CaptureCompanyCode(context.Context, string, string, time.Time) (store.CompanyCapture, error)
 	Gifts(context.Context, string, int64) (store.GiftsPage, error)
 	Receipt(context.Context, string, pgtype.UUID) (store.Receipt, error)
 	AnnualSummary(context.Context, string, int) (store.AnnualSummary, error)
@@ -57,10 +60,30 @@ func donorStatus(err error) (int, string) {
 		return http.StatusConflict, "This is the session making the request. Sign out instead"
 	case errors.Is(err, store.ErrPreferenceConflict):
 		return http.StatusConflict, "Preferences changed. Refresh before saving again"
+	case errors.Is(err, store.ErrGivingActive):
+		return http.StatusConflict, "Cancel your monthly giving, or let a checkout in progress finish, before deleting your account"
 	case errors.Is(err, store.ErrPushToken):
 		return http.StatusUnprocessableEntity, "The push token is not valid for this platform"
 	case errors.Is(err, store.ErrPublicName):
 		return http.StatusUnprocessableEntity, "Choose a public first name or nickname of 1 to 80 characters"
+	case errors.Is(err, store.ErrZip):
+		return http.StatusUnprocessableEntity, "Enter a valid US ZIP code"
+	case errors.Is(err, store.ErrCity):
+		return http.StatusUnprocessableEntity, "Enter a city of 1 to 80 characters"
+	case errors.Is(err, store.ErrPhone):
+		return http.StatusUnprocessableEntity, "Enter a valid phone number in international format"
+	case errors.Is(err, store.ErrEventNotFound):
+		return http.StatusNotFound, "Record not found"
+	case errors.Is(err, store.ErrEventCancelled):
+		return http.StatusConflict, "This event has been cancelled"
+	case errors.Is(err, store.ErrReservationClosed):
+		return http.StatusConflict, "This event has already started"
+	case errors.Is(err, store.ErrBookingNotOpen):
+		return http.StatusConflict, "Booking for this event has not opened yet"
+	case errors.Is(err, store.ErrCheckIn):
+		return http.StatusUnprocessableEntity, "Check-in is not valid for this event right now"
+	case errors.Is(err, store.ErrCheckInDisabled):
+		return http.StatusServiceUnavailable, "Event check-in is not configured"
 	case errors.Is(err, pgx.ErrNoRows):
 		return http.StatusNotFound, "Record not found"
 	case errors.Is(err, store.ErrReceipt):
@@ -81,28 +104,101 @@ func (a *api) profile(w http.ResponseWriter, r *http.Request, session string) {
 	a.donor().serve(w, r, func(ctx context.Context) (any, error) { return a.Donor.Profile(ctx, session) })
 }
 
+func (a *api) saveProfile(w http.ResponseWriter, r *http.Request, session string) {
+	var body struct {
+		Zip   *string `json:"zip"`
+		City  *string `json:"city"`
+		Phone *string `json:"phone"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	update := store.ProfileUpdate{}
+	if body.Zip != nil {
+		update.Zip = *body.Zip
+	}
+	if body.City != nil {
+		update.City = *body.City
+	}
+	if body.Phone != nil {
+		update.Phone = *body.Phone
+	}
+	a.donor().serve(w, r, func(ctx context.Context) (any, error) { return a.Donor.SaveProfile(ctx, session, update) })
+}
+
+// deleteAccount erases the donor's personal data and signs them out. The donor
+// session cookie is cleared since the deletion revokes every session.
+func (a *api) deleteAccount(w http.ResponseWriter, r *http.Request, session string) {
+	a.donor().serve(w, r, func(ctx context.Context) (any, error) {
+		if err := a.Donor.DeleteAccount(ctx, session); err != nil {
+			return nil, err
+		}
+		a.setCookie(w, donorCookie, "", -1, http.SameSiteLaxMode)
+		return map[string]bool{"deleted": true}, nil
+	})
+}
+
+// maxVolunteerInterests and maxInterestLength bound the E-1 interest set.
+const (
+	maxVolunteerInterests = 20
+	maxInterestLength     = 60
+)
+
+// savePreferences replaces the donor's choices. The original six fields are
+// required; older clients may omit the later ones, which keep their saved
+// values.
 func (a *api) savePreferences(w http.ResponseWriter, r *http.Request, session string) {
 	var body struct {
-		Version           *int32 `json:"version"`
-		Referral          *bool  `json:"referral_emails"`
-		Marketing         *bool  `json:"marketing_emails"`
-		ReferralConverted *bool  `json:"push_referral_converted"`
-		StreakAtRisk      *bool  `json:"push_streak_at_risk"`
-		StreakMilestone   *bool  `json:"push_streak_milestone"`
+		Version            *int32    `json:"version"`
+		Referral           *bool     `json:"referral_emails"`
+		Marketing          *bool     `json:"marketing_emails"`
+		ReferralConverted  *bool     `json:"push_referral_converted"`
+		StreakAtRisk       *bool     `json:"push_streak_at_risk"`
+		StreakMilestone    *bool     `json:"push_streak_milestone"`
+		StreakLapsed       *bool     `json:"push_streak_lapsed"`
+		BadgeEarned        *bool     `json:"push_badge_earned"`
+		GiftProcessed      *bool     `json:"push_gift_processed"`
+		EventNearby        *bool     `json:"push_event_nearby"`
+		EventReminder      *bool     `json:"push_event_reminder"`
+		EventPromoted      *bool     `json:"push_event_promoted"`
+		RankingsOptedOut   *bool     `json:"rankings_opted_out"`
+		NetworkVisible     *bool     `json:"network_visible"`
+		Volunteer          *bool     `json:"volunteer"`
+		VolunteerInterests *[]string `json:"volunteer_interests"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
 	}
 	if body.Version == nil || *body.Version < 0 || body.Referral == nil || body.Marketing == nil ||
-		body.ReferralConverted == nil || body.StreakAtRisk == nil || body.StreakMilestone == nil {
+		body.ReferralConverted == nil || body.StreakAtRisk == nil || body.StreakMilestone == nil ||
+		(body.VolunteerInterests != nil && !validInterests(*body.VolunteerInterests)) {
 		invalidFields(w, r)
 		return
 	}
-	preferences := store.Preferences{
+	change := store.PreferenceChange{
 		Version: *body.Version, ReferralEmails: *body.Referral, MarketingEmails: *body.Marketing,
 		PushReferralConverted: *body.ReferralConverted, PushStreakAtRisk: *body.StreakAtRisk, PushStreakMilestone: *body.StreakMilestone,
+		PushStreakLapsed: body.StreakLapsed, PushBadgeEarned: body.BadgeEarned, PushGiftProcessed: body.GiftProcessed,
+		PushEventNearby: body.EventNearby, PushEventReminder: body.EventReminder, PushEventPromoted: body.EventPromoted,
+		RankingsOptedOut: body.RankingsOptedOut, NetworkVisible: body.NetworkVisible,
+		Volunteer: body.Volunteer, VolunteerInterests: body.VolunteerInterests,
 	}
-	a.donor().serve(w, r, func(ctx context.Context) (any, error) { return a.Donor.SavePreferences(ctx, session, preferences) })
+	a.donor().serve(w, r, func(ctx context.Context) (any, error) { return a.Donor.SavePreferences(ctx, session, change) })
+}
+
+func validInterests(interests []string) bool {
+	if len(interests) > maxVolunteerInterests {
+		return false
+	}
+	seen := make(map[string]bool, len(interests))
+	for _, interest := range interests {
+		if interest == "" || strings.TrimSpace(interest) != interest || utf8.RuneCountInString(interest) > maxInterestLength ||
+			seen[interest] {
+			return false
+		}
+		seen[interest] = true
+	}
+	return true
 }
 
 func (a *api) logoutAll(w http.ResponseWriter, r *http.Request, session string) {
@@ -227,6 +323,32 @@ func (a *api) captureReferral(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setCookie(w, referralCookie, result.Token, age, http.SameSiteLaxMode)
 	writeJSON(w, http.StatusOK, map[string]any{"captured": result.Token != "", "public_name": result.PublicName})
+}
+
+// captureCompany records a pre-signup company-code visit on an anonymous
+// visitor cookie, mirroring referral capture. The response never reveals whether
+// the code resolves to a partner. Account ownership is proved before linking it.
+func (a *api) captureCompany(w http.ResponseWriter, r *http.Request) {
+	code, ok := referralCode(w, r)
+	if !ok {
+		return
+	}
+	if !a.donor().available(w, r) {
+		return
+	}
+	ctx, cancel := withTimeout(r, readTimeout)
+	defer cancel()
+	result, err := a.Donor.CaptureCompanyCode(ctx, code, cookieValue(r, companyCookie), time.Now().UTC())
+	if err != nil {
+		respond(w, r, nil, err, donorStatus)
+		return
+	}
+	age := referralCookieAge
+	if result.Token == "" {
+		age = -1
+	}
+	a.setCookie(w, companyCookie, result.Token, age, http.SameSiteLaxMode)
+	writeJSON(w, http.StatusOK, map[string]any{"captured": result.Token != ""})
 }
 
 func (a *api) gifts(w http.ResponseWriter, r *http.Request, session string) {

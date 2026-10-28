@@ -166,7 +166,7 @@ func renderReceipt(r Receipt) string {
 	}
 	return "DAD sandbox gift record " + r.ID + "\nTEST PAYMENT — NOT A TAX RECEIPT. No real donation was collected.\n\n" +
 		frequency + " test gift: " + money(g.Amount) + " USD\nCompleted: " + g.PaidAt + "\nSuccessful refunds: " + money(g.Refunded) + " USD\nNet test amount: " + money(g.Net) + " USD\nAs of: " + r.AsOf + "\n\n" +
-		"DAD launches in April 2027. Pre-launch giving earns permanent Founding Donor recognition; recognition in this sandbox is simulated.\n"
+		"DAD launches in April 2027. A first gift completed before 1 January 2027 (New York time) earns permanent Founding Donor recognition; recognition in this sandbox is simulated.\n"
 }
 
 func renderSummary(s AnnualSummary) string {

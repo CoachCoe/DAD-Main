@@ -77,7 +77,8 @@ true; add a rule when a mistake would otherwise be repeated.
 - **Verify before claiming done:** `make format-go` (wraps past 140 columns), `go vet ./...`,
   `go build ./...`, and `go test -race` on the affected packages against a
   synthetic DB. State explicitly what you could not run and why.
-- **Correctness-first on money paths.** This is a 501(c)(3) donation platform.
+- **Correctness-first on money paths.** This is a donation platform; never describe the
+  receiving entity as a 501(c)(3), since its status is unconfirmed (PRD G-11).
   On financial-fact handling, recognition rules, migrations, auth, and the
   Founding Donor cutoff, prefer a correct fetch/behavior over a clever
   optimization. "Ship imperfect and iterate" does not apply to the ledger.

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -114,6 +115,45 @@ func FromEnvironment(getenv func(string) string) (Config, error) {
 		}
 	}
 	return config, nil
+}
+
+// RegistrationPlatforms lets the API accept devices without loading delivery credentials.
+// Unset preserves direct deployments using the original provider configuration.
+func RegistrationPlatforms(getenv func(string) string) ([]string, error) {
+	raw := strings.TrimSpace(getenv("DONOR_PUSH_PLATFORMS"))
+	if raw == "" {
+		config, err := FromEnvironment(getenv)
+		if err != nil {
+			return nil, err
+		}
+		var platforms []string
+		if config.APNs != nil {
+			platforms = append(platforms, IOS)
+		}
+		if config.FCM != nil {
+			platforms = append(platforms, Android)
+		}
+		return platforms, nil
+	}
+	if strings.EqualFold(raw, "none") {
+		return nil, nil
+	}
+	var platforms []string
+	seen := map[string]bool{}
+	for part := range strings.SplitSeq(raw, ",") {
+		part = strings.ToUpper(strings.TrimSpace(part))
+		if part == "" {
+			continue
+		}
+		if part != IOS && part != Android {
+			return nil, fmt.Errorf("%w: DONOR_PUSH_PLATFORMS must contain IOS, ANDROID, or none", ErrConfiguration)
+		}
+		if !seen[part] {
+			platforms = append(platforms, part)
+			seen[part] = true
+		}
+	}
+	return platforms, nil
 }
 
 func readFile(path string) ([]byte, error) {

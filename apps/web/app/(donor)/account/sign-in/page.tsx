@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Page } from "@/components/donor/Page";
 import { PasskeySignIn } from "@/components/donor/PasskeySignIn";
+import { PasswordAccess } from "@/components/donor/PasswordAccess";
+import { PhoneSignIn } from "@/components/donor/PhoneSignIn";
 import { SignInForm } from "@/components/donor/SignInForm";
 import { AlreadySignedIn } from "./AlreadySignedIn";
 
@@ -13,9 +15,17 @@ export default function SignInPage() {
       <p className="lead">
         Use the email you entered when giving. We’ll email a single-use link to claim your account or sign in.
       </p>
+      <p>
+        <a href="/account/signup">Create a donor account</a>
+      </p>
+      <PasswordAccess />
+      <p>
+        <a href="/account/oauth/apple">Sign in with Apple</a> · <a href="/account/oauth/google">Sign in with Google</a>
+      </p>
       <SignInForm />
       <p className="note">The link expires after 15 minutes. You don’t need a password.</p>
       <PasskeySignIn />
+      <PhoneSignIn />
     </Page>
   );
 }

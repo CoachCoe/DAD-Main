@@ -162,30 +162,49 @@ func (q *Queries) PushTargets(ctx context.Context, arg PushTargetsParams) ([]Pus
 
 const queuePushIntents = `-- name: QueuePushIntents :exec
 WITH projection AS (
-    SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version, referred_link_count, referred_irl_count, referred_link_minor, referred_irl_minor FROM donor_metric_projections m WHERE m.donor_id=$3::uuid
+    SELECT donor_id, referrer_id, referral_kind, first_gift_id, net_minor, founding_awarded_at, best_streak, current_streak, at_risk, grace_ends_at, computed_at, next_refresh_at, id, created_at, refresh_failures, refresh_error, rules_version, referred_link_count, referred_irl_count, referred_link_minor, referred_irl_minor, streak_since, current_monthly_minor, active FROM donor_metric_projections m WHERE m.donor_id=$3::uuid
 ), candidates AS (
     SELECT p.referrer_id AS donor_id,'REFERRAL_CONVERTED' AS category,'push:referral:'||p.donor_id::text||':'||p.referrer_id::text||':'||p.referral_kind AS dedup_key,
-        json_build_object('referred_id',p.donor_id::text,'kind',p.referral_kind) AS context
+        json_build_object('referred_id',p.donor_id::text,'kind',p.referral_kind) AS context,
+        $2::timestamptz AS available_at
     FROM projection p WHERE p.referrer_id IS NOT NULL AND p.net_minor>0
     AND EXISTS(SELECT 1 FROM donor_gifts g WHERE g.stripe_object_id=p.first_gift_id
         AND greatest(g.paid_at,g.created_at)>$4::timestamptz)
     UNION ALL
-    SELECT p.donor_id,'STREAK_AT_RISK','push:streak-at-risk:'||b.id::text,json_build_object('period_id',b.id::text)
+    SELECT p.donor_id,'STREAK_AT_RISK',
+        'push:streak-at-risk:'||b.id::text||CASE WHEN days.day=0 THEN '' ELSE ':5' END,
+        json_build_object('period_id',b.id::text,'day',days.day),
+        greatest(b.due_at+days.day*interval '24 hours',$2::timestamptz)
     FROM projection p CROSS JOIN LATERAL (
-        SELECT id,status FROM donor_billing_periods WHERE donor_id=p.donor_id AND due_at<=$1::timestamptz
+        SELECT id,status,due_at FROM donor_billing_periods WHERE donor_id=p.donor_id AND due_at<=$2::timestamptz
         ORDER BY due_at DESC LIMIT 1
-    ) b WHERE p.at_risk AND b.status='FAILED'
+    ) b CROSS JOIN (VALUES(0),(5)) AS days(day) WHERE p.at_risk AND b.status='FAILED'
+    UNION ALL
+    -- Streak lapsed (§6.11): the latest renewal failed and its 7-day grace has
+    -- fully elapsed with no recovery, so the run ended. Keyed by that period so
+    -- the lapse fires once; distinct from the at-risk reminders inside grace.
+    SELECT p.donor_id,'STREAK_LAPSED','push:streak-lapsed:'||b.id::text,json_build_object('period_id',b.id::text),$2::timestamptz
+    FROM projection p CROSS JOIN LATERAL (
+        SELECT id,status,due_at FROM donor_billing_periods WHERE donor_id=p.donor_id AND due_at<=$2::timestamptz
+        ORDER BY due_at DESC LIMIT 1
+    ) b WHERE b.status='FAILED' AND b.due_at + interval '7 days' <= $2::timestamptz
     UNION ALL
     SELECT $3::uuid,'STREAK_MILESTONE',
         'push:streak-milestone:'||$3::text||':'||floor(extract(epoch FROM $5::timestamptz))::bigint::text||':'||$6::integer::text,
-        json_build_object('months',$6::integer)
+        json_build_object('days',$6::integer),$2::timestamptz
     WHERE $6::integer IS NOT NULL AND $5::timestamptz IS NOT NULL
+    UNION ALL
+    SELECT g.donor_id,'GIFT_PROCESSED','push:gift:'||g.id::text,
+        json_build_object('gift_id',g.id::text),$2::timestamptz
+    FROM donor_gifts g WHERE g.donor_id=$3::uuid
+      AND g.paid_at<=$2::timestamptz
+      AND greatest(g.paid_at,g.created_at)>$4::timestamptz
 )
 INSERT INTO donor_push_notifications(id,donor_id,category,dedup_key,context,available_at,expires_at)
-SELECT gen_random_uuid(),c.donor_id,c.category,c.dedup_key,c.context,$1::timestamptz,$2::timestamptz
+SELECT gen_random_uuid(),c.donor_id,c.category,c.dedup_key,c.context,c.available_at,c.available_at+make_interval(secs=>extract(epoch FROM $1::timestamptz-$2::timestamptz))
 FROM candidates c
 WHERE EXISTS(SELECT 1 FROM donor_sessions s WHERE s.donor_id=c.donor_id AND s.push_token IS NOT NULL
-    AND coalesce(s.refresh_expires_at,s.expires_at)>$1::timestamptz)
+    AND coalesce(s.refresh_expires_at,s.expires_at)>$2::timestamptz)
 AND (c.category<>'REFERRAL_CONVERTED' OR NOT EXISTS(
     SELECT 1 FROM donor_push_notifications n WHERE n.category='REFERRAL_CONVERTED' AND n.donor_id=c.donor_id
     AND n.context->>'referred_id'=c.context->>'referred_id' AND n.context->>'kind'=c.context->>'kind'))
@@ -193,8 +212,8 @@ ON CONFLICT(dedup_key) DO NOTHING
 `
 
 type QueuePushIntentsParams struct {
-	AsOf         pgtype.Timestamptz `json:"as_of"`
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	AsOf         pgtype.Timestamptz `json:"as_of"`
 	DonorID      pgtype.UUID        `json:"donor_id"`
 	RecentSince  pgtype.Timestamptz `json:"recent_since"`
 	RunStartedAt pgtype.Timestamptz `json:"run_started_at"`
@@ -208,10 +227,14 @@ type QueuePushIntentsParams struct {
 // while the streak it threatens is at risk, and a streak milestone the caller
 // computed, keyed by the run it belongs to. Only donors with a live device
 // get one, so nothing accumulates for donors without the app.
+// The lifetime is a fixed span of seconds: a bare timestamptz difference
+// normalises to an interval of whole days, and adding days back across a DST
+// boundary shifts the instant by the offset, so a push scheduled past a
+// transition would expire an hour early or late.
 func (q *Queries) QueuePushIntents(ctx context.Context, arg QueuePushIntentsParams) error {
 	_, err := q.db.Exec(ctx, queuePushIntents,
-		arg.AsOf,
 		arg.ExpiresAt,
+		arg.AsOf,
 		arg.DonorID,
 		arg.RecentSince,
 		arg.RunStartedAt,

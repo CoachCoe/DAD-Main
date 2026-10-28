@@ -36,23 +36,50 @@ type Services struct {
 	Content  ContentSource
 	Checkout CheckoutSource
 	Webhook  WebhookReceiver
-	Partner  PartnerSource
+	// Partner portal: the public application, the authenticated
+	// partner session surface, and the staff-side partner administration.
+	PartnerApply        PartnerApplySource
+	ApplicationReceipts ApplicationReceiptSource
+	PartnerPortal       PartnerPortalSource
+	StaffPartner        StaffPartnerSource
+	EmployeeDonor       EmployeeDonorSource
+	EmployeePartner     EmployeePartnerSource
+	EmployeeStaff       EmployeeStaffSource
 
+	Passwords       PasswordSource
 	Account         AccountSource
 	EmailConfigured bool
 	EmailChange     EmailChangeSource
 	Donor           DonorSource
 	DonorPasskeys   DonorPasskeySource
+	PhoneSignIn     PhoneSignInSource
+	OIDCSignIn      OIDCSignInSource
+	Analytics       AnalyticsSource
 	Dashboard       DashboardSource
 	Recurring       RecurringSource
 	Push            PushSource
+	PartnerPush     PushSource
 	Wallet          *wallet.Issuer
 
-	Staff        StaffSource
-	Admin        AdminSource
-	StaffFinance StaffFinanceSource
-	Exports      ExportSource
-	ContentAdmin ContentAdminSource
+	Staff           StaffSource
+	Admin           AdminSource
+	StaffFinance    StaffFinanceSource
+	Exports         ExportSource
+	ContentAdmin    ContentAdminSource
+	Wording         WordingSource
+	Initiatives     InitiativeSource
+	InitiativeRead  InitiativeReadSource
+	TodayInitiative TodayInitiativeSource
+	Badges          BadgeSource
+	FoundingClaims  FoundingClaimSource
+	Network         NetworkSource
+	Events          EventSource
+	EventRead       EventReadSource
+	Reservations    ReservationSource
+	Reporting       ReportSource
+	// EventCheckInSecret is the HMAC key for QR check-in tokens (E-8); empty
+	// disables check-in.
+	EventCheckInSecret string
 }
 
 type api struct {

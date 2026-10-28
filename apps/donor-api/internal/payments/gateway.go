@@ -29,8 +29,15 @@ type SubscriptionGateway interface {
 	PaymentMethodGateway
 	CheckoutGateway
 	ScheduleCancellation(context.Context, string, int64, string) error
-	PauseCollection(context.Context, string, int64, string) error
 	ChangeMonthlyAmount(context.Context, string, string, string, int64, string) error
+}
+
+// ReversalGateway undoes a checkout that completed after its donor deleted
+// the account.
+type ReversalGateway interface {
+	RetrieveSubscription(context.Context, string) (Object, error)
+	RefundAfterDeletion(context.Context, string, int64, string) error
+	CancelSubscriptionNow(context.Context, string, string) error
 }
 
 type StaffFinanceGateway interface {
@@ -159,7 +166,7 @@ func (g *StripeGateway) CreateCheckout(ctx context.Context, raw []byte, key stri
 	return result, nil
 }
 
-// Recurring changes never prorate: a new amount, pause, or cancellation takes
+// Recurring changes never prorate: a new amount or cancellation takes
 // effect at a renewal boundary.
 func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, params *stripe.SubscriptionUpdateParams, key string) error {
 	params.ProrationBehavior = stripe.String("none")
@@ -175,20 +182,6 @@ func (g *StripeGateway) mutateSubscription(ctx context.Context, id string, param
 
 func (g *StripeGateway) ScheduleCancellation(ctx context.Context, id string, end int64, key string) error {
 	return g.mutateSubscription(ctx, id, &stripe.SubscriptionUpdateParams{CancelAt: stripe.Int64(end)}, key)
-}
-
-func (g *StripeGateway) PauseCollection(ctx context.Context, id string, resumes int64, key string) error {
-	return g.mutateSubscription(
-		ctx,
-		id,
-		&stripe.SubscriptionUpdateParams{
-			PauseCollection: &stripe.SubscriptionUpdatePauseCollectionParams{
-				Behavior:  stripe.String("void"),
-				ResumesAt: stripe.Int64(resumes),
-			},
-		},
-		key,
-	)
 }
 
 func (g *StripeGateway) ChangeMonthlyAmount(ctx context.Context, id, item, product string, amount int64, key string) error {
@@ -306,6 +299,39 @@ func (g *StripeGateway) CreateRefund(ctx context.Context, payment string, amount
 		return nil, ErrProcessorUnavailable
 	}
 	return rawObject(result.LastResponse)
+}
+
+// RefundAfterDeletion refunds a payment taken after its donor deleted the
+// account. reversal names the queued reversal, so a retry is the same request.
+func (g *StripeGateway) RefundAfterDeletion(ctx context.Context, payment string, amount int64, reversal string) error {
+	params := &stripe.RefundCreateParams{
+		PaymentIntent: stripe.String(payment),
+		Amount:        stripe.Int64(amount),
+		Reason:        stripe.String("requested_by_customer"),
+		Metadata:      map[string]string{"dad_deleted_account_reversal": reversal},
+	}
+	params.SetIdempotencyKey("dad-deleted-account-refund-" + reversal)
+	if err := g.acquire(ctx, BucketStaff); err != nil {
+		return err
+	}
+	if _, err := g.client.V1Refunds.Create(ctx, params); err != nil {
+		return ErrProcessorUnavailable
+	}
+	return nil
+}
+
+// CancelSubscriptionNow ends a subscription immediately, without a final
+// invoice or proration credit.
+func (g *StripeGateway) CancelSubscriptionNow(ctx context.Context, id, key string) error {
+	params := &stripe.SubscriptionCancelParams{InvoiceNow: stripe.Bool(false), Prorate: stripe.Bool(false)}
+	params.SetIdempotencyKey(key)
+	if err := g.acquire(ctx, BucketStaff); err != nil {
+		return err
+	}
+	if _, err := g.client.V1Subscriptions.Cancel(ctx, id, params); err != nil {
+		return ErrProcessorUnavailable
+	}
+	return nil
 }
 
 func (g *StripeGateway) ListPaymentRefunds(ctx context.Context, payment string) ([]Object, error) {

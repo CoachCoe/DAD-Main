@@ -1,0 +1,185 @@
+name: Infra (CDK)
+
+# Infrastructure pipeline. CDK is reserved for infra changes only; the app rollout
+# lives in deploy.yml and does NOT use CDK (direct ECS update-service).
+#
+# Flow:
+#   - PR touching infra/**     -> `cdk diff` against the target env (read-only).
+#   - push to dev              -> `cdk deploy -c env=staging`  (sandbox 853377042897).
+#   - release tag / push main  -> `cdk deploy -c env=production` (216833405626),
+#                                 gated by the `production` GitHub Environment
+#                                 (configure a manual-approval protection rule there).
+#
+# Auth is GitHub OIDC assuming the FEAT-002 pipeline-iam roles (no static keys):
+#   staging  -> arn role dad-staging-infra-deploy
+#   production -> arn role dad-production-infra-deploy
+# The role ARNs are read from GitHub Environment variables (vars.INFRA_DEPLOY_ROLE_ARN)
+# so account ids are not hardcoded here. Region is us-east-2.
+
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  push:
+    branches: [dev, main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/infra.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+# OIDC needs id-token: write; the rest is read-only.
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: infra
+
+env:
+  AWS_REGION: us-east-2
+  NODE_VERSION: "22"
+
+jobs:
+  # PRs: always validate the IaC offline with `cdk synth` (no AWS credentials
+  # needed). Only attempt a credentialed `cdk diff` once the account has been
+  # bootstrapped and the OIDC deploy role ARN is configured as the GitHub
+  # Environment variable INFRA_DEPLOY_ROLE_ARN. Before bootstrap that variable
+  # is unset, so the diff step is skipped and the PR check stays green on the
+  # synth alone. See infra/README.md for the one-time bootstrap steps.
+  diff:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # PRs diff against staging by default; production diffs run from the
+    # production environment on demand (workflow_dispatch) only.
+    environment: staging
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      # Offline validation: synth both environments with dummy account/region.
+      # This is the real PR signal and needs no AWS credentials.
+      - name: cdk synth (staging + production, offline)
+        env:
+          CDK_DEFAULT_ACCOUNT: "000000000000"
+          CDK_DEFAULT_REGION: ${{ env.AWS_REGION }}
+        run: |
+          npx cdk synth -c env=staging >/dev/null
+          npx cdk synth -c env=production >/dev/null
+      # Credentialed diff, only once OIDC is set up (role ARN variable present).
+      - name: Check whether OIDC deploy role is configured
+        id: oidc
+        run: |
+          if [ -n "${{ vars.INFRA_DEPLOY_ROLE_ARN }}" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "INFRA_DEPLOY_ROLE_ARN is not set yet; skipping credentialed cdk diff. The offline synth above is the PR signal until the account is bootstrapped." >&2
+          fi
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        if: steps.oidc.outputs.configured == 'true'
+        with:
+          role-to-assume: ${{ vars.INFRA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: cdk diff (staging)
+        if: steps.oidc.outputs.configured == 'true'
+        run: npx cdk diff -c env=staging
+
+  # Merge to dev -> staging deploy. Skipped (green) until the account is
+  # bootstrapped and INFRA_DEPLOY_ROLE_ARN is set; see infra/README.md.
+  deploy-staging:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev' && vars.INFRA_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: staging
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.INFRA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: cdk deploy (staging)
+        run: npx cdk deploy -c env=staging --all --require-approval never
+
+  # Release tag or merge to main -> production deploy, gated by the `production`
+  # GitHub Environment (manual-approval protection rule is configured on that
+  # environment in repo settings, not in YAML).
+  deploy-production:
+    if: >-
+      vars.INFRA_DEPLOY_ROLE_ARN != '' &&
+      ((github.event_name == 'release' && github.event.action == 'published') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.INFRA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: cdk deploy (production)
+        run: npx cdk deploy -c env=production --all --require-approval never
+
+  # On-demand deploy to a chosen environment.
+  deploy-dispatch:
+    if: github.event_name == 'workflow_dispatch' && vars.INFRA_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ inputs.env }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.INFRA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: cdk deploy (${{ inputs.env }})
+        run: npx cdk deploy -c env=${{ inputs.env }} --all --require-approval never

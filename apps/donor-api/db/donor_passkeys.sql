@@ -26,7 +26,7 @@ VALUES($1,$2,$3,$4,$5);
 
 -- name: TakeDonorCeremony :one
 DELETE FROM donor_ceremonies
-WHERE token_hash=$1 AND kind=$2
+WHERE token_hash=$1 AND kind=$2 AND expires_at>clock_timestamp()
 RETURNING donor_id,session,expires_at;
 
 -- name: DeleteExpiredDonorCeremonies :exec

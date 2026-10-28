@@ -33,9 +33,10 @@ cp .env.database.example .env.database
 ./scripts/deploy.sh smoke
 ```
 
-`ENV_FILE` (default `.env.production`) holds application settings and reaches every donor
-container; `DATABASE_ENV_FILE` (default `.env.database`) holds database credentials and
-reaches none: Compose reads it to give each service its own login's URL, and the scripts
+`ENV_FILE` (default `.env.production`) supplies application settings for Compose
+interpolation; each container receives only its explicitly listed settings and secrets.
+`DATABASE_ENV_FILE` (default `.env.database`) holds database credentials and is not mounted
+or passed wholesale to containers: Compose gives each service its own login's URL, and the scripts
 refuse database credentials in `ENV_FILE`. Both may be relative to the current directory.
 
 `migrate` starts PostgreSQL, applies embedded forward SQL migrations, and brings the
@@ -105,7 +106,8 @@ through PostgreSQL with a deadline. It can be ready while Stripe or SMTP is inte
 unconfigured. Readiness is not payment-provider acceptance or live-release authorization.
 
 Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURED`,
-`EMAIL_UNCONFIGURED`, `SOURCE_STORAGE_UNCONFIGURED`, or `PUSH_UNCONFIGURED`) and are not logged as errors; a
+`EMAIL_UNCONFIGURED`, `SOURCE_STORAGE_UNCONFIGURED`, `PUSH_UNCONFIGURED`, or
+`FOUNDING_CLAIMS_UNCONFIGURED`) and are not logged as errors; a
 503 without a code is a transient failure and is logged.
 
 ### Upgrading an existing deployment
@@ -117,6 +119,10 @@ Features that are not configured answer 503 with a `code` (`PAYMENTS_UNCONFIGURE
 3. Run `./scripts/deploy.sh up`, then `workers` if they are enabled, then `smoke`.
 
 Some migrations and releases need more:
+
+- Projection rules version 11 prevents expired continuity from awarding new streak
+  badges. Run the projections worker after upgrading so overdue projections refresh;
+  previously earned badges remain permanent.
 
 - The DAD rebrand changes image names, example database names/logins, and the default
   TLS directory. Existing PostgreSQL volumes keep their original database, owner, and
@@ -146,7 +152,7 @@ Some migrations and releases need more:
   from `/staff`.
 - `0008_referral_touch_retention` builds its indexes without `CONCURRENTLY`, blocking
   checkout writes while it runs; on a large database, migrate at a quiet time.
-- `0009_subscription_sync` adds the billing anchor that dates paused renewals. A
+- `0009_subscription_sync` adds the billing anchor that dates renewals. A
   subscription synced before it shows no anchor until the Stripe worker next syncs it, so
   start the workers promptly after `up`.
 - `0015_pending_refund_reconciliation` indexes unsettled refunds for bounded batch reads.
@@ -286,7 +292,7 @@ use their own logins instead. Size the pooler's server connections to the databa
 
 Stripe limits requests per account: by default 25 per second in a sandbox and 100 in
 live mode ([rate limits](https://docs.stripe.com/rate-limits)). Set the account's limit
-as `DONOR_STRIPE_REQUESTS_PER_SECOND` (default 25) for every process. It is divided
+as `DONOR_STRIPE_REQUESTS_PER_SECOND` (default 25) for every Stripe caller. It is divided
 among four buckets so that one kind of traffic cannot starve another: event-processing
 reads 40%, donor checkout and card setup 30%, staff and donor subscription commands
 20%, and the daily reconciliation 10%. Each bucket admits a burst of one second of its
@@ -301,13 +307,15 @@ cannot validate that capacity.
 Use the organization's verified Stripe **test** account and snapshot webhook events at
 API version `2026-09-30.endive`. Subscribe to:
 
-- `payment_intent.succeeded` for one-time gifts.
 - `invoice.payment_succeeded` and `invoice.payment_failed` for monthly periods.
 - `refund.created`, `refund.updated`, and `refund.failed`.
 - `checkout.session.completed` and `checkout.session.expired`.
 - `customer.subscription.created`, `customer.subscription.updated`,
   `customer.subscription.deleted`, `customer.subscription.pending_update_applied`, and
   `customer.subscription.pending_update_expired`.
+
+New `payment_intent.succeeded` events are ignored by the R1 receiver. Retained
+pre-R1 one-time gift records remain readable; new giving is monthly only.
 
 Point the endpoint at `/api/donor/stripe/webhook` on the public origin. nginx gives it
 its own generous limit ([edge](edge.md#rate-limits)); Cloudflare must skip its bot and
@@ -322,6 +330,14 @@ subscription with a complete card payment is the supported billing model. Betwee
 events, the worker syncs any subscription stored without a billing anchor (one saved
 before migration 0009), one at a time and checking hourly; one that fails to sync is
 logged as a worker step failure and retried in the next hourly pass.
+
+Account deletion waits two hours for an open checkout, but Stripe can still report one
+later. When a gift is paid after its donor deleted the account, the worker queues a full
+refund of that payment and an immediate cancellation of its subscription, then makes
+both Stripe calls between events. The gift stays in the ledger, and the refund and
+cancellation are recorded from their own events. A failed call is retried every ten
+minutes; after ten attempts it parks and the monitor's `reversals` queue counts it.
+Check the error class and the payment in Stripe, then refund or cancel it there.
 
 Monitor the oldest unprocessed `donor_stripe_events`, attempt counts, and worker health.
 A failed event waits before its next attempt, doubling from one minute up to an hour,
@@ -408,8 +424,8 @@ age of the oldest unprocessed event, and changes refused as out of date answer 4
 staff refund whose outcome was lost stays pending until the original action is retried.
 A second recurring change submitted while another is still with Stripe receives 409; the
 subscription lease expires after two minutes if a writer stops mid-command, and the same
-request ID can then resume it. One-time gifts take their paid time from the successful
-charge, so a restricted key needs read access to PaymentIntents and Charges.
+request ID can then resume it. Historical one-time gift facts take their paid time from
+the successful charge, so a restricted key needs read access to PaymentIntents and Charges.
 Refund and recurring cancellation are separate actions requiring named permissions,
 confirmation, reasons, and audit records. Never edit processor identifiers by hand.
 
@@ -420,7 +436,7 @@ use the same mail configuration, require current-address proof before new-addres
 and park delivery after five failures. Requesting a replacement invalidates prior proofs.
 Projection refresh handles grace expiry, recurring boundaries, permanent recognition,
 and prior-year summaries. A projection is recomputed when facts that change it arrive and
-at its next time boundary: a due date, period end, grace deadline, pause, cancellation,
+at its next time boundary: a due date, period end, grace deadline, cancellation,
 refund, or New Year in New York, and at least every 25 to 35 days, a span fixed per
 donor so that projections computed together fall due over ten days. A release that changes
 recognition, or the messages and push intents queued with it, raises `projectionRules` in
@@ -428,6 +444,14 @@ recognition, or the messages and push intents queued with it, raises `projection
 projection whenever no projection is due. A donor whose facts cannot be projected is deferred with
 backoff, records an error class, and counts as parked in the monitor; other donors keep
 refreshing. Unknown streak state displays Updating; it must not silently become zero.
+
+Global rankings use `donor_projection_schedules` to claim one refresh every 15 minutes
+across projection replicas, even when no donors qualify. The schedule and ranking changes
+commit together, so a failed refresh remains due. Publishing an event records a durable
+alert job in the same transaction; projection workers resume it in batches of at most 256
+eligible volunteers. Republishing does not restart the job. Each batch rechecks publication,
+cancellation, start time, and notification choices; delivery rechecks the recipient again.
+Apply migration `0054_projection_schedules_and_event_fanout.sql` before these binaries.
 
 Deploy migration `0017_referral_corrections.sql` before binaries using projection rules
 version 6. Older projections then converge on the earliest verified successful payment
@@ -497,7 +521,7 @@ anywhere real.
 
 ## App notifications
 
-The push worker (`make worker KIND=push`, or `push-worker` in Compose) sends donor app
+The push worker (`make worker KIND=push`, or `push-worker` in Compose) sends donor and partner app
 notifications through Apple Push Notification service for iOS and Firebase Cloud
 Messaging for Android. The API reads the same settings: it accepts device registrations
 only for a configured platform, answering `PUSH_UNCONFIGURED` otherwise, so no
@@ -508,6 +532,18 @@ suppressed `push_unconfigured`; notifications are queued only for donors with a
 registered device and are dropped as `expired` 24 hours after queuing, so none wait
 indefinitely.
 
+Partner installations register through `POST /donor/partner/push-device` after a native
+partner sign-in; browsers and donor credentials cannot register partner devices.
+`POST /donor/partner/push-device/unregister` removes the registration. Devices receive
+approval (when registered within 24 hours of approval), verified-metric, and initiative
+completion notices. Approval email remains the way into a newly approved portal.
+Each installation has its own bounded-retry job and stable notification identifier.
+Notices contain generic copy and open `/partner`; they contain no organization, donor,
+or financial details. The normal push queue monitor includes parked partner jobs.
+Registrations end with the existing 12-hour partner session, sign-out, or user removal;
+a new sign-in must register again. An installation moves between donor and partner
+accounts when it registers, so a shared device cannot retain both recipients.
+
 | Variable | Meaning |
 |---|---|
 | `DONOR_PUSH_APNS_KEY_FILE` | Path to the APNs authentication key (`AuthKey_<key ID>.p8`, PKCS#8 P-256). |
@@ -517,7 +553,7 @@ indefinitely.
 | `DONOR_PUSH_FCM_KEY_FILE` | Path to the Firebase service-account JSON key; its `project_id` receives the sends. |
 
 Key material is read only from files, at most 1 MiB, like the Wallet keys: mount them
-read-only into the API and push-worker containers (readable by uid 10001), keep them
+read-only into the push-worker container (readable by uid 10001), keep them
 in the deployment secret manager, and never commit them or copy them into images.
 
 APNs setup: in Apple Developer, Certificates, Identifiers & Profiles, enable Push
@@ -549,6 +585,31 @@ notification as suppressed (`opted_out`, `referral_no_longer_qualifies`,
 `payment_recovered`, `streak_ended`, `no_device`, and similar) otherwise. Local tests
 use a fake provider and local HTTP servers; they do not prove acceptance by Apple or
 Google, which needs real accounts, a signed build, and physical devices.
+
+## Phone and social sign-in
+
+Phone sign-in and Apple/Google sign-in stay off until configured; the API refuses to
+start with an invalid configuration and names the variables to fix.
+
+- Phone: `DONOR_SMS_PROVIDER=twilio` with `DONOR_SMS_ACCOUNT_ID` (the `AC…` account
+  SID), `DONOR_SMS_AUTH_TOKEN`, and `DONOR_SMS_FROM` (an E.164 number or an `MG…`
+  Messaging Service SID). Codes are sent after the response, so a failed send reaches
+  the donor only as a code that never arrives; it is logged as `sign-in code not sent`,
+  and the donor can ask again after a minute. The per-phone cooldown preserves the
+  previous code and its attempt budget during that minute, including across API replicas.
+- Apple/Google: `DONOR_OIDC_MODE=live` with `DONOR_OIDC_APPLE_CLIENT_ID` and/or
+  `DONOR_OIDC_GOOGLE_CLIENT_ID`, the audience each provider puts in its ID tokens. List
+  several, separated by commas, when the app and the website use different ones (Apple's
+  bundle ID and Services ID). The
+  API fetches signing keys from `appleid.apple.com` and `www.googleapis.com`, so it needs
+  outbound HTTPS to both; keys are cached for an hour and a known key keeps working
+  through a provider outage.
+
+`DONOR_SMS_PROVIDER=stub` (with `DONOR_SMS_FROM`) records codes instead of sending them,
+and `DONOR_OIDC_MODE=stub` (with `DONOR_OIDC_STUB_KEY`) accepts HMAC-signed test tokens.
+Both are for development and tests only. The API refuses to start with either unless the
+public origin is on this machine (`localhost`, `*.localhost`, `127.0.0.1`), or a shared
+test deployment sets `DONOR_ALLOW_SIGN_IN_STUBS=true`; production must never set it.
 
 ## App associations
 
@@ -590,27 +651,30 @@ recovery for an enabled administrator:
 It works like the back-office recovery action and is audited as `staff.recovery_invited`
 with no actor. Protect the printed invitation, and review the audit history afterwards.
 
-At `/staff/content`, upload private source documents, then publish complete CSV snapshots.
+At `/staff/content`, upload private source documents, then publish complete CSV snapshots
+of the impact ledger. Initiatives are created, edited and published at `/staff/initiatives`;
+initiatives published from the spreadsheet before it was retired for them were copied there.
 Sources are limited to 10 MiB, encrypted, SHA-256 checked, and permission-protected.
 Without `DONOR_CONTENT_ENCRYPTION_KEY`, uploads return 503 before the file is read;
 publishing still works. Donor records have linkable URLs (`/staff/donors/{id}`), and
 search keeps its query in `/staff?q=`.
-Each CSV is limited to 512 KiB and 500 rows. Exact column order:
-
-```csv
-slug,title,summary,partner,planned_start,board_approval_source_id,approved_on
-```
+The CSV is limited to 512 KiB and 500 rows. Exact column order:
 
 ```csv
 metric,value,unit,source_id,illustrative
 ```
 
-Dates are YYYY-MM-DD. Every initiative references an uploaded board-approval source.
-Slugs are unique lowercase words separated by hyphens. Ledger values are nonnegative
-integers with unit `USD_CENTS`, `PEOPLE`, `INITIATIVES`, or `PARTNERS`. Real figures require
-a source; examples require `illustrative=true`. Supply an as-of date and stated update
-cadence. Invalid publications leave the current snapshot intact. Staff are responsible
-for actual accuracy and board approval; uploading a source cannot establish either.
+Ledger values are nonnegative integers with unit `USD_CENTS`, `PEOPLE`, `INITIATIVES`, or
+`PARTNERS`. Real figures require a source; examples require `illustrative=true`. Supply an
+as-of date (YYYY-MM-DD) and stated update cadence. Invalid publications leave the current
+snapshot intact. Staff are responsible for actual accuracy; uploading a source cannot
+establish it.
+
+Publishing an initiative requires its board approval: the ID of the approval document
+stored here and the date the board approved it. A published initiative's approval can be
+replaced but not removed. Initiatives published before this rule stay published; record
+their approvals when next editing them. Approvals given in the content spreadsheet were
+carried over.
 
 Exports use fixed field allowlists, omit credentials and message bodies, neutralize CSV
 formula prefixes, and audit completion/interruption. Referral rows retain channel.
@@ -620,8 +684,54 @@ The `billing-history` CSV contains verified failed and successful invoice observ
 See [analytics](analytics.md) for its coverage boundary and for timestamp, replay, and
 renewal-cohort rules.
 
+At `/staff/content/wording`, content staff change badge titles, how-to-earn text, and
+streak-milestone notifications; an empty entry restores the default.
+
+At `/staff/founding-claims`, an administrator imports website waitlist sign-ups and earlier
+website donors (D-6) as a CSV of at most 4 MiB and 50,000 rows:
+
+```csv
+email,signed_up_on,source
+```
+
+`signed_up_on` is a YYYY-MM-DD date before 2027-01-01 and `source` is `WAITLIST` or
+`WEBSITE_DONOR`. Any invalid row refuses the whole file. The API stores only an
+HMAC-SHA256 of each lower-cased address under `DONOR_FOUNDING_CLAIM_KEY`, so the stored
+hashes cannot be matched against guessed addresses without the key; delete the source file
+once imported. Generate the key with `openssl rand -base64 32 | tr '+/' '-_'` and set it on
+the API only; without it the import answers 503 `FOUNDING_CLAIMS_UNCONFIGURED`. A donor is
+granted the badge when the import finds their address, when they first give as a guest
+under it, or when they change their email to it. Grants survive a key change, but claims
+not yet granted no longer match under a new key, so re-import the file after changing it.
+Re-importing is safe and keeps each address's earliest sign-up. Qualifying claims have
+no redemption expiry; a later account claim still earns the badge.
+
 The enrolment CSV has headers only until R2. Keep exports private and apply an approved
 retention policy. Sensitive source documents have separate authenticated downloads.
+
+## Partner report artifacts
+
+Offline match payments use a permanent version-4 UUID request key. The staff screen
+saves the key, amount and year in tab-scoped session storage before sending the request,
+and preserves them after an uncertain response or navigation. Retry the saved payment
+until confirmed; do not create another payment to resolve an unknown outcome. Identical
+replays create neither another payment nor another audit entry. A key reused with another
+partner, year or amount returns 409. Older API clients may omit `Idempotency-Key`, but
+must be upgraded before retrying uncertain requests because omission cannot deduplicate.
+
+Partner administrators upload a PNG or JPEG logo from the organization section, up to
+512 by 512 pixels and 256 KiB. The API validates dimensions before decoding, removes
+metadata, and stores a normalized PNG. Empty input explicitly removes the logo. No
+external image URL is fetched.
+
+New PDF exports retain their exact bytes and dashboard snapshot. A later edit to the
+organization, logo, metrics or spending never changes an existing export. Authenticated
+users of that organization can download retained files; only administrators can create
+exports or change the logo. Historical entries created before artifact retention remain
+listed as unavailable because their original contents cannot be reconstructed safely.
+Unverified figures are labeled awaiting verification in the portal and omitted from the
+PDF. Published zero values remain distinguishable from unknown values. PDFs carry a
+sandbox label, export time, logo, and a header and footer on each page.
 
 ## Load testing with representative data
 
@@ -649,10 +759,10 @@ make seed SEED_DATABASE_URL=postgresql://user:pass@db:5432/dad_load SEED_CONFIRM
 
 `SEED_DONORS` (default 50,000, at most 1,000,000) donors are generated deterministically
 from `-seed` and held in memory, about 8 KB of RSS per donor (400 MB at 50,000, 8 GB at 1,000,000): mostly
-monthly gifts at the preselected $30, some at the $90 and $150 presets or at custom
-amounts such as $10, $50 and $100, one-time gifts, abandoned checkouts, up to two years of
-anniversary renewals with failures recovered within and after the 14-day grace,
-unrecovered failures, pauses, cancellations, refunds, and referral trees in which most
+monthly gifts at the preselected $30, some at $90 and $150 or at other valid whole-dollar
+daily amounts, abandoned checkouts, up to two years of anniversary renewals with failures
+recovered within and after the 7-day grace, unrecovered failures, cancellations, refunds,
+and referral trees in which most
 donors refer nobody and a few refer hundreds, with Link and IRL visits that did and did
 not convert. Rows are written as checkout and webhook processing store them, including
 the processed Stripe events that billing and refund observations cite, and the
@@ -721,16 +831,15 @@ for CPU. Keep results with the run's ticket, not in the repository.
 
 ## External acceptance
 
-Browser analytics/privacy decisions and manual assistive-technology acceptance are
-deferred by product agreement, as are native design deliverables and physical Wallet/QR
-acceptance. See [analytics](analytics.md) for the collection boundary and
+First-party browser analytics requires explicit user consent. Manual assistive-technology
+acceptance, native design deliverables, and physical Wallet/QR acceptance remain external. See [analytics](analytics.md) for the collection boundary and
 [design foundations](design-system.md) for the manual accessibility scope. These items
 remain unverified; deferral does not establish production acceptance.
 
 Before live solicitation, verify the receiving entity, EIN, processor account, approved
 receipt and policy text, registrations, Wallet accounts/certificates, delivery reputation,
 backup/restore and incident ownership. Exercise the full Stripe sandbox journey including
-out-of-order webhooks, refund transitions, failed renewals, pauses, early resumption,
+out-of-order webhooks, refund transitions, failed renewals, cancellation,
 month-end boundaries, and ambiguous responses. Local test doubles do not prove these
 provider behaviors. Physical QR scanning, assistive-technology checks, and viral-load
 acceptance also require explicit evidence.
@@ -770,8 +879,9 @@ newest first: the first key encrypts everything written, and any key in the list
 decrypts. A single key is a list of one. The API and workers refuse to start if any key
 in a list is malformed. Session, link, and referral-visitor lookups use unkeyed SHA-256
 hashes of random tokens, so no stored hash depends on these keys and rotation re-hashes
-nothing. Wallet signing keys and staff passkeys are not data-encryption keys and are not
-rotated this way.
+nothing. `DONOR_FOUNDING_CLAIM_KEY` is not an encryption key and `rekey` does not
+handle it; see [staff and content](#staff-and-content) for changing it. Wallet signing
+keys and staff passkeys are not data-encryption keys and are not rotated this way.
 
 `rekey --key email` (or `content`) re-encrypts every token of that setting still on a
 later key under the first key. It reads each table in id order in pages of `--batch`
@@ -861,3 +971,151 @@ Rehearse the restored app in an isolated environment with the encryption keys in
 when the dump was taken ([retired keys](#backups-and-retired-keys)) and
 outbound Stripe/email disabled. Establish recovery-point and recovery-time objectives,
 backup scheduling, retention, alerting, and off-host recovery ownership before launch.
+
+## Continuous integration
+
+CI runs in GitHub Actions on ephemeral GitHub-hosted runners. Linux jobs use
+`ubuntu-24.04`; Swift compatibility uses `macos-latest`. Fork pull requests run
+ordinary CI without production credentials. Repository environment protections
+continue to govern the separate ATM ledger reader, publisher, and administrative
+jobs. Those jobs accept trusted repository events only and require a
+`github-hosted` OIDC identity.
+
+The main workflow runs Go formatting, vet, race tests, static analysis and
+vulnerability scanning; web lint, unit tests, types and production build; ledger
+checks; generated-code validation; browser journeys in development and production;
+and production image, Compose and ingress checks. Changes to shared scripts,
+contracts, Makefile and Docker inputs trigger their dependent jobs. Pushes to
+`dev` and `main` run the full suite.
+
+The mobile workflow validates and bundles the contract, then compiles and tests
+it with the pinned Swift package dependencies. Only matching mobile version tags
+publish a release; pull requests cannot publish artifacts as releases.
+
+Branch protection should require the CI and mobile checks and ATM acceptance.
+A green application test suite alone does not authorize deployment. Retire
+previous persistent self-hosted runners from this repository and revoke any
+credentials stored on those machines through the operator's runner controls.
+
+
+## One email, one role
+
+New identities are refused for an address held by another role (see
+[donor domain](donor-domain.md#giving-and-identity)), but addresses that already held two
+roles are left as they are. List them with the owner role before deciding, with each
+person, which login keeps the address:
+
+```sql
+SELECT email, array_agg(role ORDER BY role) AS roles FROM (
+  SELECT email, 'DONOR' AS role FROM donors WHERE email IS NOT NULL
+  UNION ALL SELECT email, 'STAFF' FROM donor_staff WHERE NOT disabled
+  UNION ALL SELECT email, 'PARTNER:' || partner_id FROM donor_partner_users WHERE NOT disabled
+) held GROUP BY email HAVING count(*) > 1;
+```
+
+## Process secret boundaries
+
+The production Compose file never injects an entire environment file into a process.
+The application and database files are interpolation inputs; each service has an explicit
+allowlist. Keep operator files outside Git, protect them on the host, and use separate
+provider keys for independently operated capabilities.
+
+The API receives its database role, Stripe/webhook credentials, source-document and
+email-token encryption keys, configured SMS/OIDC settings, Wallet signing files and
+check-in secret. It queues email without SMTP login credentials. Mail workers alone
+receive SMTP authentication. Stripe processing and reconciliation receive the Stripe
+API key; projection and monitor processes receive no provider credentials. Rekey receives
+only the encryption keyrings it rotates. The push worker alone mounts APNs/FCM delivery
+keys; the API receives `DONOR_PUSH_PLATFORMS` to accept device registration without
+opening those keys. Compose derives the platforms from configured delivery paths unless
+an explicit platform list or `none` overrides it.
+
+`make check-deploy-secrets` renders Compose with canary settings and verifies these
+boundaries, including that unrelated secrets never reach a container. CI runs this before
+image checks. Direct API deployments retain the original key-loading configuration when
+`DONOR_PUSH_PLATFORMS` is unset; set explicit platform names to isolate delivery keys there.
+
+## Partner application receipts
+
+The web application form uses `POST /donor/partner/applications` with a
+client-generated 32-byte random base64url receipt and a stable idempotency key. The
+receipt and application commit together. Application submission remains browser-only. A retry must retain both values and the same
+form. The browser receives an HttpOnly, SameSite=Lax cookie lasting 30 days. `GET /donor/partner/application-status` also accepts the receipt
+as a native bearer credential; native clients must obtain and securely retain that
+separate receipt through an explicit application-submission integration. No receipt is
+implicitly shared from the browser to an app.
+
+`/apply/status` shows the organization and current review decision after navigation or
+refresh. A receipt proves possession of the submission, not ownership of its work
+email; it grants no partner or donor access and exposes no contact details or staff
+notes. It is never put in a URL. The database stores only its SHA-256 hash. Browsers
+without the original receipt, including another device, need the partnerships team's
+help; approval continues to require the emailed sign-in proof. Existing application
+clients remain supported through the original submission endpoint.
+
+## Recognition repair
+
+A super admin can use **Repair recognition after a system error** on a donor record.
+`POST /donor/staff/donors/{donor_id}/recognition/recompute` requires `donor.recompute`
+and a 10–1000-character reason identifying the documented error and resolution.
+The repair uses the normal locked projection path and records the reason, before/after
+current and best streaks, and rules version in the same transaction's audit event.
+Payment history remains authoritative; permanent earned badges and historical bests
+are preserved. This operation repairs derived state after facts or code have been
+corrected. It does not provide an arbitrary manual continuity override.
+
+### Web signup and identity providers
+
+Donor signup collects a private name, email, ZIP, and city before emailing a
+single-use verification link. Existing donor profiles are not overwritten by an
+anonymous signup. After following the link, donors may set a password in their
+profile. Passwords use bcrypt at cost 12, accept 12–72 bytes, and are never logged.
+Changing a password requires the current password or an email proof completed in
+the same session within 15 minutes. The email sign-in flow is also password recovery.
+Account deletion removes the password hash and private signup name.
+
+The web Apple and Google authorization-code flows use these server-only variables:
+
+- `DONOR_OAUTH_APPLE_CLIENT_ID` and `DONOR_OAUTH_APPLE_CLIENT_SECRET` (Apple's signed
+  client-secret JWT, renewed before its expiry).
+- `DONOR_OAUTH_GOOGLE_CLIENT_ID` and `DONOR_OAUTH_GOOGLE_CLIENT_SECRET`.
+
+Register the exact redirect URLs `${DONOR_PUBLIC_ORIGIN}/account/oauth/apple` and
+`${DONOR_PUBLIC_ORIGIN}/account/oauth/google` with the providers. Include the web
+client IDs in the corresponding `DONOR_OIDC_*_CLIENT_ID` audience allowlists and use
+`DONOR_OIDC_MODE=live`. Apple requires HTTPS for its cross-site form-post callback.
+Each attempt has a short-lived HttpOnly state/nonce cookie; Google also uses PKCE.
+The Go verifier validates the resulting token's signature, issuer, audience, and
+expiry before issuing the normal HttpOnly donor session. Provider errors return a
+sign-in failure without logging codes, tokens, or response bodies. These flows need
+real-provider acceptance with the deployment's registered credentials.
+
+### Initiative co-funders and verified spending
+
+An initiative may have several approved co-funders, each with its own committed
+amount. Partnerships staff set the initiative ID and that partner's commitment in
+partner detail. Linking another partner preserves all existing links and amounts.
+Partner committed totals use those individual commitments; initiative metrics and
+category spending describe the whole initiative. Published metric/completion
+notifications fan out to every co-funder. The older optional primary-partner field
+remains compatible and adds a link without removing other co-funders.
+
+Spend changes are drafts. Impact Ops must supply a verification note and date and
+explicitly publish each category. An edit leaves the previously published total
+visible until the verified replacement is published. Verification evidence is kept
+with the published total. Existing published totals are preserved on migration;
+the migration does not manufacture historical verification evidence.
+
+### Recognition controls
+
+Super administrators can reset a donor's current streak with a reason. The reset is
+stored separately from gift facts and survives projection recomputation; giving
+history, historical best, and already earned badges are preserved. A future paid
+gift starts the new run. Repairing a faulty projection remains a separate action.
+
+Content administration includes badge names, rule text, numeric earning thresholds,
+PNG/JPEG artwork, and increasing streak milestone thresholds. Supported badge signals
+remain fixed; staff cannot supply executable rules. Changes are audited and schedule
+projection refreshes. Past awards remain permanent. Company month winners use combined
+active giving, matching the displayed leaderboard. Qualifying website-waitlist claims
+have no redemption expiry; only their keyed address hashes are retained.

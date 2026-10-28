@@ -23,6 +23,13 @@ func (unconfiguredRecurring) BeginPaymentUpdate(context.Context, string, pgtype.
 	return store.PaymentUpdate{}, payments.ErrUnconfigured
 }
 
+// unconfiguredClaims answers as the store does without a waitlist key.
+type unconfiguredClaims struct{ FoundingClaimSource }
+
+func (unconfiguredClaims) Authorize(context.Context, string) error {
+	return store.ErrFoundingClaimsUnconfigured
+}
+
 func TestUnconfiguredFeaturesAnswerWithCodesWithoutErrorLogs(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()
@@ -42,6 +49,7 @@ func TestUnconfiguredFeaturesAnswerWithCodesWithoutErrorLogs(t *testing.T) {
 		{"login without email", Services{Account: &accountStub{}}, "/donor/login", `{"email":"donor@example.org"}`, "EMAIL_UNCONFIGURED"},
 		{"email change without email", Services{EmailChange: &emailChangeStub{}}, "/donor/me/email-change", `{"email":"new@example.org"}`, "EMAIL_UNCONFIGURED"},
 		{"source upload without key", Services{ContentAdmin: &uploadStub{authorizeErr: store.ErrSourceStorageUnconfigured}}, "/donor/staff/content/sources?name=a.pdf", "", "SOURCE_STORAGE_UNCONFIGURED"},
+		{"waitlist import without key", Services{FoundingClaims: unconfiguredClaims{}}, "/donor/staff/founding-claims", `{"claims_csv":""}`, "FOUNDING_CLAIMS_UNCONFIGURED"},
 	} {
 		r := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
 		r.Header.Set("Origin", originFor(tc.path))

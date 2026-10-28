@@ -37,6 +37,10 @@ func (s publicSite) claim(token, next string) string {
 	return link
 }
 
+func (s publicSite) partnerSignIn(token string) string {
+	return string(s) + "/partner/accept#token=" + token
+}
+
 func (s publicSite) emailChange(token string) string {
 	return string(s) + "/account/email-change#token=" + token
 }
@@ -47,10 +51,11 @@ const (
 	paymentMethodPath = "/account/payment-method"
 )
 
-func (s publicSite) dashboard() string     { return string(s) + dashboardPath }
-func (s publicSite) profile() string       { return string(s) + "/account/profile" }
-func (s publicSite) paymentMethod() string { return string(s) + paymentMethodPath }
-func (s publicSite) donate() string        { return string(s) + "/donate" }
+func (s publicSite) dashboard() string      { return string(s) + dashboardPath }
+func (s publicSite) event(id string) string { return string(s) + "/events/" + id }
+func (s publicSite) profile() string        { return string(s) + "/account/profile" }
+func (s publicSite) paymentMethod() string  { return string(s) + paymentMethodPath }
+func (s publicSite) donate() string         { return string(s) + "/donate" }
 
 // checkoutReturn is where hosted checkout returns a donor; Stripe substitutes
 // the session placeholder.

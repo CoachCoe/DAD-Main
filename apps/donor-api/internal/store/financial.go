@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"dad/donor-api/internal/badges"
 	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
@@ -86,6 +87,24 @@ func loadHistory(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) (
 	return result, nil
 }
 
+// latestMonthlyMinor is the amount of the most recent MONTHLY gift -- the
+// donor's current pledge -- which annualizes to their network contribution.
+// Returns 0 when there is no monthly gift.
+func latestMonthlyMinor(gifts []recognition.Gift) int64 {
+	var amount int64
+	var latest time.Time
+	for _, g := range gifts {
+		if g.Frequency != "MONTHLY" {
+			continue
+		}
+		if g.PaidAt.After(latest) {
+			latest = g.PaidAt
+			amount = g.Amount
+		}
+	}
+	return amount
+}
+
 // historicalBest replays refund observations made by asOf so a full refund
 // cannot erase a best streak the donor had already attained.
 func historicalBest(
@@ -96,7 +115,6 @@ func historicalBest(
 	now time.Time,
 	previous int64,
 	stops []time.Time,
-	pauses []recognition.Pause,
 ) (int64, error) {
 	byID := map[string]recognition.Refund{}
 	for _, r := range h.Refunds {
@@ -119,7 +137,7 @@ func historicalBest(
 			history = append(history, r)
 		}
 	}
-	return replayBest(ctx, id.String(), h, history, now, previous, stops, pauses)
+	return replayBest(ctx, id.String(), h, history, now, previous, stops)
 }
 
 // refundsAsOf returns each refund's state as of asOf. A refund last updated
@@ -158,7 +176,6 @@ func replayBest(
 	now time.Time,
 	previous int64,
 	stops []time.Time,
-	pauses []recognition.Pause,
 ) (int64, error) {
 	slices.SortStableFunc(history, func(a, b recognition.Refund) int { return a.UpdatedAt.Compare(b.UpdatedAt) })
 	gifts := slices.Clone(h.Gifts)
@@ -198,7 +215,7 @@ func replayBest(
 			continue
 		}
 		refunds := slices.Collect(maps.Values(latest))
-		value, err := recognition.GivingStreak(h.Gifts, refunds, h.Periods, donorID, point, best, stops, pauses)
+		value, err := recognition.GivingStreak(h.Gifts, refunds, h.Periods, donorID, point, best, stops)
 		if err != nil && !errors.Is(err, recognition.ErrIncomplete) {
 			return 0, err
 		}
@@ -214,10 +231,12 @@ func replayBest(
 type projection struct {
 	queries.SaveProjectionParams
 	streakSince *time.Time
+	donor       queries.Donor
+	zone        *time.Location
 }
 
-// Version 6 attributes conversions to the earliest verified successful payment.
-const projectionRules = 6
+// Version 11 requires fresh continuity before awarding new streak badges.
+const projectionRules = 12
 
 // A projection waits at most refreshCap for its next time boundary. Facts that
 // change a projection refresh it when they arrive, so this is a backstop, not a
@@ -245,9 +264,11 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		NextRefreshAt: timestamp(now.Add(refreshCap(id))),
 		RulesVersion:  projectionRules,
 	}
-	if _, err := q.LockDonor(ctx, id); err != nil {
+	donor, err := q.LockDonor(ctx, id)
+	if err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
+	zone := recognition.Zone(donor.Timezone.String)
 	if err := seedProjection(ctx, q, id, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
@@ -269,17 +290,26 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		return projection{SaveProjectionParams: out}, err
 	}
 	refunds, refundBoundaries := refundsAsOf(h.Refunds, observations, now)
-	if err = projectConversion(&out, h, id, now); err != nil {
+	claimed := false
+	if !out.FoundingAwardedAt.Valid {
+		if claimed, err = q.FoundingClaimed(ctx, id); err != nil {
+			return projection{SaveProjectionParams: out}, err
+		}
+	}
+	if err = projectConversion(&out, h, id, claimed, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
 	if out.NetMinor, err = netMinor(h.Gifts, refunds, now); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
-	stops, pauses, err := renewalStops(ctx, q, id)
+	stops, err := renewalStops(ctx, q, id)
 	if err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
-	best, err := historicalBest(ctx, id, h, observations, now, int64(out.BestStreak), stops, pauses)
+	if err = saveRetention(ctx, q, id, h, observations, stops, zone, now); err != nil {
+		return projection{SaveProjectionParams: out}, err
+	}
+	best, err := historicalBest(ctx, id, h, observations, now, int64(out.BestStreak), stops)
 	if err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
@@ -287,7 +317,15 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		return projection{SaveProjectionParams: out}, recognition.ErrInvalid
 	}
 	out.BestStreak = int32(best)
-	streak, err := recognition.GivingStreak(h.Gifts, refunds, h.Periods, id.String(), now, best, stops, pauses)
+	resetAt, err := q.LatestStreakReset(ctx, queries.LatestStreakResetParams{DonorID: id, AsOf: timestamp(now)})
+	if err != nil {
+		return projection{SaveProjectionParams: out}, err
+	}
+	streakGifts := h.Gifts
+	if resetAt.Valid {
+		streakGifts = slices.DeleteFunc(slices.Clone(h.Gifts), func(g recognition.Gift) bool { return !g.PaidAt.After(resetAt.Time) })
+	}
+	streak, err := recognition.GivingStreak(streakGifts, refundsForGifts(refunds, streakGifts), h.Periods, id.String(), now, best, stops)
 	switch {
 	case errors.Is(err, recognition.ErrIncomplete):
 		out.NextRefreshAt = timestamp(now.Add(5 * time.Minute))
@@ -303,8 +341,58 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 		if streak.GraceEndsAt != nil {
 			out.GraceEndsAt = timestamp(*streak.GraceEndsAt)
 		}
+		if streak.Since != nil {
+			out.StreakSince = timestamp(*streak.Since)
+		}
+		// N-1/I-2 network inputs: a donor counts toward a referrer's active
+		// network, at their current monthly pledge, exactly while their own
+		// streak is alive (a live run has a start and a positive length). A
+		// lapsed donor's run has reset to zero and drops out of the network
+		// total until they give again.
+		currentGift := streak
+		if resetAt.Valid {
+			natural, e := recognition.GivingStreak(h.Gifts, refunds, h.Periods, id.String(), now, best, stops)
+			if e != nil && !errors.Is(e, recognition.ErrIncomplete) {
+				return projection{}, e
+			}
+			if e == nil {
+				currentGift = natural
+			}
+		}
+		out.Active = currentGift.Since != nil && currentGift.Current > 0
+		if out.Active {
+			out.CurrentMonthlyMinor = latestMonthlyMinor(h.Gifts)
+		}
 	}
-	out.NextRefreshAt = nextRefresh(out, h, refundBoundaries, stops, pauses, now)
+	for _, g := range h.Gifts {
+		if g.PaidAt.After(now) || g.PaidAt.Before(now.AddDate(0, -13, 0)) {
+			continue
+		}
+		if err := recordServerEvent(ctx, q, id, "gift_completed", "gift:"+g.ID, g.PaidAt); err != nil {
+			return projection{}, err
+		}
+	}
+
+	if old.AtRisk != out.AtRisk && out.AtRisk {
+		if err := recordServerEvent(ctx, q, id, "gift_failed", "gift-failed:"+id.String()+":"+out.GraceEndsAt.Time.String(), now); err != nil {
+			return projection{}, err
+		}
+	}
+	if old.AtRisk && !out.AtRisk && out.Active {
+		if err := recordServerEvent(ctx, q, id, "gift_recovered", "gift-recovered:"+id.String()+":"+old.GraceEndsAt.Time.String(), now); err != nil {
+			return projection{}, err
+		}
+	}
+	if old.Active && !out.Active && !out.AtRisk {
+		if err := recordServerEvent(ctx, q, id, "gift_lapsed", "gift-lapsed:"+id.String()+":"+old.StreakSince.Time.String(), now); err != nil {
+			return projection{}, err
+		}
+	}
+	rules, err := recognitionRules(ctx, q)
+	if err != nil {
+		return projection{}, err
+	}
+	out.NextRefreshAt = nextRefresh(out, h, refundBoundaries, stops, now, zone, rules.Milestones)
 	if err = recomputeReferredTotals(ctx, q, id, &out); err != nil {
 		return projection{SaveProjectionParams: out}, err
 	}
@@ -322,7 +410,7 @@ func projectFacts(ctx context.Context, q *queries.Queries, id pgtype.UUID, now t
 			return projection{SaveProjectionParams: out}, err
 		}
 	}
-	return projection{out, streak.Since}, q.SaveProjection(ctx, out)
+	return projection{out, streak.Since, donor, zone}, q.SaveProjection(ctx, out)
 }
 
 // recomputeReferredTotals reconciles the locked row with committed referred
@@ -367,7 +455,8 @@ func referralContribution(referrer pgtype.UUID, kind pgtype.Text, net pgtype.Int
 	return linkCount, irlCount, linkMinor, irlMinor
 }
 
-// applyReferralDelta transfers contributions atomically with the projection.
+// applyReferralDelta transfers contributions atomically with the projection,
+// and awards the referrer the referral badges their new counts reach.
 func applyReferralDelta(
 	ctx context.Context,
 	q *queries.Queries,
@@ -400,31 +489,57 @@ func applyReferralDelta(
 		if err := seedProjection(ctx, q, id, now); err != nil {
 			return err
 		}
-		if err := q.ApplyReferralDelta(ctx, d); err != nil {
+		counts, err := q.ApplyReferralDelta(ctx, d)
+		if err != nil {
 			return err
+		}
+		referrals := badges.Signals{
+			ConvertedReferrals: counts.ReferredLinkCount + counts.ReferredIrlCount,
+			HasIRLReferral:     counts.ReferredIrlCount > 0,
+		}
+		rules, err := recognitionRules(ctx, q)
+		if err != nil {
+			return err
+		}
+		for _, rule := range rules.Badges {
+			if !ruleEarned(rule, referrals) {
+				continue
+			}
+			if err := earnBadge(ctx, q, id, rule.Code, now); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
 // nextRefresh is the earliest moment after now at which the projection can
-// change without new facts arriving, and at most its default refresh time.
+// change without new facts arriving, and at most its default refresh time. The
+// next streak milestone is one, so its badge and notice arrive on the day.
 func nextRefresh(
 	out queries.SaveProjectionParams,
 	h history,
 	refundBoundaries, stops []time.Time,
-	pauses []recognition.Pause,
 	now time.Time,
+	zone *time.Location,
+	configured ...[]int64,
 ) pgtype.Timestamptz {
 	boundaries := slices.Concat(refundBoundaries, stops)
+	if out.StreakSince.Valid {
+		run := recognition.Streak{Since: &out.StreakSince.Time}
+		milestones := recognition.LadderMilestones
+		if len(configured) > 0 {
+			milestones = configured[0]
+		}
+		if next := run.LadderWithMilestones(now, zone, milestones).NextMilestone; next != nil {
+			boundaries = append(boundaries, run.Reaches(*next, zone))
+		}
+	}
 	for _, p := range h.Periods {
 		boundaries = append(boundaries, p.DueAt, p.EndsAt, p.EndsAt.Add(recognition.Grace))
 	}
 	for _, g := range h.Gifts {
 		boundaries = append(boundaries, g.PaidAt)
-	}
-	for _, p := range pauses {
-		boundaries = append(boundaries, p.Start, p.End, p.End.Add(recognition.Grace), recognition.PauseFreezeEnd(p.Start))
 	}
 	if out.GraceEndsAt.Valid {
 		boundaries = append(boundaries, out.GraceEndsAt.Time)
@@ -443,7 +558,8 @@ func nextRefresh(
 }
 
 // Arrival order must not determine attribution. The founding award stays earned.
-func projectConversion(out *queries.SaveProjectionParams, h history, id pgtype.UUID, now time.Time) error {
+// A donor on the website waitlist (claimed, D-6) earns it when matched.
+func projectConversion(out *queries.SaveProjectionParams, h history, id pgtype.UUID, claimed bool, now time.Time) error {
 	relations, err := recognition.Relationships(h.Gifts, now)
 	if err != nil {
 		return err
@@ -462,8 +578,11 @@ func projectConversion(out *queries.SaveProjectionParams, h history, id pgtype.U
 		return nil
 	}
 	at, qualified, err := recognition.FoundingQualifiedAt(h.Gifts, id.String(), now)
-	if qualified {
+	switch {
+	case qualified:
 		out.FoundingAwardedAt = timestamp(at)
+	case claimed:
+		out.FoundingAwardedAt = timestamp(now)
 	}
 	return err
 }
@@ -483,28 +602,23 @@ func netMinor(gifts []recognition.Gift, refunds []recognition.Refund, now time.T
 	return pgtype.Int8{Int64: total, Valid: true}, nil
 }
 
-// renewalStops returns the renewal boundaries ended by cancellation and the
-// pause windows that skip renewals.
-func renewalStops(ctx context.Context, q *queries.Queries, id pgtype.UUID) ([]time.Time, []recognition.Pause, error) {
-	windows, err := q.PauseWindows(ctx, id)
-	if err != nil {
-		return nil, nil, err
-	}
-	pauses := make([]recognition.Pause, 0, len(windows))
-	for _, w := range windows {
-		end := w.ResumesAt.Time
-		if w.NextRenewal.Valid {
-			end = w.NextRenewal.Time
-		}
-		pauses = append(pauses, recognition.Pause{Start: w.StartsAt.Time, End: end})
-	}
+// renewalStops returns the renewal boundaries ended by cancellation.
+func renewalStops(ctx context.Context, q *queries.Queries, id pgtype.UUID) ([]time.Time, error) {
 	ended, err := q.StoppedPeriods(ctx, id)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	stops := make([]time.Time, 0, len(ended))
 	for _, v := range ended {
 		stops = append(stops, v.Time)
 	}
-	return stops, pauses, nil
+	return stops, nil
+}
+
+func refundsForGifts(refunds []recognition.Refund, gifts []recognition.Gift) []recognition.Refund {
+	ids := map[string]bool{}
+	for _, g := range gifts {
+		ids[g.ID] = true
+	}
+	return slices.DeleteFunc(slices.Clone(refunds), func(r recognition.Refund) bool { return !ids[r.GiftID] })
 }

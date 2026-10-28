@@ -46,8 +46,8 @@ func TestSourceUploadsRequireEncryptionKeyButPublishingDoesNot(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "ADMIN")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	restoreContent(t, pool, actor)
 	s := ContentService{Staff: &StaffService{DB: api}}
 	if err := s.AuthorizeSourceUpload(ctx, support); !errors.Is(err, ErrStaffForbidden) {
@@ -75,12 +75,8 @@ func TestSourceUploadsRequireEncryptionKeyButPublishingDoesNot(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := PublicationRequest{
-		AsOf:    "2026-01-01",
-		Cadence: "Monthly",
-		InitiativesCSV: fmt.Sprintf(
-			"slug,title,summary,partner,planned_start,board_approval_source_id,approved_on\nfirst,First,Planned initiative,Partner,2027-04-22,%s,2026-01-01\n",
-			source.String(),
-		),
+		AsOf:      "2026-01-01",
+		Cadence:   "Monthly",
 		LedgerCSV: fmt.Sprintf("metric,value,unit,source_id,illustrative\nCollected,3000,USD_CENTS,%s,false\n", source.String()),
 	}
 	if _, err := s.Publish(ctx, token, r); err != nil {
@@ -92,7 +88,7 @@ func TestSourceStoredBeforeAKeyRotationStaysReadable(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "ADMIN")
+	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
 	restoreContent(t, pool, actor)
 	old := base64.URLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32))
 	s := ContentService{Staff: &StaffService{DB: api}, EncryptionKeys: keyring(t, old)}
@@ -111,8 +107,8 @@ func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "ADMIN")
-	_, support := staffFixture(t, pool, "SUPPORT")
+	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
+	_, support := staffFixture(t, pool, "OP_PARTNERSHIPS")
 	restoreContent(t, pool, actor)
 	s := ContentService{Staff: &StaffService{DB: api}, EncryptionKeys: keyring(t, base64.URLEncoding.EncodeToString(make([]byte, 32)))}
 	data := []byte("Private signed source record")
@@ -134,12 +130,8 @@ func TestSourceIntegrityAndAtomicPublication(t *testing.T) {
 		t.Fatal("source roundtrip failed", err)
 	}
 	r := PublicationRequest{
-		AsOf:    "2026-01-01",
-		Cadence: "Monthly",
-		InitiativesCSV: fmt.Sprintf(
-			"slug,title,summary,partner,planned_start,board_approval_source_id,approved_on\nfirst,First,Planned initiative,Partner,2027-04-22,%s,2026-01-01\n",
-			id.String(),
-		),
+		AsOf:      "2026-01-01",
+		Cadence:   "Monthly",
 		LedgerCSV: fmt.Sprintf("metric,value,unit,source_id,illustrative\nCollected,3000,USD_CENTS,%s,false\n", id.String()),
 	}
 	if _, err = s.Publish(ctx, token, r); err != nil {
@@ -170,34 +162,29 @@ func TestPublicationErrorsLocateEachProblem(t *testing.T) {
 	pool := database(t)
 	api := as(t, dbroles.API)
 	ctx := context.Background()
-	actor, token := staffFixture(t, pool, "ADMIN")
+	actor, token := staffFixture(t, pool, "SUPER_ADMIN")
 	restoreContent(t, pool, actor)
 	s := ContentService{Staff: &StaffService{DB: api}}
 	source := testID(t)
 	if err := queries.New(pool).InsertContentSource(ctx, queries.InsertContentSourceParams{ID: source, ActorID: actor, Name: "approval.pdf", Sha256: strings.Repeat("0", 64), EncryptedData: []byte("ciphertext")}); err != nil {
 		t.Fatal(err)
 	}
-	const initiativesHeader = "slug,title,summary,partner,planned_start,board_approval_source_id,approved_on\n"
 	const ledgerHeader = "metric,value,unit,source_id,illustrative\n"
-	initiative := "first,First,Planned,Partner,2027-04-22," + source.String() + ",2026-01-01\n"
-	ledger := "Collected,3000,USD_CENTS," + source.String() + ",false\n"
 	for _, c := range []struct {
-		name              string
-		initiatives, rows string
-		want              PublicationProblem
+		name string
+		rows string
+		want PublicationProblem
 	}{
-		{"bad header", "slug,title\n", ledgerHeader + ledger, PublicationProblem{Sheet: "initiatives", Row: 1, Reason: "invalid_header"}},
-		{"duplicate slug", initiativesHeader + initiative + initiative, ledgerHeader + ledger, PublicationProblem{Sheet: "initiatives", Row: 3, Column: "slug", Reason: "duplicate_slug"}},
-		{"bad date", initiativesHeader + "first,First,Planned,Partner,someday," + source.String() + ",2026-01-01\n", ledgerHeader + ledger, PublicationProblem{Sheet: "initiatives", Row: 2, Column: "planned_start", Reason: "invalid_date"}},
-		{"bad unit", initiativesHeader + initiative, ledgerHeader + "Collected,3000,EUROS," + source.String() + ",false\n", PublicationProblem{Sheet: "ledger", Row: 2, Column: "unit", Reason: "invalid_unit"}},
-		{"unknown source", initiativesHeader + initiative, ledgerHeader + "Collected,3000,USD_CENTS," + testID(t).String() + ",false\n", PublicationProblem{Sheet: "ledger", Row: 2, Column: "source_id", Reason: "unknown_source"}},
-		{"NUL byte", initiativesHeader + "first,First\x00,Planned,Partner,2027-04-22," + source.String() + ",2026-01-01\n", ledgerHeader + ledger, PublicationProblem{Sheet: "initiatives", Reason: "invalid_text"}},
+		{"bad header", "metric,value\n", PublicationProblem{Sheet: "ledger", Row: 1, Reason: "invalid_header"}},
+		{"bad unit", ledgerHeader + "Collected,3000,EUROS," + source.String() + ",false\n", PublicationProblem{Sheet: "ledger", Row: 2, Column: "unit", Reason: "invalid_unit"}},
+		{"unknown source", ledgerHeader + "Collected,3000,USD_CENTS," + testID(t).String() + ",false\n", PublicationProblem{Sheet: "ledger", Row: 2, Column: "source_id", Reason: "unknown_source"}},
+		{"NUL byte", ledgerHeader + "Collected\x00,3000,USD_CENTS," + source.String() + ",false\n", PublicationProblem{Sheet: "ledger", Reason: "invalid_text"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := s.Publish(
 				ctx,
 				token,
-				PublicationRequest{AsOf: "2026-01-01", Cadence: "Monthly", InitiativesCSV: c.initiatives, LedgerCSV: c.rows},
+				PublicationRequest{AsOf: "2026-01-01", Cadence: "Monthly", LedgerCSV: c.rows},
 			)
 			if !errors.Is(err, ErrStaffInput) {
 				t.Fatalf("got %v, want an ErrStaffInput", err)

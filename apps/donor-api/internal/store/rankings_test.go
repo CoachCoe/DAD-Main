@@ -1,0 +1,217 @@
+package store
+
+import (
+	"context"
+	"sync"
+	"testing"
+
+	"dad/donor-api/internal/dbroles"
+	"dad/donor-api/internal/recognition"
+	"dad/donor-api/internal/store/queries"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func TestRankingScheduleSurvivesEmptyPopulationAndSerializesWorkers(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	mustExec(t, pool, "DELETE FROM donor_projection_schedules WHERE id='rankings'")
+	cleanup(t, "DELETE FROM donor_projection_schedules WHERE id='rankings'")
+	cleanup(t, "DELETE FROM donor_rankings")
+	svc := RankingService{DB: as(t, dbroles.ProjectionWorker)}
+	now := time.Now().UTC()
+	var wg sync.WaitGroup
+	results := make(chan bool, 8)
+	errors := make(chan error, 8)
+	for range 8 {
+		wg.Go(func() {
+			worked, err := svc.RefreshIfDue(ctx, now)
+			results <- worked
+			errors <- err
+		})
+	}
+	wg.Wait()
+	close(results)
+	close(errors)
+	for err := range errors {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	count := 0
+	for worked := range results {
+		if worked {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("concurrent workers refreshed %d times, want one", count)
+	}
+	if worked, err := svc.RefreshIfDue(ctx, now.Add(RankingInterval-time.Microsecond)); err != nil || worked {
+		t.Fatalf("empty population refreshed before due: %t %v", worked, err)
+	}
+	if worked, err := svc.RefreshIfDue(ctx, now.Add(RankingInterval)); err != nil || !worked {
+		t.Fatalf("scheduled refresh did not run: %t %v", worked, err)
+	}
+}
+
+// rankDonor seeds a donor with a projection carrying a streak and start, and an
+// optional city + opt-out, for ranking tests.
+func rankDonor(t *testing.T, pool *pgxpool.Pool, streak int32, since time.Time, city string, optedOut bool) pgtype.UUID {
+	t.Helper()
+	ctx := context.Background()
+	id, _ := donor(t, pool)
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), "DELETE FROM donor_rankings WHERE donor_id=$1", id)
+		pool.Exec(context.Background(), "DELETE FROM donor_preferences WHERE donor_id=$1", id)
+	})
+	if city != "" {
+		if _, err := pool.Exec(ctx, "UPDATE donors SET city=$2 WHERE id=$1", id, city); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pid, _ := NewID()
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO donor_metric_projections (id,donor_id,best_streak,current_streak,streak_since,computed_at,next_refresh_at)
+		 VALUES ($1,$2,$3,$3,$4,$5,$6)`,
+		pid, id, streak, since, time.Now().UTC(), time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if optedOut {
+		prefID, _ := NewID()
+		if _, err := pool.Exec(ctx,
+			`INSERT INTO donor_preferences (id,donor_id,version,referral_emails,marketing_emails,rankings_opted_out)
+			 VALUES ($1,$2,1,true,true,true)`, prefID, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return id
+}
+
+func TestRankingsUseLocalDaysAndImmediateOptOut(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	longer := rankDonor(t, pool, 2, now.Add(-61*24*time.Hour), "Austin", false)
+	shorter := rankDonor(t, pool, 3, now.Add(-60*24*time.Hour), "Austin", false)
+	stale := rankDonor(t, pool, 10, now.Add(-300*24*time.Hour), "Austin", false)
+	mustExec(t, pool, "UPDATE donor_metric_projections SET next_refresh_at=$2 WHERE donor_id=$1", stale, now.Add(-time.Second))
+	svc := RankingService{DB: as(t, dbroles.ProjectionWorker)}
+	cleanup(t, "DELETE FROM donor_badges WHERE code IN ('NAT2','CITY50')")
+	cleanup(t, "DELETE FROM donor_rankings")
+	if err := svc.Refresh(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	q := queries.New(as(t, dbroles.API))
+	for id, want := range map[pgtype.UUID]int{longer: 1, shorter: 2} {
+		rank, err := ForDonor(ctx, q, id)
+		if err != nil || rank == nil || rank.CityRank == nil || *rank.CityRank != want {
+			t.Fatalf("daily ranking for %s = %+v (%v), want city rank %d", id, rank, err, want)
+		}
+	}
+	if rank, err := ForDonor(ctx, q, stale); err != nil || rank != nil {
+		t.Fatalf("stale recognition was ranked: %+v %v", rank, err)
+	}
+	pref := mustNewID(t)
+	mustExec(t, pool, `INSERT INTO donor_preferences(id,donor_id,version,referral_emails,marketing_emails,rankings_opted_out)
+		VALUES($1,$2,1,false,false,true)`, pref, longer)
+	if rank, err := ForDonor(ctx, q, longer); err != nil || rank != nil {
+		t.Fatalf("opt-out waited for the next rollup: %+v %v", rank, err)
+	}
+}
+
+func TestSingleEligibleDonorIsTopPercentile(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	id := rankDonor(t, pool, 1, now.Add(-7*24*time.Hour), "Austin", false)
+	cleanup(t, "DELETE FROM donor_badges WHERE code IN ('NAT2','CITY50')")
+	cleanup(t, "DELETE FROM donor_rankings")
+	if err := (RankingService{DB: as(t, dbroles.ProjectionWorker)}).Refresh(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	rank, err := ForDonor(ctx, queries.New(as(t, dbroles.API)), id)
+	if err != nil || rank == nil || rank.NationalPercentile != 1 {
+		t.Fatalf("single eligible donor rank = %+v %v; want top 1%%", rank, err)
+	}
+}
+
+func TestRankingRefreshPercentileCityRankAndOptOut(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	local := now.In(recognition.NewYork)
+	base := time.Date(local.Year(), local.Month(), local.Day()-300, 12, 0, 0, 0, recognition.NewYork)
+
+	// Clean any pre-existing ranking rows for isolation.
+	t.Cleanup(func() { pool.Exec(ctx, "DELETE FROM donor_rankings") })
+	if _, err := pool.Exec(ctx, "DELETE FROM donor_rankings"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Top streak in city A, with a tie broken by earlier start.
+	top := rankDonor(t, pool, 17, base.AddDate(0, 0, -200), "Austin", false)
+	tieEarlier := rankDonor(t, pool, 10, base.Add(-time.Hour), "Austin", false)
+	tieLater := rankDonor(t, pool, 10, base, "Austin", false)
+	_ = rankDonor(t, pool, 4, base.AddDate(0, 0, 200), "Austin", false)
+	// An opted-out donor with the highest streak must be excluded entirely.
+	optedOut := rankDonor(t, pool, 100, base.AddDate(0, 0, -1000), "Austin", true)
+
+	cleanup(t, "DELETE FROM donor_badges WHERE code IN ('NAT2','CITY50')")
+	svc := RankingService{DB: as(t, dbroles.ProjectionWorker)}
+	if err := svc.Refresh(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	held := func(id pgtype.UUID) string {
+		t.Helper()
+		var codes string
+		if err := pool.QueryRow(ctx, "SELECT coalesce(string_agg(code, ',' ORDER BY code), '') FROM donor_badges WHERE donor_id=$1", id).Scan(&codes); err != nil {
+			t.Fatal(err)
+		}
+		return codes
+	}
+	if got := held(top); got != "CITY50,NAT2" {
+		t.Fatalf("top donor holds %q after the rollup, want Top 50 City and Top 2%%", got)
+	}
+	if got := held(optedOut); got != "" {
+		t.Fatalf("opted-out donor earned ranking badges %q", got)
+	}
+
+	cityRank := func(id pgtype.UUID) int {
+		t.Helper()
+		var r pgtype.Int4
+		if err := pool.QueryRow(ctx, "SELECT city_rank FROM donor_rankings WHERE donor_id=$1", id).Scan(&r); err != nil {
+			t.Fatalf("no ranking row for donor: %v", err)
+		}
+		return int(r.Int32)
+	}
+
+	// Top streak ranks #1 in the city.
+	if got := cityRank(top); got != 1 {
+		t.Fatalf("top donor city_rank=%d want 1", got)
+	}
+	// Tie on 300 local days: the earlier start ranks ahead (rank 2 vs 3).
+	if e, l := cityRank(tieEarlier), cityRank(tieLater); !(e < l) {
+		t.Fatalf("tie-break failed: earlier=%d later=%d (earlier should rank ahead)", e, l)
+	}
+
+	// The opted-out donor has no ranking row at all.
+	var exists bool
+	if err := pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM donor_rankings WHERE donor_id=$1)", optedOut).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if exists {
+		t.Fatal("opted-out donor was ranked")
+	}
+
+	// The top donor's national percentile is the best bucket (1).
+	var pct int
+	if err := pool.QueryRow(ctx, "SELECT national_percentile FROM donor_rankings WHERE donor_id=$1", top).Scan(&pct); err != nil {
+		t.Fatal(err)
+	}
+	if pct != 1 {
+		t.Fatalf("top donor percentile: %d, want 1", pct)
+	}
+}

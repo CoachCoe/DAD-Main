@@ -462,7 +462,8 @@ func (q *Queries) StaffPasskeys(ctx context.Context, staffID pgtype.UUID) ([]Don
 }
 
 const takeStaffCeremony = `-- name: TakeStaffCeremony :one
-DELETE FROM donor_staff_ceremonies WHERE token_hash=$1 AND kind=$2 RETURNING invite_id,session,expires_at
+DELETE FROM donor_staff_ceremonies WHERE token_hash=$1 AND kind=$2 AND expires_at>clock_timestamp()
+RETURNING invite_id,session,expires_at
 `
 
 type TakeStaffCeremonyParams struct {

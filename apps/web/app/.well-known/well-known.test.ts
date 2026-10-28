@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
+import links from "../../../../contracts/mobile/links.json";
 import { GET as appleAssociation } from "./apple-app-site-association/route";
 import { GET as androidAssociation } from "./assetlinks.json/route";
 
@@ -17,7 +18,7 @@ it("names no app until one is configured", async () => {
   }
 });
 
-it("associates the iOS app with the account pages and its passkeys", async () => {
+it("associates the iOS app with the account and partner pages and its passkeys", async () => {
   vi.stubEnv("DONOR_IOS_APP_ID", "ABCDE12345.org.dynamicaid.donor");
   const response = appleAssociation();
   expect(response.status).toBe(200);
@@ -30,17 +31,37 @@ it("associates the iOS app with the account pages and its passkeys", async () =>
           appIDs: ["ABCDE12345.org.dynamicaid.donor"],
           components: [
             { "/": "/r/*" },
+            { "/": "/c/*" },
+            { "/": "/partner" },
+            { "/": "/partner/accept" },
             { "/": "/account/claim" },
             { "/": "/account/email-change" },
             { "/": "/account/payment-method" },
             { "/": "/account/dashboard" },
             { "/": "/account/profile" },
+            { "/": "/account/gifts" },
           ],
         },
       ],
     },
     webcredentials: { apps: ["ABCDE12345.org.dynamicaid.donor"] },
   });
+});
+
+it("keeps Apple association paths aligned with the shared mobile link policy", async () => {
+  vi.stubEnv("DONOR_IOS_APP_ID", "ABCDE12345.org.dynamicaid.donor");
+  const association = await appleAssociation().json();
+  const paths = association.applinks.details[0].components.map((entry: { "/": string }) => entry["/"]);
+  expect(paths.toSorted()).toEqual(
+    [
+      `${links.referral_prefix}*`,
+      `${links.company_prefix}*`,
+      ...links.partner_paths,
+      ...links.partner_proof_paths,
+      ...links.proof_paths,
+      ...links.account_paths,
+    ].toSorted(),
+  );
 });
 
 it("associates the Android app with its links and passkeys for every signing key", async () => {

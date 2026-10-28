@@ -62,15 +62,15 @@ func (h *historyFixture) donor(name string) pgtype.UUID {
 func (h *historyFixture) gift(g recognition.Gift) {
 	h.t.Helper()
 	ctx := context.Background()
-	if g.Frequency != "ONE_TIME" {
-		h.t.Fatal("history fixture supports one-time gifts")
-	}
 	donor := h.donor(g.DonorID)
+	// Giving is MONTHLY-only (one-time removed, PRD §5.1); the checkout constraint
+	// forbids any other frequency. Shared scenarios exercise referral/recognition
+	// math, which is frequency-agnostic, so every seeded gift is recorded monthly.
 	draft := queries.InsertCheckoutParams{
 		ID:          testID(h.t),
 		DonorID:     donor,
 		AmountMinor: g.Amount,
-		Frequency:   g.Frequency,
+		Frequency:   "MONTHLY",
 		CreatedAt:   timestamp(g.PaidAt),
 	}
 	// Checkout never captures a donor's own referral touch, so the schema forbids it.
@@ -167,7 +167,7 @@ func TestSharedReferralScenariosAgainstSQLAggregate(t *testing.T) {
 			actAs(t, tx, dbroles.API)
 			for _, name := range names {
 				want := expected[name]
-				board, err := dashboard(ctx, h.q, h.donors[name], c.AsOf)
+				board, err := dashboard(ctx, h.q, queries.Donor{ID: h.donors[name]}, c.AsOf)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -216,7 +216,7 @@ FROM donor_metric_projections WHERE referrer_id=$1`, referrer).Scan(&got.Link, &
 // role sees them, failing if the referrals are withheld.
 func dashboardTotals(t *testing.T, tx pgx.Tx, id pgtype.UUID, now time.Time) referralTotals {
 	t.Helper()
-	board, err := dashboard(context.Background(), queries.New(tx), id, now)
+	board, err := dashboard(context.Background(), queries.New(tx), queries.Donor{ID: id}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 				DonorID:   "link1",
 				Amount:    3000,
 				Currency:  "USD",
-				Frequency: "ONE_TIME",
+				Frequency: "MONTHLY",
 				PaidAt:    asOf.Add(-72 * time.Hour),
 				Candidate: referred("alice", "LINK"),
 			},
@@ -276,7 +276,7 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 				DonorID:   "link2",
 				Amount:    5000,
 				Currency:  "USD",
-				Frequency: "ONE_TIME",
+				Frequency: "MONTHLY",
 				PaidAt:    asOf.Add(-71 * time.Hour),
 				Candidate: referred("alice", "LINK"),
 			},
@@ -287,7 +287,7 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 				DonorID:   "irl1",
 				Amount:    9000,
 				Currency:  "USD",
-				Frequency: "ONE_TIME",
+				Frequency: "MONTHLY",
 				PaidAt:    asOf.Add(-70 * time.Hour),
 				Candidate: referred("alice", "IRL"),
 			},
@@ -315,7 +315,7 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 				DonorID:   "link1",
 				Amount:    3000,
 				Currency:  "USD",
-				Frequency: "ONE_TIME",
+				Frequency: "MONTHLY",
 				PaidAt:    asOf.Add(-72 * time.Hour),
 				Candidate: referred("alice", "LINK"),
 			},
@@ -326,7 +326,7 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 				DonorID:   "irl1",
 				Amount:    9000,
 				Currency:  "USD",
-				Frequency: "ONE_TIME",
+				Frequency: "MONTHLY",
 				PaidAt:    asOf.Add(-70 * time.Hour),
 				Candidate: referred("alice", "IRL"),
 			},
@@ -361,7 +361,7 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 				DonorID:   "link1",
 				Amount:    3000,
 				Currency:  "USD",
-				Frequency: "ONE_TIME",
+				Frequency: "MONTHLY",
 				PaidAt:    asOf.Add(-72 * time.Hour),
 				Candidate: referred("alice", "LINK"),
 			},
@@ -372,7 +372,7 @@ func TestDenormalizedReferralTotalsEqualTheOldAggregate(t *testing.T) {
 				DonorID:   "link2",
 				Amount:    5000,
 				Currency:  "USD",
-				Frequency: "ONE_TIME",
+				Frequency: "MONTHLY",
 				PaidAt:    asOf.Add(-71 * time.Hour),
 				Candidate: referred("alice", "LINK"),
 			},
@@ -435,7 +435,7 @@ func TestReferralTotalsConvergeAfterRulesBumpRecompute(t *testing.T) {
 			DonorID:   "link1",
 			Amount:    3000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    asOf.Add(-72 * time.Hour),
 			Candidate: ref("LINK"),
 		},
@@ -446,7 +446,7 @@ func TestReferralTotalsConvergeAfterRulesBumpRecompute(t *testing.T) {
 			DonorID:   "link2",
 			Amount:    5000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    asOf.Add(-71 * time.Hour),
 			Candidate: ref("LINK"),
 		},
@@ -457,7 +457,7 @@ func TestReferralTotalsConvergeAfterRulesBumpRecompute(t *testing.T) {
 			DonorID:   "irl1",
 			Amount:    9000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    asOf.Add(-70 * time.Hour),
 			Candidate: ref("IRL"),
 		},
@@ -501,7 +501,7 @@ func TestGiftStoresAttributionValidWhenCharged(t *testing.T) {
 	pool := database(t)
 	referrer, _ := donor(t, pool)
 	accountCleanup(t, pool, referrer)
-	f := newWorkerFixture(t, "ONE_TIME")
+	f := newWorkerFixture(t, "MONTHLY")
 	ctx := context.Background()
 	visitor := "visitor-" + f.donorID.String()
 	f.request.Visitor = &visitor
@@ -513,28 +513,18 @@ func TestGiftStoresAttributionValidWhenCharged(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	pay := func(checkout, payment string) {
-		f.charge(t, payment, time.Now())
-		f.receive(
-			t,
-			"payment_intent.succeeded",
-			map[string]any{
-				"id":              payment,
-				"metadata":        map[string]any{"dad_checkout_id": checkout},
-				"status":          "succeeded",
-				"currency":        "usd",
-				"amount_received": 3000,
-			},
-		)
+	pay := func(checkout, invoiceID string, start time.Time) {
+		f.receive(t, "invoice.payment_succeeded", invoice(checkout, invoiceID, start, true))
 		f.process(t)
 	}
+	firstStart := time.Now().UTC().Truncate(time.Second).Add(-33 * 24 * time.Hour)
 	first := f.checkout(t)
-	pay(first.CheckoutID, "pi_first_"+f.donorID.String())
+	pay(first.CheckoutID, "in_first_"+f.donorID.String(), firstStart)
 	var touchReferrer, giftReferrer, checkoutReferrer pgtype.UUID
 	var touchKind, giftKind, checkoutKind string
 	if err := pool.QueryRow(ctx, `SELECT t.referrer_id,t.kind,c.referrer_id,c.referral_kind,g.referrer_id,g.referral_kind
 FROM donor_gifts g JOIN donor_checkouts c ON c.id=g.checkout_id JOIN donor_referral_touches t ON t.token_hash=$2
-WHERE g.stripe_object_id=$1`, "pi_first_"+f.donorID.String(), HashToken(visitor)).Scan(&touchReferrer, &touchKind, &checkoutReferrer, &checkoutKind, &giftReferrer, &giftKind); err != nil {
+WHERE g.stripe_object_id=$1`, "in_first_"+f.donorID.String(), HashToken(visitor)).Scan(&touchReferrer, &touchKind, &checkoutReferrer, &checkoutKind, &giftReferrer, &giftKind); err != nil {
 		t.Fatal(err)
 	}
 	if giftReferrer != referrer || checkoutReferrer != referrer || touchReferrer != referrer || giftKind != "LINK" ||
@@ -542,15 +532,15 @@ WHERE g.stripe_object_id=$1`, "pi_first_"+f.donorID.String(), HashToken(visitor)
 		giftKind != touchKind {
 		t.Fatal("payment record lost first-touch attribution")
 	}
-	// A charge after the attribution window keeps the checkout's snapshot but is not referred.
-	f.request.RequestID = testID(t)
-	second := f.checkout(t)
-	if _, err := pool.Exec(ctx, "UPDATE donor_checkouts SET referral_expires_at=now()-interval '1 second' WHERE id=$1", second.CheckoutID); err != nil {
+	// A renewal charged after the attribution window records no referrer: the
+	// gift captures the checkout snapshot as it stands when the invoice is paid.
+	// The window closes between the first charge and the renewal.
+	if _, err := pool.Exec(ctx, "UPDATE donor_checkouts SET referral_expires_at=$2 WHERE id=$1", first.CheckoutID, firstStart.Add(15*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	pay(second.CheckoutID, "pi_second_"+f.donorID.String())
+	pay(first.CheckoutID, "in_second_"+f.donorID.String(), firstStart.Add(30*24*time.Hour))
 	var attributed bool
-	if err := pool.QueryRow(ctx, "SELECT referrer_id IS NOT NULL OR referral_kind IS NOT NULL FROM donor_gifts WHERE stripe_object_id=$1", "pi_second_"+f.donorID.String()).Scan(&attributed); err != nil ||
+	if err := pool.QueryRow(ctx, "SELECT referrer_id IS NOT NULL OR referral_kind IS NOT NULL FROM donor_gifts WHERE stripe_object_id=$1", "in_second_"+f.donorID.String()).Scan(&attributed); err != nil ||
 		attributed {
 		t.Fatal("expired attribution written to payment", err)
 	}
@@ -569,7 +559,7 @@ func TestEarlierPaymentCorrectsConversionAndPreservesFoundingAward(t *testing.T)
 	}
 	defer tx.Rollback(ctx)
 	h := newHistoryFixture(t, tx)
-	later := time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)
+	later := time.Date(2026, 12, 15, 0, 0, 0, 0, time.UTC)
 	earlier := later.AddDate(0, -1, 0)
 	window := later.AddDate(0, 1, 0)
 	h.gift(
@@ -578,7 +568,7 @@ func TestEarlierPaymentCorrectsConversionAndPreservesFoundingAward(t *testing.T)
 			DonorID:   "ben",
 			Amount:    3000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    later,
 			Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: window},
 		},
@@ -594,7 +584,7 @@ func TestEarlierPaymentCorrectsConversionAndPreservesFoundingAward(t *testing.T)
 			DonorID:   "ben",
 			Amount:    3000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    earlier,
 			Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: window},
 		},
@@ -619,7 +609,7 @@ func TestRefundRecordedByLaterClockUsesEarlierObservation(t *testing.T) {
 	h := newHistoryFixture(t, tx)
 	paid := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 	asOf := paid.Add(time.Hour)
-	h.gift(recognition.Gift{ID: "g", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid})
+	h.gift(recognition.Gift{ID: "g", DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "MONTHLY", PaidAt: paid})
 	h.refund(recognition.Refund{GiftID: "g", Amount: 3000, Status: "PENDING", UpdatedAt: asOf.Add(-time.Minute)})
 	ahead := asOf.Add(2 * time.Second)
 	if _, err = tx.Exec(ctx, "UPDATE donor_refunds SET status='SUCCEEDED',observed_at=$2 WHERE gift_id=(SELECT id FROM donor_gifts WHERE stripe_object_id=$1)", h.objects["g"], ahead); err != nil {
@@ -666,10 +656,10 @@ func TestRefreshNextProjectionDefersUnprojectableDonor(t *testing.T) {
 		}
 	}
 	// A succeeded refund larger than its gift cannot be projected.
-	if _, err := pool.Exec(ctx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')", checkout, poisoned); err != nil {
+	if _, err := pool.Exec(ctx, "INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','MONTHLY')", checkout, poisoned); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)", gift, poisoned, checkout, "pi_"+gift.String(), now.Add(-48*time.Hour)); err != nil {
+	if _, err := pool.Exec(ctx, "INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','MONTHLY',$5)", gift, poisoned, checkout, "pi_"+gift.String(), now.Add(-48*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, "INSERT INTO donor_refunds(id,gift_id,stripe_refund_id,amount_minor,currency,status,observed_at) VALUES($1,$2,$3,9000,'USD','SUCCEEDED',$4)", testID(t), gift, "re_"+gift.String(), now.Add(-24*time.Hour)); err != nil {
@@ -813,14 +803,14 @@ func TestRefreshDueProjectionsDefersPoisonedDonorInBatch(t *testing.T) {
 	mustExec(
 		t,
 		pool,
-		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','ONE_TIME')",
+		"INSERT INTO donor_checkouts(id,donor_id,amount_minor,currency,frequency) VALUES($1,$2,3000,'USD','MONTHLY')",
 		checkout,
 		poisoned,
 	)
 	mustExec(
 		t,
 		pool,
-		"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','ONE_TIME',$5)",
+		"INSERT INTO donor_gifts(id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at) VALUES($1,$2,$3,$4,3000,'USD','MONTHLY',$5)",
 		gift,
 		poisoned,
 		checkout,
@@ -864,13 +854,44 @@ func TestProjectionWaitsForItsNextBoundaryAndSummarizesAtNewYear(t *testing.T) {
 	}
 	defer tx.Rollback(ctx)
 	h := newHistoryFixture(t, tx)
-	paid := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
-	h.gift(recognition.Gift{ID: "june", DonorID: "ana", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: paid})
 	donor := h.donor("ana")
+	paid := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
+	periodEnd := paid.AddDate(0, 1, 0)
+	// A monthly donor who gave once in 2027 then cancelled at period end: the
+	// subscription stop makes the missed renewal a clean streak end (not an
+	// incomplete billing history), so the only far boundary is the 2027 annual
+	// summary at New Year.
+	checkoutID, attemptID, periodID, giftID := testID(t), testID(t), testID(t), testID(t)
+	subID := "sub_" + attemptID.String()
+	for _, step := range []struct {
+		sql  string
+		args []any
+	}{
+		{"INSERT INTO donor_checkouts (id,donor_id,amount_minor,currency,frequency,created_at) VALUES ($1,$2,3000,'USD','MONTHLY',$3)", []any{checkoutID, donor, paid}},
+		{"INSERT INTO donor_stripe_checkouts (id,checkout_id,request_hash,request_params,stripe_subscription_id,status) VALUES ($1,$2,'h','{}',$3,'COMPLETE')", []any{attemptID, checkoutID, subID}},
+		{"INSERT INTO donor_billing_periods (id,donor_id,checkout_id,stripe_invoice_id,stripe_subscription_id,due_at,ends_at,status) VALUES ($1,$2,$3,'in_june',$4,$5,$6,'PAID')", []any{periodID, donor, checkoutID, subID, paid, periodEnd}},
+		{"INSERT INTO donor_gifts (id,donor_id,checkout_id,stripe_object_id,amount_minor,currency,frequency,paid_at,stripe_payment_intent_id,period_id) VALUES ($1,$2,$3,'pi_june',3000,'USD','MONTHLY',$4,'pi_june',$5)", []any{giftID, donor, checkoutID, paid, periodID}},
+		{"INSERT INTO donor_subscriptions (id,attempt_id,donor_id,status,period_end,stops_at,observed_at) VALUES ($1,$2,$3,'canceled',$4,$4,$5)", []any{testID(t), attemptID, donor, periodEnd, paid}},
+	} {
+		if _, err := tx.Exec(ctx, step.sql, step.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
 	summer := paid.Add(time.Hour)
-	if p, err := projectFacts(ctx, h.q, donor, summer); err != nil || !p.NextRefreshAt.Time.Equal(summer.Add(refreshCap(donor))) ||
+	// The next refresh is the nearest of the donor's refresh cadence, this
+	// period's end, and the next streak milestone: seven days, reached at
+	// midnight in the donor's zone (New York without a ZIP).
+	wantNext := summer.Add(refreshCap(donor))
+	if periodEnd.Before(wantNext) {
+		wantNext = periodEnd
+	}
+	sevenDays := recognition.Streak{Since: &paid}.Reaches(7, recognition.NewYork)
+	if sevenDays.Before(wantNext) {
+		wantNext = sevenDays
+	}
+	if p, err := projectFacts(ctx, h.q, donor, summer); err != nil || !p.NextRefreshAt.Time.Equal(wantNext) ||
 		p.RulesVersion != projectionRules {
-		t.Fatalf("a projection with no boundary ahead waits the full interval: %+v %v", p, err)
+		t.Fatalf("projection did not schedule its nearest boundary: %+v %v", p, err)
 	}
 	newYear := time.Date(2028, 1, 1, 0, 0, 0, 0, recognition.NewYork)
 	december, err := refreshProjection(ctx, tx, donor, newYear.Add(-10*24*time.Hour))

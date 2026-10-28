@@ -46,7 +46,7 @@ func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		go func() {
 			<-start
-			_, err := s.SavePreferences(ctx, token, Preferences{Version: 0, ReferralEmails: true})
+			_, err := s.SavePreferences(ctx, token, Preferences{Version: 0, ReferralEmails: true}.Replace())
 			results <- err
 		}()
 	}
@@ -86,10 +86,10 @@ func TestPreferenceConcurrencyAndConsentAudit(t *testing.T) {
 	}
 }
 
-func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
+func TestSharingRotationAppliesLastTouchAndExpiry(t *testing.T) {
 	first, token, id := donorServiceFixture(t)
 	pool := database(t)
-	second, other, _ := donorServiceFixture(t)
+	second, other, secondID := donorServiceFixture(t)
 	ctx := context.Background()
 	now := time.Now()
 	before, err := first.Sharing(ctx, token)
@@ -118,12 +118,13 @@ func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 		t.Fatal(touch, err)
 	}
 	later, err := first.CaptureReferral(ctx, strings.TrimPrefix(*b.Link, second.Origin+"/r/"), "IRL", touch.Token, now.Add(10*24*time.Hour))
-	if err != nil || later.Token != touch.Token || *later.PublicName != "First" {
-		t.Fatal("first touch replaced", later, err)
+	if err != nil || later.Token != touch.Token || *later.PublicName != "Second" {
+		t.Fatal("last touch not applied", later, err)
 	}
 	saved, err := queries.New(pool).ReferralTouchByToken(ctx, HashToken(touch.Token))
-	if err != nil || saved.Kind != "LINK" || !saved.ExpiresAt.Time.Equal(now.Add(30*24*time.Hour).Truncate(time.Microsecond)) {
-		t.Fatal("attribution type/expiry changed", err)
+	if err != nil || saved.Kind != "IRL" ||
+		!saved.ExpiresAt.Time.Equal(now.Add(10*24*time.Hour+30*24*time.Hour).Truncate(time.Microsecond)) {
+		t.Fatal("last-touch attribution type/expiry not updated", err)
 	}
 	rotated, err := first.SaveSharing(ctx, token, "First", true)
 	if err != nil || *rotated.Link == *a.Link {
@@ -142,7 +143,7 @@ func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 		strings.TrimPrefix(*rotated.Link, first.Origin+"/r/"),
 		"IRL",
 		touch.Token,
-		now.Add(31*24*time.Hour),
+		now.Add(41*24*time.Hour),
 	)
 	if err != nil || renewed.Token == touch.Token || renewed.Token == "" {
 		t.Fatal("expired token repurposed", err)
@@ -152,6 +153,11 @@ func TestSharingRotationPreservesFirstTouchAndExpiry(t *testing.T) {
 	}
 	if _, err = first.Sharing(ctx, token); !errors.Is(err, ErrDenied) {
 		t.Fatal("disabled donor can share", err)
+	}
+	// The token now points at Second via last-touch; a disabled referrer's name
+	// must not be disclosed on a subsequent capture.
+	if _, err = pool.Exec(ctx, "UPDATE donors SET disabled=true WHERE id=$1", secondID); err != nil {
+		t.Fatal(err)
 	}
 	existing, err := first.CaptureReferral(ctx, code, "LINK", touch.Token, now)
 	if err != nil || existing.PublicName != nil {
@@ -181,5 +187,142 @@ func TestConcurrentSharingKeepsOnePermanentCode(t *testing.T) {
 	}
 	if a.Link == nil || b.Link == nil || *a.Link != *b.Link {
 		t.Fatal("concurrent sharing returned different codes")
+	}
+}
+
+func TestSaveProfileDerivesTimezoneAndValidates(t *testing.T) {
+	s, token, _ := donorServiceFixture(t)
+	ctx := context.Background()
+
+	// A new donor's role is DONOR and identity fields are empty.
+	profile, err := s.Profile(ctx, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.AccountRole != "DONOR" {
+		t.Fatalf("new donor role = %q; want DONOR", profile.AccountRole)
+	}
+	if profile.Zip != nil || profile.City != nil || profile.Timezone != nil || profile.Phone != nil {
+		t.Fatalf("new donor identity fields not empty: %+v", profile)
+	}
+
+	// A valid Chicago ZIP derives America/Chicago; city and phone are stored as given.
+	profile, err = s.SaveProfile(ctx, token, ProfileUpdate{Zip: "60601", City: "Chicago", Phone: "+13125550123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Zip == nil || *profile.Zip != "60601" {
+		t.Errorf("zip = %v; want 60601", profile.Zip)
+	}
+	if profile.Timezone == nil || *profile.Timezone != "America/Chicago" {
+		t.Errorf("timezone = %v; want America/Chicago", profile.Timezone)
+	}
+	if profile.City == nil || *profile.City != "Chicago" {
+		t.Errorf("city = %v; want Chicago", profile.City)
+	}
+	if profile.Phone == nil || *profile.Phone != "+13125550123" {
+		t.Errorf("phone = %v; want +13125550123", profile.Phone)
+	}
+	// Role is untouched by a profile save (immutability, PRD §3).
+	if profile.AccountRole != "DONOR" {
+		t.Errorf("role changed to %q after profile save", profile.AccountRole)
+	}
+
+	// Switching to a San Francisco ZIP re-derives the timezone.
+	profile, err = s.SaveProfile(ctx, token, ProfileUpdate{Zip: "94103"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Timezone == nil || *profile.Timezone != "America/Los_Angeles" {
+		t.Errorf("timezone = %v; want America/Los_Angeles", profile.Timezone)
+	}
+	// Omitted city/phone are cleared (every save is a full replace).
+	if profile.City != nil || profile.Phone != nil {
+		t.Errorf("city/phone not cleared on replace: city=%v phone=%v", profile.City, profile.Phone)
+	}
+
+	// A blank ZIP clears both the ZIP and the derived timezone together.
+	profile, err = s.SaveProfile(ctx, token, ProfileUpdate{Zip: ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Zip != nil || profile.Timezone != nil {
+		t.Errorf("blank zip did not clear zip/timezone: zip=%v tz=%v", profile.Zip, profile.Timezone)
+	}
+
+	// Invalid inputs are rejected with the right typed errors, and nothing is written.
+	for _, tc := range []struct {
+		name   string
+		update ProfileUpdate
+		want   error
+	}{
+		{"bad zip", ProfileUpdate{Zip: "123"}, ErrZip},
+		{"unresolvable zip", ProfileUpdate{Zip: "00000"}, ErrZip},
+		{"bad phone", ProfileUpdate{Phone: "5550123"}, ErrPhone},
+		{"long city", ProfileUpdate{City: strings.Repeat("x", 81)}, ErrCity},
+	} {
+		if _, err := s.SaveProfile(ctx, token, tc.update); !errors.Is(err, tc.want) {
+			t.Errorf("%s: error = %v; want %v", tc.name, err, tc.want)
+		}
+	}
+}
+
+// TestVolunteerPreferenceRoundTrip covers E-1: the volunteer opt-in and the
+// chosen interests are stored on the versioned preference record, mirrored to
+// the consent-event table, and read back; the default is off with an empty
+// (non-null) interests set.
+func TestVolunteerPreferenceRoundTrip(t *testing.T) {
+	s, token, id := donorServiceFixture(t)
+	pool := database(t)
+	ctx := context.Background()
+
+	profile, err := s.Profile(ctx, token)
+	if err != nil || profile.Volunteer || profile.VolunteerInterests == nil || len(profile.VolunteerInterests) != 0 {
+		t.Fatalf("default volunteer prefs: %+v %v", profile.Preferences, err)
+	}
+
+	saved, err := s.SavePreferences(ctx, token, Preferences{
+		Version: 0, PushReferralConverted: true,
+		Volunteer: true, VolunteerInterests: []string{"food-bank", "mentoring"},
+	}.Replace())
+	if err != nil || saved.Version != 1 || !saved.Volunteer ||
+		len(saved.VolunteerInterests) != 2 || saved.VolunteerInterests[0] != "food-bank" || saved.VolunteerInterests[1] != "mentoring" {
+		t.Fatalf("saved volunteer prefs: %+v %v", saved.Preferences, err)
+	}
+
+	// The consent-event mirror records the change.
+	var vol bool
+	var interests []string
+	if err = pool.QueryRow(ctx,
+		"SELECT volunteer,volunteer_interests FROM donor_preference_events WHERE donor_id=$1 AND version=1", id,
+	).Scan(&vol, &interests); err != nil || !vol || len(interests) != 2 {
+		t.Fatalf("consent event mirror: %v %v %v", vol, interests, err)
+	}
+
+	// Turning volunteer back off clears the pool membership but the record keeps versioning.
+	off, err := s.SavePreferences(ctx, token, Preferences{Version: 1, PushReferralConverted: true}.Replace())
+	if err != nil || off.Version != 2 || off.Volunteer || len(off.VolunteerInterests) != 0 {
+		t.Fatalf("opt back out: %+v %v", off.Preferences, err)
+	}
+}
+
+// TestPreferenceChangeKeepsOmittedChoices covers a client that predates a
+// choice: saving without it must not reset it.
+func TestPreferenceChangeKeepsOmittedChoices(t *testing.T) {
+	s, token, _ := donorServiceFixture(t)
+	ctx := context.Background()
+	on, off := true, false
+	interests := []string{"mentoring"}
+	if _, err := s.SavePreferences(ctx, token, PreferenceChange{
+		Version: 0, PushStreakLapsed: &off, RankingsOptedOut: &on, NetworkVisible: &off,
+		Volunteer: &on, VolunteerInterests: &interests,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.SavePreferences(ctx, token, PreferenceChange{Version: 1, MarketingEmails: true})
+	if err != nil || saved.Version != 2 || !saved.MarketingEmails || saved.PushStreakLapsed || !saved.PushBadgeEarned ||
+		!saved.RankingsOptedOut || saved.NetworkVisible || !saved.Volunteer ||
+		len(saved.VolunteerInterests) != 1 || saved.VolunteerInterests[0] != "mentoring" {
+		t.Fatalf("omitted choices changed: %+v %v", saved.Preferences, err)
 	}
 }

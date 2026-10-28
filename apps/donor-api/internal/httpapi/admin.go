@@ -12,13 +12,14 @@ import (
 )
 
 type AdminSource interface {
+	ResetStreak(context.Context, string, pgtype.UUID, string) error
+	RecomputeRecognition(context.Context, string, pgtype.UUID, string) error
 	SearchDonors(context.Context, string, string, int64) (store.DonorSearch, error)
 	DonorDetail(context.Context, string, pgtype.UUID, int64, int64) (store.DonorDetail, error)
 	AuditEvents(context.Context, string, int64) (store.AuditPage, error)
 	DonorMessages(context.Context, string, pgtype.UUID, int64) (store.MessagePage, error)
 	DonorActions(context.Context, string, pgtype.UUID, int64) (store.ActionPage, error)
 	PendingAction(context.Context, string, pgtype.UUID, pgtype.UUID, string) (store.PendingAction, error)
-	Enrolments(context.Context, string) (store.Enrolments, error)
 	RequestClaim(context.Context, string, pgtype.UUID) error
 	ResendMessage(context.Context, string, pgtype.UUID, pgtype.UUID) (store.QueuedMessage, error)
 }
@@ -114,10 +115,6 @@ func (a *api) auditEvents(w http.ResponseWriter, r *http.Request, session string
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.AuditEvents(ctx, session, offset) })
 }
 
-func (a *api) enrolments(w http.ResponseWriter, r *http.Request, session string) {
-	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.Enrolments(ctx, session) })
-}
-
 func (a *api) requestClaim(w http.ResponseWriter, r *http.Request, session string) {
 	id, ok := pathID(w, r, "donor_id")
 	if !ok {
@@ -138,4 +135,37 @@ func (a *api) resendMessage(w http.ResponseWriter, r *http.Request, session stri
 		return
 	}
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.ResendMessage(ctx, session, id, key) })
+}
+
+type recomputeRecognitionBody struct {
+	Reason string `json:"reason"`
+}
+
+func (a *api) recomputeRecognition(w http.ResponseWriter, r *http.Request, token string) {
+	id, ok := pathID(w, r, "donor_id")
+	if !ok {
+		return
+	}
+	var body recomputeRecognitionBody
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	svc := service{a.Admin != nil, staffUnavailable, staffTimeout, staffStatus}
+	svc.serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"recomputed": true}, a.Admin.RecomputeRecognition(ctx, token, id, body.Reason)
+	})
+}
+
+func (a *api) resetStreak(w http.ResponseWriter, r *http.Request, token string) {
+	id, ok := pathID(w, r, "donor_id")
+	if !ok {
+		return
+	}
+	var body recomputeRecognitionBody
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"reset": true}, a.Admin.ResetStreak(ctx, token, id, body.Reason)
+	})
 }

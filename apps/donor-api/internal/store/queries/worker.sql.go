@@ -119,7 +119,7 @@ func (q *Queries) CancelAttempt(ctx context.Context, id pgtype.UUID) error {
 }
 
 const checkoutDraft = `-- name: CheckoutDraft :one
-SELECT donor_id, amount_minor, currency, frequency, referrer_id, referral_kind, referral_expires_at, id, created_at FROM donor_checkouts WHERE id=$1
+SELECT donor_id, amount_minor, currency, frequency, referrer_id, referral_kind, referral_expires_at, id, created_at, journey_id FROM donor_checkouts WHERE id=$1
 `
 
 func (q *Queries) CheckoutDraft(ctx context.Context, id pgtype.UUID) (DonorCheckout, error) {
@@ -135,8 +135,58 @@ func (q *Queries) CheckoutDraft(ctx context.Context, id pgtype.UUID) (DonorCheck
 		&i.ReferralExpiresAt,
 		&i.ID,
 		&i.CreatedAt,
+		&i.JourneyID,
 	)
 	return i, err
+}
+
+const claimDeletedAccountReversal = `-- name: ClaimDeletedAccountReversal :one
+UPDATE donor_deleted_account_reversals r SET attempts = r.attempts + 1, available_at = $1::timestamptz
+WHERE r.id = (
+    SELECT due.id FROM donor_deleted_account_reversals due
+    WHERE due.completed_at IS NULL AND due.available_at <= $2::timestamptz AND due.attempts < 10
+    ORDER BY due.available_at, due.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING id, donor_id, kind, target, amount_minor, attempts, available_at, completed_at, last_error, created_at
+`
+
+type ClaimDeletedAccountReversalParams struct {
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+}
+
+func (q *Queries) ClaimDeletedAccountReversal(ctx context.Context, arg ClaimDeletedAccountReversalParams) (DonorDeletedAccountReversal, error) {
+	row := q.db.QueryRow(ctx, claimDeletedAccountReversal, arg.LeaseUntil, arg.AsOf)
+	var i DonorDeletedAccountReversal
+	err := row.Scan(
+		&i.ID,
+		&i.DonorID,
+		&i.Kind,
+		&i.Target,
+		&i.AmountMinor,
+		&i.Attempts,
+		&i.AvailableAt,
+		&i.CompletedAt,
+		&i.LastError,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const completeDeletedAccountReversal = `-- name: CompleteDeletedAccountReversal :exec
+UPDATE donor_deleted_account_reversals SET completed_at = $2, last_error = NULL WHERE id = $1
+`
+
+type CompleteDeletedAccountReversalParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+}
+
+func (q *Queries) CompleteDeletedAccountReversal(ctx context.Context, arg CompleteDeletedAccountReversalParams) error {
+	_, err := q.db.Exec(ctx, completeDeletedAccountReversal, arg.ID, arg.CompletedAt)
+	return err
 }
 
 const completeStripeEvent = `-- name: CompleteStripeEvent :exec
@@ -167,34 +217,6 @@ func (q *Queries) ConfirmAmountChange(ctx context.Context, arg ConfirmAmountChan
 	return err
 }
 
-const confirmPause = `-- name: ConfirmPause :exec
-UPDATE donor_pauses SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1
-`
-
-type ConfirmPauseParams struct {
-	ID          pgtype.UUID        `json:"id"`
-	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
-}
-
-func (q *Queries) ConfirmPause(ctx context.Context, arg ConfirmPauseParams) error {
-	_, err := q.db.Exec(ctx, confirmPause, arg.ID, arg.ConfirmedAt)
-	return err
-}
-
-const confirmResumption = `-- name: ConfirmResumption :exec
-UPDATE donor_resumptions SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1
-`
-
-type ConfirmResumptionParams struct {
-	ID          pgtype.UUID        `json:"id"`
-	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
-}
-
-func (q *Queries) ConfirmResumption(ctx context.Context, arg ConfirmResumptionParams) error {
-	_, err := q.db.Exec(ctx, confirmResumption, arg.ID, arg.ConfirmedAt)
-	return err
-}
-
 const enrichGift = `-- name: EnrichGift :exec
 UPDATE donor_gifts SET stripe_payment_intent_id=$2,period_id=$3 WHERE id=$1
 `
@@ -207,6 +229,21 @@ type EnrichGiftParams struct {
 
 func (q *Queries) EnrichGift(ctx context.Context, arg EnrichGiftParams) error {
 	_, err := q.db.Exec(ctx, enrichGift, arg.ID, arg.StripePaymentIntentID, arg.PeriodID)
+	return err
+}
+
+const failDeletedAccountReversal = `-- name: FailDeletedAccountReversal :exec
+UPDATE donor_deleted_account_reversals SET available_at = $2, last_error = $3 WHERE id = $1
+`
+
+type FailDeletedAccountReversalParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	AvailableAt pgtype.Timestamptz `json:"available_at"`
+	LastError   pgtype.Text        `json:"last_error"`
+}
+
+func (q *Queries) FailDeletedAccountReversal(ctx context.Context, arg FailDeletedAccountReversalParams) error {
+	_, err := q.db.Exec(ctx, failDeletedAccountReversal, arg.ID, arg.AvailableAt, arg.LastError)
 	return err
 }
 
@@ -509,26 +546,6 @@ func (q *Queries) LatestAmountChange(ctx context.Context, checkoutID pgtype.UUID
 	return i, err
 }
 
-const latestPause = `-- name: LatestPause :one
-SELECT donor_id, attempt_id, months, starts_at, resumes_at, confirmed_at, id, created_at FROM donor_pauses WHERE attempt_id=$1 ORDER BY created_at DESC LIMIT 1
-`
-
-func (q *Queries) LatestPause(ctx context.Context, attemptID pgtype.UUID) (DonorPause, error) {
-	row := q.db.QueryRow(ctx, latestPause, attemptID)
-	var i DonorPause
-	err := row.Scan(
-		&i.DonorID,
-		&i.AttemptID,
-		&i.Months,
-		&i.StartsAt,
-		&i.ResumesAt,
-		&i.ConfirmedAt,
-		&i.ID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const markPeriodPaid = `-- name: MarkPeriodPaid :exec
 UPDATE donor_billing_periods SET status='PAID' WHERE id=$1
 `
@@ -645,6 +662,53 @@ func (q *Queries) PendingAmountChange(ctx context.Context, checkoutID pgtype.UUI
 	return pending, err
 }
 
+const queueDeletedAccountCancellation = `-- name: QueueDeletedAccountCancellation :exec
+INSERT INTO donor_deleted_account_reversals (id, donor_id, kind, target, available_at, created_at)
+SELECT gen_random_uuid(), c.donor_id, 'CANCEL', a.stripe_subscription_id,
+       $1::timestamptz, $1::timestamptz
+FROM donor_stripe_checkouts a
+JOIN donor_checkouts c ON c.id = a.checkout_id
+JOIN donor_deletions x ON x.donor_id = c.donor_id
+WHERE a.checkout_id = $2 AND a.stripe_subscription_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM donor_subscriptions s
+    WHERE s.attempt_id = a.id AND s.status IN ('canceled', 'incomplete_expired')
+  )
+ON CONFLICT (kind, target) DO NOTHING
+`
+
+type QueueDeletedAccountCancellationParams struct {
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+	CheckoutID pgtype.UUID        `json:"checkout_id"`
+}
+
+// The checkout's subscription, unless Stripe has already ended it.
+func (q *Queries) QueueDeletedAccountCancellation(ctx context.Context, arg QueueDeletedAccountCancellationParams) error {
+	_, err := q.db.Exec(ctx, queueDeletedAccountCancellation, arg.AsOf, arg.CheckoutID)
+	return err
+}
+
+const queueDeletedAccountRefunds = `-- name: QueueDeletedAccountRefunds :exec
+INSERT INTO donor_deleted_account_reversals (id, donor_id, kind, target, amount_minor, available_at, created_at)
+SELECT gen_random_uuid(), g.donor_id, 'REFUND', g.stripe_payment_intent_id, g.amount_minor,
+       $1::timestamptz, $1::timestamptz
+FROM donor_gifts g
+JOIN donor_deletions x ON x.donor_id = g.donor_id
+WHERE g.checkout_id = $2 AND g.paid_at > x.deleted_at AND g.stripe_payment_intent_id IS NOT NULL
+ON CONFLICT (kind, target) DO NOTHING
+`
+
+type QueueDeletedAccountRefundsParams struct {
+	AsOf       pgtype.Timestamptz `json:"as_of"`
+	CheckoutID pgtype.UUID        `json:"checkout_id"`
+}
+
+// Gifts on this checkout paid after its donor deleted the account.
+func (q *Queries) QueueDeletedAccountRefunds(ctx context.Context, arg QueueDeletedAccountRefundsParams) error {
+	_, err := q.db.Exec(ctx, queueDeletedAccountRefunds, arg.AsOf, arg.CheckoutID)
+	return err
+}
+
 const recordCheckoutSession = `-- name: RecordCheckoutSession :exec
 UPDATE donor_stripe_checkouts SET stripe_session_id=$2,status=$3 WHERE id=$1
 `
@@ -687,24 +751,6 @@ DELETE FROM donor_recurring_reservations WHERE attempt_id=$1
 func (q *Queries) ReleaseReservation(ctx context.Context, attemptID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, releaseReservation, attemptID)
 	return err
-}
-
-const resumptionForPause = `-- name: ResumptionForPause :one
-SELECT donor_id, pause_id, next_renewal, confirmed_at, id, created_at FROM donor_resumptions WHERE pause_id=$1
-`
-
-func (q *Queries) ResumptionForPause(ctx context.Context, pauseID pgtype.UUID) (DonorResumption, error) {
-	row := q.db.QueryRow(ctx, resumptionForPause, pauseID)
-	var i DonorResumption
-	err := row.Scan(
-		&i.DonorID,
-		&i.PauseID,
-		&i.NextRenewal,
-		&i.ConfirmedAt,
-		&i.ID,
-		&i.CreatedAt,
-	)
-	return i, err
 }
 
 const retryStripeEvent = `-- name: RetryStripeEvent :execrows

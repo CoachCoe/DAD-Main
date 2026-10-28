@@ -33,7 +33,7 @@ versions and results, fix failures, and retest; automated accessibility results 
 do not complete this acceptance.
 
 These shared values are an engineering foundation, not completion of the agency design
-deliverables. The eleven donor app screens, native component implementations, interactive
+deliverables. The R1 PRD's 24 donor and 11 partner screens, native component implementations, interactive
 prototype, responsive/redline specifications, approved Wallet artwork, store assets, and
 manual accessibility conformance still require design and device acceptance. The R2 app
 remains unbuilt; importing these tokens must not introduce recipient or partner surfaces.

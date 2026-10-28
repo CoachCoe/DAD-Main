@@ -7,9 +7,9 @@ import (
 	"math"
 	"time"
 
+	"dad/donor-api/internal/recognition"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,6 +21,19 @@ type DonorDashboard struct {
 	Referrals     *ReferralSummary `json:"referrals"`
 	State         string           `json:"state"`
 	Streak        *StreakSummary   `json:"streak"`
+	Rank          *Ranking         `json:"rank"`
+	Network       *NetworkCard     `json:"network"`
+	Impact        ImpactSummary    `json:"impact"`
+}
+
+// ImpactSummary is the donor's own impact totals (PRD I-1, I-3): what they have
+// given since joining, net of refunds, the distinct initiatives they have been
+// shown (A-4), and the events they checked in at.
+type ImpactSummary struct {
+	GivenMinor        *int64 `json:"given_minor"`
+	Currency          string `json:"currency"`
+	InitiativesFunded int64  `json:"initiatives_funded"`
+	EventsVolunteered int64  `json:"events_volunteered"`
 }
 
 type ReferralSummary struct {
@@ -36,6 +49,19 @@ type StreakSummary struct {
 	AtRisk      bool       `json:"at_risk"`
 	Current     int32      `json:"current"`
 	GraceEndsAt *time.Time `json:"grace_ends_at"`
+	// Ladder is the day-based streak card (PRD S-2/S-3): days since the run
+	// began, the milestone ladder, days to the next milestone, and the 30-day bar.
+	Ladder *recognition.StreakLadder `json:"ladder,omitempty"`
+}
+
+// NetworkCard is the dashboard headline for the donor's referral network
+// (PRD I-2): the number of currently-active donors they brought in and that
+// network's combined annualized giving. The full invitee list and milestone
+// progress live on GET /donor/me/network.
+type NetworkCard struct {
+	ActiveCount     int64  `json:"active_count"`
+	AnnualizedMinor int64  `json:"annualized_minor"`
+	Currency        string `json:"currency"`
 }
 
 // MarshalJSON reports a dashboard still being prepared by its state alone.
@@ -52,7 +78,8 @@ func (d DonorDashboard) MarshalJSON() ([]byte, error) {
 
 // dashboard reads the donor's projections, which must come from one snapshot:
 // a worker may update several of them while the three queries run.
-func dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time.Time) (DonorDashboard, error) {
+func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now time.Time) (DonorDashboard, error) {
+	id := donor.ID
 	row, err := q.Projection(ctx, id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DonorDashboard{Mode: "test", State: "preparing"}, nil
@@ -88,7 +115,42 @@ func dashboard(ctx context.Context, q *queries.Queries, id pgtype.UUID, now time
 		if row.GraceEndsAt.Valid {
 			result.Streak.GraceEndsAt = &row.GraceEndsAt.Time
 		}
+		var since *time.Time
+		if row.StreakSince.Valid {
+			since = &row.StreakSince.Time
+		}
+		ladder, err := configuredLadder(ctx, q, recognition.Streak{Since: since}, now, recognition.Zone(donor.Timezone.String))
+		if err != nil {
+			return DonorDashboard{}, err
+		}
+		result.Streak.Ladder = &ladder
 	}
+	// Rank line under the streak (S-4): the donor's own position only.
+	rank, err := ForDonor(ctx, q, id)
+	if err != nil {
+		return DonorDashboard{}, err
+	}
+	result.Rank = rank
+	// Network headline (I-2): active-network count + annualized giving.
+	net, err := q.NetworkTotals(ctx, id)
+	if err != nil {
+		return DonorDashboard{}, err
+	}
+	if net.ActiveCount > 0 {
+		result.Network = &NetworkCard{ActiveCount: net.ActiveCount, AnnualizedMinor: net.AnnualizedMinor, Currency: "USD"}
+	}
+	result.Impact.Currency = "USD"
+	if row.NetMinor.Valid {
+		result.Impact.GivenMinor = &row.NetMinor.Int64
+	}
+	if result.Impact.InitiativesFunded, err = q.DistinctInitiativeExposures(ctx, id); err != nil {
+		return DonorDashboard{}, err
+	}
+	volunteered, err := q.DonorVolunteerStats(ctx, id)
+	if err != nil {
+		return DonorDashboard{}, err
+	}
+	result.Impact.EventsVolunteered = volunteered.Events
 	return result, nil
 }
 
@@ -96,6 +158,6 @@ type DashboardReader struct{ DB *pgxpool.Pool }
 
 func (reader DashboardReader) DonorDashboard(ctx context.Context, token string) (DonorDashboard, error) {
 	return donorRead(ctx, reader.DB, token, func(q *queries.Queries, d queries.Donor, now time.Time) (DonorDashboard, error) {
-		return dashboard(ctx, q, d.ID, now)
+		return dashboard(ctx, q, d, now)
 	})
 }

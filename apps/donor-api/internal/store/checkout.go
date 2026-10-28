@@ -8,11 +8,13 @@ import (
 	"unicode/utf8"
 
 	"dad/donor-api/internal/credentials"
+	"dad/donor-api/internal/geo"
 	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -20,6 +22,8 @@ type CheckoutService struct {
 	DB      *pgxpool.Pool
 	Gateway payments.CheckoutGateway
 	Origin  string
+	// FoundingClaims matches a giver's address to the website waitlist (D-6).
+	FoundingClaims FoundingClaimKey
 }
 
 // BeginCheckout returns a hosted checkout for a guest gift. The attempt and
@@ -34,7 +38,7 @@ func (s CheckoutService) BeginCheckout(ctx context.Context, request payments.Che
 	if err != nil {
 		return empty, err
 	}
-	if !ValidRequestID(request.RequestID) || utf8.RuneCountInString(request.Email) > 320 || !validAmount(request.Amount) {
+	if !ValidRequestID(request.RequestID) || utf8.RuneCountInString(request.Email) > 320 || !ValidGiftAmount(request.Amount) {
 		return empty, payments.ErrCheckoutInput
 	}
 	email, err := identity.NormalizeEmail(request.Email)
@@ -92,22 +96,42 @@ func (s CheckoutService) prepare(
 	now time.Time,
 ) (queries.DonorStripeCheckout, error) {
 	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (queries.DonorStripeCheckout, error) {
-		return prepareAttempt(ctx, queries.New(tx), site, request, digest, now)
+		return prepareAttempt(ctx, queries.New(tx), s.FoundingClaims, site, request, digest, now)
 	})
 }
 
 func prepareAttempt(
 	ctx context.Context,
 	q *queries.Queries,
+	claims FoundingClaimKey,
 	site publicSite,
 	request payments.CheckoutRequest,
 	digest string,
 	now time.Time,
 ) (queries.DonorStripeCheckout, error) {
 	empty := queries.DonorStripeCheckout{}
-	donor, err := lockGuest(ctx, q, request.Email, now)
+	_, lookup := q.DonorByEmail(ctx, request.Email)
+	donor, err := lockGuest(ctx, q, claims, request.Email, now)
 	if err != nil {
 		return empty, err
+	}
+	owner := false
+	if request.Session != "" {
+		u, e := authenticate(ctx, q, request.Session, now)
+		owner = e == nil && u.ID == donor.ID
+		if e != nil && !errors.Is(e, ErrDenied) {
+			return empty, e
+		}
+	}
+	if (errors.Is(lookup, pgx.ErrNoRows) || owner) && request.Name != "" {
+		zone, e := geo.Timezone(request.Zip)
+		if e != nil || len(request.Name) > 150 || !plainText(request.Name, false) || len(request.City) > 80 ||
+			!plainText(request.City, false) {
+			return empty, payments.ErrCheckoutInput
+		}
+		if e = q.SaveSignupProfile(ctx, queries.SaveSignupProfileParams{ID: donor.ID, FullName: text(request.Name), Zip: text(request.Zip), City: text(request.City), Timezone: text(zone)}); e != nil {
+			return empty, e
+		}
 	}
 	attempt, err := q.StripeCheckout(ctx, request.RequestID)
 	if err == nil {
@@ -128,6 +152,12 @@ func prepareAttempt(
 	}
 	if err = q.InsertCheckout(ctx, draft); err != nil {
 		return empty, err
+	}
+	var journey pgtype.UUID
+	if journey.Scan(request.Journey) == nil && journey.Valid {
+		if err = q.AttachCheckoutJourney(ctx, queries.AttachCheckoutJourneyParams{ID: draft.ID, JourneyID: journey}); err != nil {
+			return empty, err
+		}
 	}
 	raw, err := checkoutParams(site, donor.Email, draft, request)
 	if err != nil {
@@ -155,10 +185,14 @@ func prepareAttempt(
 }
 
 // lockGuest returns the donor for email, created as an unclaimed guest if
-// new, locked and with a projection row for the refresh worker to find.
-func lockGuest(ctx context.Context, q *queries.Queries, email string, now time.Time) (queries.Donor, error) {
+// new, locked, granted any waitlist claim on the address, and with a
+// projection row for the refresh worker to find.
+func lockGuest(ctx context.Context, q *queries.Queries, claims FoundingClaimKey, email string, now time.Time) (queries.Donor, error) {
 	id, err := NewID()
 	if err != nil {
+		return queries.Donor{}, err
+	}
+	if err = reserveEmailIdentity(ctx, q, email, identityDonor, pgtype.UUID{}); err != nil {
 		return queries.Donor{}, err
 	}
 	if err = q.InsertGuest(ctx, queries.InsertGuestParams{ID: id, Email: email}); err != nil {
@@ -173,6 +207,9 @@ func lockGuest(ctx context.Context, q *queries.Queries, email string, now time.T
 	}
 	if donor.Disabled {
 		return queries.Donor{}, ErrDenied
+	}
+	if err = claims.grant(ctx, q, donor.ID, email, now); err != nil {
+		return queries.Donor{}, err
 	}
 	projection, err := NewID()
 	if err != nil {
@@ -233,21 +270,23 @@ func checkoutParams(site publicSite, email string, draft queries.InsertCheckoutP
 		metadata["dad_referrer_id"] = draft.ReferrerID.String()
 		metadata["dad_referral_kind"] = draft.ReferralKind.String
 	}
-	monthly := request.Frequency == "MONTHLY"
-	mode, name := "payment", "DAD one-time gift"
-	if monthly {
-		mode, name = "subscription", "DAD monthly giving"
+	price := map[string]any{
+		"currency":     "usd",
+		"unit_amount":  request.Amount,
+		"product_data": map[string]string{"name": "DAD monthly giving"},
+		"recurring":    map[string]string{"interval": "month"},
 	}
-	price := map[string]any{"currency": "usd", "unit_amount": request.Amount, "product_data": map[string]string{"name": name}}
-	params := map[string]any{"mode": mode, "customer_email": email, "client_reference_id": checkoutID.String(), "metadata": metadata,
-		"line_items": []any{map[string]any{"price_data": price, "quantity": 1}}, "allowed_payment_method_types": []string{"card"},
-		"success_url": site.checkoutReturn(request.Amount, request.Frequency), "cancel_url": site.donate(),
-		"expires_at": draft.CreatedAt.Time.Add(checkoutLifetime).Unix()}
-	if monthly {
-		price["recurring"] = map[string]string{"interval": "month"}
-		params["subscription_data"] = map[string]any{"metadata": metadata}
-	} else {
-		params["payment_intent_data"] = map[string]any{"metadata": metadata}
+	params := map[string]any{
+		"mode":                         "subscription",
+		"customer_email":               email,
+		"client_reference_id":          checkoutID.String(),
+		"metadata":                     metadata,
+		"line_items":                   []any{map[string]any{"price_data": price, "quantity": 1}},
+		"allowed_payment_method_types": []string{"card"},
+		"success_url":                  site.checkoutReturn(request.Amount, request.Frequency),
+		"cancel_url":                   site.donate(),
+		"expires_at":                   draft.CreatedAt.Time.Add(checkoutLifetime).Unix(),
+		"subscription_data":            map[string]any{"metadata": metadata},
 	}
 	return json.Marshal(params)
 }

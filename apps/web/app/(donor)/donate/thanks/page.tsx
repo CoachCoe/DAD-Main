@@ -1,33 +1,31 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
-import { MAX_GIFT_MINOR, MIN_GIFT_MINOR } from "@/lib/money";
+import { isGiftAmount } from "@/lib/money";
 
 export const metadata: Metadata = { title: "Thank you", robots: { index: false } };
 
-type Gift = { frequency: "MONTHLY" | "ONE_TIME"; minor: number };
-
 // The checkout success URL carries what the donor chose. It is display-only: anything
 // malformed falls back to a thank-you that restates nothing.
-function giftFrom(params: Record<string, string | string[] | undefined>): Gift | null {
+function giftFrom(params: Record<string, string | string[] | undefined>): number | null {
   const { amount_minor: amount, frequency } = params;
-  if (typeof amount !== "string" || !/^\d{1,9}$/.test(amount)) return null;
-  if (frequency !== "MONTHLY" && frequency !== "ONE_TIME") return null;
+  if (typeof amount !== "string" || !/^\d{1,9}$/.test(amount) || frequency !== "MONTHLY") return null;
   const minor = Number(amount);
-  return minor >= MIN_GIFT_MINOR && minor <= MAX_GIFT_MINOR ? { frequency, minor } : null;
+  return isGiftAmount(minor) ? minor : null;
 }
 
 export default async function ThankYouPage({ searchParams }: PageProps<"/donate/thanks">) {
   const gift = giftFrom(await searchParams);
   return (
     <Page eyebrow="Your gift" title="Thank you for joining the beginning">
-      {gift && (
+      {gift !== null && (
         <p>
-          Your gift: <GiftFraming minor={gift.minor} monthly={gift.frequency === "MONTHLY"} />
+          Your gift: <GiftFraming minor={gift} />
         </p>
       )}
-      <p>DAD launches in April 2027. A first gift completed before launch earns a permanent Founding Donor badge.</p>
+      <p>
+        DAD launches in April 2027. A first gift completed before January 2027 earns a permanent Founding Donor badge.
+      </p>
       <div className="callout highlight">
         <h2>Next: claim your account</h2>
         <p>
@@ -47,9 +45,9 @@ export default async function ThankYouPage({ searchParams }: PageProps<"/donate/
         Your receipt email follows once Stripe confirms the payment. In this sandbox preview it is a test gift record,
         not a tax receipt, and no real donation is collected.
       </p>
-      <Link className="secondary" href="/donate">
-        Make another gift
-      </Link>
+      <a className="secondary" href="/account/share">
+        Invite someone to give with you
+      </a>
     </Page>
   );
 }

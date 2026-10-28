@@ -102,18 +102,6 @@ SELECT * FROM donor_amount_changes WHERE checkout_id=$1 ORDER BY created_at DESC
 -- name: ConfirmAmountChange :exec
 UPDATE donor_amount_changes SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1;
 
--- name: LatestPause :one
-SELECT * FROM donor_pauses WHERE attempt_id=$1 ORDER BY created_at DESC LIMIT 1;
-
--- name: ResumptionForPause :one
-SELECT * FROM donor_resumptions WHERE pause_id=$1;
-
--- name: ConfirmPause :exec
-UPDATE donor_pauses SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1;
-
--- name: ConfirmResumption :exec
-UPDATE donor_resumptions SET confirmed_at=COALESCE(confirmed_at,$2) WHERE id=$1;
-
 -- name: SaveSubscription :one
 INSERT INTO donor_subscriptions (id,attempt_id,donor_id,status,period_end,stops_at,billing_anchor,external_change,observed_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -140,3 +128,45 @@ SELECT a.id,a.checkout_id,a.stripe_subscription_id,s.donor_id FROM donor_subscri
 JOIN donor_stripe_checkouts a ON a.id=s.attempt_id
 WHERE s.billing_anchor IS NULL AND s.status NOT IN ('canceled','incomplete_expired') AND a.id>sqlc.arg(after)::uuid
 ORDER BY a.id LIMIT 1;
+
+-- name: QueueDeletedAccountRefunds :exec
+-- Gifts on this checkout paid after its donor deleted the account.
+INSERT INTO donor_deleted_account_reversals (id, donor_id, kind, target, amount_minor, available_at, created_at)
+SELECT gen_random_uuid(), g.donor_id, 'REFUND', g.stripe_payment_intent_id, g.amount_minor,
+       sqlc.arg(as_of)::timestamptz, sqlc.arg(as_of)::timestamptz
+FROM donor_gifts g
+JOIN donor_deletions x ON x.donor_id = g.donor_id
+WHERE g.checkout_id = sqlc.arg(checkout_id) AND g.paid_at > x.deleted_at AND g.stripe_payment_intent_id IS NOT NULL
+ON CONFLICT (kind, target) DO NOTHING;
+
+-- name: QueueDeletedAccountCancellation :exec
+-- The checkout's subscription, unless Stripe has already ended it.
+INSERT INTO donor_deleted_account_reversals (id, donor_id, kind, target, available_at, created_at)
+SELECT gen_random_uuid(), c.donor_id, 'CANCEL', a.stripe_subscription_id,
+       sqlc.arg(as_of)::timestamptz, sqlc.arg(as_of)::timestamptz
+FROM donor_stripe_checkouts a
+JOIN donor_checkouts c ON c.id = a.checkout_id
+JOIN donor_deletions x ON x.donor_id = c.donor_id
+WHERE a.checkout_id = sqlc.arg(checkout_id) AND a.stripe_subscription_id IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM donor_subscriptions s
+    WHERE s.attempt_id = a.id AND s.status IN ('canceled', 'incomplete_expired')
+  )
+ON CONFLICT (kind, target) DO NOTHING;
+
+-- name: ClaimDeletedAccountReversal :one
+UPDATE donor_deleted_account_reversals r SET attempts = r.attempts + 1, available_at = sqlc.arg(lease_until)::timestamptz
+WHERE r.id = (
+    SELECT due.id FROM donor_deleted_account_reversals due
+    WHERE due.completed_at IS NULL AND due.available_at <= sqlc.arg(as_of)::timestamptz AND due.attempts < 10
+    ORDER BY due.available_at, due.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING *;
+
+-- name: CompleteDeletedAccountReversal :exec
+UPDATE donor_deleted_account_reversals SET completed_at = $2, last_error = NULL WHERE id = $1;
+
+-- name: FailDeletedAccountReversal :exec
+UPDATE donor_deleted_account_reversals SET available_at = $2, last_error = $3 WHERE id = $1;

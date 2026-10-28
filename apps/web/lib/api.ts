@@ -1,3 +1,4 @@
+import { observeAPI } from "./analytics";
 import type { components, paths } from "./openapi";
 
 /** A named schema from the API contract. */
@@ -56,7 +57,9 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   const response = await fetch(`/api${path}`, { ...init, headers, credentials: "include" });
   if (!response.ok) throw await toError(response);
-  return response.json() as Promise<T>;
+  const result = (await response.json()) as T;
+  observeAPI(path, init.method ?? "GET", result, init.body);
+  return result;
 }
 
 type Failure =

@@ -26,7 +26,7 @@ func (q *Queries) ConsumeDonorLinks(ctx context.Context, arg ConsumeDonorLinksPa
 }
 
 const donorByEmail = `-- name: DonorByEmail :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at FROM donors WHERE email = $1
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name FROM donors WHERE email = $1
 `
 
 func (q *Queries) DonorByEmail(ctx context.Context, email string) (Donor, error) {
@@ -40,8 +40,50 @@ func (q *Queries) DonorByEmail(ctx context.Context, email string) (Donor, error)
 		&i.ReferralCode,
 		&i.ID,
 		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
+		&i.CompanyCode,
+		&i.FullName,
 	)
 	return i, err
+}
+
+const emailIdentities = `-- name: EmailIdentities :many
+SELECT 'DONOR'::text AS role, NULL::uuid AS partner_id FROM donors WHERE email = $1::text
+UNION ALL
+SELECT 'STAFF', NULL FROM donor_staff WHERE email = $1::text AND NOT disabled
+UNION ALL
+SELECT 'PARTNER', partner_id FROM donor_partner_users WHERE email = $1::text AND NOT disabled
+`
+
+type EmailIdentitiesRow struct {
+	Role      string      `json:"role"`
+	PartnerID pgtype.UUID `json:"partner_id"`
+}
+
+// Live identities using an address. A deleted donor's address is erased, and a
+// removed partner or staff login no longer holds one.
+func (q *Queries) EmailIdentities(ctx context.Context, email string) ([]EmailIdentitiesRow, error) {
+	rows, err := q.db.Query(ctx, emailIdentities, email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []EmailIdentitiesRow{}
+	for rows.Next() {
+		var i EmailIdentitiesRow
+		if err := rows.Scan(&i.Role, &i.PartnerID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const insertGuest = `-- name: InsertGuest :exec
@@ -83,7 +125,7 @@ func (q *Queries) InsertStripeEvent(ctx context.Context, arg InsertStripeEventPa
 }
 
 const lockDonor = `-- name: LockDonor :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at FROM donors WHERE id = $1 FOR NO KEY UPDATE
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name FROM donors WHERE id = $1 FOR NO KEY UPDATE
 `
 
 // Serialize donor writes without blocking foreign keys that reference this donor.
@@ -98,8 +140,26 @@ func (q *Queries) LockDonor(ctx context.Context, id pgtype.UUID) (Donor, error) 
 		&i.ReferralCode,
 		&i.ID,
 		&i.CreatedAt,
+		&i.AccountRole,
+		&i.Zip,
+		&i.City,
+		&i.Timezone,
+		&i.Phone,
+		&i.CompanyCode,
+		&i.FullName,
 	)
 	return i, err
+}
+
+const lockEmailIdentity = `-- name: LockEmailIdentity :exec
+SELECT pg_advisory_xact_lock(hashtextextended('email-identity:' || $1::text, 0))
+`
+
+// Serializes every check-then-create of an identity for one address, so two
+// concurrent sign-ups cannot both find it free (PRD §3, one email one role).
+func (q *Queries) LockEmailIdentity(ctx context.Context, email string) error {
+	_, err := q.db.Exec(ctx, lockEmailIdentity, email)
+	return err
 }
 
 const loginLink = `-- name: LoginLink :one

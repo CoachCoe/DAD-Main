@@ -22,6 +22,8 @@ const proofLifetime = 15 * time.Minute
 type EmailChangeService struct {
 	DB             *pgxpool.Pool
 	EncryptionKeys credentials.Keyring
+	// FoundingClaims matches the new address to the website waitlist (D-6).
+	FoundingClaims FoundingClaimKey
 }
 
 func emailChangeProof(keys credentials.Keyring) (string, []byte, error) {
@@ -61,6 +63,11 @@ func (s EmailChangeService) Request(ctx context.Context, session, email string) 
 			return struct{}{}, err
 		}
 		q := queries.New(tx)
+		if err = reserveEmailIdentity(ctx, q, email, identityDonor, pgtype.UUID{}); errors.Is(err, EmailRoleError{}) {
+			return struct{}{}, ErrEmailChangeConflict
+		} else if err != nil {
+			return struct{}{}, err
+		}
 		if err = q.CancelEmailChanges(ctx, donor.ID); err != nil {
 			return struct{}{}, err
 		}
@@ -108,7 +115,7 @@ func (s EmailChangeService) Confirm(ctx context.Context, proof string) (string, 
 			return s.advanceEmailChange(ctx, q, change, now)
 		case "NEW":
 			stage = "COMPLETED"
-			return completeEmailChange(ctx, q, change, now)
+			return completeEmailChange(ctx, q, s.FoundingClaims, change, now)
 		}
 		return ErrDenied
 	})
@@ -138,11 +145,25 @@ func (s EmailChangeService) advanceEmailChange(
 
 // completeEmailChange moves the account to the new address, which must not
 // belong to another donor: accounts are never merged.
-func completeEmailChange(ctx context.Context, q *queries.Queries, change queries.DonorEmailChange, now time.Time) error {
+func completeEmailChange(
+	ctx context.Context,
+	q *queries.Queries,
+	claims FoundingClaimKey,
+	change queries.DonorEmailChange,
+	now time.Time,
+) error {
+	if err := reserveEmailIdentity(ctx, q, change.NewEmail, identityDonor, pgtype.UUID{}); errors.Is(err, EmailRoleError{}) {
+		return ErrEmailChangeConflict
+	} else if err != nil {
+		return err
+	}
 	if err := q.SetDonorEmail(ctx, queries.SetDonorEmailParams{ID: change.DonorID, Email: change.NewEmail}); err != nil {
 		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == uniqueViolation {
 			return ErrEmailChangeConflict
 		}
+		return err
+	}
+	if err := claims.grant(ctx, q, change.DonorID, change.NewEmail, now); err != nil {
 		return err
 	}
 	if err := q.RevokeAllSessions(ctx, queries.RevokeAllSessionsParams{DonorID: change.DonorID, RevokedAt: timestamp(now)}); err != nil {

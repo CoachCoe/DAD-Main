@@ -1,10 +1,11 @@
 module dad/donor-api
 
-go 1.27.2
+go 1.27.3
 
 require (
-	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc
+	github.com/boombuler/barcode v1.0.1
 	github.com/fernet/fernet-go v0.0.0-20240119011108-303da6aec611
+	github.com/go-pdf/fpdf v0.9.0
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/makiuchi-d/gozxing v0.1.1

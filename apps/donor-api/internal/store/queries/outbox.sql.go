@@ -149,7 +149,15 @@ WITH gifts AS MATERIALIZED (
     UNION ALL
     SELECT p.donor_id,'RECOVERY','recovery:'||p.id::text||':'||days.day::text,
         json_build_object('period_id',p.id::text,'day',days.day),p.due_at+days.day*interval '24 hours'
-    FROM donor_billing_periods p CROSS JOIN (VALUES(0),(7),(13)) AS days(day)
+    FROM donor_billing_periods p CROSS JOIN (VALUES(0),(5)) AS days(day)
+    WHERE p.donor_id=$1 AND p.status='FAILED'
+    UNION ALL
+    -- Streak lapsed email (§6.11): the failure stayed unresolved through the
+    -- 7-day grace, so the run ended. Keyed by the period, available at grace
+    -- end, so it fires once and not before the lapse is real.
+    SELECT p.donor_id,'LAPSED','lapsed:'||p.id::text,
+        json_build_object('period_id',p.id::text),p.due_at+interval '7 days'
+    FROM donor_billing_periods p
     WHERE p.donor_id=$1 AND p.status='FAILED'
 )
 INSERT INTO donor_messages(id,donor_id,kind,dedup_key,context,available_at)

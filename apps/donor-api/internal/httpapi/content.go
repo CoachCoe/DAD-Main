@@ -20,11 +20,6 @@ type ContentAdminSource interface {
 	StoreSource(context.Context, string, string, []byte) (store.StoredSource, error)
 	ReadSource(context.Context, string, pgtype.UUID) (store.ContentDocument, error)
 	Publish(context.Context, string, store.PublicationRequest) (store.Publication, error)
-	Partners(context.Context, string, int64) (store.PartnerPage, error)
-}
-
-type PartnerSource interface {
-	Signup(context.Context, pgtype.UUID, store.PartnerRequest) error
 }
 
 const (
@@ -38,15 +33,6 @@ func (a *api) contentAdmin() service {
 
 func (a *api) contentInventory(w http.ResponseWriter, r *http.Request, session string) {
 	a.contentAdmin().serve(w, r, func(ctx context.Context) (any, error) { return a.ContentAdmin.Inventory(ctx, session) })
-}
-
-func (a *api) partnerInquiries(w http.ResponseWriter, r *http.Request, session string) {
-	offset, ok := offsetParam(r, "offset")
-	if !ok {
-		invalidFields(w, r)
-		return
-	}
-	a.contentAdmin().serve(w, r, func(ctx context.Context) (any, error) { return a.ContentAdmin.Partners(ctx, session, offset) })
 }
 
 // Uploads are authorized before the body is read so anonymous clients cannot
@@ -120,30 +106,4 @@ func (a *api) publish(w http.ResponseWriter, r *http.Request, session string) {
 		return
 	}
 	respond(w, r, result, err, staffStatus)
-}
-
-func partnerStatus(err error) (int, string) {
-	switch {
-	case errors.Is(err, store.ErrStaffInput):
-		return http.StatusUnprocessableEntity, "Check the highlighted fields and try again"
-	case errors.Is(err, store.ErrStaffConflict):
-		return http.StatusConflict, "This request was already used for a different submission. Start a new submission"
-	default:
-		return http.StatusServiceUnavailable, "Partner signup is temporarily unavailable"
-	}
-}
-
-func (a *api) partnerSignup(w http.ResponseWriter, r *http.Request) {
-	key, ok := idempotencyKey(w, r)
-	if !ok {
-		return
-	}
-	var body store.PartnerRequest
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	partners := service{a.Partner != nil, "Partner signup is temporarily unavailable", readTimeout, partnerStatus}
-	partners.serve(w, r, func(ctx context.Context) (any, error) {
-		return map[string]any{"received": true, "mode": "test"}, a.Partner.Signup(ctx, key, body)
-	})
 }

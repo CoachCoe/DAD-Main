@@ -1,0 +1,212 @@
+name: Deploy (app)
+
+# Application rollout pipeline. This does the DIRECT ECS deploy and does NOT use
+# CDK (CDK is reserved for infra changes in infra.yml). The step order mirrors
+# scripts/deploy.sh exactly:
+#
+#   build/push images -> migrate (run-task) -> provision-roles (run-task)
+#     -> ecs update-service api/web/nginx ("up") -> smoke checks
+#     -> workers (ecs update-service for the six worker services),
+#        behind DONOR_GO_WORKERS_ENABLED
+#
+# Staging runs automatically on a merge to dev. Production runs on a release tag
+# or a merge to main, gated by the `production` GitHub Environment manual-approval
+# protection rule (configured in repo settings, not in YAML).
+#
+# Cluster and service names are read from CDK CloudFormation outputs / SSM at
+# runtime, never hardcoded. ECS service names match docker-compose.prod.yml
+# exactly: api, web, nginx, stripe-worker, projection-worker, login-email-worker,
+# email-change-worker, message-worker, push-worker.
+#
+# Auth is GitHub OIDC assuming the FEAT-002 app-deploy role (no static keys);
+# the role ARN is read from the environment variable vars.APP_DEPLOY_ROLE_ARN.
+
+on:
+  push:
+    branches: [dev, main]
+    paths:
+      - "apps/**"
+      - "deploy/**"
+      - "docker-compose.prod.yml"
+      - ".github/workflows/deploy.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    # Only run once the account is bootstrapped and the OIDC app-deploy role ARN
+    # is configured as the per-environment variable APP_DEPLOY_ROLE_ARN. Before
+    # bootstrap the variable is empty, so the job is skipped (green) instead of
+    # hard-failing on a role that does not exist yet. The pipeline "wakes up" on
+    # the first push/release after the variable is set. See infra/README.md.
+    if: ${{ vars.APP_DEPLOY_ROLE_ARN != '' }}
+    # Resolve the environment from the trigger: dev push -> staging; release tag
+    # or main push -> production; workflow_dispatch -> the chosen input.
+    environment: >-
+      ${{
+        github.event_name == 'workflow_dispatch' && inputs.env
+        || ((github.event_name == 'release' || github.ref == 'refs/heads/main') && 'production' || 'staging')
+      }}
+    env:
+      # The CloudFormation stack that carries the ECS cluster/service outputs
+      # (ecs-cluster stack). The env suffix is derived from the GitHub Environment.
+      DAD_ENV: >-
+        ${{
+          github.event_name == 'workflow_dispatch' && inputs.env
+          || ((github.event_name == 'release' || github.ref == 'refs/heads/main') && 'production' || 'staging')
+        }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.APP_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve cluster/subnets/security-groups from CDK outputs / SSM
+        id: names
+        # Prefer the CloudFormation outputs the CDK stacks publish; fall back to
+        # SSM parameters the stacks also write. Never hardcode names.
+        run: |
+          set -euo pipefail
+          out() {
+            # out <stack-suffix> <OutputKey> <ssm-fallback-path>
+            local stack="dad-$1-${DAD_ENV}" key="$2" ssm="$3" val
+            val="$(aws cloudformation describe-stacks --stack-name "$stack" \
+              --query "Stacks[0].Outputs[?OutputKey=='$key'].OutputValue" \
+              --output text 2>/dev/null || true)"
+            if [ -z "$val" ] || [ "$val" = "None" ]; then
+              val="$(aws ssm get-parameter --name "$ssm" \
+                --query 'Parameter.Value' --output text)"
+            fi
+            printf '%s' "$val"
+          }
+          cluster="$(out ecs-cluster ClusterName /dad/${DAD_ENV}/ecs/cluster-name)"
+          subnets="$(out network ComputeSubnetIds /dad/${DAD_ENV}/network/compute-subnet-ids)"
+          sgs="$(out network WorkersSecurityGroupId /dad/${DAD_ENV}/network/workers-sg-id)"
+          {
+            echo "cluster=$cluster"
+            echo "subnets=$subnets"
+            echo "sgs=$sgs"
+          } >> "$GITHUB_OUTPUT"
+          echo "Resolved cluster=$cluster subnets=$subnets sgs=$sgs"
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+        id: ecr
+
+      - name: Build and push images (dad/api, dad/web, dad/nginx) tagged with the git SHA
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+          # Origins are web image BUILD ARGS (not runtime env); the web image MUST
+          # be rebuilt whenever an origin changes. They come from environment vars.
+          DONOR_PUBLIC_ORIGIN: ${{ vars.DONOR_PUBLIC_ORIGIN }}
+          DONOR_STAFF_ORIGIN: ${{ vars.DONOR_STAFF_ORIGIN }}
+        run: |
+          set -euo pipefail
+          docker build -t "$REGISTRY/dad/api:$IMAGE_TAG" -f apps/donor-api/Dockerfile apps/donor-api
+          docker build -t "$REGISTRY/dad/web:$IMAGE_TAG" \
+            --build-arg "DONOR_PUBLIC_ORIGIN=$DONOR_PUBLIC_ORIGIN" \
+            --build-arg "DONOR_STAFF_ORIGIN=$DONOR_STAFF_ORIGIN" \
+            -f apps/web/Dockerfile apps/web
+          docker build -t "$REGISTRY/dad/nginx:$IMAGE_TAG" -f deploy/nginx/Dockerfile deploy/nginx
+          docker push "$REGISTRY/dad/api:$IMAGE_TAG"
+          docker push "$REGISTRY/dad/web:$IMAGE_TAG"
+          docker push "$REGISTRY/dad/nginx:$IMAGE_TAG"
+
+      # --- Rollout order mirrors scripts/deploy.sh exactly ---
+
+      # 1) migrate: run the schema migrations first (owner DONOR_GO_DATABASE_URL).
+      - name: migrate (ECS run-task)
+        env:
+          DAD_CLUSTER: ${{ steps.names.outputs.cluster }}
+          DAD_SUBNETS: ${{ steps.names.outputs.subnets }}
+          DAD_SECURITY_GROUPS: ${{ steps.names.outputs.sgs }}
+        run: ./infra/scripts/run-task.sh "$DAD_ENV" migrate
+
+      # 2) provision-roles: runs AFTER migrate; creates/grants the per-process
+      #    Postgres roles (owner + all per-process DONOR_*_DATABASE_URL).
+      - name: provision-roles (ECS run-task)
+        env:
+          DAD_CLUSTER: ${{ steps.names.outputs.cluster }}
+          DAD_SUBNETS: ${{ steps.names.outputs.subnets }}
+          DAD_SECURITY_GROUPS: ${{ steps.names.outputs.sgs }}
+        run: ./infra/scripts/run-task.sh "$DAD_ENV" provision-roles
+
+      # 3) the "up" step: roll the long-running services api, web, nginx.
+      - name: update-service api/web/nginx (the up step)
+        env:
+          CLUSTER: ${{ steps.names.outputs.cluster }}
+        run: |
+          set -euo pipefail
+          for svc in api web nginx; do
+            aws ecs update-service \
+              --cluster "$CLUSTER" \
+              --service "$svc" \
+              --force-new-deployment
+          done
+          aws ecs wait services-stable --cluster "$CLUSTER" --services api web nginx
+
+      # 4) smoke checks, mirroring `deploy.sh smoke` (api /health/ready on 8002,
+      #    nginx /health on 8081, web / on 3000). Uses ECS Exec against one
+      #    running task of each service, the same shape as `compose exec`.
+      #    ECS Exec must be enabled on the services (enableExecuteCommand).
+      - name: smoke checks
+        env:
+          CLUSTER: ${{ steps.names.outputs.cluster }}
+        run: |
+          set -euo pipefail
+          task_for() {
+            aws ecs list-tasks --cluster "$CLUSTER" --service-name "$1" \
+              --desired-status RUNNING --query 'taskArns[0]' --output text
+          }
+          exec_in() {
+            # exec_in <service> <container> <shell-command>
+            aws ecs execute-command --cluster "$CLUSTER" \
+              --task "$(task_for "$1")" --container "$2" \
+              --interactive --command "$3"
+          }
+          exec_in api   api   'wget -q -O - http://127.0.0.1:8002/health/ready'
+          exec_in nginx nginx 'wget -q -O /dev/null http://127.0.0.1:8081/health'
+          exec_in web   web   'node -e '\''fetch("http://127.0.0.1:3000/").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'\'''
+
+      # 5) workers: roll the six worker services last, only when workers are on.
+      #    Gated on DONOR_GO_WORKERS_ENABLED (environment variable).
+      - name: update-service workers (gated on DONOR_GO_WORKERS_ENABLED)
+        if: ${{ vars.DONOR_GO_WORKERS_ENABLED == 'true' }}
+        env:
+          CLUSTER: ${{ steps.names.outputs.cluster }}
+        run: |
+          set -euo pipefail
+          workers="stripe-worker projection-worker login-email-worker email-change-worker message-worker push-worker"
+          for svc in $workers; do
+            aws ecs update-service \
+              --cluster "$CLUSTER" \
+              --service "$svc" \
+              --force-new-deployment
+          done
+          aws ecs wait services-stable --cluster "$CLUSTER" --services $workers

@@ -135,34 +135,6 @@ func (q *Queries) InsertContentSource(ctx context.Context, arg InsertContentSour
 	return err
 }
 
-const insertPartnerSignup = `-- name: InsertPartnerSignup :exec
-INSERT INTO donor_partner_signups(id,organization,name,email,website,message,request_hash,consent_version)
-VALUES($1,$2,$3,$4,$5,$6,$7,'r1-partner-contact-v1') ON CONFLICT(id) DO NOTHING
-`
-
-type InsertPartnerSignupParams struct {
-	ID           pgtype.UUID `json:"id"`
-	Organization string      `json:"organization"`
-	Name         string      `json:"name"`
-	Email        string      `json:"email"`
-	Website      string      `json:"website"`
-	Message      string      `json:"message"`
-	RequestHash  string      `json:"request_hash"`
-}
-
-func (q *Queries) InsertPartnerSignup(ctx context.Context, arg InsertPartnerSignupParams) error {
-	_, err := q.db.Exec(ctx, insertPartnerSignup,
-		arg.ID,
-		arg.Organization,
-		arg.Name,
-		arg.Email,
-		arg.Website,
-		arg.Message,
-		arg.RequestHash,
-	)
-	return err
-}
-
 const insertPublication = `-- name: InsertPublication :exec
 INSERT INTO donor_content_publications(id,actor_id,payload,created_at) VALUES($1,$2,$3,$4)
 `
@@ -182,70 +154,6 @@ func (q *Queries) InsertPublication(ctx context.Context, arg InsertPublicationPa
 		arg.CreatedAt,
 	)
 	return err
-}
-
-const partnerSignupByID = `-- name: PartnerSignupByID :one
-SELECT organization, name, email, website, message, request_hash, consent_version, id, created_at FROM donor_partner_signups WHERE id=$1
-`
-
-func (q *Queries) PartnerSignupByID(ctx context.Context, id pgtype.UUID) (DonorPartnerSignup, error) {
-	row := q.db.QueryRow(ctx, partnerSignupByID, id)
-	var i DonorPartnerSignup
-	err := row.Scan(
-		&i.Organization,
-		&i.Name,
-		&i.Email,
-		&i.Website,
-		&i.Message,
-		&i.RequestHash,
-		&i.ConsentVersion,
-		&i.ID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const partnerSignupsPage = `-- name: PartnerSignupsPage :many
-SELECT id,organization,name,email,website,message,created_at FROM donor_partner_signups
-ORDER BY created_at DESC,id LIMIT 51 OFFSET $1::bigint
-`
-
-type PartnerSignupsPageRow struct {
-	ID           pgtype.UUID        `json:"id"`
-	Organization string             `json:"organization"`
-	Name         string             `json:"name"`
-	Email        string             `json:"email"`
-	Website      string             `json:"website"`
-	Message      string             `json:"message"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) PartnerSignupsPage(ctx context.Context, pageOffset int64) ([]PartnerSignupsPageRow, error) {
-	rows, err := q.db.Query(ctx, partnerSignupsPage, pageOffset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []PartnerSignupsPageRow{}
-	for rows.Next() {
-		var i PartnerSignupsPageRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Organization,
-			&i.Name,
-			&i.Email,
-			&i.Website,
-			&i.Message,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const publishContentHead = `-- name: PublishContentHead :exec

@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
+import { observe } from "@/lib/analytics";
 import { ApiError, api, failureMessage, type RequestBody, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
@@ -64,8 +65,10 @@ export default function Share() {
     try {
       if (typeof navigator.share === "function") {
         await navigator.share({ title: "Join me at DAD", text, url: sharing.link });
+        observe("invite_shared", { channel: "share_sheet" });
       } else {
         await navigator.clipboard.writeText(`${text}\n${sharing.link}`);
+        observe("invite_shared", { channel: "copy" });
         setMessage("Invitation copied. Paste it into a message to someone you know.");
       }
     } catch (cause) {

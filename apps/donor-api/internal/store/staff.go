@@ -28,24 +28,39 @@ var (
 	ErrStaffExists = fmt.Errorf("%w: a staff account with this email already exists", ErrStaffConflict)
 )
 
-// rolePermissions lists each role's named permissions, sorted. Each role adds
-// to the one before it.
+// rolePermissions lists each role's named permissions, sorted (PRD §8). A
+// super admin holds every one. Each operator holds only its own area's:
+// Partnerships runs partner approvals, links, matching and partner users;
+// Growth runs events and check-ins; Impact Ops enters initiatives, metrics and
+// spend. Donors and money, badge grants, website content, the audit log and
+// admin management stay with a super admin. Every role reads the §4 report.
 var rolePermissions = map[string][]string{
-	"SUPPORT": {"donor.read", "message.resend"},
-	"FINANCE": {"data.export", "donor.read", "gift.cancel", "gift.refund", "message.resend"},
-	"ADMIN": {
+	"SUPER_ADMIN": {
 		"audit.read",
+		"badge.manage",
 		"content.publish",
 		"data.export",
 		"donor.read",
+		"donor.recompute",
+		"event.manage",
 		"gift.cancel",
 		"gift.refund",
+		"initiative.manage",
 		"message.resend",
+		"partner.manage",
+		"report.read",
 		"staff.manage",
 	},
+	"OP_PARTNERSHIPS": {"partner.manage", "report.read"},
+	"OP_GROWTH":       {"event.manage", "report.read"},
+	"OP_IMPACT":       {"initiative.manage", "report.read"},
 }
 
 func staffPermissions(role string) []string { return rolePermissions[role] }
+
+// superAdminRole is the role that holds the §8 super-admin-only powers; the
+// "do not strand the org without an admin manager" guards key on it.
+const superAdminRole = "SUPER_ADMIN"
 
 type StaffView struct {
 	ID          string   `json:"id"`

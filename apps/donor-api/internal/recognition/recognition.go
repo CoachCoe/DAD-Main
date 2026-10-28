@@ -16,20 +16,14 @@ var (
 	ErrIncomplete = errors.New("incomplete billing history")
 )
 
-const Grace = 14 * 24 * time.Hour
-
-// PauseFreezeEnd follows the billing anniversary, clamping month-end dates.
-func PauseFreezeEnd(start time.Time) time.Time {
-	start = utc(start)
-	first := time.Date(start.Year(), start.Month()+3, 1, start.Hour(), start.Minute(), start.Second(), start.Nanosecond(), time.UTC)
-	return first.AddDate(0, 0, min(start.Day(), first.AddDate(0, 1, -1).Day())-1)
-}
+const Grace = 7 * 24 * time.Hour
 
 // NewYork is the zone of the Founding Donor cutoff and receipt tax years.
 var NewYork = mustLoadLocation("America/New_York")
 
-// FoundingCutoff is exclusive: a first gift must succeed before it.
-var FoundingCutoff = time.Date(2027, 4, 22, 0, 0, 0, 0, NewYork)
+// FoundingCutoff is exclusive: a first gift must succeed before it. Per the R1
+// PRD (Appendix A #1), Founding Donor status requires a gift before January 2027.
+var FoundingCutoff = time.Date(2027, 1, 1, 0, 0, 0, 0, NewYork)
 
 func mustLoadLocation(name string) *time.Location {
 	zone, err := time.LoadLocation(name)
@@ -88,11 +82,6 @@ type Streak struct {
 	AtRisk      bool       `json:"at_risk"`
 	GraceEndsAt *time.Time `json:"grace_ends_at"`
 	Since       *time.Time `json:"since"`
-}
-
-type Pause struct {
-	Start time.Time `json:"start"`
-	End   time.Time `json:"end"`
 }
 
 func utc(t time.Time) time.Time { return t.Round(0).UTC() }
@@ -233,7 +222,6 @@ func GivingStreak(
 	asOf time.Time,
 	previousBest int64,
 	stops []time.Time,
-	pauses []Pause,
 ) (Streak, error) {
 	if previousBest < 0 {
 		return Streak{}, ErrInvalid
@@ -254,7 +242,7 @@ func GivingStreak(
 	if err != nil {
 		return Streak{}, err
 	}
-	stopped, pauses, err := renewalBoundaries(stops, pauses)
+	stopped, err := renewalBoundaries(stops)
 	if err != nil {
 		return Streak{}, err
 	}
@@ -268,13 +256,12 @@ func GivingStreak(
 		return Streak{Best: previousBest}, nil
 	}
 	last := elapsed[len(elapsed)-1]
-	next, ended, freezeEnd := renewalAfter(last.EndsAt, stopped, pauses)
+	next, ended := renewalAfter(last.EndsAt, stopped)
 	renewalDue := !next.After(asOf)
-	frozen := !freezeEnd.IsZero() && asOf.Before(freezeEnd)
-	if renewalDue && !ended && !frozen && !asOf.Before(next.Add(Grace)) {
+	if renewalDue && !ended && !asOf.Before(next.Add(Grace)) {
 		return Streak{}, ErrIncomplete
 	}
-	result := countStreak(elapsed, paid, net, asOf, stopped, pauses)
+	result := countStreak(elapsed, paid, net, asOf, stopped)
 	result.Best = max(previousBest, result.Best)
 	if renewalDue && ended {
 		result.Current = 0
@@ -340,51 +327,21 @@ func periodPayments(gifts []Gift, net map[string]int64, periods []Period, donorI
 	return result, nil
 }
 
-func renewalBoundaries(stops []time.Time, input []Pause) (map[time.Time]bool, []Pause, error) {
+func renewalBoundaries(stops []time.Time) (map[time.Time]bool, error) {
 	stopped := map[time.Time]bool{}
 	for _, t := range stops {
 		if t.IsZero() {
-			return nil, nil, ErrInvalid
+			return nil, ErrInvalid
 		}
 		stopped[utc(t)] = true
 	}
-	pauses := slices.Clone(input)
-	for i, p := range pauses {
-		if p.Start.IsZero() || p.End.IsZero() || p.End.Before(p.Start) {
-			return nil, nil, ErrInvalid
-		}
-		pauses[i] = Pause{Start: utc(p.Start), End: utc(p.End)}
-	}
-	slices.SortFunc(pauses, func(a, b Pause) int { return a.Start.Compare(b.Start) })
-	return stopped, pauses, nil
+	return stopped, nil
 }
 
-// renewalAfter bridges skipped renewals even after the pause has ended.
-func renewalAfter(due time.Time, stopped map[time.Time]bool, pauses []Pause) (next time.Time, ended bool, freezeEnd time.Time) {
-	next = due
-	for _, p := range pauses {
-		if !p.Start.Equal(next) || p.End.Equal(p.Start) {
-			continue
-		}
-		if stopped[next] {
-			return next, true, time.Time{}
-		}
-		cap := PauseFreezeEnd(p.Start)
-		var stop time.Time
-		for at := range stopped {
-			if !at.Before(p.Start) && !at.After(p.End) && (stop.IsZero() || at.Before(stop)) {
-				stop = at
-			}
-		}
-		if !stop.IsZero() && !stop.After(cap) {
-			return stop, true, time.Time{}
-		}
-		if p.End.After(cap) {
-			return next, false, cap
-		}
-		next = p.End
-	}
-	return next, stopped[next], time.Time{}
+// renewalAfter reports the next renewal boundary after due and whether a
+// cancellation ended renewals at it.
+func renewalAfter(due time.Time, stopped map[time.Time]bool) (next time.Time, ended bool) {
+	return due, stopped[due]
 }
 
 func countStreak(
@@ -393,12 +350,11 @@ func countStreak(
 	net map[string]int64,
 	asOf time.Time,
 	stopped map[time.Time]bool,
-	pauses []Pause,
 ) Streak {
 	result := Streak{}
 	var last, lastPaid time.Time
 	for _, p := range elapsed {
-		next, ended, _ := renewalAfter(last, stopped, pauses)
+		next, ended := renewalAfter(last, stopped)
 		if ended || (!last.Equal(p.DueAt) && !next.Equal(p.DueAt)) {
 			result.Current = 0
 			result.Since = nil
@@ -436,10 +392,110 @@ func countStreak(
 	return result
 }
 
-// Milestone reports whether a run of months consecutive monthly gifts earns a
-// congratulation: three and six months, a year, and every year after. The
-// product requirements name streak milestones without defining them, so this
-// set is a product judgment.
-func Milestone(months int64) bool {
-	return months == 3 || months == 6 || (months >= 12 && months%12 == 0)
+// LadderMilestones are the streak milestones in days (PRD S-3): a fixed early
+// set, then every 365 days after the last.
+var LadderMilestones = []int64{7, 30, 100, 365, 500, 1000, 1095, 1460}
+
+// LadderMilestone reports whether a run of days is a streak milestone (S-3).
+func LadderMilestone(days int64) bool {
+	last := LadderMilestones[len(LadderMilestones)-1]
+	return slices.Contains(LadderMilestones, days) || (days > last && (days-last)%365 == 0)
+}
+
+// ladderBarDays is the width of the streak card's segmented bar (PRD S-2).
+const ladderBarDays = 30
+
+// StreakLadder is the streak card's display data (PRD S-2/S-3): the current
+// streak length in days, the next milestone and how many days remain, the last
+// milestone reached, and a 30-day segmented bar (most recent day last).
+type StreakLadder struct {
+	Days          int64  `json:"days"`
+	LastMilestone int64  `json:"last_milestone"`
+	NextMilestone *int64 `json:"next_milestone"`
+	DaysToNext    *int64 `json:"days_to_next"`
+	Bar           []bool `json:"bar"`
+}
+
+// nextLadderMilestone returns the first milestone strictly greater than days.
+// Past the fixed set the ladder continues every 365 days (PRD S-3 "+365").
+func nextMilestone(days int64, milestones []int64) (int64, bool) {
+	for _, m := range milestones {
+		if m > days {
+			return m, true
+		}
+	}
+	last := milestones[len(milestones)-1]
+	// Continue at 365-day steps beyond the final fixed milestone.
+	steps := (days-last)/365 + 1
+	return last + steps*365, true
+}
+
+// lastLadderMilestone returns the highest milestone at or below days, or 0.
+func lastMilestone(days int64, milestones []int64) int64 {
+	var reached int64
+	for _, m := range milestones {
+		if m <= days {
+			reached = m
+		}
+	}
+	if days >= milestones[len(milestones)-1] {
+		last := milestones[len(milestones)-1]
+		reached = last + (days-last)/365*365
+	}
+	return reached
+}
+
+// Ladder derives the streak card from a streak and the moment it is read.
+// Days counts the midnights in zone, the donor's own, since the run began, so
+// a streak grows by one at local midnight (§10 Time). A streak with no run
+// shows zero days, no reached milestone, the first milestone as next, and an
+// empty bar. The bar marks, for each of the last 30 days ending today, whether
+// the streak was already running on that day.
+func (s Streak) Ladder(asOf time.Time, zone *time.Location) StreakLadder {
+	return s.LadderWithMilestones(asOf, zone, LadderMilestones)
+}
+func (s Streak) LadderWithMilestones(asOf time.Time, zone *time.Location, milestones []int64) StreakLadder {
+	if s.Since == nil {
+		next := milestones[0]
+		return StreakLadder{NextMilestone: &next, DaysToNext: &next, Bar: make([]bool, ladderBarDays)}
+	}
+	days := max(civilDay(asOf, zone)-civilDay(*s.Since, zone), 0)
+	ladder := StreakLadder{Days: days, LastMilestone: lastMilestone(days, milestones)}
+	if next, ok := nextMilestone(days, milestones); ok {
+		toNext := next - days
+		ladder.NextMilestone = &next
+		ladder.DaysToNext = &toNext
+	}
+	bar := make([]bool, ladderBarDays)
+	for i := range bar {
+		// bar[ladderBarDays-1] is today; bar[0] is 29 days ago.
+		bar[i] = days >= int64(ladderBarDays-1-i)
+	}
+	ladder.Bar = bar
+	return ladder
+}
+
+// Reaches is the local midnight in zone at which the run is days long.
+func (s Streak) Reaches(days int64, zone *time.Location) time.Time {
+	start := s.Since.In(zone)
+	return time.Date(start.Year(), start.Month(), start.Day()+int(days), 0, 0, 0, 0, zone)
+}
+
+// civilDay numbers t's calendar date in zone.
+func civilDay(t time.Time, zone *time.Location) int64 {
+	local := t.In(zone)
+	return time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC).Unix() / 86400
+}
+
+// Zone is the IANA zone a donor's streak and daily rotation roll over in,
+// New York when their ZIP gives none.
+func Zone(name string) *time.Location {
+	if name == "" {
+		return NewYork
+	}
+	zone, err := time.LoadLocation(name)
+	if err != nil {
+		return NewYork
+	}
+	return zone
 }

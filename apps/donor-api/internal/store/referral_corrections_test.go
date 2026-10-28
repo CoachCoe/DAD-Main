@@ -35,7 +35,7 @@ func TestReferralCorrectionsTransferTotalsAndAuditAtomically(t *testing.T) {
 			ben, alice, cara := h.donor("ben"), h.donor("alice"), h.donor("cara")
 			now := time.Now().UTC().Truncate(time.Microsecond)
 			gift := func(id string, at time.Time, owner, kind string) {
-				g := recognition.Gift{ID: id, DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "ONE_TIME", PaidAt: at}
+				g := recognition.Gift{ID: id, DonorID: "ben", Amount: 3000, Currency: "USD", Frequency: "MONTHLY", PaidAt: at}
 				if owner != "" {
 					g.Candidate = &recognition.Candidate{ReferrerID: owner, Kind: kind, ExpiresAt: now.Add(time.Hour)}
 				}
@@ -133,7 +133,7 @@ func TestCorrectedReferralNoticesRespectLegacyDedupAndCurrentRelationship(t *tes
 			DonorID:   "ben",
 			Amount:    3000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    now.Add(-time.Hour),
 			Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: now.Add(time.Hour)},
 		},
@@ -167,8 +167,8 @@ func TestCorrectedReferralNoticesRespectLegacyDedupAndCurrentRelationship(t *tes
 			count != want {
 			t.Fatalf("email count %d, want %d: %v", count, want, err)
 		}
-		if got := len(pushIntents(t, tx, owner)); got != want {
-			t.Fatalf("push count %d, want %d", got, want)
+		if got := len(intentsOf(t, tx, owner, "REFERRAL_CONVERTED")); got != want {
+			t.Fatalf("referral push count %d, want %d", got, want)
 		}
 	}
 	assertCount(alice, 1)
@@ -179,7 +179,7 @@ func TestCorrectedReferralNoticesRespectLegacyDedupAndCurrentRelationship(t *tes
 			DonorID:   "ben",
 			Amount:    3000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    now.Add(-24 * time.Hour),
 			Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: now.Add(time.Hour)},
 		},
@@ -229,7 +229,7 @@ func TestRefundDoesNotReplaceTheEarliestPaymentWhenCorrectingAttribution(t *test
 			DonorID:   "ben",
 			Amount:    3000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    now.Add(-time.Hour),
 			Candidate: &recognition.Candidate{ReferrerID: "alice", Kind: "LINK", ExpiresAt: now.Add(time.Hour)},
 		},
@@ -243,7 +243,7 @@ func TestRefundDoesNotReplaceTheEarliestPaymentWhenCorrectingAttribution(t *test
 			DonorID:   "ben",
 			Amount:    3000,
 			Currency:  "USD",
-			Frequency: "ONE_TIME",
+			Frequency: "MONTHLY",
 			PaidAt:    now.Add(-24 * time.Hour),
 			Candidate: &recognition.Candidate{ReferrerID: "cara", Kind: "IRL", ExpiresAt: now.Add(time.Hour)},
 		},

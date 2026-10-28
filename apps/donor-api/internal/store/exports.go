@@ -65,8 +65,6 @@ var exportDatasets = map[string]exportDataset{
 		"data.export",
 	},
 	"subscriptions": {"donor_subscriptions", "id donor_id attempt_id status period_end stops_at observed_at", "data.export"},
-	"pauses":        {"donor_pauses", "id donor_id attempt_id months starts_at resumes_at confirmed_at created_at", "data.export"},
-	"resumptions":   {"donor_resumptions", "id donor_id pause_id next_renewal confirmed_at created_at", "data.export"},
 	"amount-changes": {
 		"donor_amount_changes",
 		"id donor_id checkout_id previous_minor amount_minor effective_at confirmed_at created_at",
@@ -75,12 +73,12 @@ var exportDatasets = map[string]exportDataset{
 	"cancellations": {"donor_cancellations", "id donor_id attempt_id confirmed_period_end completed_at created_at", "data.export"},
 	"preferences": {
 		"donor_preferences",
-		"donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone",
+		"donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone push_streak_lapsed push_badge_earned push_event_nearby push_event_reminder push_event_promoted rankings_opted_out network_visible volunteer",
 		"data.export",
 	},
 	"consent-history": {
 		"donor_preference_events",
-		"id donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone consent_version source created_at",
+		"id donor_id version referral_emails marketing_emails push_referral_converted push_streak_at_risk push_streak_milestone push_streak_lapsed push_badge_earned push_event_nearby push_event_reminder push_event_promoted rankings_opted_out network_visible volunteer consent_version source created_at",
 		"data.export",
 	},
 	"messages": {
@@ -95,14 +93,13 @@ var exportDatasets = map[string]exportDataset{
 	},
 	"staff": {"donor_staff", "id name email role disabled created_at", "staff.manage"},
 	"audit": {"donor_staff_audit", "id actor_id action target created_at details", "audit.read"},
-	"partner-signups": {
+	"partners": {
 		"donor_partner_signups",
-		"id organization name email website message consent_version created_at",
-		"content.publish",
+		"id organization partner_type company_code workforce_size match_rate_bp match_cap_minor approved_at created_at",
+		"partner.manage",
 	},
 	"content-sources": {"donor_content_sources", "id actor_id name sha256 created_at", "content.publish"},
 	"publications":    {"donor_content_publications", "id actor_id payload created_at", "content.publish"},
-	"enrolments":      {"", "enrolment_id program_id submitted_at status", "data.export"},
 }
 
 type ExportDatasets struct {

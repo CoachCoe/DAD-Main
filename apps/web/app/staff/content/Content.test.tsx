@@ -27,8 +27,7 @@ it("lists each spreadsheet problem by row and column when publication is rejecte
   // jsdom's File has no text(); browsers do.
   const csv = (name: string) =>
     Object.assign(new File(["header\n"], name, { type: "text/csv" }), { text: async () => "header\n" });
-  fireEvent.change(await screen.findByLabelText("Initiatives CSV"), { target: { files: [csv("initiatives.csv")] } });
-  fireEvent.change(screen.getByLabelText("Ledger CSV"), { target: { files: [csv("ledger.csv")] } });
+  fireEvent.change(await screen.findByLabelText("Ledger CSV"), { target: { files: [csv("ledger.csv")] } });
   fireEvent.change(screen.getByLabelText("Ledger as-of date"), { target: { value: "2026-09-30" } });
   fireEvent.change(screen.getByLabelText("Update cadence"), { target: { value: "monthly" } });
   fireEvent.click(screen.getByRole("checkbox"));

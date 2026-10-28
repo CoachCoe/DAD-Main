@@ -189,7 +189,7 @@ func (q *Queries) RecordDonorPasskeyUse(ctx context.Context, arg RecordDonorPass
 
 const takeDonorCeremony = `-- name: TakeDonorCeremony :one
 DELETE FROM donor_ceremonies
-WHERE token_hash=$1 AND kind=$2
+WHERE token_hash=$1 AND kind=$2 AND expires_at>clock_timestamp()
 RETURNING donor_id,session,expires_at
 `
 
