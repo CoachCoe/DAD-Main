@@ -46,6 +46,7 @@ type Services struct {
 	EmployeePartner     EmployeePartnerSource
 	EmployeeStaff       EmployeeStaffSource
 
+	Passwords       PasswordSource
 	Account         AccountSource
 	EmailConfigured bool
 	EmailChange     EmailChangeSource

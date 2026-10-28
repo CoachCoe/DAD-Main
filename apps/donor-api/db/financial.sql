@@ -105,11 +105,11 @@ checkpoint_at=EXCLUDED.checkpoint_at,retained=EXCLUDED.retained,computed_at=EXCL
 SELECT EXISTS(SELECT 1 FROM donor_founding_grants WHERE donor_id = $1)::bool;
 
 -- name: GrantFoundingClaim :exec
--- Grants the donor Founding Donor if their address hash has an unexpired claim.
+-- Grants the donor Founding Donor if their address hash has a claim.
 INSERT INTO donor_founding_grants (donor_id, granted_at)
 SELECT sqlc.arg(donor_id)::uuid, sqlc.arg(now)::timestamptz
 WHERE EXISTS(SELECT 1 FROM donor_founding_claims
-             WHERE email_hash = sqlc.arg(email_hash)::text AND expires_at > sqlc.arg(now)::timestamptz)
+             WHERE email_hash = sqlc.arg(email_hash)::text)
 ON CONFLICT (donor_id) DO NOTHING;
 
 -- name: GrantFoundingClaimsByEmail :exec
@@ -120,13 +120,10 @@ ON CONFLICT (donor_id) DO NOTHING;
 
 -- name: ImportFoundingClaims :execrows
 -- An address listed more than once keeps its earliest sign-up.
-INSERT INTO donor_founding_claims(email_hash, signed_up_on, source, imported_at, expires_at)
+INSERT INTO donor_founding_claims(email_hash, signed_up_on, source, imported_at)
 SELECT unnest(sqlc.arg(hashes)::text[]), unnest(sqlc.arg(dates)::date[]), unnest(sqlc.arg(sources)::text[]),
-  sqlc.arg(imported_at)::timestamptz, sqlc.arg(expires_at)::timestamptz
+  sqlc.arg(imported_at)::timestamptz
 ON CONFLICT (email_hash) DO UPDATE SET
   signed_up_on = least(donor_founding_claims.signed_up_on, EXCLUDED.signed_up_on),
   source = CASE WHEN EXCLUDED.signed_up_on < donor_founding_claims.signed_up_on THEN EXCLUDED.source ELSE donor_founding_claims.source END
 WHERE EXCLUDED.signed_up_on < donor_founding_claims.signed_up_on;
-
--- name: PurgeFoundingClaims :exec
-DELETE FROM donor_founding_claims WHERE expires_at <= $1;

@@ -88,7 +88,7 @@ func (s InitiativeService) Detail(ctx context.Context, token string, id pgtype.U
 			if err != nil {
 				return StaffInitiativeDetail{}, err
 			}
-			spend, err := q.InitiativeSpend(ctx, id)
+			spend, err := q.StaffSpend(ctx, id)
 			if err != nil {
 				return StaffInitiativeDetail{}, err
 			}
@@ -111,7 +111,20 @@ func (s InitiativeService) Detail(ctx context.Context, token string, id pgtype.U
 				})
 			}
 			for _, row := range spend {
-				out.Spend = append(out.Spend, SpendInput{Category: row.Category, AmountMinor: row.AmountMinor})
+				verified := ""
+				if row.VerifiedOn.Valid {
+					verified = row.VerifiedOn.Time.Format(time.DateOnly)
+				}
+				out.Spend = append(
+					out.Spend,
+					SpendInput{
+						Category:         row.Category,
+						AmountMinor:      row.AmountMinor,
+						VerificationNote: row.VerificationNote,
+						VerifiedOn:       verified,
+						PublishState:     row.PublishState,
+					},
+				)
 			}
 			return out, nil
 		})

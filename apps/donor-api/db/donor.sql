@@ -135,6 +135,7 @@ DELETE FROM donor_company_touches WHERE expires_at<=$1;
 UPDATE donors SET
 	email = 'deleted-' || id::text || '@deleted.invalid',
 	public_name = NULL,
+ full_name = NULL,
 	referral_code = NULL,
 	zip = NULL,
 	city = NULL,
@@ -166,3 +167,18 @@ DELETE FROM donor_partner_employees WHERE donor_id = $1;
 -- name: RecordDonorDeletion :exec
 INSERT INTO donor_deletions (donor_id, deleted_at) VALUES ($1, $2)
 ON CONFLICT (donor_id) DO NOTHING;
+
+-- name: DonorPassword :one
+SELECT password_hash FROM donor_passwords WHERE donor_id=$1;
+-- name: SetDonorPassword :exec
+INSERT INTO donor_passwords(donor_id,password_hash,updated_at) VALUES($1,$2,$3)
+ON CONFLICT(donor_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,updated_at=EXCLUDED.updated_at;
+-- name: DeleteDonorPassword :exec
+DELETE FROM donor_passwords WHERE donor_id=$1;
+-- name: SaveSignupProfile :exec
+UPDATE donors SET full_name=$2,zip=$3,city=$4,timezone=$5 WHERE id=$1;
+
+-- name: MarkPasswordReauthenticated :exec
+UPDATE donor_sessions SET password_verified_at=$2 WHERE token_hash=$1;
+-- name: PasswordReauthentication :one
+SELECT EXISTS(SELECT 1 FROM donor_sessions WHERE token_hash=$1 AND password_verified_at>sqlc.arg(as_of)::timestamptz-interval '15 minutes');

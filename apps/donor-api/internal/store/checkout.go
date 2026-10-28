@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"dad/donor-api/internal/credentials"
+	"dad/donor-api/internal/geo"
 	"dad/donor-api/internal/identity"
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store/queries"
@@ -109,9 +110,28 @@ func prepareAttempt(
 	now time.Time,
 ) (queries.DonorStripeCheckout, error) {
 	empty := queries.DonorStripeCheckout{}
+	_, lookup := q.DonorByEmail(ctx, request.Email)
 	donor, err := lockGuest(ctx, q, claims, request.Email, now)
 	if err != nil {
 		return empty, err
+	}
+	owner := false
+	if request.Session != "" {
+		u, e := authenticate(ctx, q, request.Session, now)
+		owner = e == nil && u.ID == donor.ID
+		if e != nil && !errors.Is(e, ErrDenied) {
+			return empty, e
+		}
+	}
+	if (errors.Is(lookup, pgx.ErrNoRows) || owner) && request.Name != "" {
+		zone, e := geo.Timezone(request.Zip)
+		if e != nil || len(request.Name) > 150 || !plainText(request.Name, false) || len(request.City) > 80 ||
+			!plainText(request.City, false) {
+			return empty, payments.ErrCheckoutInput
+		}
+		if e = q.SaveSignupProfile(ctx, queries.SaveSignupProfileParams{ID: donor.ID, FullName: text(request.Name), Zip: text(request.Zip), City: text(request.City), Timezone: text(zone)}); e != nil {
+			return empty, e
+		}
 	}
 	attempt, err := q.StripeCheckout(ctx, request.RequestID)
 	if err == nil {
@@ -132,6 +152,12 @@ func prepareAttempt(
 	}
 	if err = q.InsertCheckout(ctx, draft); err != nil {
 		return empty, err
+	}
+	var journey pgtype.UUID
+	if journey.Scan(request.Journey) == nil && journey.Valid {
+		if err = q.AttachCheckoutJourney(ctx, queries.AttachCheckoutJourneyParams{ID: draft.ID, JourneyID: journey}); err != nil {
+			return empty, err
+		}
 	}
 	raw, err := checkoutParams(site, donor.Email, draft, request)
 	if err != nil {

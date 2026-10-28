@@ -20,6 +20,9 @@ describe("sandbox giving", () => {
   ])("rejects an unsafe checkout destination: %s", async (url) => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ url }), { status: 200 })));
     render(<Donate />);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ben Donor" } });
+    fireEvent.change(screen.getByLabelText("ZIP code"), { target: { value: "10001" } });
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: "New York" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
     await expectAlert("unexpected destination");
@@ -56,6 +59,9 @@ describe("sandbox giving", () => {
     const fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
     vi.stubGlobal("fetch", fetch);
     render(<Donate />);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ben Donor" } });
+    fireEvent.change(screen.getByLabelText("ZIP code"), { target: { value: "10001" } });
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: "New York" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
     fireEvent.change(screen.getByLabelText("Dollars a day"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
@@ -73,6 +79,9 @@ describe("sandbox giving", () => {
       const fetch = vi.fn();
       vi.stubGlobal("fetch", fetch);
       render(<Donate />);
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ben Donor" } });
+      fireEvent.change(screen.getByLabelText("ZIP code"), { target: { value: "10001" } });
+      fireEvent.change(screen.getByLabelText("City"), { target: { value: "New York" } });
       fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
       const amount = screen.getByLabelText("Dollars a day");
       fireEvent.change(amount, { target: { value } });
@@ -93,6 +102,9 @@ describe("sandbox giving", () => {
     vi.stubGlobal("fetch", fetch);
     const { unmount } = render(<Donate />);
     fireEvent.change(screen.getByLabelText("Dollars a day"), { target: { value: "$10" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ben Donor" } });
+    fireEvent.change(screen.getByLabelText("ZIP code"), { target: { value: "10001" } });
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: "New York" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
     await expectAlert("offline");
@@ -108,6 +120,9 @@ describe("sandbox giving", () => {
     await waitFor(() => expect(retry).toHaveBeenCalled());
     expect(JSON.parse(retry.mock.calls[0][1].body)).toEqual({
       email: "ben@example.org",
+      name: "Ben Donor",
+      zip: "10001",
+      city: "New York",
       amount_minor: 30000,
       frequency: "MONTHLY",
     });
@@ -116,6 +131,9 @@ describe("sandbox giving", () => {
   it("clears a stale error as soon as the donor edits the form", async () => {
     vi.stubGlobal("fetch", vi.fn());
     render(<Donate />);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ben Donor" } });
+    fireEvent.change(screen.getByLabelText("ZIP code"), { target: { value: "10001" } });
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: "New York" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
     fireEvent.change(screen.getByLabelText("Dollars a day"), { target: { value: "0.50" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
@@ -135,6 +153,9 @@ describe("sandbox giving", () => {
       vi.fn(() => new Promise(() => {})),
     );
     render(<Donate />);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ben Donor" } });
+    fireEvent.change(screen.getByLabelText("ZIP code"), { target: { value: "10001" } });
+    fireEvent.change(screen.getByLabelText("City"), { target: { value: "New York" } });
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "ben@example.org" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue to test checkout" }));
     expect(await screen.findByRole("button", { name: "Opening secure checkout…" })).toBeDisabled();

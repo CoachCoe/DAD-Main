@@ -331,7 +331,7 @@ WITH standings AS (
   HAVING count(*) >= $3::int
 ), ranked AS (
   SELECT s.team_id, s.members, s.annualized_minor, s.active_givers, s.annualized_minor / s.members AS per_member_minor,
-    row_number() OVER (ORDER BY s.annualized_minor / s.members DESC, s.active_givers DESC, t.name, t.id)::int AS rank
+    row_number() OVER (ORDER BY s.annualized_minor DESC, s.active_givers DESC, t.name, t.id)::int AS rank
   FROM standings s JOIN donor_partner_teams t ON t.id = s.team_id
 )
 INSERT INTO donor_team_month_standings(partner_id, month, team_id, rank, members, annualized_minor, per_member_minor)
@@ -352,7 +352,7 @@ type RecordTeamMonthStandingsRow struct {
 }
 
 // Ranks the partner's teams by the annualized active giving of their members
-// divided by the team's size, as the month closes, and records the standings.
+// as the month closes, using the same ordering as the company leaderboard.
 func (q *Queries) RecordTeamMonthStandings(ctx context.Context, arg RecordTeamMonthStandingsParams) ([]RecordTeamMonthStandingsRow, error) {
 	rows, err := q.db.Query(ctx, recordTeamMonthStandings, arg.PartnerID, arg.Month, arg.Minimum)
 	if err != nil {

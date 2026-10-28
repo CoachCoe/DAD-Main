@@ -35,7 +35,7 @@ INSERT INTO donor_initiative_metrics
   (id, initiative_id, position, label, value, unit, verification_note, verified_on, created_at, updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)
 ON CONFLICT (initiative_id, position) DO UPDATE
-SET label=EXCLUDED.label, value=EXCLUDED.value, unit=EXCLUDED.unit,
+SET publish_state='DRAFT', label=EXCLUDED.label, value=EXCLUDED.value, unit=EXCLUDED.unit,
     verification_note=EXCLUDED.verification_note, verified_on=EXCLUDED.verified_on,
     updated_at=EXCLUDED.updated_at;
 
@@ -92,15 +92,36 @@ ON CONFLICT (donor_id, initiative_id) DO UPDATE SET last_shown_on=EXCLUDED.last_
 SELECT count(*)::bigint AS shown FROM donor_initiative_exposures WHERE donor_id=$1;
 
 -- name: PublishedInitiatives :many
-SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, s.organization AS partner
+SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, coalesce((SELECT string_agg(p.organization, ', ' ORDER BY p.organization) FROM donor_initiative_partners ip JOIN donor_partner_signups p ON p.id=ip.partner_id WHERE ip.initiative_id=i.id AND p.approved_at IS NOT NULL),'')::text AS partner
 FROM donor_initiatives i
-LEFT JOIN donor_partner_signups s ON s.id = i.partner_signup_id AND s.approved_at IS NOT NULL
 WHERE i.publish_state = 'PUBLISHED'
 ORDER BY i.status, i.started_on, i.title
 LIMIT 500;
 
 -- name: PublishedInitiativeBySlug :one
-SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, s.organization AS partner
+SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, coalesce((SELECT string_agg(p.organization, ', ' ORDER BY p.organization) FROM donor_initiative_partners ip JOIN donor_partner_signups p ON p.id=ip.partner_id WHERE ip.initiative_id=i.id AND p.approved_at IS NOT NULL),'')::text AS partner
 FROM donor_initiatives i
-LEFT JOIN donor_partner_signups s ON s.id = i.partner_signup_id AND s.approved_at IS NOT NULL
 WHERE i.publish_state = 'PUBLISHED' AND i.slug = $1;
+
+-- name: SaveSpendDraft :exec
+INSERT INTO donor_initiative_spend_drafts(initiative_id,category,amount_minor,verification_note,verified_on,updated_at)
+VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT(initiative_id,category) DO UPDATE SET amount_minor=EXCLUDED.amount_minor,
+ verification_note=EXCLUDED.verification_note,verified_on=EXCLUDED.verified_on,updated_at=EXCLUDED.updated_at;
+
+-- name: StaffSpend :many
+SELECT d.category,d.amount_minor,d.verification_note,d.verified_on,'DRAFT'::text AS publish_state FROM donor_initiative_spend_drafts d WHERE d.initiative_id=$1
+UNION ALL
+SELECT s.category,s.amount_minor,s.verification_note,s.verified_on,'PUBLISHED'::text FROM donor_initiative_spend s
+WHERE s.initiative_id=$1 AND NOT EXISTS(SELECT 1 FROM donor_initiative_spend_drafts d WHERE d.initiative_id=s.initiative_id AND d.category=s.category)
+ORDER BY category;
+
+-- name: PublishSpendDraft :execrows
+INSERT INTO donor_initiative_spend(id,initiative_id,category,amount_minor,created_at,updated_at,verification_note,verified_on)
+SELECT sqlc.arg(id)::uuid,d.initiative_id,d.category,d.amount_minor,sqlc.arg(as_of)::timestamptz,sqlc.arg(as_of)::timestamptz,d.verification_note,d.verified_on
+FROM donor_initiative_spend_drafts d WHERE d.initiative_id=sqlc.arg(initiative_id)::uuid AND d.category=sqlc.arg(category)::text
+ AND verified_on IS NOT NULL AND verification_note<>''
+ON CONFLICT(initiative_id,category) DO UPDATE SET amount_minor=EXCLUDED.amount_minor,updated_at=EXCLUDED.updated_at,verification_note=EXCLUDED.verification_note,verified_on=EXCLUDED.verified_on;
+
+-- name: DeleteSpendDraft :exec
+DELETE FROM donor_initiative_spend_drafts WHERE initiative_id=$1 AND category=$2;

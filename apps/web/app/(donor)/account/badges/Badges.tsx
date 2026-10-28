@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
@@ -31,6 +32,7 @@ export default function Badges() {
                   <ul className="metrics">
                     {earned.map((badge) => (
                       <li key={badge.code} className="metric">
+                        {badge.artwork && <Image unoptimized src={badge.artwork} alt="" width={64} height={64} />}
                         <h3>{badge.title}</h3>
                         {badge.earned_at && <p>Earned {formatDate(badge.earned_at)}</p>}
                         {badge.perk && <p>{badge.perk}</p>}
@@ -47,6 +49,7 @@ export default function Badges() {
                   <ul className="metrics">
                     {unearned.map((badge) => (
                       <li key={badge.code} className="metric">
+                        {badge.artwork && <Image unoptimized src={badge.artwork} alt="" width={64} height={64} />}
                         <h3>{badge.title}</h3>
                         <p>{badge.rule}</p>
                       </li>

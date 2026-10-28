@@ -75,10 +75,11 @@ export default function DonorDetail({ donor }: { donor: string }) {
           {detail.streak && <p>Computed {formatDateTime(detail.streak.computed_at)}</p>}
           {can("donor.recompute") && (
             <RecomputeRecognition
+              announce={false}
               donor={id}
-              onComplete={() => {
+              onComplete={(message) => {
                 setRepairStatus(
-                  "Recognition recomputed from recorded facts. The reason and result are in the audit log.",
+                  message ?? "Recognition recomputed from recorded facts. The reason and result are in the audit log.",
                 );
                 reload();
               }}

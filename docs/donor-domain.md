@@ -16,7 +16,7 @@ daily amount; larger gifts are arranged with DAD directly. The daily amount and 
 monthly charge always appear at equal visual weight; an amount set before this rule
 shows its daily figure as "about". DAD absorbs fees; there is no cover-fees prompt.
 
-Giving requires an email, not an account. Matching is case-insensitive and does not
+Giving collects a private name, email, ZIP and city. A verified account is not required for hosted checkout. Matching is case-insensitive and does not
 remove dots or plus tags. Different addresses are separate identities until an explicit
 merge verifies both. Never infer identity from a shared card, device, or postal address.
 The initial implementation accepts ASCII mailbox names and IDNA domains.
@@ -114,7 +114,7 @@ unknown until facts arrive. A cancellation ends continuity at the first skipped 
 not immediately. Amount changes do not break continuity. Partial refunds retain
 the period if recurring funds remain; full refunds disqualify it unless another qualifying
 recurring payment covers it. Recalculate subsequent continuity rather than erasing every
-later month. Staff corrections are for documented system errors and must be audited.
+later month. Staff repairs recompute recorded facts. Super administrators may separately reset the current streak with an audited reason; resets survive recomputation and preserve financial history and earned badges.
 
 A streak milestone is reached at 7, 30, 100, 365, 500, 1,000, 1,095, and 1,460 days,
 then every further 365 days. Each milestone is congratulated once per streak run, which
@@ -122,21 +122,20 @@ is identified by its first current day; a streak that resets and is rebuilt is a
 
 Content staff may change the words on a badge (its title and how-to-earn text) and on each
 named streak milestone's notification; the yearly milestones after 1,460 days use the
-standard wording. Earning rules and thresholds are not editable, and every change is audited.
+standard wording. Numeric earning thresholds and badge artwork are editable through content administration; signal types stay fixed, and every change is audited.
 
 Any successful first gift before 2027-01-01 00:00 America/New_York earns Founding Donor
 status. Use the processor's successful-payment timestamp, not checkout start or webhook
 arrival. Website-waitlist sign-ups and earlier website donors (D-6) are Founding Donors too:
 staff import their addresses with sign-up dates before the cutoff, and a donor whose email
 matches earns the badge at their next update, without needing a gift before the cutoff. Only
-a keyed hash of each imported address is kept, and the claims are deleted 90 days after the cutoff. Claiming after cutoff is allowed. The badge is
+a keyed hash of each imported address is kept, and qualifying claims do not expire. Claiming after cutoff is allowed. The badge is
 permanent, including after refunds/cancellation. Changing the cutoff requires a product
 decision; existing awards remain permanent.
 
 A company team wins a month (Winning Team) when, at the close of the calendar month in
-America/New_York, it has the most active giving per member among its company's teams:
-members' current monthly gifts, annualized, divided by the team's size, so a small team can
-beat a large one. Teams below the minimum group size are not ranked, a month in which no team
+America/New_York, it has the most combined active giving among its company's teams:
+members' current monthly gifts, annualized, using the displayed leaderboard's ordering. Teams below the minimum group size are not ranked, a month in which no team
 gave has no winner, and the standings are recorded once. Members of the winning team when the
 month closes earn the badge.
 
@@ -185,8 +184,8 @@ The receiving entity remains unverified and the application accepts test payment
 Gift records and summaries are explicitly sandbox records, not approved tax receipts.
 Terms, Privacy, and donor consent need approved content. [Wallet issuance](wallet.md) is
 implemented behind optional issuer configuration; real-provider/device acceptance remains
-open. [Analytics](analytics.md) defines available financial facts and the pending browser
-collection contract. App design deliverables and operational release acceptance remain
+open. [Analytics](analytics.md) defines available financial facts and consented first-party browser
+collection. App design deliverables and operational release acceptance remain
 separate from the backend rewrite. The web referral-code page
 offers full screen, keeps the display awake while shown, and gives manual brightness
 instructions; it cannot promise hardware brightness control. Email changes require single-use confirmations at both the current

@@ -141,7 +141,7 @@ ON CONFLICT (partner_id, month) DO NOTHING;
 
 -- name: RecordTeamMonthStandings :many
 -- Ranks the partner's teams by the annualized active giving of their members
--- divided by the team's size, as the month closes, and records the standings.
+-- as the month closes, using the same ordering as the company leaderboard.
 WITH standings AS (
   SELECT e.team_id,
     count(*)::int AS members,
@@ -154,7 +154,7 @@ WITH standings AS (
   HAVING count(*) >= sqlc.arg(minimum)::int
 ), ranked AS (
   SELECT s.*, s.annualized_minor / s.members AS per_member_minor,
-    row_number() OVER (ORDER BY s.annualized_minor / s.members DESC, s.active_givers DESC, t.name, t.id)::int AS rank
+    row_number() OVER (ORDER BY s.annualized_minor DESC, s.active_givers DESC, t.name, t.id)::int AS rank
   FROM standings s JOIN donor_partner_teams t ON t.id = s.team_id
 )
 INSERT INTO donor_team_month_standings(partner_id, month, team_id, rank, members, annualized_minor, per_member_minor)

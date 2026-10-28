@@ -19,7 +19,7 @@ import (
 // TestWaitlistClaimsEarnFounding covers D-6: an imported waitlist address
 // earns Founding Donor without a gift, whether its donor already exists or
 // gives later; only a keyed hash of the address is stored; and claims stop
-// counting and are deleted after they expire.
+// counting even years after the cutoff.
 func TestWaitlistClaimsEarnFounding(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
@@ -103,16 +103,17 @@ func TestWaitlistClaimsEarnFounding(t *testing.T) {
 	if !founding(guest(later, now), now) {
 		t.Fatal("a waitlisted address that gave after the import did not earn Founding Donor")
 	}
-	if founding(guest(late, FoundingClaimExpiry), FoundingClaimExpiry) {
-		t.Fatal("an expired claim earned Founding Donor")
+	farFuture := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	if !founding(guest(late, farFuture), farFuture) {
+		t.Fatal("a qualifying waitlist member lost eligibility after the cutoff")
 	}
 
-	if _, err := (&TouchRetention{DB: as(t, dbroles.ProjectionWorker)}).PurgeNext(ctx, FoundingClaimExpiry); err != nil {
+	if _, err := (&TouchRetention{DB: as(t, dbroles.ProjectionWorker)}).PurgeNext(ctx, farFuture); err != nil {
 		t.Fatal(err)
 	}
 	var stored int
 	if err := pool.QueryRow(ctx, "SELECT count(*) FROM donor_founding_claims WHERE email_hash=ANY($1)", hashes).Scan(&stored); err != nil ||
-		stored != 0 {
-		t.Fatalf("%d expired claims kept, err %v", stored, err)
+		stored != 3 {
+		t.Fatalf("%d claims retained; want all three, err %v", stored, err)
 	}
 }

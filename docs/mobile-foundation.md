@@ -49,6 +49,14 @@ pins its dependency; changing the backend must preserve supported installed clie
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
 
+## Compatible additions in version 2.2
+
+Version 2.2 adds donor signup and password authentication, optional checkout signup
+fields, badge artwork, and analytics event/journey UUIDs. Existing financial request
+shapes remain accepted. Staff-only co-funding, spend publication and recognition
+controls remain outside the native-admitted contract. Native clients should emit the
+shared analytics taxonomy only after consent and use stable event UUIDs on retries.
+
 ## Compatible additions in version 2.1
 
 Version 2.1 adds authenticated invite-only event calendar downloads, partner device

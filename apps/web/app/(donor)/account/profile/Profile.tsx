@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
+import { PasswordAccess } from "@/components/donor/PasswordAccess";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { ApiError, api, failureMessage, type RequestBody, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
@@ -378,6 +379,7 @@ export default function Profile() {
                   </button>
                 </form>
               </details>
+              <PasswordAccess setup />
               <Passkeys onSignedOut={markSignedOut} />
               <Sessions onSignedOut={markSignedOut} />
               <button type="button" className="secondary" disabled={busy} onClick={logout}>

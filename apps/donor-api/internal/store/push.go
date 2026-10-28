@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -141,7 +142,14 @@ func queuePushIntents(ctx context.Context, q *queries.Queries, p projection, now
 	}
 	if p.CurrentStreak.Valid && p.streakSince != nil {
 		run := recognition.Streak{Since: p.streakSince}
-		if reached := run.Ladder(now, p.zone).LastMilestone; reached > 0 && now.Sub(run.Reaches(reached, p.zone)) < pushLifetime {
+		ladder, err := configuredLadder(ctx, q, run, now, p.zone)
+		if err != nil {
+			return err
+		}
+		if reached := ladder.LastMilestone; reached > 0 && now.Sub(run.Reaches(reached, p.zone)) < pushLifetime {
+			if err := recordServerEvent(ctx, q, p.DonorID, "milestone_reached", "milestone:"+p.DonorID.String()+":"+p.streakSince.String()+":"+fmt.Sprint(reached), run.Reaches(reached, p.zone)); err != nil {
+				return err
+			}
 			params.Milestone = pgtype.Int4{Int32: int32(reached), Valid: true}
 			params.RunStartedAt = timestamp(*p.streakSince)
 		}
@@ -344,7 +352,7 @@ func pushContent(job queries.DonorPushNotification) (push.Notification, error) {
 		n.Body = "Your monthly test payment was declined. Update your payment method to keep your streak going."
 	case "STREAK_MILESTONE":
 		days, err := data.Int("days")
-		if err != nil || !recognition.LadderMilestone(days) {
+		if err != nil || days < 1 || days > 1000000 {
 			return n, payments.ErrFacts
 		}
 		n.Title, n.Body = milestoneWording(days)

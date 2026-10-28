@@ -114,7 +114,7 @@ const grantFoundingClaim = `-- name: GrantFoundingClaim :exec
 INSERT INTO donor_founding_grants (donor_id, granted_at)
 SELECT $1::uuid, $2::timestamptz
 WHERE EXISTS(SELECT 1 FROM donor_founding_claims
-             WHERE email_hash = $3::text AND expires_at > $2::timestamptz)
+             WHERE email_hash = $3::text)
 ON CONFLICT (donor_id) DO NOTHING
 `
 
@@ -124,7 +124,7 @@ type GrantFoundingClaimParams struct {
 	EmailHash string             `json:"email_hash"`
 }
 
-// Grants the donor Founding Donor if their address hash has an unexpired claim.
+// Grants the donor Founding Donor if their address hash has a claim.
 func (q *Queries) GrantFoundingClaim(ctx context.Context, arg GrantFoundingClaimParams) error {
 	_, err := q.db.Exec(ctx, grantFoundingClaim, arg.DonorID, arg.Now, arg.EmailHash)
 	return err
@@ -148,9 +148,9 @@ func (q *Queries) GrantFoundingClaimsByEmail(ctx context.Context, arg GrantFound
 }
 
 const importFoundingClaims = `-- name: ImportFoundingClaims :execrows
-INSERT INTO donor_founding_claims(email_hash, signed_up_on, source, imported_at, expires_at)
+INSERT INTO donor_founding_claims(email_hash, signed_up_on, source, imported_at)
 SELECT unnest($1::text[]), unnest($2::date[]), unnest($3::text[]),
-  $4::timestamptz, $5::timestamptz
+  $4::timestamptz
 ON CONFLICT (email_hash) DO UPDATE SET
   signed_up_on = least(donor_founding_claims.signed_up_on, EXCLUDED.signed_up_on),
   source = CASE WHEN EXCLUDED.signed_up_on < donor_founding_claims.signed_up_on THEN EXCLUDED.source ELSE donor_founding_claims.source END
@@ -162,7 +162,6 @@ type ImportFoundingClaimsParams struct {
 	Dates      []pgtype.Date      `json:"dates"`
 	Sources    []string           `json:"sources"`
 	ImportedAt pgtype.Timestamptz `json:"imported_at"`
-	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
 }
 
 // An address listed more than once keeps its earliest sign-up.
@@ -172,7 +171,6 @@ func (q *Queries) ImportFoundingClaims(ctx context.Context, arg ImportFoundingCl
 		arg.Dates,
 		arg.Sources,
 		arg.ImportedAt,
-		arg.ExpiresAt,
 	)
 	if err != nil {
 		return 0, err
@@ -335,15 +333,6 @@ func (q *Queries) Projection(ctx context.Context, donorID pgtype.UUID) (DonorMet
 		&i.Active,
 	)
 	return i, err
-}
-
-const purgeFoundingClaims = `-- name: PurgeFoundingClaims :exec
-DELETE FROM donor_founding_claims WHERE expires_at <= $1
-`
-
-func (q *Queries) PurgeFoundingClaims(ctx context.Context, expiresAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, purgeFoundingClaims, expiresAt)
-	return err
 }
 
 const referralTotals = `-- name: ReferralTotals :one

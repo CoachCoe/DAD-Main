@@ -29,6 +29,11 @@ var (
 
 // CheckoutRequest is a guest gift. Visitor is an anonymous referral touch.
 type CheckoutRequest struct {
+	Session   string
+	Journey   string
+	Name      string
+	Zip       string
+	City      string
 	RequestID pgtype.UUID
 	Email     string
 	Amount    int64

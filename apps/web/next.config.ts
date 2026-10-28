@@ -18,6 +18,7 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  logging: { incomingRequests: { ignore: [/\/account\/oauth\//] } },
   poweredByHeader: false,
   // The static headers below are fixed at build time, so proxy.ts gets the same origins
   // compiled in rather than reading a server environment that could disagree.

@@ -155,7 +155,13 @@ export default function PartnerDetail({ partner }: { partner: string }) {
 
   function link(event: FormEvent<HTMLFormElement>) {
     const initiative = String(new FormData(event.currentTarget).get("initiative") ?? "").trim();
-    return run(event, "Initiative linked.", () => post("link", { initiative_id: initiative }));
+    const amount = parseDollars(String(new FormData(event.currentTarget).get("commitment") ?? ""));
+    if (amount === null) {
+      event.preventDefault();
+      setError("Enter this partner’s commitment in dollars.");
+      return;
+    }
+    return run(event, "Initiative linked.", () => post("link", { initiative_id: initiative, committed_minor: amount }));
   }
 
   function invite(event: FormEvent<HTMLFormElement>) {
@@ -293,6 +299,10 @@ export default function PartnerDetail({ partner }: { partner: string }) {
             <label>
               Initiative ID
               <input name="initiative" required pattern="[0-9a-fA-F-]{36}" />
+            </label>
+            <label>
+              Partner commitment in USD
+              <input name="commitment" inputMode="decimal" defaultValue="0" required />
             </label>
             <button className="button" type="submit" disabled={busy}>
               Link initiative

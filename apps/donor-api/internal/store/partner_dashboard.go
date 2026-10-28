@@ -263,6 +263,9 @@ func (s PartnerDashboardService) ExportReport(ctx context.Context, token string)
 			}); err != nil {
 				return nil, err
 			}
+			if err := recordServerEvent(ctx, q, pgtype.UUID{}, "partner_report_exported", "partner-report:"+id.String(), now); err != nil {
+				return nil, err
+			}
 			return pdf, nil
 		},
 	)

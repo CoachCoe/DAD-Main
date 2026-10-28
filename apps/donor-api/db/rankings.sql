@@ -70,10 +70,10 @@ ON CONFLICT(id) DO UPDATE SET next_run_at=EXCLUDED.next_run_at;
 -- queueing the badge-earned push for each new one, in one pass.
 WITH qualifying AS (
   SELECT donor_id, 'NAT2'::varchar AS code FROM donor_rankings
-  WHERE computed_at = sqlc.arg(computed_at)::timestamptz AND national_percentile <= 2
+  WHERE computed_at = sqlc.arg(computed_at)::timestamptz AND national_percentile <= coalesce((SELECT threshold FROM donor_badge_rules WHERE code='NAT2'),2)
   UNION ALL
   SELECT donor_id, 'CITY50'::varchar FROM donor_rankings
-  WHERE computed_at = sqlc.arg(computed_at)::timestamptz AND city_rank <= 50
+  WHERE computed_at = sqlc.arg(computed_at)::timestamptz AND city_rank <= coalesce((SELECT threshold FROM donor_badge_rules WHERE code='CITY50'),50)
 ), earned AS (
   INSERT INTO donor_badges (donor_id, code, source, earned_at)
   SELECT donor_id, code, 'AUTO', sqlc.arg(computed_at)::timestamptz FROM qualifying

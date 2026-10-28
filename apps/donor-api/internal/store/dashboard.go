@@ -119,7 +119,10 @@ func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now
 		if row.StreakSince.Valid {
 			since = &row.StreakSince.Time
 		}
-		ladder := recognition.Streak{Since: since}.Ladder(now, recognition.Zone(donor.Timezone.String))
+		ladder, err := configuredLadder(ctx, q, recognition.Streak{Since: since}, now, recognition.Zone(donor.Timezone.String))
+		if err != nil {
+			return DonorDashboard{}, err
+		}
 		result.Streak.Ladder = &ladder
 	}
 	// Rank line under the streak (S-4): the donor's own position only.

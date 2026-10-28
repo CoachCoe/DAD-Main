@@ -15,6 +15,7 @@ const anonymizeDonor = `-- name: AnonymizeDonor :exec
 UPDATE donors SET
 	email = 'deleted-' || id::text || '@deleted.invalid',
 	public_name = NULL,
+ full_name = NULL,
 	referral_code = NULL,
 	zip = NULL,
 	city = NULL,
@@ -100,6 +101,15 @@ func (q *Queries) DeleteDonorOIDCIdentities(ctx context.Context, donorID pgtype.
 	return err
 }
 
+const deleteDonorPassword = `-- name: DeleteDonorPassword :exec
+DELETE FROM donor_passwords WHERE donor_id=$1
+`
+
+func (q *Queries) DeleteDonorPassword(ctx context.Context, donorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDonorPassword, donorID)
+	return err
+}
+
 const deleteDonorPreferences = `-- name: DeleteDonorPreferences :exec
 DELETE FROM donor_preferences WHERE donor_id=$1
 `
@@ -128,7 +138,7 @@ func (q *Queries) DeletePhoneCode(ctx context.Context, phone string) error {
 }
 
 const donorByPhone = `-- name: DonorByPhone :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code FROM donors WHERE phone=$1 AND disabled=false
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name FROM donors WHERE phone=$1 AND disabled=false
 `
 
 func (q *Queries) DonorByPhone(ctx context.Context, phone pgtype.Text) (Donor, error) {
@@ -148,6 +158,7 @@ func (q *Queries) DonorByPhone(ctx context.Context, phone pgtype.Text) (Donor, e
 		&i.Timezone,
 		&i.Phone,
 		&i.CompanyCode,
+		&i.FullName,
 	)
 	return i, err
 }
@@ -206,6 +217,17 @@ func (q *Queries) DonorGiftsPage(ctx context.Context, arg DonorGiftsPageParams) 
 	return items, nil
 }
 
+const donorPassword = `-- name: DonorPassword :one
+SELECT password_hash FROM donor_passwords WHERE donor_id=$1
+`
+
+func (q *Queries) DonorPassword(ctx context.Context, donorID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, donorPassword, donorID)
+	var password_hash string
+	err := row.Scan(&password_hash)
+	return password_hash, err
+}
+
 const insertOIDCIdentity = `-- name: InsertOIDCIdentity :exec
 INSERT INTO donor_oidc_identities (id, donor_id, provider, subject, last_used_at)
 VALUES ($1, $2, $3, $4, $5)
@@ -227,6 +249,20 @@ func (q *Queries) InsertOIDCIdentity(ctx context.Context, arg InsertOIDCIdentity
 		arg.Subject,
 		arg.LastUsedAt,
 	)
+	return err
+}
+
+const markPasswordReauthenticated = `-- name: MarkPasswordReauthenticated :exec
+UPDATE donor_sessions SET password_verified_at=$2 WHERE token_hash=$1
+`
+
+type MarkPasswordReauthenticatedParams struct {
+	TokenHash          string             `json:"token_hash"`
+	PasswordVerifiedAt pgtype.Timestamptz `json:"password_verified_at"`
+}
+
+func (q *Queries) MarkPasswordReauthenticated(ctx context.Context, arg MarkPasswordReauthenticatedParams) error {
+	_, err := q.db.Exec(ctx, markPasswordReauthenticated, arg.TokenHash, arg.PasswordVerifiedAt)
 	return err
 }
 
@@ -252,6 +288,22 @@ func (q *Queries) OIDCIdentity(ctx context.Context, arg OIDCIdentityParams) (Don
 		&i.LastUsedAt,
 	)
 	return i, err
+}
+
+const passwordReauthentication = `-- name: PasswordReauthentication :one
+SELECT EXISTS(SELECT 1 FROM donor_sessions WHERE token_hash=$1 AND password_verified_at>$2::timestamptz-interval '15 minutes')
+`
+
+type PasswordReauthenticationParams struct {
+	TokenHash string             `json:"token_hash"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+}
+
+func (q *Queries) PasswordReauthentication(ctx context.Context, arg PasswordReauthenticationParams) (bool, error) {
+	row := q.db.QueryRow(ctx, passwordReauthentication, arg.TokenHash, arg.AsOf)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const phoneCode = `-- name: PhoneCode :one
@@ -437,7 +489,7 @@ func (q *Queries) ReferralTouchByToken(ctx context.Context, tokenHash string) (D
 }
 
 const referrerByCode = `-- name: ReferrerByCode :one
-SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false
+SELECT email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name FROM donors WHERE referral_code=$1 AND claimed_at IS NOT NULL AND public_name IS NOT NULL AND disabled=false
 `
 
 func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) (Donor, error) {
@@ -457,6 +509,7 @@ func (q *Queries) ReferrerByCode(ctx context.Context, referralCode pgtype.Text) 
 		&i.Timezone,
 		&i.Phone,
 		&i.CompanyCode,
+		&i.FullName,
 	)
 	return i, err
 }
@@ -522,7 +575,7 @@ func (q *Queries) SavePreference(ctx context.Context, arg SavePreferenceParams) 
 }
 
 const saveSharing = `-- name: SaveSharing :one
-UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code
+UPDATE donors SET public_name=$2,referral_code=$3 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name
 `
 
 type SaveSharingParams struct {
@@ -548,8 +601,32 @@ func (q *Queries) SaveSharing(ctx context.Context, arg SaveSharingParams) (Donor
 		&i.Timezone,
 		&i.Phone,
 		&i.CompanyCode,
+		&i.FullName,
 	)
 	return i, err
+}
+
+const saveSignupProfile = `-- name: SaveSignupProfile :exec
+UPDATE donors SET full_name=$2,zip=$3,city=$4,timezone=$5 WHERE id=$1
+`
+
+type SaveSignupProfileParams struct {
+	ID       pgtype.UUID `json:"id"`
+	FullName pgtype.Text `json:"full_name"`
+	Zip      pgtype.Text `json:"zip"`
+	City     pgtype.Text `json:"city"`
+	Timezone pgtype.Text `json:"timezone"`
+}
+
+func (q *Queries) SaveSignupProfile(ctx context.Context, arg SaveSignupProfileParams) error {
+	_, err := q.db.Exec(ctx, saveSignupProfile,
+		arg.ID,
+		arg.FullName,
+		arg.Zip,
+		arg.City,
+		arg.Timezone,
+	)
+	return err
 }
 
 const scrubDonorEmailChanges = `-- name: ScrubDonorEmailChanges :exec
@@ -574,6 +651,22 @@ func (q *Queries) ScrubDonorSessionDevices(ctx context.Context, donorID pgtype.U
 	return err
 }
 
+const setDonorPassword = `-- name: SetDonorPassword :exec
+INSERT INTO donor_passwords(donor_id,password_hash,updated_at) VALUES($1,$2,$3)
+ON CONFLICT(donor_id) DO UPDATE SET password_hash=EXCLUDED.password_hash,updated_at=EXCLUDED.updated_at
+`
+
+type SetDonorPasswordParams struct {
+	DonorID      pgtype.UUID        `json:"donor_id"`
+	PasswordHash string             `json:"password_hash"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) SetDonorPassword(ctx context.Context, arg SetDonorPasswordParams) error {
+	_, err := q.db.Exec(ctx, setDonorPassword, arg.DonorID, arg.PasswordHash, arg.UpdatedAt)
+	return err
+}
+
 const touchOIDCIdentity = `-- name: TouchOIDCIdentity :exec
 UPDATE donor_oidc_identities SET last_used_at=$2 WHERE id=$1
 `
@@ -589,7 +682,7 @@ func (q *Queries) TouchOIDCIdentity(ctx context.Context, arg TouchOIDCIdentityPa
 }
 
 const updateDonorProfile = `-- name: UpdateDonorProfile :one
-UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code
+UPDATE donors SET zip=$2, city=$3, timezone=$4, phone=$5 WHERE id=$1 RETURNING email, claimed_at, disabled, public_name, referral_code, id, created_at, account_role, zip, city, timezone, phone, company_code, full_name
 `
 
 type UpdateDonorProfileParams struct {
@@ -625,6 +718,7 @@ func (q *Queries) UpdateDonorProfile(ctx context.Context, arg UpdateDonorProfile
 		&i.Timezone,
 		&i.Phone,
 		&i.CompanyCode,
+		&i.FullName,
 	)
 	return i, err
 }

@@ -9,10 +9,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// TestWinningTeamByGivingPerMember covers Appendix A's Winning Team: when a
-// month closes, the team with the most active giving per member wins, and its
+// TestWinningTeamByCombinedActiveGiving covers Appendix A's Winning Team: when a
+// month closes, the team with the most combined active giving wins, and its
 // members earn the badge once.
-func TestWinningTeamByGivingPerMember(t *testing.T) {
+func TestWinningTeamByCombinedActiveGiving(t *testing.T) {
 	pool := database(t)
 	ctx := context.Background()
 	partner := approvedPartner(t, pool, "Team Org", "TEAMMONTH", 0, 0)
@@ -69,10 +69,10 @@ FROM donor_team_months WHERE partner_id=$1 AND month='2026-10-01'`, partner).Sca
 		}
 		return n
 	}
-	if got := earned(small); got != len(small) {
-		t.Fatalf("%d of %d members of the team with the most giving per member earned Winning Team", got, len(small))
+	if got := earned(large); got != len(large) {
+		t.Fatalf("%d of %d members of the team with the most giving per member earned Winning Team", got, len(large))
 	}
-	if got := earned(large); got != 0 {
-		t.Fatalf("%d members of the larger, lower-rate team earned Winning Team", got)
+	if got := earned(small); got != 0 {
+		t.Fatalf("%d members of the smaller, lower-total team earned Winning Team", got)
 	}
 }

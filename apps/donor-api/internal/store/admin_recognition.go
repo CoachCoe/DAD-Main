@@ -43,3 +43,32 @@ func (s *StaffService) RecomputeRecognition(ctx context.Context, token string, d
 	)
 	return err
 }
+
+func (s *StaffService) ResetStreak(ctx context.Context, token string, donor pgtype.UUID, reason string) error {
+	reason = strings.TrimSpace(reason)
+	if n := utf8.RuneCountInString(reason); n < 10 || n > 1000 || !plainText(reason, true) {
+		return ErrStaffInput
+	}
+	_, err := staffDonorWrite(
+		ctx,
+		s,
+		token,
+		"donor.recompute",
+		donor,
+		func(tx pgx.Tx, actor queries.DonorStaff, now time.Time) (struct{}, error) {
+			q := queries.New(tx)
+			id, err := NewID()
+			if err != nil {
+				return struct{}{}, err
+			}
+			if err = q.InsertStreakReset(ctx, queries.InsertStreakResetParams{ID: id, DonorID: donor, ResetAt: timestamp(now), ActorID: actor.ID, Reason: reason}); err != nil {
+				return struct{}{}, err
+			}
+			if _, err = refreshProjection(ctx, tx, donor, now); err != nil {
+				return struct{}{}, err
+			}
+			return struct{}{}, auditStaff(ctx, q, actor.ID, "donor.streak_reset", donor.String(), map[string]string{"reason": reason}, now)
+		},
+	)
+	return err
+}

@@ -251,6 +251,35 @@ func (q *Queries) FailPartnerMessage(ctx context.Context, arg FailPartnerMessage
 	return err
 }
 
+const initiativePartners = `-- name: InitiativePartners :many
+SELECT partner_id,committed_minor FROM donor_initiative_partners WHERE initiative_id=$1 ORDER BY partner_id
+`
+
+type InitiativePartnersRow struct {
+	PartnerID      pgtype.UUID `json:"partner_id"`
+	CommittedMinor int64       `json:"committed_minor"`
+}
+
+func (q *Queries) InitiativePartners(ctx context.Context, initiativeID pgtype.UUID) ([]InitiativePartnersRow, error) {
+	rows, err := q.db.Query(ctx, initiativePartners, initiativeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []InitiativePartnersRow{}
+	for rows.Next() {
+		var i InitiativePartnersRow
+		if err := rows.Scan(&i.PartnerID, &i.CommittedMinor); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertPartnerApplication = `-- name: InsertPartnerApplication :exec
 INSERT INTO donor_partner_applications
   (id, organization, website, type, contact_name, title, work_email, phone, workforce_size, created_at, updated_at)
@@ -385,18 +414,28 @@ func (q *Queries) InvitePartnerUser(ctx context.Context, arg InvitePartnerUserPa
 }
 
 const linkInitiativeToPartner = `-- name: LinkInitiativeToPartner :execrows
-UPDATE donor_initiatives SET partner_signup_id=$2, updated_at=$3 WHERE id=$1
+INSERT INTO donor_initiative_partners(initiative_id,partner_id,committed_minor,updated_at)
+SELECT id, $1::uuid, coalesce($2::bigint, committed_minor), $3::timestamptz
+FROM donor_initiatives WHERE id=$4::uuid
+ON CONFLICT(initiative_id,partner_id) DO UPDATE SET
+ committed_minor=coalesce($2::bigint,donor_initiative_partners.committed_minor),updated_at=EXCLUDED.updated_at
 `
 
 type LinkInitiativeToPartnerParams struct {
-	ID              pgtype.UUID        `json:"id"`
-	PartnerSignupID pgtype.UUID        `json:"partner_signup_id"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	PartnerID      pgtype.UUID        `json:"partner_id"`
+	CommittedMinor pgtype.Int8        `json:"committed_minor"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	InitiativeID   pgtype.UUID        `json:"initiative_id"`
 }
 
 // §8/P-3: link an initiative to its partner org.
 func (q *Queries) LinkInitiativeToPartner(ctx context.Context, arg LinkInitiativeToPartnerParams) (int64, error) {
-	result, err := q.db.Exec(ctx, linkInitiativeToPartner, arg.ID, arg.PartnerSignupID, arg.UpdatedAt)
+	result, err := q.db.Exec(ctx, linkInitiativeToPartner,
+		arg.PartnerID,
+		arg.CommittedMinor,
+		arg.UpdatedAt,
+		arg.InitiativeID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -560,7 +599,7 @@ const partnerInitiativeMetrics = `-- name: PartnerInitiativeMetrics :many
 SELECT m.initiative_id, m.label, m.value, m.unit, m.verified_on
 FROM donor_initiative_metrics m
 JOIN donor_initiatives i ON i.id = m.initiative_id
-WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED'
+WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED'
 ORDER BY m.initiative_id, m.position
 `
 
@@ -573,8 +612,8 @@ type PartnerInitiativeMetricsRow struct {
 }
 
 // P-11 detail: every published headline metric of the partner's initiatives.
-func (q *Queries) PartnerInitiativeMetrics(ctx context.Context, partnerSignupID pgtype.UUID) ([]PartnerInitiativeMetricsRow, error) {
-	rows, err := q.db.Query(ctx, partnerInitiativeMetrics, partnerSignupID)
+func (q *Queries) PartnerInitiativeMetrics(ctx context.Context, partnerID pgtype.UUID) ([]PartnerInitiativeMetricsRow, error) {
+	rows, err := q.db.Query(ctx, partnerInitiativeMetrics, partnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -603,7 +642,7 @@ const partnerInitiativeSpend = `-- name: PartnerInitiativeSpend :many
 SELECT s.initiative_id, s.category, s.amount_minor
 FROM donor_initiative_spend s
 JOIN donor_initiatives i ON i.id = s.initiative_id
-WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED'
 ORDER BY s.initiative_id, s.category
 `
 
@@ -614,8 +653,8 @@ type PartnerInitiativeSpendRow struct {
 }
 
 // P-11/P-12: spend by category for each of the partner's initiatives.
-func (q *Queries) PartnerInitiativeSpend(ctx context.Context, partnerSignupID pgtype.UUID) ([]PartnerInitiativeSpendRow, error) {
-	rows, err := q.db.Query(ctx, partnerInitiativeSpend, partnerSignupID)
+func (q *Queries) PartnerInitiativeSpend(ctx context.Context, partnerID pgtype.UUID) ([]PartnerInitiativeSpendRow, error) {
+	rows, err := q.db.Query(ctx, partnerInitiativeSpend, partnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -635,13 +674,13 @@ func (q *Queries) PartnerInitiativeSpend(ctx context.Context, partnerSignupID pg
 }
 
 const partnerInitiativesList = `-- name: PartnerInitiativesList :many
-SELECT i.id, i.title, i.summary, i.status, i.region, cardinality(i.counties)::int AS county_count, i.committed_minor,
+SELECT i.id, i.title, i.summary, i.status, i.region, cardinality(i.counties)::int AS county_count, (SELECT ip.committed_minor FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s WHERE s.initiative_id=i.id), 0)::bigint AS deployed_minor,
   greatest(i.updated_at,
     (SELECT max(m.updated_at) FROM donor_initiative_metrics m WHERE m.initiative_id=i.id AND m.publish_state='PUBLISHED'),
     (SELECT max(s.updated_at) FROM donor_initiative_spend s WHERE s.initiative_id=i.id))::timestamptz AS updated_at
 FROM donor_initiatives i
-WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED'
 ORDER BY i.status, i.title
 `
 
@@ -659,8 +698,8 @@ type PartnerInitiativesListRow struct {
 
 // P-11: the partner's published initiatives with committed and deployed totals
 // and when any of their figures last changed.
-func (q *Queries) PartnerInitiativesList(ctx context.Context, partnerSignupID pgtype.UUID) ([]PartnerInitiativesListRow, error) {
-	rows, err := q.db.Query(ctx, partnerInitiativesList, partnerSignupID)
+func (q *Queries) PartnerInitiativesList(ctx context.Context, partnerID pgtype.UUID) ([]PartnerInitiativesListRow, error) {
+	rows, err := q.db.Query(ctx, partnerInitiativesList, partnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -770,26 +809,26 @@ SELECT
   p.workforce_size,
   p.description,
   (p.logo_png IS NOT NULL)::boolean AS has_logo,
-  EXISTS(SELECT 1 FROM donor_initiatives i WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED') AS committed_verified,
+  EXISTS(SELECT 1 FROM donor_initiatives i WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED') AS committed_verified,
   EXISTS(SELECT 1 FROM donor_initiative_spend s JOIN donor_initiatives i ON i.id=s.initiative_id
-    WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED') AS deployed_verified,
+    WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED') AS deployed_verified,
   EXISTS(SELECT 1 FROM donor_initiative_metrics m JOIN donor_initiatives i ON i.id=m.initiative_id
-    WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE') AS people_reached_verified,
-  coalesce((SELECT sum(i.committed_minor) FROM donor_initiatives i
-            WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
+    WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED' AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE') AS people_reached_verified,
+  coalesce((SELECT sum(ip.committed_minor) FROM donor_initiatives i JOIN donor_initiative_partners ip ON ip.initiative_id=i.id AND ip.partner_id=p.id
+            WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED'), 0)::bigint AS committed_minor,
   coalesce((SELECT sum(s.amount_minor) FROM donor_initiative_spend s
             JOIN donor_initiatives i ON i.id=s.initiative_id
-            WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'), 0)::bigint AS deployed_minor,
+            WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED'), 0)::bigint AS deployed_minor,
   coalesce((SELECT sum(m.value) FROM donor_initiative_metrics m
             JOIN donor_initiatives i ON i.id=m.initiative_id
-            WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED'
+            WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED'
               AND m.publish_state='PUBLISHED' AND m.unit='PEOPLE'), 0)::bigint AS people_reached,
   (SELECT count(*) FROM donor_partner_employees e WHERE e.partner_id=p.id)::bigint AS employees_enrolled,
   (SELECT greatest(max(i.updated_at), max(m.updated_at), max(s.updated_at))
    FROM donor_initiatives i
    LEFT JOIN donor_initiative_metrics m ON m.initiative_id=i.id AND m.publish_state='PUBLISHED'
    LEFT JOIN donor_initiative_spend s ON s.initiative_id=i.id
-   WHERE i.partner_signup_id=p.id AND i.publish_state='PUBLISHED')::timestamptz AS updated_at
+   WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id) AND i.publish_state='PUBLISHED')::timestamptz AS updated_at
 FROM donor_partner_signups p
 WHERE p.id=$1
 `
@@ -904,7 +943,7 @@ const partnerSpendByCategory = `-- name: PartnerSpendByCategory :many
 SELECT s.category, sum(s.amount_minor)::bigint AS amount_minor
 FROM donor_initiative_spend s
 JOIN donor_initiatives i ON i.id = s.initiative_id
-WHERE i.partner_signup_id=$1 AND i.publish_state='PUBLISHED'
+WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=$1) AND i.publish_state='PUBLISHED'
 GROUP BY s.category
 ORDER BY s.category
 `
@@ -915,8 +954,8 @@ type PartnerSpendByCategoryRow struct {
 }
 
 // P-12: spend by category across a partner's linked initiatives (totals only).
-func (q *Queries) PartnerSpendByCategory(ctx context.Context, partnerSignupID pgtype.UUID) ([]PartnerSpendByCategoryRow, error) {
-	rows, err := q.db.Query(ctx, partnerSpendByCategory, partnerSignupID)
+func (q *Queries) PartnerSpendByCategory(ctx context.Context, partnerID pgtype.UUID) ([]PartnerSpendByCategoryRow, error) {
+	rows, err := q.db.Query(ctx, partnerSpendByCategory, partnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -1027,7 +1066,7 @@ func (q *Queries) PartnerUsersForSignIn(ctx context.Context, email string) ([]pg
 const partnersDueMonthlyReport = `-- name: PartnersDueMonthlyReport :many
 SELECT s.id FROM donor_partner_signups s
 WHERE s.approved_at IS NOT NULL
-AND EXISTS(SELECT 1 FROM donor_initiatives i WHERE i.partner_signup_id=s.id AND i.publish_state='PUBLISHED')
+AND EXISTS(SELECT 1 FROM donor_initiatives i WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=s.id) AND i.publish_state='PUBLISHED')
 AND NOT EXISTS(
     SELECT 1 FROM donor_partner_messages m
     WHERE m.partner_id=s.id AND m.kind='MONTHLY_REPORT'
@@ -1326,8 +1365,9 @@ func (q *Queries) SetPartnerUserLink(ctx context.Context, arg SetPartnerUserLink
 }
 
 const staffPartnerInitiatives = `-- name: StaffPartnerInitiatives :many
-SELECT id, title, status, publish_state, committed_minor FROM donor_initiatives
-WHERE partner_signup_id=$1
+SELECT i.id, i.title, i.status, i.publish_state, ip.committed_minor
+FROM donor_initiatives i JOIN donor_initiative_partners ip ON ip.initiative_id=i.id
+WHERE ip.partner_id=$1
 ORDER BY title, id
 `
 
@@ -1339,8 +1379,8 @@ type StaffPartnerInitiativesRow struct {
 	CommittedMinor int64       `json:"committed_minor"`
 }
 
-func (q *Queries) StaffPartnerInitiatives(ctx context.Context, partnerSignupID pgtype.UUID) ([]StaffPartnerInitiativesRow, error) {
-	rows, err := q.db.Query(ctx, staffPartnerInitiatives, partnerSignupID)
+func (q *Queries) StaffPartnerInitiatives(ctx context.Context, partnerID pgtype.UUID) ([]StaffPartnerInitiativesRow, error) {
+	rows, err := q.db.Query(ctx, staffPartnerInitiatives, partnerID)
 	if err != nil {
 		return nil, err
 	}
@@ -1368,7 +1408,7 @@ func (q *Queries) StaffPartnerInitiatives(ctx context.Context, partnerSignupID p
 const staffPartnersPage = `-- name: StaffPartnersPage :many
 SELECT p.id, p.organization, p.partner_type, p.company_code, p.workforce_size, p.match_rate_bp, p.match_cap_minor, p.approved_at,
   (SELECT count(*) FROM donor_partner_users u WHERE u.partner_id=p.id AND NOT u.disabled)::bigint AS user_count,
-  (SELECT count(*) FROM donor_initiatives i WHERE i.partner_signup_id=p.id)::bigint AS initiative_count
+  (SELECT count(*) FROM donor_initiatives i WHERE EXISTS(SELECT 1 FROM donor_initiative_partners ip WHERE ip.initiative_id=i.id AND ip.partner_id=p.id))::bigint AS initiative_count
 FROM donor_partner_signups p
 WHERE p.approved_at IS NOT NULL
 ORDER BY p.organization, p.id

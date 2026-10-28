@@ -22,6 +22,7 @@ type InitiativeSource interface {
 	PublishMetric(context.Context, string, pgtype.UUID, int32) error
 	DeleteMetric(context.Context, string, pgtype.UUID, int32) error
 	SetSpend(context.Context, string, pgtype.UUID, store.SpendInput) error
+	PublishSpend(context.Context, string, pgtype.UUID, string) error
 	DeleteSpend(context.Context, string, pgtype.UUID, string) error
 	List(context.Context, string, int64) (store.StaffInitiativePage, error)
 	Detail(context.Context, string, pgtype.UUID) (store.StaffInitiativeDetail, error)
@@ -258,4 +259,18 @@ func (a *api) todayInitiative(w http.ResponseWriter, r *http.Request, session st
 	svc := service{a.TodayInitiative != nil, donorUnavailableInitiative, readTimeout, donorStatus}.
 		missing("No initiative to show today")
 	svc.serve(w, r, func(ctx context.Context) (any, error) { return a.TodayInitiative.Today(ctx, session) })
+}
+
+func (a *api) publishInitiativeSpend(w http.ResponseWriter, r *http.Request, session string) {
+	id, ok := pathID(w, r, "initiative_id")
+	if !ok {
+		return
+	}
+	var body deleteSpendBody
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	a.initiativesAdmin().serve(w, r, func(ctx context.Context) (any, error) {
+		return map[string]bool{"published": true}, a.Initiatives.PublishSpend(ctx, session, id, body.Category)
+	})
 }

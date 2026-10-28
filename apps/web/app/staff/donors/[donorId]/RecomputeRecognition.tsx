@@ -4,25 +4,37 @@ import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
 import { api, failureMessage } from "@/lib/api";
 
-export function RecomputeRecognition({ donor, onComplete }: { donor: string; onComplete: () => void }) {
-  const [reason, setReason] = useState("");
-  const [busy, setBusy] = useState(false);
+export function RecomputeRecognition({
+  donor,
+  onComplete,
+  announce = true,
+}: {
+  donor: string;
+  onComplete: (message?: string) => void;
+  announce?: boolean;
+}) {
   const [status, setStatus] = useState("");
+  const [reason, setReason] = useState("");
+  const [reset, setReset] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (busy) return;
     setBusy(true);
-    setStatus("");
     setError("");
     try {
-      await api(`/donor/staff/donors/${donor}/recognition/recompute`, {
+      await api(`/donor/staff/donors/${donor}/recognition/${reset ? "reset" : "recompute"}`, {
         method: "POST",
         body: JSON.stringify({ reason }),
       });
-      setStatus("Recognition recomputed from recorded facts. The reason and result are in the audit log.");
+      setStatus(
+        reset
+          ? "Streak reset to zero. The reason is in the audit log."
+          : "Recognition recomputed from recorded facts. The reason and result are in the audit log.",
+      );
       setReason("");
-      onComplete();
+      onComplete(reset ? "Streak reset to zero. The reason is in the audit log." : undefined);
     } catch (cause) {
       setError(failureMessage(cause, "Recognition could not be recomputed. Please retry."));
     } finally {
@@ -38,6 +50,10 @@ export function RecomputeRecognition({ donor, onComplete }: { donor: string; onC
       </p>
       <form onSubmit={submit}>
         <label>
+          <input type="checkbox" checked={reset} onChange={(e) => setReset(e.target.checked)} />
+          Reset the current streak to zero; retain gift history and earned badges
+        </label>
+        <label>
           Reason for repair
           <textarea
             required
@@ -51,7 +67,7 @@ export function RecomputeRecognition({ donor, onComplete }: { donor: string; onC
         <button className="secondary" type="submit" disabled={busy}>
           {busy ? "Recomputing…" : "Recompute recognition"}
         </button>
-        <Announcer status={status} alert={error} />
+        <Announcer status={announce ? status : ""} alert={error} />
       </form>
     </details>
   );

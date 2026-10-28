@@ -233,7 +233,7 @@ func (s OIDCService) SignIn(ctx context.Context, provider oidc.Provider, idToken
 		}
 		donor, err := q.DonorByEmail(ctx, canonical)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Tokens{}, ErrSignInCode
+			donor, err = lockGuest(ctx, q, nil, canonical, now)
 		}
 		if err != nil {
 			return Tokens{}, err

@@ -39,6 +39,20 @@ func (q *Queries) DeleteInitiativeSpend(ctx context.Context, arg DeleteInitiativ
 	return err
 }
 
+const deleteSpendDraft = `-- name: DeleteSpendDraft :exec
+DELETE FROM donor_initiative_spend_drafts WHERE initiative_id=$1 AND category=$2
+`
+
+type DeleteSpendDraftParams struct {
+	InitiativeID pgtype.UUID `json:"initiative_id"`
+	Category     string      `json:"category"`
+}
+
+func (q *Queries) DeleteSpendDraft(ctx context.Context, arg DeleteSpendDraftParams) error {
+	_, err := q.db.Exec(ctx, deleteSpendDraft, arg.InitiativeID, arg.Category)
+	return err
+}
+
 const distinctInitiativeExposures = `-- name: DistinctInitiativeExposures :one
 SELECT count(*)::bigint AS shown FROM donor_initiative_exposures WHERE donor_id=$1
 `
@@ -272,10 +286,37 @@ func (q *Queries) PublishInitiativeMetric(ctx context.Context, arg PublishInitia
 	return err
 }
 
+const publishSpendDraft = `-- name: PublishSpendDraft :execrows
+INSERT INTO donor_initiative_spend(id,initiative_id,category,amount_minor,created_at,updated_at,verification_note,verified_on)
+SELECT $1::uuid,d.initiative_id,d.category,d.amount_minor,$2::timestamptz,$2::timestamptz,d.verification_note,d.verified_on
+FROM donor_initiative_spend_drafts d WHERE d.initiative_id=$3::uuid AND d.category=$4::text
+ AND verified_on IS NOT NULL AND verification_note<>''
+ON CONFLICT(initiative_id,category) DO UPDATE SET amount_minor=EXCLUDED.amount_minor,updated_at=EXCLUDED.updated_at,verification_note=EXCLUDED.verification_note,verified_on=EXCLUDED.verified_on
+`
+
+type PublishSpendDraftParams struct {
+	ID           pgtype.UUID        `json:"id"`
+	AsOf         pgtype.Timestamptz `json:"as_of"`
+	InitiativeID pgtype.UUID        `json:"initiative_id"`
+	Category     string             `json:"category"`
+}
+
+func (q *Queries) PublishSpendDraft(ctx context.Context, arg PublishSpendDraftParams) (int64, error) {
+	result, err := q.db.Exec(ctx, publishSpendDraft,
+		arg.ID,
+		arg.AsOf,
+		arg.InitiativeID,
+		arg.Category,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const publishedInitiativeBySlug = `-- name: PublishedInitiativeBySlug :one
-SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, s.organization AS partner
+SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, coalesce((SELECT string_agg(p.organization, ', ' ORDER BY p.organization) FROM donor_initiative_partners ip JOIN donor_partner_signups p ON p.id=ip.partner_id WHERE ip.initiative_id=i.id AND p.approved_at IS NOT NULL),'')::text AS partner
 FROM donor_initiatives i
-LEFT JOIN donor_partner_signups s ON s.id = i.partner_signup_id AND s.approved_at IS NOT NULL
 WHERE i.publish_state = 'PUBLISHED' AND i.slug = $1
 `
 
@@ -288,7 +329,7 @@ type PublishedInitiativeBySlugRow struct {
 	Location  string      `json:"location"`
 	Status    string      `json:"status"`
 	StartedOn pgtype.Date `json:"started_on"`
-	Partner   pgtype.Text `json:"partner"`
+	Partner   string      `json:"partner"`
 }
 
 func (q *Queries) PublishedInitiativeBySlug(ctx context.Context, slug string) (PublishedInitiativeBySlugRow, error) {
@@ -347,9 +388,8 @@ func (q *Queries) PublishedInitiativeMetrics(ctx context.Context, initiativeID p
 }
 
 const publishedInitiatives = `-- name: PublishedInitiatives :many
-SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, s.organization AS partner
+SELECT i.id, i.slug, i.title, i.summary, i.type, i.location, i.status, i.started_on, coalesce((SELECT string_agg(p.organization, ', ' ORDER BY p.organization) FROM donor_initiative_partners ip JOIN donor_partner_signups p ON p.id=ip.partner_id WHERE ip.initiative_id=i.id AND p.approved_at IS NOT NULL),'')::text AS partner
 FROM donor_initiatives i
-LEFT JOIN donor_partner_signups s ON s.id = i.partner_signup_id AND s.approved_at IS NOT NULL
 WHERE i.publish_state = 'PUBLISHED'
 ORDER BY i.status, i.started_on, i.title
 LIMIT 500
@@ -364,7 +404,7 @@ type PublishedInitiativesRow struct {
 	Location  string      `json:"location"`
 	Status    string      `json:"status"`
 	StartedOn pgtype.Date `json:"started_on"`
-	Partner   pgtype.Text `json:"partner"`
+	Partner   string      `json:"partner"`
 }
 
 func (q *Queries) PublishedInitiatives(ctx context.Context) ([]PublishedInitiativesRow, error) {
@@ -463,6 +503,34 @@ func (q *Queries) RotatableInitiatives(ctx context.Context) ([]DonorInitiative, 
 	return items, nil
 }
 
+const saveSpendDraft = `-- name: SaveSpendDraft :exec
+INSERT INTO donor_initiative_spend_drafts(initiative_id,category,amount_minor,verification_note,verified_on,updated_at)
+VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT(initiative_id,category) DO UPDATE SET amount_minor=EXCLUDED.amount_minor,
+ verification_note=EXCLUDED.verification_note,verified_on=EXCLUDED.verified_on,updated_at=EXCLUDED.updated_at
+`
+
+type SaveSpendDraftParams struct {
+	InitiativeID     pgtype.UUID        `json:"initiative_id"`
+	Category         string             `json:"category"`
+	AmountMinor      int64              `json:"amount_minor"`
+	VerificationNote string             `json:"verification_note"`
+	VerifiedOn       pgtype.Date        `json:"verified_on"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) SaveSpendDraft(ctx context.Context, arg SaveSpendDraftParams) error {
+	_, err := q.db.Exec(ctx, saveSpendDraft,
+		arg.InitiativeID,
+		arg.Category,
+		arg.AmountMinor,
+		arg.VerificationNote,
+		arg.VerifiedOn,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
 const setInitiativeRotation = `-- name: SetInitiativeRotation :execrows
 UPDATE donor_initiatives SET in_rotation=$2, updated_at=$3 WHERE id=$1
 `
@@ -527,6 +595,48 @@ func (q *Queries) StaffInitiativesPage(ctx context.Context, pageOffset int64) ([
 	return items, nil
 }
 
+const staffSpend = `-- name: StaffSpend :many
+SELECT d.category,d.amount_minor,d.verification_note,d.verified_on,'DRAFT'::text AS publish_state FROM donor_initiative_spend_drafts d WHERE d.initiative_id=$1
+UNION ALL
+SELECT s.category,s.amount_minor,s.verification_note,s.verified_on,'PUBLISHED'::text FROM donor_initiative_spend s
+WHERE s.initiative_id=$1 AND NOT EXISTS(SELECT 1 FROM donor_initiative_spend_drafts d WHERE d.initiative_id=s.initiative_id AND d.category=s.category)
+ORDER BY category
+`
+
+type StaffSpendRow struct {
+	Category         string      `json:"category"`
+	AmountMinor      int64       `json:"amount_minor"`
+	VerificationNote string      `json:"verification_note"`
+	VerifiedOn       pgtype.Date `json:"verified_on"`
+	PublishState     string      `json:"publish_state"`
+}
+
+func (q *Queries) StaffSpend(ctx context.Context, initiativeID pgtype.UUID) ([]StaffSpendRow, error) {
+	rows, err := q.db.Query(ctx, staffSpend, initiativeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StaffSpendRow{}
+	for rows.Next() {
+		var i StaffSpendRow
+		if err := rows.Scan(
+			&i.Category,
+			&i.AmountMinor,
+			&i.VerificationNote,
+			&i.VerifiedOn,
+			&i.PublishState,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateInitiative = `-- name: UpdateInitiative :exec
 UPDATE donor_initiatives
 SET title=$2, summary=$3, type=$4, location=$5, region=$6, counties=$7,
@@ -577,7 +687,7 @@ INSERT INTO donor_initiative_metrics
   (id, initiative_id, position, label, value, unit, verification_note, verified_on, created_at, updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)
 ON CONFLICT (initiative_id, position) DO UPDATE
-SET label=EXCLUDED.label, value=EXCLUDED.value, unit=EXCLUDED.unit,
+SET publish_state='DRAFT', label=EXCLUDED.label, value=EXCLUDED.value, unit=EXCLUDED.unit,
     verification_note=EXCLUDED.verification_note, verified_on=EXCLUDED.verified_on,
     updated_at=EXCLUDED.updated_at
 `

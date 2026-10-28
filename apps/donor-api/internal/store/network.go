@@ -17,18 +17,6 @@ import (
 // referrals, never a population scan.
 type NetworkService struct{ DB *pgxpool.Pool }
 
-// networkMilestones are the referral-count tiers a donor climbs, shared with the
-// referral badges (REF1/REF3/REF12/TC). The last tier (20) unlocks Team Captain.
-var networkMilestones = []struct {
-	n     int64
-	label string
-}{
-	{1, "First Referral"},
-	{3, "Community Builder"},
-	{12, "Super Connector"},
-	{20, "Team Captain"},
-}
-
 // NetworkInvitee is one person the donor brought in, shown only when they opted
 // in to visibility (N-3). Anonymous invitees are not listed; they are counted in
 // AnonymousActive instead.
@@ -77,7 +65,23 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 	proj, err := q.Projection(ctx, donorID)
 	if err == nil {
 		converted := int64(proj.ReferredLinkCount + proj.ReferredIrlCount)
-		out.NextMilestone = nextNetworkMilestone(converted)
+		out.NextMilestone = nil
+		rules, e := recognitionRules(ctx, q)
+		if e != nil {
+			return out, e
+		}
+		for _, rule := range rules.Badges {
+			if rule.Signal != "referrals" || rule.Threshold <= converted {
+				continue
+			}
+			if out.NextMilestone == nil || rule.Threshold < out.NextMilestone.Target {
+				out.NextMilestone = &NetworkMilestone{
+					Label:     map[string]string{"REF1": "First Referral", "REF3": "Community Builder", "REF12": "Super Connector", "TC": "Team Captain"}[rule.Code],
+					Target:    rule.Threshold,
+					Remaining: rule.Threshold - converted,
+				}
+			}
+		}
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
 	}
@@ -104,15 +108,4 @@ func buildNetwork(ctx context.Context, q *queries.Queries, donorID pgtype.UUID) 
 		out.AnonymousActive = anon
 	}
 	return out, nil
-}
-
-// nextNetworkMilestone returns the first tier the donor has not yet reached, or
-// nil once all tiers are reached.
-func nextNetworkMilestone(converted int64) *NetworkMilestone {
-	for _, m := range networkMilestones {
-		if converted < m.n {
-			return &NetworkMilestone{Label: m.label, Target: m.n, Remaining: m.n - converted}
-		}
-	}
-	return nil
 }

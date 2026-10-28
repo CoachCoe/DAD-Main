@@ -119,7 +119,7 @@ func (q *Queries) CancelAttempt(ctx context.Context, id pgtype.UUID) error {
 }
 
 const checkoutDraft = `-- name: CheckoutDraft :one
-SELECT donor_id, amount_minor, currency, frequency, referrer_id, referral_kind, referral_expires_at, id, created_at FROM donor_checkouts WHERE id=$1
+SELECT donor_id, amount_minor, currency, frequency, referrer_id, referral_kind, referral_expires_at, id, created_at, journey_id FROM donor_checkouts WHERE id=$1
 `
 
 func (q *Queries) CheckoutDraft(ctx context.Context, id pgtype.UUID) (DonorCheckout, error) {
@@ -135,6 +135,7 @@ func (q *Queries) CheckoutDraft(ctx context.Context, id pgtype.UUID) (DonorCheck
 		&i.ReferralExpiresAt,
 		&i.ID,
 		&i.CreatedAt,
+		&i.JourneyID,
 	)
 	return i, err
 }

@@ -31,6 +31,42 @@ func (q *Queries) BadgeEarned(ctx context.Context, arg BadgeEarnedParams) (bool,
 	return exists, err
 }
 
+const badgeRules = `-- name: BadgeRules :many
+SELECT code,signal,threshold,artwork FROM donor_badge_rules ORDER BY code
+`
+
+type BadgeRulesRow struct {
+	Code      string `json:"code"`
+	Signal    string `json:"signal"`
+	Threshold int64  `json:"threshold"`
+	Artwork   string `json:"artwork"`
+}
+
+func (q *Queries) BadgeRules(ctx context.Context) ([]BadgeRulesRow, error) {
+	rows, err := q.db.Query(ctx, badgeRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BadgeRulesRow{}
+	for rows.Next() {
+		var i BadgeRulesRow
+		if err := rows.Scan(
+			&i.Code,
+			&i.Signal,
+			&i.Threshold,
+			&i.Artwork,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const donorBadges = `-- name: DonorBadges :many
 SELECT code, source, earned_at, revoked_at FROM donor_badges
 WHERE donor_id=$1
@@ -139,6 +175,69 @@ func (q *Queries) GrantBadge(ctx context.Context, arg GrantBadgeParams) error {
 	return err
 }
 
+const insertStreakReset = `-- name: InsertStreakReset :exec
+INSERT INTO donor_streak_resets(id,donor_id,reset_at,actor_id,reason) VALUES($1,$2,$3,$4,$5)
+`
+
+type InsertStreakResetParams struct {
+	ID      pgtype.UUID        `json:"id"`
+	DonorID pgtype.UUID        `json:"donor_id"`
+	ResetAt pgtype.Timestamptz `json:"reset_at"`
+	ActorID pgtype.UUID        `json:"actor_id"`
+	Reason  string             `json:"reason"`
+}
+
+func (q *Queries) InsertStreakReset(ctx context.Context, arg InsertStreakResetParams) error {
+	_, err := q.db.Exec(ctx, insertStreakReset,
+		arg.ID,
+		arg.DonorID,
+		arg.ResetAt,
+		arg.ActorID,
+		arg.Reason,
+	)
+	return err
+}
+
+const latestStreakReset = `-- name: LatestStreakReset :one
+SELECT max(reset_at)::timestamptz AS reset_at FROM donor_streak_resets WHERE donor_id=$1 AND reset_at<=$2::timestamptz
+`
+
+type LatestStreakResetParams struct {
+	DonorID pgtype.UUID        `json:"donor_id"`
+	AsOf    pgtype.Timestamptz `json:"as_of"`
+}
+
+func (q *Queries) LatestStreakReset(ctx context.Context, arg LatestStreakResetParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, latestStreakReset, arg.DonorID, arg.AsOf)
+	var reset_at pgtype.Timestamptz
+	err := row.Scan(&reset_at)
+	return reset_at, err
+}
+
+const milestoneRules = `-- name: MilestoneRules :many
+SELECT days FROM donor_milestone_rules
+`
+
+func (q *Queries) MilestoneRules(ctx context.Context) ([][]int64, error) {
+	rows, err := q.db.Query(ctx, milestoneRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]int64{}
+	for rows.Next() {
+		var days []int64
+		if err := rows.Scan(&days); err != nil {
+			return nil, err
+		}
+		items = append(items, days)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const milestoneWording = `-- name: MilestoneWording :one
 SELECT title,body FROM donor_recognition_wording WHERE kind='MILESTONE' AND key=$1
 `
@@ -222,6 +321,15 @@ func (q *Queries) RecognitionWording(ctx context.Context, kind string) ([]Recogn
 	return items, nil
 }
 
+const refreshRecognitionSchedule = `-- name: RefreshRecognitionSchedule :exec
+UPDATE donor_metric_projections SET next_refresh_at=least(next_refresh_at,$1)
+`
+
+func (q *Queries) RefreshRecognitionSchedule(ctx context.Context, nextRefreshAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, refreshRecognitionSchedule, nextRefreshAt)
+	return err
+}
+
 const resetRecognitionWording = `-- name: ResetRecognitionWording :exec
 DELETE FROM donor_recognition_wording WHERE kind=$1 AND key=$2
 `
@@ -249,6 +357,48 @@ type RevokeBadgeParams struct {
 // Admin revoke (B-4): tombstone the row rather than delete it, for audit.
 func (q *Queries) RevokeBadge(ctx context.Context, arg RevokeBadgeParams) error {
 	_, err := q.db.Exec(ctx, revokeBadge, arg.DonorID, arg.Code, arg.RevokedAt)
+	return err
+}
+
+const setBadgeRule = `-- name: SetBadgeRule :exec
+INSERT INTO donor_badge_rules(code,signal,threshold,artwork,updated_at,actor_id) VALUES($1,$2,$3,$4,$5,$6)
+ON CONFLICT(code) DO UPDATE SET signal=EXCLUDED.signal,threshold=EXCLUDED.threshold,artwork=EXCLUDED.artwork,updated_at=EXCLUDED.updated_at,actor_id=EXCLUDED.actor_id
+`
+
+type SetBadgeRuleParams struct {
+	Code      string             `json:"code"`
+	Signal    string             `json:"signal"`
+	Threshold int64              `json:"threshold"`
+	Artwork   string             `json:"artwork"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ActorID   pgtype.UUID        `json:"actor_id"`
+}
+
+func (q *Queries) SetBadgeRule(ctx context.Context, arg SetBadgeRuleParams) error {
+	_, err := q.db.Exec(ctx, setBadgeRule,
+		arg.Code,
+		arg.Signal,
+		arg.Threshold,
+		arg.Artwork,
+		arg.UpdatedAt,
+		arg.ActorID,
+	)
+	return err
+}
+
+const setMilestoneRules = `-- name: SetMilestoneRules :exec
+INSERT INTO donor_milestone_rules(singleton,days,updated_at,actor_id) VALUES(true,$1,$2,$3)
+ON CONFLICT(singleton) DO UPDATE SET days=EXCLUDED.days,updated_at=EXCLUDED.updated_at,actor_id=EXCLUDED.actor_id
+`
+
+type SetMilestoneRulesParams struct {
+	Days      []int64            `json:"days"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ActorID   pgtype.UUID        `json:"actor_id"`
+}
+
+func (q *Queries) SetMilestoneRules(ctx context.Context, arg SetMilestoneRulesParams) error {
+	_, err := q.db.Exec(ctx, setMilestoneRules, arg.Days, arg.UpdatedAt, arg.ActorID)
 	return err
 }
 

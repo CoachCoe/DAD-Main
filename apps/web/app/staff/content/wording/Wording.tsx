@@ -5,6 +5,7 @@ import { Announcer } from "@/components/donor/Announcer";
 import { Page } from "@/components/donor/Page";
 import { api, failureMessage, type Schema } from "@/lib/api";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
+import { Rules } from "./Rules";
 
 type Entry = Schema<"WordingEntry">;
 type Kind = "BADGE" | "MILESTONE";
@@ -91,8 +92,8 @@ export default function Wording() {
   return (
     <Page wide eyebrow="Staff" back={{ href: "/staff/content", label: "Content" }} title="Badge and milestone wording">
       <p>
-        Change the words donors see. How badges are earned and when milestones arrive stay as approved; the yearly
-        milestones after the last one listed use the standard wording.
+        Change the words donors see. Earning thresholds and artwork can be changed below; the yearly milestones after
+        the last one listed use the standard wording.
       </p>
       {resource.state === "signedOut" && (
         <p>
@@ -111,6 +112,7 @@ export default function Wording() {
           {data.milestones.map((entry) => editor("MILESTONE", entry, `${entry.key}-day milestone`, "Message"))}
         </>
       )}
+      <Rules />
       <Announcer status={status || messages.status} alert={error || messages.alert} />
       {(resource.state === "offline" || resource.state === "error") && (
         <button type="button" className="secondary" onClick={reload}>

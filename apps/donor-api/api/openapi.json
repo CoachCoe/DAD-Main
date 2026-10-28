@@ -281,6 +281,15 @@
           "enum": [
            "MONTHLY"
           ]
+         },
+         "name": {
+          "type": "string"
+         },
+         "zip": {
+          "type": "string"
+         },
+         "city": {
+          "type": "string"
          }
         },
         "required": [
@@ -630,6 +639,14 @@
              "additionalProperties": {
               "type": "string"
              }
+            },
+            "id": {
+             "type": "string",
+             "format": "uuid"
+            },
+            "journey_id": {
+             "type": "string",
+             "format": "uuid"
             }
            },
            "required": [
@@ -8546,6 +8563,11 @@
         "properties": {
          "initiative_id": {
           "type": "string"
+         },
+         "committed_minor": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
          }
         },
         "required": [
@@ -11020,6 +11042,516 @@
         }
        }
       }
+     }
+    }
+   }
+  },
+  "/donor/staff/initiatives/{initiative_id}/spend/publish": {
+   "post": {
+    "operationId": "publishInitiativeSpend",
+    "summary": "Publish a verified category total",
+    "tags": [
+     "Initiatives"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "parameters": [
+     {
+      "name": "initiative_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed ID is 404, like an unknown one."
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DeleteSpendRequest"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/staff/donors/{donor_id}/recognition/reset": {
+   "post": {
+    "operationId": "postDonorStaffDonorsDonorIdRecognitionReset",
+    "summary": "/donor/staff/donors/{donor_id}/recognition/reset",
+    "tags": [
+     "Staff donors"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "parameters": [
+     {
+      "name": "donor_id",
+      "in": "path",
+      "required": true,
+      "schema": {
+       "type": "string",
+       "format": "uuid"
+      },
+      "description": "A malformed ID is 404, like an unknown one."
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "Recognition and its audit event committed together.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": false,
+         "properties": {
+          "reset": {
+           "type": "boolean"
+          }
+         },
+         "required": [
+          "reset"
+         ]
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    },
+    "description": "Replays recorded facts without editing financial history or granting arbitrary continuity. Requires donor.recompute and a reason. Permanent earned badges and historical best streaks remain permanent.",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "reason"
+        ],
+        "properties": {
+         "reason": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1000
+         }
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "/donor/staff/content/rules": {
+   "get": {
+    "operationId": "getDonorStaffContentRules",
+    "summary": "/donor/staff/content/rules",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/RecognitionRules"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   },
+   "post": {
+    "operationId": "postDonorStaffContentRules",
+    "summary": "/donor/staff/content/rules",
+    "description": "Replaces the words only; how badges and milestones are earned does not change. An empty title and text restore the default.",
+    "tags": [
+     "Content"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "x-rate-limit": "staff",
+    "x-clients": [
+     "browser"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/RecognitionRules"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "saved": {
+           "type": "boolean",
+           "const": true
+          }
+         },
+         "required": [
+          "saved"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/signup": {
+   "post": {
+    "operationId": "postDonorSignup",
+    "summary": "/donor/signup",
+    "description": "503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address exists. The link (`/account/claim#token=\u2026`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim.",
+    "tags": [
+     "Account"
+    ],
+    "security": [],
+    "x-rate-limit": "auth",
+    "x-clients": [
+     "browser",
+     "native"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "email": {
+          "type": "string"
+         },
+         "zip": {
+          "type": "string"
+         },
+         "city": {
+          "type": "string"
+         }
+        },
+        "required": [
+         "name",
+         "email",
+         "zip",
+         "city"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "202": {
+      "description": "Accepted, whether or not the address has an account.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "properties": {
+          "message": {
+           "type": "string"
+          }
+         },
+         "required": [
+          "message"
+         ],
+         "additionalProperties": false
+        }
+       }
+      }
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "413": {
+      "$ref": "#/components/responses/PayloadTooLarge"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/password/sign-in": {
+   "post": {
+    "operationId": "postDonorPasswordSignIn",
+    "summary": "/donor/password/sign-in",
+    "description": "Verifies the SMS code and signs the donor in. 401 covers a wrong, expired, or over-tried code and a phone with no account alike, so none reveals whether an account exists. 503 when no SMS provider is configured.",
+    "tags": [
+     "Account"
+    ],
+    "security": [],
+    "x-rate-limit": "auth",
+    "x-clients": [
+     "browser",
+     "native"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "email": {
+          "type": "string"
+         },
+         "password": {
+          "type": "string",
+          "maxLength": 72
+         }
+        },
+        "required": [
+         "email",
+         "password"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "$ref": "#/components/responses/SignedIn"
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "413": {
+      "$ref": "#/components/responses/PayloadTooLarge"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/me/password": {
+   "post": {
+    "operationId": "postDonorMePassword",
+    "summary": "/donor/me/password",
+    "description": "Saves the donor's notification, rankings, network and volunteer choices. The required fields are always replaced; an optional field left out keeps its saved value. 409 when `version` is stale: re-read the profile and retry.",
+    "tags": [
+     "Donor"
+    ],
+    "security": [
+     {
+      "cookieAuth": []
+     },
+     {
+      "bearerAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "browser",
+     "native"
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "current_password": {
+          "type": "string"
+         },
+         "password": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 72
+         }
+        },
+        "required": [
+         "password"
+        ]
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "type": "object",
+         "additionalProperties": false,
+         "properties": {
+          "saved": {
+           "type": "boolean"
+          }
+         },
+         "required": [
+          "saved"
+         ]
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "413": {
+      "$ref": "#/components/responses/PayloadTooLarge"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
      }
     }
    }
@@ -13585,11 +14117,24 @@
      "amount_minor": {
       "type": "integer",
       "format": "int64"
+     },
+     "verification_note": {
+      "type": "string",
+      "maxLength": 2000
+     },
+     "verified_on": {
+      "type": "string"
+     },
+     "publish_state": {
+      "type": "string"
      }
     },
     "required": [
      "category",
-     "amount_minor"
+     "amount_minor",
+     "verification_note",
+     "verified_on",
+     "publish_state"
     ],
     "additionalProperties": false
    },
@@ -13797,6 +14342,9 @@
        "null"
       ],
       "format": "date-time"
+     },
+     "artwork": {
+      "type": "string"
      }
     },
     "required": [
@@ -13804,7 +14352,8 @@
      "title",
      "rule",
      "perk",
-     "earned"
+     "earned",
+     "artwork"
     ],
     "additionalProperties": false
    },
@@ -15586,6 +16135,58 @@
       ]
      }
     }
+   },
+   "BadgeRule": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "code": {
+      "type": "string"
+     },
+     "signal": {
+      "type": "string"
+     },
+     "threshold": {
+      "type": "integer",
+      "format": "int64",
+      "minimum": 1,
+      "maximum": 1000000
+     },
+     "artwork": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "code",
+     "signal",
+     "threshold",
+     "artwork"
+    ]
+   },
+   "RecognitionRules": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+     "badges": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/BadgeRule"
+      }
+     },
+     "milestones": {
+      "type": "array",
+      "items": {
+       "type": "integer",
+       "format": "int64"
+      },
+      "minItems": 1,
+      "maxItems": 32
+     }
+    },
+    "required": [
+     "badges",
+     "milestones"
+    ]
    }
   }
  }

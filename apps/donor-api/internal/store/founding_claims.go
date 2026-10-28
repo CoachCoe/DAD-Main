@@ -20,9 +20,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// FoundingClaimExpiry is when waitlist claims (D-6) stop being honoured.
-var FoundingClaimExpiry = recognition.FoundingCutoff.AddDate(0, 0, 90)
-
 var ErrFoundingClaimsUnconfigured = errors.New("founding claims are not configured")
 
 const (
@@ -121,7 +118,6 @@ func (s FoundingClaimService) Import(ctx context.Context, token, sheet string) (
 					Dates:      make([]pgtype.Date, len(chunk)),
 					Sources:    make([]string, len(chunk)),
 					ImportedAt: timestamp(now),
-					ExpiresAt:  timestamp(FoundingClaimExpiry),
 				}
 				for i, email := range chunk {
 					params.Hashes[i] = s.Key.hash(email)
@@ -144,10 +140,6 @@ func (s FoundingClaimService) Import(ctx context.Context, token, sheet string) (
 // parseFoundingClaims returns the sheet's claims by normalized address, each
 // address keeping its earliest sign-up.
 func parseFoundingClaims(problems *PublicationError, sheet string, now time.Time) map[string]foundingClaim {
-	if !now.Before(FoundingClaimExpiry) {
-		problems.add(foundingClaimSheet, 0, "", "claims_expired")
-		return nil
-	}
 	if len(sheet) > maxFoundingClaimBytes {
 		problems.add(foundingClaimSheet, 0, "", "too_large")
 		return nil

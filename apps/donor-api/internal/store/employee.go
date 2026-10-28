@@ -187,6 +187,9 @@ func teamByName(ctx context.Context, q *queries.Queries, partnerID pgtype.UUID, 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return q.TeamIDByName(ctx, queries.TeamIDByNameParams{PartnerID: partnerID, Name: name})
 	}
+	if err == nil {
+		err = recordServerEvent(ctx, q, pgtype.UUID{}, "team_created", "team-created:"+id.String(), time.Now().UTC())
+	}
 	return id, err
 }
 

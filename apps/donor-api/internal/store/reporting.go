@@ -25,7 +25,7 @@ const reportReadPermission = "report.read"
 
 // shareProxyUnavailable explains why the seven-day share rate is not computed:
 // it requires the browser share-handoff observation that analytics.md defers.
-const shareProxyUnavailable = "browser share-action collection is not enabled (deferred by product agreement); " +
+const shareProxyUnavailable = "no consented share-action observations exist in this reporting window; " +
 	"this metric cannot be computed from server facts"
 
 // Metric is one §4 number with its availability. A metric the server cannot
@@ -155,7 +155,7 @@ func (s *ReportingService) Report(ctx context.Context, token string, start, end 
 			CoverageNote:      coverageNote,
 			SevenDayShareRate: Metric{Available: false, Reason: shareProxyUnavailable},
 			TimeToFirstGift: TimeToFirstGift{
-				Reason: "Landing-to-account linkage is not collected; account creation is not a landing timestamp.",
+				Reason: "No observed checkout journey has a verified first gift in this reporting window; account creation is not a landing timestamp.",
 			},
 		}
 
@@ -253,6 +253,20 @@ func (s *ReportingService) Report(ctx context.Context, token string, start, end 
 			report.Retention.Reason = "Historical survival is incomplete; run the projections worker to backfill milestones. Unknown outcomes are excluded from retained totals."
 		}
 
+		journeys, err := q.JourneyReport(ctx, queries.JourneyReportParams{StartAt: startTS, EndAt: endTS})
+		if err != nil {
+			return Report{}, err
+		}
+		if journeys.Sample > 0 {
+			report.TimeToFirstGift = TimeToFirstGift{Available: true, Sample: journeys.Sample, MedianSeconds: journeys.MedianSeconds}
+		}
+		share, err := q.SevenDayShareReport(ctx, queries.SevenDayShareReportParams{StartAt: startTS, EndAt: endTS})
+		if err != nil {
+			return Report{}, err
+		}
+		if share.Eligible > 0 {
+			report.SevenDayShareRate = Metric{Available: true, Value: share.Shared * 100 / share.Eligible}
+		}
 		return report, nil
 	})
 }

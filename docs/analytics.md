@@ -109,38 +109,34 @@ Reports spanning earlier history must flag incomplete coverage; missing history 
 zero failures. Exports require `data.export` and use the existing export audit trail.
 No anonymous identifier, browser event, or new third-party destination is introduced.
 
-## Browser event contract and collection boundary
+## First-party browser collection
 
-Anonymous behavioral collection is not enabled. Approved privacy/consent text, retention,
-and an analytics destination have not been provided. The referral cookie serves the
-explicit referral function; it is not permission to create a general tracking identifier.
-Browser analytics and its privacy decisions are deferred by product agreement. Before
-enabling collection, approve the events, journey-to-checkout linkage, destination and
-access, retention/deletion, and consent/opt-out disclosures. Metrics that depend on browser
-observations remain unavailable until collection and reconciliation are accepted.
-The following schema is the implementation contract once that product/privacy decision is
-approved, rather than an implied live collection policy:
+The web app offers an explicit usage-analytics choice. Collection respects Do Not
+Track and Global Privacy Control. Declining or withdrawing consent clears the
+session journey identifier and stops subsequent observations. Only the consent
+choice persists across browser sessions; a journey UUID lives in session storage.
+The first-party endpoint sets a one-day HttpOnly journey cookie for checkout and
+verified-account linkage. No third-party analytics destination is used.
 
-- Envelope: schema version, random event UUID, server receipt timestamp, bounded client
-  timestamp, consent version, short-lived random journey ID, environment, event name.
-- Allowlisted events: `landing_viewed.v1`, `amount_selected.v1`, `checkout_opened.v1`,
-  `share_requested.v1`, `share_handed_off.v1`, `invite_copied.v1`, `code_displayed.v1`.
-- Allowlisted properties: surface enum, DIRECT/LINK/IRL source, MONTHLY frequency,
-  amount in cents where relevant, share method enum. No arbitrary property objects.
-- Never send names, email, full URLs/query strings, referral codes, login fragments,
-  cookies, IP addresses, user-agent fingerprints, free text, or raw Stripe objects.
-- Only the authenticated server may join an approved journey to a checkout. Financial
-  completion/refund events come from committed server facts, never client claims.
-- Drop duplicate event UUIDs; reject unknown names/properties, oversized batches, invalid
-  timestamps, and unapproved consent versions. Rate limit ingestion independently from
-  financial mutations. Failed analytics must never block giving, sharing, or account access.
-- Respect opt-out and applicable browser privacy signals. Do not persist/retry an event
-  after consent is withdrawn. Retention and deletion periods require an approved policy.
+The shared PRD §9 taxonomy is accepted at `/analytics/events` for web and native
+clients. Web observations include app opens, attribution source, signup, checkout
+start, sharing after a completed share handoff/copy, IRL-code display, settings,
+reservations, and team actions. Native clients must send the same schema and honor
+their own consent choice. Event UUIDs make client retries idempotent. Financial
+completion, failure, recovery and lapse events derive from committed server facts;
+client claims are never used as financial evidence. Badge-earned events are written
+in the same transaction as awards. The server source is distinct from client sources.
 
-Acceptance must include both referral channels, direct guest giving, claim after gift,
-expired/conflicting touches, retry/replay, share cancellation, full/partial refunds,
-failed-and-recovered renewal, and email change. Reconcile acquisition counts and realized
-dollars against the financial exports before trusting campaign reports. Browser
-instrumentation remains a release gap; metrics requiring it must be marked unavailable,
-never displayed as fabricated zeros. Billing-history reports must disclose their coverage
-start and observation cutoff.
+Events contain only allowlisted names/properties, platform, timestamps, optional
+internal donor and journey IDs, and deduplication keys. Never send names, emails,
+full URLs, referral codes, provider tokens, payment details, or free text. Events
+expire after 13 months and donor-linked observations are removed on account deletion.
+A usage-observation failure never blocks giving or account access.
+
+Landing-to-first-gift reports join observed journeys to persisted checkout IDs and
+verified first gifts. Share-rate cohorts require an observed app open within the
+first seven days and a full seven-day observation window; IRL display counts as
+showing the code. Both are consented-sample metrics, not a claim about unobserved
+visitors. Empty samples remain unavailable with a reason; an observed cohort with
+no shares has a measured zero. Server financial exports remain authoritative for
+all acquired donors, including donors who decline analytics.

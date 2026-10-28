@@ -249,7 +249,7 @@ test("a new monthly gift shows its confirmation first and the sandbox note last"
   await expect(page.getByRole("main").getByRole("status")).toHaveText(
     "We’re confirming your new monthly gift with Stripe. This usually takes a few seconds.",
   );
-  const order = await page.locator(".callout, .note").evaluateAll((nodes) => nodes.map((node) => node.className));
+  const order = await page.getByRole("main").locator(".callout, .note").evaluateAll((nodes) => nodes.map((node) => node.className));
   expect(order).toEqual(["callout", "note"]);
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(results.violations).toEqual([]);

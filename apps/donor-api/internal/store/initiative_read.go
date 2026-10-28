@@ -202,8 +202,8 @@ func publicInitiative(r queries.PublishedInitiativesRow) PublicInitiative {
 		ID: r.ID.String(), Slug: r.Slug, Title: r.Title, Summary: r.Summary, Type: r.Type, Location: r.Location,
 		Status: r.Status, StartedOn: r.StartedOn.Time.Format(time.DateOnly),
 	}
-	if r.Partner.Valid {
-		out.Partner = &r.Partner.String
+	if r.Partner != "" {
+		out.Partner = &r.Partner
 	}
 	return out
 }
