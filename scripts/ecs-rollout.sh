@@ -8,6 +8,11 @@
 # Environment (optional):
 #   ROLLOUT_TIMEOUT_SECONDS  give up on a service after this long   (default 1200)
 #   ROLLOUT_POLL_SECONDS     seconds between status checks          (default 15)
+#   DAD_TASKDEFS_FILE        file of `<family>=<task definition ARN>` lines, as printed by
+#                            ecs-pin-image.sh. When set, each service is deployed on the
+#                            pinned revision of family `dad-<service>` (--task-definition);
+#                            a service with no entry is an error. When unset, the service's
+#                            current task definition is redeployed as is.
 #
 # For each service this starts a new deployment, remembers that deployment's id, then
 # polls until THAT deployment's rolloutState is COMPLETED. It fails if the deployment
@@ -36,14 +41,40 @@ services=("$@")
 
 timeout="${ROLLOUT_TIMEOUT_SECONDS:-1200}"
 interval="${ROLLOUT_POLL_SECONDS:-15}"
+taskdefs_file="${DAD_TASKDEFS_FILE:-}"
+
+# Print the pinned task definition ARN for the service's family (dad-<service>).
+pinned_taskdef() {
+  local family="dad-$1" line
+  line="$(grep -E "^${family}=" "$taskdefs_file" | head -n 1 || true)"
+  if [ -z "$line" ]; then
+    echo "::error::no pinned task definition for '$family' in $taskdefs_file" >&2
+    return 1
+  fi
+  printf '%s' "${line#*=}"
+}
+
+# Resolve every pinned revision before touching any service, so a missing entry cannot
+# leave some services rolling and others not.
+taskdefs=()
+for svc in "${services[@]}"; do
+  if [ -n "$taskdefs_file" ]; then
+    taskdefs+=("$(pinned_taskdef "$svc")")
+  else
+    taskdefs+=("")
+  fi
+done
 
 # Start every deployment first so they roll out in parallel, then wait on each.
 deployment_ids=()
-for svc in "${services[@]}"; do
+for i in "${!services[@]}"; do
+  svc="${services[$i]}"
+  update_args=(--cluster "$cluster" --service "$svc" --force-new-deployment)
+  if [ -n "${taskdefs[$i]}" ]; then
+    update_args+=(--task-definition "${taskdefs[$i]}")
+  fi
   id="$(aws ecs update-service \
-    --cluster "$cluster" \
-    --service "$svc" \
-    --force-new-deployment \
+    "${update_args[@]}" \
     --query "service.deployments[?status=='PRIMARY'] | [0].id" \
     --output text)"
   if [ -z "$id" ] || [ "$id" = "None" ]; then
