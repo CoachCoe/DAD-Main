@@ -65,7 +65,7 @@ test-native-clients:
 	bash scripts/check-native-clients.sh
 
 check-deploy-secrets:
-	node --test scripts/check-deploy-secrets.test.mjs scripts/ecs-rollout.test.mjs
+	node --test scripts/check-deploy-secrets.test.mjs scripts/ecs-rollout.test.mjs scripts/ecs-pin-image.test.mjs scripts/run-task.test.mjs
 
 bundle-mobile: check-mobile
 	node scripts/mobile-foundation.mjs bundle "$${MOBILE_BUNDLE_DIR:?set MOBILE_BUNDLE_DIR outside the repository}"
