@@ -9,14 +9,18 @@ repository files: `docker-compose.prod.yml`, `scripts/deploy.sh`, `docs/operatio
 Where the design's assumptions differed from the repository, the repository wins and the
 reconciliation is noted inline.
 
-The IaC is AWS CDK (TypeScript). This is the design; the CDK app and the concrete
-implementation plan live in `infra/` (`infra/PLAN.md`).
+The IaC is AWS CDK (TypeScript). This is the design; the CDK app lives in the
+[DAD-infra](https://github.com/CoachCoe/DAD-infra) repository at `apps/dad-main/`, and
+the estate-wide design (accounts, shared packages, the DAD-Quality runner) is in
+DAD-infra `docs/design/aws-infra-design.md`.
 
 ## 1. Region and accounts
 
 - **Region:** `us-east-2` (Ohio) for all resources, including SES.
-- **IaC:** AWS CDK in TypeScript, one app, environment selected by CDK context
-  `-c env=staging|production`.
+- **IaC:** AWS CDK in TypeScript, one app (`apps/dad-main` in DAD-infra), environment
+  selected by CDK context `-c env=staging|production`. Account ids and region come from
+  DAD-infra's shared `packages/config`; DAD-Main-specific values (hostnames, counts, task
+  sizes) are an app-level extension of it.
 - **Accounts / environments:**
   - `staging` → AWS account `853377042897` (org "sandbox"). Primary focus for the test.
   - `production` → AWS account `216833405626` (org "production").
@@ -137,8 +141,8 @@ run-task definitions, not services, and CDK does **not** execute them:
 | `rekey` | `rekey` | `DONOR_EMAIL_ENCRYPTION_KEY`, `DONOR_CONTENT_ENCRYPTION_KEY`, `DONOR_REKEY_DATABASE_URL` | key rotation |
 | `monitor` | `monitor` | `DONOR_MONITOR_DATABASE_URL` | queue-age check |
 
-A thin wrapper `infra/scripts/run-task.sh` wraps `aws ecs run-task` with the right task
-definition and command overrides; it is documented, not auto-run.
+A thin wrapper `scripts/run-task.sh` (in this repo) wraps `aws ecs run-task` with the
+right task definition and command overrides; it is documented, not auto-run.
 
 ### 4.4 Scheduled task — reconcile
 
@@ -236,15 +240,20 @@ Security-group chain (mirrors the Compose network isolation):
 ## 8. CI/CD (GitHub Actions)
 
 Extends existing workflows without breaking `ci.yml`. Auth is **GitHub OIDC → per-account
-IAM deploy roles** (no static keys). The OIDC provider + roles come from a dedicated CDK
-`pipeline-iam` / bootstrap stack (documented one-time per-account apply). Action pinning
+IAM deploy roles** (no static keys). The OIDC provider is the shared construct in
+DAD-infra's `packages/pipeline-iam` (an account has exactly one GitHub OIDC provider, so
+it is defined once and shared with DAD-Quality's stack); the DAD-Main deploy roles come
+from the `pipeline-iam` stack in `apps/dad-main` (documented one-time per-account
+apply). Action pinning
 follows the repo convention in `ci.yml`: pin by full commit SHA with a `# vX.Y.Z` comment;
 where a SHA cannot be resolved offline, pin by major tag with a NOTE.
 
 Two pipelines:
 
-1. **Infra pipeline — `.github/workflows/infra.yml`** (CDK only):
-   - PRs touching `infra/` → `cdk diff`.
+1. **Infra pipeline — DAD-infra `.github/workflows/dad-main-infra.yml`** (CDK only; it
+   lives in the DAD-infra repo, path-filtered to `apps/dad-main/**`):
+   - PRs touching `apps/dad-main/**` or `packages/**` → offline `cdk synth` of both
+     environments (no AWS credentials).
    - merge to `dev` → `cdk deploy -c env=staging` (sandbox role).
    - release tag / merge to `main` → `cdk deploy -c env=production`, gated by a GitHub
      Environment protection rule (manual approval).

@@ -1,7 +1,8 @@
 name: Deploy (app)
 
 # Application rollout pipeline. This does the DIRECT ECS deploy and does NOT use
-# CDK (CDK is reserved for infra changes in infra.yml). The step order mirrors
+# CDK (CDK is reserved for infra changes, which live in the DAD-infra repo's
+# dad-main-infra.yml). The step order mirrors
 # scripts/deploy.sh exactly:
 #
 #   build/push images -> migrate (run-task) -> provision-roles (run-task)
@@ -58,7 +59,8 @@ jobs:
     # is configured as the per-environment variable APP_DEPLOY_ROLE_ARN. Before
     # bootstrap the variable is empty, so the job is skipped (green) instead of
     # hard-failing on a role that does not exist yet. The pipeline "wakes up" on
-    # the first push/release after the variable is set. See infra/README.md.
+    # the first push/release after the variable is set. See docs/aws-deployment.md
+    # and https://github.com/CoachCoe/DAD-infra (apps/dad-main).
     if: ${{ vars.APP_DEPLOY_ROLE_ARN != '' }}
     # Resolve the environment from the trigger: dev push -> staging; release tag
     # or main push -> production; workflow_dispatch -> the chosen input.
