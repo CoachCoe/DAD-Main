@@ -110,9 +110,12 @@ values are `login-email`, `email-changes`, `messages` respectively (the service 
 the kind are not identical). The ECS service names mirror the Compose service names.
 
 Staging desired counts: `web`=1, each worker=1, `api`=1, `nginx`>=1 (default 1, raise for
-AZ coverage). All counts are per-env config. Workers only run when
-`DONOR_GO_WORKERS_ENABLED=true`; the app pipeline enables them last (see §8), mirroring
-`scripts/deploy.sh workers` which refuses to start workers while the flag is unset.
+AZ coverage). All counts are per-env config. Whether the workers run at all is one switch,
+`workersEnabled` in DAD-infra's per-env config (off until an environment is ready): it
+sets their desired count, and the app pipeline skips services at a desired count of 0
+(see §8). That mirrors `scripts/deploy.sh workers`, which refuses to start workers until
+they are enabled. The worker binary itself also requires `DONOR_GO_WORKERS_ENABLED=true`,
+so the task definitions always set it; it is not the switch.
 
 ### 4.2 api networking and trust
 
@@ -255,8 +258,8 @@ Two pipelines:
    - PRs touching `apps/dad-main/**` or `packages/**` → offline `cdk synth` of both
      environments (no AWS credentials).
    - merge to `dev` → `cdk deploy -c env=staging` (sandbox role).
-   - release tag / merge to `main` → `cdk deploy -c env=production`, gated by a GitHub
-     Environment protection rule (manual approval).
+   - merge to `main` → `cdk deploy -c env=production`, gated by a GitHub Environment
+     protection rule (manual approval).
 
 2. **App pipeline — `.github/workflows/deploy.yml`** (direct ECS, CDK reserved for infra):
    - build `dad/api` + `dad/web` (+ `dad/nginx`), push to ECR tagged with the git SHA.
@@ -267,11 +270,11 @@ Two pipelines:
    - then **direct ECS deploy** in the exact `scripts/deploy.sh` order:
      `migrate` run-task → `provision-roles` run-task (each waited on, and failing unless
      the container exits 0) → deploy api/web/nginx on their pinned revisions and wait for
-     the rollout to complete (the `up` step) → the same for the six worker services
-     **behind `DONOR_GO_WORKERS_ENABLED`**.
-   - staging auto on merge to `dev`; production on merge to `main`, gated by manual
-     approval. Releases tagged `mobile-foundation-*` (the mobile contract) never start a
-     deploy.
+     the rollout to complete (the `up` step) → the same for the six worker services,
+     skipping any DAD-infra has switched off (desired count 0).
+   - staging auto on merge to `dev`; production **only** on merge to `main`, gated by
+     manual approval. There is no release- or tag-triggered path to production (releases,
+     including the `mobile-foundation-*` contract releases, never start a deploy).
    - **Decision:** the app pipeline uses direct `aws ecs update-service`; CDK is reserved
      for infra only.
 

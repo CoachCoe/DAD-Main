@@ -34,6 +34,7 @@ case "$cmd" in
     fi
     case "$*" in
       *rolloutStateReason*) echo "$STUB_REASON"; exit 0 ;;
+      *desiredCount*) eval "d=\\\${DESIRED_$key:-1}"; echo "$d"; exit 0 ;;
     esac
     seqfile="$STUB_DIR/seq_$key"
     if [ ! -f "$seqfile" ]; then
@@ -204,4 +205,54 @@ test("without a task-definitions file, redeploys the current revision (no --task
   const r = run(["dad-staging", "api"], { STATES_api: "COMPLETED" });
   assert.equal(r.status, 0, r.stderr);
   assert.doesNotMatch(r.calls, /--task-definition/);
+});
+
+// ROLLOUT_SKIP_IDLE: services at a desired count of 0 are switched off in DAD-infra's
+// config (the one owner of that switch); deploy.yml must skip them rather than keep its
+// own flag.
+test("ROLLOUT_SKIP_IDLE skips services at desired count 0 and rolls the rest", () => {
+  const r = run(["dad-staging", "api", "stripe-worker"], {
+    ROLLOUT_SKIP_IDLE: "true",
+    DESIRED_api: "1",
+    DESIRED_stripe_worker: "0",
+    STATES_api: "COMPLETED",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /stripe-worker: desired count 0 \(switched off\); skipping/);
+  assert.match(r.calls, /update-service --cluster dad-staging --service api /);
+  assert.doesNotMatch(r.calls, /update-service .*--service stripe-worker/);
+});
+
+test("ROLLOUT_SKIP_IDLE with every service off rolls nothing and succeeds", () => {
+  const r = run(["dad-staging", "stripe-worker", "push-worker"], {
+    ROLLOUT_SKIP_IDLE: "true",
+    DESIRED_stripe_worker: "0",
+    DESIRED_push_worker: "0",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /every service is switched off; nothing to roll/);
+  assert.doesNotMatch(r.calls, /update-service/);
+});
+
+test("an idle service needs no pinned revision", () => {
+  const r = runPinned(["dad-staging", "api", "push-worker"], [`dad-api=${TD("dad-api")}`], {
+    ROLLOUT_SKIP_IDLE: "true",
+    DESIRED_push_worker: "0",
+    STATES_api: "COMPLETED",
+  });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("ROLLOUT_SKIP_IDLE fails on a service that does not exist", () => {
+  const r = run(["dad-staging", "api"], { ROLLOUT_SKIP_IDLE: "true", DESIRED_api: "None" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /api: no such service in dad-staging/);
+  assert.doesNotMatch(r.calls, /update-service/);
+});
+
+test("without ROLLOUT_SKIP_IDLE an idle service is still rolled (no desired-count lookup)", () => {
+  const r = run(["dad-staging", "api"], { DESIRED_api: "0", STATES_api: "COMPLETED" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.calls, /desiredCount/);
+  assert.match(r.calls, /update-service/);
 });
