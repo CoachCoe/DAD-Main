@@ -210,3 +210,18 @@ jobs:
           ./scripts/ecs-rollout.sh "$CLUSTER" \
             stripe-worker projection-worker login-email-worker \
             email-change-worker message-worker push-worker
+
+      # 5) record the release. Reached only if every step above succeeded, so a failed or
+      #    rolled-back rollout never moves it. DAD-infra reads this parameter (as a
+      #    CloudFormation parameter) to tag every task definition, so a later `cdk deploy`
+      #    recreates them at the last good release instead of a placeholder image. The
+      #    parameter is created at bootstrap (DAD-infra docs/bootstrap.md).
+      - name: Record the deployed image tag
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          aws ssm put-parameter \
+            --name "/dad/${DAD_ENV}/image-tag" \
+            --type String \
+            --value "$IMAGE_TAG" \
+            --overwrite
