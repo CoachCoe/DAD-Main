@@ -11,15 +11,15 @@
 # EventBridge Scheduler cron and should not normally be run by hand.
 #
 # Usage:
-#   infra/scripts/run-task.sh <env> <task> [extra container command args...]
+#   scripts/run-task.sh <env> <task> [extra container command args...]
 #
 #   <env>   staging | production
 #   <task>  migrate | provision-roles | staff | rekey | monitor | reconcile
 #
 # Examples:
-#   infra/scripts/run-task.sh staging migrate
-#   infra/scripts/run-task.sh staging migrate --adopt-existing
-#   infra/scripts/run-task.sh staging provision-roles
+#   scripts/run-task.sh staging migrate
+#   scripts/run-task.sh staging migrate --adopt-existing
+#   scripts/run-task.sh staging provision-roles
 #
 # Required environment / resolved values (read from CDK outputs or SSM, not
 # hardcoded here):
