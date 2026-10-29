@@ -70,7 +70,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: CoachCoe/atm
+          repository: CoachCoe/DAD-Quality
           ref: 3d5179a41ada263c554987cf499878b955ff0147
           path: atm
           persist-credentials: false
@@ -129,7 +129,7 @@ jobs:
       # This fresh runner never builds or executes candidate code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: CoachCoe/atm
+          repository: CoachCoe/DAD-Quality
           ref: 3d5179a41ada263c554987cf499878b955ff0147
           path: atm
           persist-credentials: false
@@ -193,7 +193,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: CoachCoe/atm
+          repository: CoachCoe/DAD-Quality
           ref: 3d5179a41ada263c554987cf499878b955ff0147
           path: atm
           persist-credentials: false
