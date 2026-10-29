@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
 # run-task.sh — thin wrapper around `aws ecs run-task` for the DAD maintenance
-# task definitions created by infra/lib/maintenance-stack.ts.
+# task definitions created by DAD-infra apps/dad-main/lib/maintenance-stack.ts
+# (https://github.com/CoachCoe/DAD-infra).
 #
 # This script is DOCUMENTED, NOT AUTO-RUN by CDK. An operator invokes it by hand
 # (or the app pipeline invokes `aws ecs run-task` directly in the same shape).
@@ -11,15 +12,15 @@
 # EventBridge Scheduler cron and should not normally be run by hand.
 #
 # Usage:
-#   infra/scripts/run-task.sh <env> <task> [extra container command args...]
+#   scripts/run-task.sh <env> <task> [extra container command args...]
 #
 #   <env>   staging | production
 #   <task>  migrate | provision-roles | staff | rekey | monitor | reconcile
 #
 # Examples:
-#   infra/scripts/run-task.sh staging migrate
-#   infra/scripts/run-task.sh staging migrate --adopt-existing
-#   infra/scripts/run-task.sh staging provision-roles
+#   scripts/run-task.sh staging migrate
+#   scripts/run-task.sh staging migrate --adopt-existing
+#   scripts/run-task.sh staging provision-roles
 #
 # Required environment / resolved values (read from CDK outputs or SSM, not
 # hardcoded here):
@@ -54,20 +55,21 @@ family="dad-maint-${task}"
 
 # Build an optional command override when extra args are supplied (e.g.
 # `migrate --adopt-existing`). The container name follows the factory id.
-overrides=""
+overrides=()
 if [ "$#" -gt 0 ]; then
   args_json="$(printf '%s\n' "$@" | awk '{ printf "%s\"%s\"", (NR>1?",":""), $0 }')"
-  overrides="--overrides {\"containerOverrides\":[{\"name\":\"maint-${task}-Container\",\"command\":[\"${task}\",${args_json}]}]}"
+  overrides=(--overrides "{\"containerOverrides\":[{\"name\":\"maint-${task}-Container\",\"command\":[\"${task}\",${args_json}]}]}")
 fi
 
+# AWS CLI shorthand syntax; ids are comma-separated and need no quoting here.
 network="awsvpcConfiguration={subnets=[${DAD_SUBNETS}],securityGroups=[${DAD_SECURITY_GROUPS}],assignPublicIp=DISABLED}"
 
 set -x
-# shellcheck disable=SC2086
+# ${overrides[@]+...} keeps an empty array safe under `set -u` on bash 3.2 (macOS).
 aws ecs run-task \
   --cluster "$DAD_CLUSTER" \
   --launch-type FARGATE \
   --task-definition "$family" \
-  --network-configuration "{\"awsvpcConfiguration\":{\"subnets\":[${DAD_SUBNETS}],\"securityGroups\":[${DAD_SECURITY_GROUPS}],\"assignPublicIp\":\"DISABLED\"}}" \
+  --network-configuration "$network" \
   --region "$AWS_REGION" \
-  $overrides
+  ${overrides[@]+"${overrides[@]}"}

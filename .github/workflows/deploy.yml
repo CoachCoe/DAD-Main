@@ -146,7 +146,7 @@ jobs:
           DAD_CLUSTER: ${{ steps.names.outputs.cluster }}
           DAD_SUBNETS: ${{ steps.names.outputs.subnets }}
           DAD_SECURITY_GROUPS: ${{ steps.names.outputs.sgs }}
-        run: ./infra/scripts/run-task.sh "$DAD_ENV" migrate
+        run: ./scripts/run-task.sh "$DAD_ENV" migrate
 
       # 2) provision-roles: runs AFTER migrate; creates/grants the per-process
       #    Postgres roles (owner + all per-process DONOR_*_DATABASE_URL).
@@ -155,7 +155,7 @@ jobs:
           DAD_CLUSTER: ${{ steps.names.outputs.cluster }}
           DAD_SUBNETS: ${{ steps.names.outputs.subnets }}
           DAD_SECURITY_GROUPS: ${{ steps.names.outputs.sgs }}
-        run: ./infra/scripts/run-task.sh "$DAD_ENV" provision-roles
+        run: ./scripts/run-task.sh "$DAD_ENV" provision-roles
 
       # 3) the "up" step: roll the long-running services api, web, nginx.
       - name: update-service api/web/nginx (the up step)
