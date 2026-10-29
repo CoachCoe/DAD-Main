@@ -143,6 +143,13 @@ test("passes extra arguments as a single command override", () => {
   );
 });
 
+test("accepts bootstrap-owner and runs family dad-maint-bootstrap-owner", () => {
+  const r = run(["staging", "bootstrap-owner"], { DAD_SECURITY_GROUPS: "sg-bootstrap" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.calls, /--task-definition dad-maint-bootstrap-owner /);
+  assert.match(r.calls, /securityGroups=\[sg-bootstrap\]/);
+});
+
 test("rejects an unknown environment or task, and a missing cluster", () => {
   assert.equal(run(["qa", "migrate"]).status, 2);
   assert.equal(run(["staging", "wipe"]).status, 2);
