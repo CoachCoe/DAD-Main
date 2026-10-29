@@ -260,15 +260,28 @@ Two pipelines:
 
 2. **App pipeline — `.github/workflows/deploy.yml`** (direct ECS, CDK reserved for infra):
    - build `dad/api` + `dad/web` (+ `dad/nginx`), push to ECR tagged with the git SHA.
+   - **pin task definitions to that tag** (`scripts/ecs-pin-image.sh`): register a new
+     revision of every task-definition family (the nine services and the six maintenance
+     tasks) with only the image tag changed, and save the resulting `family=ARN` lines for
+     the later steps (`DAD_TASKDEFS_FILE`).
    - then **direct ECS deploy** in the exact `scripts/deploy.sh` order:
-     `migrate` run-task → `provision-roles` run-task → force a new deployment of
-     api/web/nginx and wait for it to complete (the `up` step) → the same for the six
-     worker services **behind `DONOR_GO_WORKERS_ENABLED`**.
+     `migrate` run-task → `provision-roles` run-task (each waited on, and failing unless
+     the container exits 0) → deploy api/web/nginx on their pinned revisions and wait for
+     the rollout to complete (the `up` step) → the same for the six worker services
+     **behind `DONOR_GO_WORKERS_ENABLED`**.
    - staging auto on merge to `dev`; production on merge to `main`, gated by manual
      approval. Releases tagged `mobile-foundation-*` (the mobile contract) never start a
      deploy.
    - **Decision:** the app pipeline uses direct `aws ecs update-service`; CDK is reserved
      for infra only.
+
+Why a pin step exists: the CDK task definitions carry a placeholder image tag, and an ECS
+service or `run-task` runs a specific task-definition revision. The pipeline therefore
+registers revisions that point at the SHA-tagged images instead of redeploying a moving
+tag. Because every revision names an immutable SHA, a circuit-breaker rollback restores
+the previous image. Each revision is copied from the family's latest active one, so
+everything but the image tag (command, environment, secrets, health check, roles, sizing,
+tags) is whatever CDK last defined.
 
 The deploy gate is the ECS rollout itself. The api, web, and nginx task definitions carry
 container health checks (api `/health/live` on 8002, nginx `/health` on 8081, web `/` on

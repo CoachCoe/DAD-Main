@@ -152,3 +152,56 @@ test("requires a cluster and at least one service", () => {
   assert.equal(run([]).status, 2);
   assert.equal(run(["dad-staging"]).status, 2);
 });
+
+/** Run with a DAD_TASKDEFS_FILE containing `lines`, cleaning the file up afterwards. */
+function runPinned(args, lines, env = {}) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "dad-taskdefs-"));
+  try {
+    const file = path.join(dir, "taskdefs.txt");
+    writeFileSync(file, `${lines.join("\n")}\n`);
+    return run(args, { DAD_TASKDEFS_FILE: file, ...env });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const TD = (family) => `arn:aws:ecs:us-east-2:111111111111:task-definition/${family}:99`;
+
+test("with a task-definitions file, deploys each service on its pinned revision", () => {
+  const r = runPinned(
+    ["dad-staging", "api", "stripe-worker"],
+    [`dad-api=${TD("dad-api")}`, `dad-web=${TD("dad-web")}`, `dad-stripe-worker=${TD("dad-stripe-worker")}`],
+    { STATES_api: "COMPLETED", STATES_stripe_worker: "COMPLETED" },
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.calls, new RegExp(`--service api --force-new-deployment --task-definition ${TD("dad-api")}`));
+  assert.match(
+    r.calls,
+    new RegExp(`--service stripe-worker --force-new-deployment --task-definition ${TD("dad-stripe-worker")}`),
+  );
+  // Never the web revision, which belongs to a service we did not roll.
+  assert.doesNotMatch(r.calls, /dad-web/);
+});
+
+test("a service with no pinned entry fails before any deployment is started", () => {
+  const r = runPinned(["dad-staging", "api", "web"], [`dad-api=${TD("dad-api")}`], {
+    STATES_api: "COMPLETED",
+    STATES_web: "COMPLETED",
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /no pinned task definition for 'dad-web'/);
+  // api HAS an entry, but nothing may be started when any service is unresolved.
+  assert.doesNotMatch(r.calls, /update-service/, "no deployment may start before every revision resolves");
+});
+
+test("does not mistake a longer family for the service (dad-api vs dad-api-extra)", () => {
+  const r = runPinned(["dad-staging", "api"], [`dad-api-extra=${TD("dad-api-extra")}`], { STATES_api: "COMPLETED" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /no pinned task definition for 'dad-api'/);
+});
+
+test("without a task-definitions file, redeploys the current revision (no --task-definition)", () => {
+  const r = run(["dad-staging", "api"], { STATES_api: "COMPLETED" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.calls, /--task-definition/);
+});
