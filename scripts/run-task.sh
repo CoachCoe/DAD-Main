@@ -15,7 +15,12 @@
 #   scripts/run-task.sh <env> <task> [extra container command args...]
 #
 #   <env>   staging | production
-#   <task>  migrate | provision-roles | staff | rekey | monitor | reconcile
+#   <task>  migrate | provision-roles | staff | rekey | monitor | reconcile | bootstrap-owner
+#
+# bootstrap-owner runs once per environment, before migrate, to create the database
+# owner role as the RDS master. Pass DAD_SECURITY_GROUPS=<BootstrapSecurityGroupId>
+# (dad-data-<env> output): it is the only security group the instance admits besides the
+# RDS Proxy. See DAD-infra docs/bootstrap.md.
 #
 # Examples:
 #   scripts/run-task.sh staging migrate
@@ -52,7 +57,7 @@ case "$env" in
 esac
 
 case "$task" in
-  migrate | provision-roles | staff | rekey | monitor | reconcile) ;;
+  migrate | provision-roles | staff | rekey | monitor | reconcile | bootstrap-owner) ;;
   *) printf 'Unknown task %q\n' "$task" >&2; exit 2 ;;
 esac
 
