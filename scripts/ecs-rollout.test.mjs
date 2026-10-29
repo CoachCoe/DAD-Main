@@ -1,0 +1,151 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const script = fileURLToPath(new URL("./ecs-rollout.sh", import.meta.url));
+
+// A stub `aws` on PATH. It never touches AWS.
+//   update-service   -> prints the id `dep-<service>` (or STUB_UPDATE_OUTPUT if set)
+//   describe-services-> rolloutState from STATES_<service> (comma list, consumed one per
+//                       call, last value repeats); the rolloutStateReason query returns
+//                       STUB_REASON. STUB_DENY=1 makes describe-services fail.
+const stub = `#!/bin/sh
+echo "$*" >> "$STUB_DIR/calls.log"
+cmd="$2"
+svc=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--service" ] || [ "$prev" = "--services" ]; then svc="$a"; fi
+  prev="$a"
+done
+key=$(echo "$svc" | tr '-' '_')
+case "$cmd" in
+  update-service)
+    if [ -n "$STUB_UPDATE_OUTPUT" ]; then echo "$STUB_UPDATE_OUTPUT"; else echo "dep-$svc"; fi
+    ;;
+  describe-services)
+    if [ -n "$STUB_DENY" ]; then
+      echo "An error occurred (AccessDenied) when calling the DescribeServices operation" >&2
+      exit 254
+    fi
+    case "$*" in
+      *rolloutStateReason*) echo "$STUB_REASON"; exit 0 ;;
+    esac
+    seqfile="$STUB_DIR/seq_$key"
+    if [ ! -f "$seqfile" ]; then
+      eval "init=\\$STATES_$key"
+      echo "$init" | tr ',' '\\n' > "$seqfile"
+    fi
+    first=$(head -n 1 "$seqfile")
+    rest=$(tail -n +2 "$seqfile")
+    if [ -n "$rest" ]; then echo "$rest" > "$seqfile"; fi
+    echo "$first"
+    ;;
+esac
+`;
+
+function run(args, env = {}) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), "dad-ecs-rollout-"));
+  try {
+    const bin = path.join(dir, "aws");
+    writeFileSync(bin, stub);
+    chmodSync(bin, 0o755);
+    const result = spawnSync("bash", [script, ...args], {
+      encoding: "utf8",
+      env: {
+        PATH: `${dir}:${process.env.PATH}`,
+        STUB_DIR: dir,
+        ROLLOUT_POLL_SECONDS: "0",
+        ROLLOUT_TIMEOUT_SECONDS: "5",
+        ...env,
+      },
+    });
+    let calls = "";
+    try {
+      calls = readFileSync(path.join(dir, "calls.log"), "utf8");
+    } catch {}
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr, calls };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("forces a new deployment of each service and succeeds when all complete", () => {
+  const r = run(["dad-staging", "api", "web", "nginx"], {
+    STATES_api: "COMPLETED",
+    STATES_web: "COMPLETED",
+    STATES_nginx: "COMPLETED",
+  });
+  assert.equal(r.status, 0, r.stderr);
+  for (const svc of ["api", "web", "nginx"]) {
+    assert.match(r.calls, new RegExp(`update-service --cluster dad-staging --service ${svc} --force-new-deployment`));
+    assert.match(r.stdout, new RegExp(`${svc}: deployment dep-${svc} COMPLETED`));
+  }
+});
+
+test("keeps polling while IN_PROGRESS or not yet listed, then succeeds", () => {
+  const r = run(["dad-staging", "api"], { STATES_api: "None,IN_PROGRESS,IN_PROGRESS,COMPLETED" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /api: deployment dep-api COMPLETED/);
+});
+
+test("fails when OUR deployment ends FAILED, even though a rollback deployment exists", () => {
+  // The circuit breaker rolled back: our id (dep-api) is FAILED. The script must key on
+  // that id; the rollback deployment being COMPLETED must not make this pass.
+  const r = run(["dad-staging", "api"], {
+    STATES_api: "IN_PROGRESS,FAILED",
+    STUB_REASON: "ECS deployment circuit breaker: tasks failed to start.",
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /api: deployment dep-api FAILED and was rolled back: ECS deployment circuit breaker: tasks failed to start\./);
+  // The rolloutState query itself (not just the later rolloutStateReason lookup) must
+  // filter on the id this run started, never on "whichever deployment is PRIMARY".
+  assert.match(
+    r.calls,
+    /deployments\[\?id=='dep-api'\] \| \[0\]\.rolloutState --output text/,
+    "state query must be keyed on the deployment id it started",
+  );
+  assert.doesNotMatch(
+    r.calls,
+    /deployments\[\?status=='PRIMARY'\] \| \[0\]\.rolloutState/,
+    "must not ask about the current primary deployment",
+  );
+});
+
+test("a failure on one service still waits for and reports the others, then exits 1", () => {
+  const r = run(["dad-staging", "api", "web"], {
+    STATES_api: "FAILED",
+    STATES_web: "COMPLETED",
+    STUB_REASON: "unhealthy",
+  });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /api: deployment dep-api FAILED/);
+  assert.match(r.stdout, /web: deployment dep-web COMPLETED/);
+});
+
+test("fails with a clear message when the deployment never finishes", () => {
+  const r = run(["dad-staging", "api"], { STATES_api: "IN_PROGRESS", ROLLOUT_TIMEOUT_SECONDS: "0" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /api: deployment dep-api still 'IN_PROGRESS' after 0s/);
+});
+
+test("fails when update-service returns no deployment id", () => {
+  const r = run(["dad-staging", "api"], { STUB_UPDATE_OUTPUT: "None", STATES_api: "COMPLETED" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /returned no PRIMARY deployment id/);
+});
+
+test("surfaces AWS errors instead of swallowing them", () => {
+  const r = run(["dad-staging", "api"], { STUB_DENY: "1" });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /AccessDenied/);
+});
+
+test("requires a cluster and at least one service", () => {
+  assert.equal(run([]).status, 2);
+  assert.equal(run(["dad-staging"]).status, 2);
+});

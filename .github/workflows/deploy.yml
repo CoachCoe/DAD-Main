@@ -6,15 +6,15 @@ name: Deploy (app)
 # scripts/deploy.sh exactly:
 #
 #   build/push images -> migrate (run-task) -> provision-roles (run-task)
-#     -> ecs update-service api/web/nginx ("up") -> smoke checks
-#     -> workers (ecs update-service for the six worker services),
+#     -> roll api/web/nginx ("up") and wait for each new deployment to COMPLETE
+#     -> workers (roll the six worker services the same way),
 #        behind DONOR_GO_WORKERS_ENABLED
 #
 # Staging runs automatically on a merge to dev. Production runs on a release tag
 # or a merge to main, gated by the `production` GitHub Environment manual-approval
 # protection rule (configured in repo settings, not in YAML).
 #
-# Cluster and service names are read from CDK CloudFormation outputs / SSM at
+# Cluster and network ids are read from the CDK CloudFormation outputs at
 # runtime, never hardcoded. ECS service names match docker-compose.prod.yml
 # exactly: api, web, nginx, stripe-worker, projection-worker, login-email-worker,
 # email-change-worker, message-worker, push-worker.
@@ -61,7 +61,11 @@ jobs:
     # hard-failing on a role that does not exist yet. The pipeline "wakes up" on
     # the first push/release after the variable is set. See docs/aws-deployment.md
     # and https://github.com/CoachCoe/DAD-infra (apps/dad-main).
-    if: ${{ vars.APP_DEPLOY_ROLE_ARN != '' }}
+    # Releases are also cut for the mobile contract (mobile-foundation-v*). Those are
+    # not application releases and must never start a deploy.
+    if: >-
+      ${{ vars.APP_DEPLOY_ROLE_ARN != '' &&
+      !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'mobile-foundation-')) }}
     # Resolve the environment from the trigger: dev push -> staging; release tag
     # or main push -> production; workflow_dispatch -> the chosen input.
     environment: >-
@@ -163,56 +167,25 @@ jobs:
           DAD_SECURITY_GROUPS: ${{ steps.names.outputs.sgs }}
         run: ./scripts/run-task.sh "$DAD_ENV" provision-roles
 
-      # 3) the "up" step: roll the long-running services api, web, nginx.
-      - name: update-service api/web/nginx (the up step)
+      # 3) the "up" step: roll the long-running services api, web, nginx, and gate on
+      #    each new deployment reaching COMPLETED. The services have container health
+      #    checks and the ECS deployment circuit breaker with rollback (DAD-infra
+      #    apps/dad-main), so a deployment whose tasks fail to start or stay healthy ends
+      #    FAILED and this step fails. This replaces the old ECS Exec smoke checks: no
+      #    shell into a running task, no Session Manager plugin, no extra IAM.
+      #    See scripts/ecs-rollout.sh for why it keys on the deployment it started.
+      - name: roll api/web/nginx and wait for the rollout (the up step)
         env:
           CLUSTER: ${{ steps.names.outputs.cluster }}
-        run: |
-          set -euo pipefail
-          for svc in api web nginx; do
-            aws ecs update-service \
-              --cluster "$CLUSTER" \
-              --service "$svc" \
-              --force-new-deployment
-          done
-          aws ecs wait services-stable --cluster "$CLUSTER" --services api web nginx
+        run: ./scripts/ecs-rollout.sh "$CLUSTER" api web nginx
 
-      # 4) smoke checks, mirroring `deploy.sh smoke` (api /health/ready on 8002,
-      #    nginx /health on 8081, web / on 3000). Uses ECS Exec against one
-      #    running task of each service, the same shape as `compose exec`.
-      #    ECS Exec must be enabled on the services (enableExecuteCommand).
-      - name: smoke checks
-        env:
-          CLUSTER: ${{ steps.names.outputs.cluster }}
-        run: |
-          set -euo pipefail
-          task_for() {
-            aws ecs list-tasks --cluster "$CLUSTER" --service-name "$1" \
-              --desired-status RUNNING --query 'taskArns[0]' --output text
-          }
-          exec_in() {
-            # exec_in <service> <container> <shell-command>
-            aws ecs execute-command --cluster "$CLUSTER" \
-              --task "$(task_for "$1")" --container "$2" \
-              --interactive --command "$3"
-          }
-          exec_in api   api   'wget -q -O - http://127.0.0.1:8002/health/ready'
-          exec_in nginx nginx 'wget -q -O /dev/null http://127.0.0.1:8081/health'
-          exec_in web   web   'node -e '\''fetch("http://127.0.0.1:3000/").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'\'''
-
-      # 5) workers: roll the six worker services last, only when workers are on.
+      # 4) workers: roll the six worker services last, only when workers are on.
       #    Gated on DONOR_GO_WORKERS_ENABLED (environment variable).
-      - name: update-service workers (gated on DONOR_GO_WORKERS_ENABLED)
+      - name: roll workers and wait for the rollout (gated on DONOR_GO_WORKERS_ENABLED)
         if: ${{ vars.DONOR_GO_WORKERS_ENABLED == 'true' }}
         env:
           CLUSTER: ${{ steps.names.outputs.cluster }}
         run: |
-          set -euo pipefail
-          workers="stripe-worker projection-worker login-email-worker email-change-worker message-worker push-worker"
-          for svc in $workers; do
-            aws ecs update-service \
-              --cluster "$CLUSTER" \
-              --service "$svc" \
-              --force-new-deployment
-          done
-          aws ecs wait services-stable --cluster "$CLUSTER" --services $workers
+          ./scripts/ecs-rollout.sh "$CLUSTER" \
+            stripe-worker projection-worker login-email-worker \
+            email-change-worker message-worker push-worker

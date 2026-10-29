@@ -261,16 +261,25 @@ Two pipelines:
 2. **App pipeline — `.github/workflows/deploy.yml`** (direct ECS, CDK reserved for infra):
    - build `dad/api` + `dad/web` (+ `dad/nginx`), push to ECR tagged with the git SHA.
    - then **direct ECS deploy** in the exact `scripts/deploy.sh` order:
-     `migrate` run-task → `provision-roles` run-task → `aws ecs update-service` for
-     api/web/nginx (the `up` step) → smoke checks → workers (`update-service` for the six
-     worker services) **behind `DONOR_GO_WORKERS_ENABLED`**.
-   - staging auto on merge to `dev`; production on release tag / merge to `main`, gated by
-     manual approval.
+     `migrate` run-task → `provision-roles` run-task → force a new deployment of
+     api/web/nginx and wait for it to complete (the `up` step) → the same for the six
+     worker services **behind `DONOR_GO_WORKERS_ENABLED`**.
+   - staging auto on merge to `dev`; production on merge to `main`, gated by manual
+     approval. Releases tagged `mobile-foundation-*` (the mobile contract) never start a
+     deploy.
    - **Decision:** the app pipeline uses direct `aws ecs update-service`; CDK is reserved
      for infra only.
 
-Smoke checks mirror `scripts/deploy.sh smoke`: api `/health/ready` on 8002, nginx
-`/health` on 8081, web `/` on 3000.
+The deploy gate is the ECS rollout itself. The api, web, and nginx task definitions carry
+container health checks (api `/health/live` on 8002, nginx `/health` on 8081, web `/` on
+3000), and every service uses the deployment circuit breaker with rollback.
+`scripts/ecs-rollout.sh` starts each new deployment, remembers its id, and waits for that
+deployment to reach `COMPLETED`; a deployment that ends `FAILED` (rolled back) fails the
+step. It follows its own deployment id because a rollback is a new deployment that itself
+reports `COMPLETED`. This replaces the earlier `deploy.sh smoke`-style checks run through
+ECS Exec, which needed a shell in running tasks. The api check is liveness, not the
+database-backed `/health/ready`, so a database outage does not make ECS replace every api
+task; `migrate` runs first and proves database connectivity.
 
 Document required GitHub Environments (`staging`, `production`) and protection rules, and
 the repo/environment variables each workflow needs (account ids, region, cluster/service
