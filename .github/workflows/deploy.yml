@@ -87,27 +87,31 @@ jobs:
           role-to-assume: ${{ vars.APP_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve cluster/subnets/security-groups from CDK outputs / SSM
+      - name: Resolve cluster/subnets/security-groups from CDK stack outputs
         id: names
-        # Prefer the CloudFormation outputs the CDK stacks publish; fall back to
-        # SSM parameters the stacks also write. Never hardcode names.
+        # The CloudFormation outputs published by DAD-infra's apps/dad-main stacks
+        # (dad-<name>-<env>) are the only source; names are never hardcoded. The app
+        # deploy role reads them via cloudformation:DescribeStacks (DAD-infra
+        # pipeline-iam-stack). A missing stack or output fails the step with a message
+        # that names it, rather than being swallowed.
         run: |
           set -euo pipefail
           out() {
-            # out <stack-suffix> <OutputKey> <ssm-fallback-path>
-            local stack="dad-$1-${DAD_ENV}" key="$2" ssm="$3" val
+            # out <stack-suffix> <OutputKey>
+            local stack="dad-$1-${DAD_ENV}" key="$2" val
+            # No stderr redirect: an AccessDenied or ValidationError should be visible.
             val="$(aws cloudformation describe-stacks --stack-name "$stack" \
               --query "Stacks[0].Outputs[?OutputKey=='$key'].OutputValue" \
-              --output text 2>/dev/null || true)"
+              --output text)" || val=""
             if [ -z "$val" ] || [ "$val" = "None" ]; then
-              val="$(aws ssm get-parameter --name "$ssm" \
-                --query 'Parameter.Value' --output text)"
+              echo "::error::Stack '$stack' has no output '$key'. Is DAD-infra apps/dad-main deployed for ${DAD_ENV}?" >&2
+              exit 1
             fi
             printf '%s' "$val"
           }
-          cluster="$(out ecs-cluster ClusterName /dad/${DAD_ENV}/ecs/cluster-name)"
-          subnets="$(out network ComputeSubnetIds /dad/${DAD_ENV}/network/compute-subnet-ids)"
-          sgs="$(out network WorkersSecurityGroupId /dad/${DAD_ENV}/network/workers-sg-id)"
+          cluster="$(out ecs-cluster ClusterName)"
+          subnets="$(out network ComputeSubnetIds)"
+          sgs="$(out network WorkersSecurityGroupId)"
           {
             echo "cluster=$cluster"
             echo "subnets=$subnets"
