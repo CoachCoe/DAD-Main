@@ -8,12 +8,12 @@ name: Deploy (app)
 #   build/push images -> pin task definitions to the image tag
 #     -> migrate (run-task, waited on) -> provision-roles (run-task, waited on)
 #     -> roll api/web/nginx ("up") and wait for each new deployment to COMPLETE
-#     -> workers (roll the six worker services the same way),
-#        behind DONOR_GO_WORKERS_ENABLED
+#     -> workers (roll the six worker services the same way, unless DAD-infra has
+#        them switched off: desired count 0)
 #
-# Staging runs automatically on a merge to dev. Production runs on a release tag
-# or a merge to main, gated by the `production` GitHub Environment manual-approval
-# protection rule (configured in repo settings, not in YAML).
+# Staging runs automatically on a merge to dev. Production runs only on a merge to main
+# (there is no release- or tag-triggered path), gated by the `production` GitHub
+# Environment's branch rule and required reviewer (configured in repo settings).
 #
 # Cluster and network ids are read from the CDK CloudFormation outputs at
 # runtime, never hardcoded. ECS service names match docker-compose.prod.yml
@@ -31,8 +31,6 @@ on:
       - "deploy/**"
       - "docker-compose.prod.yml"
       - ".github/workflows/deploy.yml"
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       env:
@@ -60,19 +58,16 @@ jobs:
     # is configured as the per-environment variable APP_DEPLOY_ROLE_ARN. Before
     # bootstrap the variable is empty, so the job is skipped (green) instead of
     # hard-failing on a role that does not exist yet. The pipeline "wakes up" on
-    # the first push/release after the variable is set. See docs/aws-deployment.md
+    # the first push after the variable is set. See docs/aws-deployment.md
     # and https://github.com/CoachCoe/DAD-infra (apps/dad-main).
-    # Releases are also cut for the mobile contract (mobile-foundation-v*). Those are
-    # not application releases and must never start a deploy.
-    if: >-
-      ${{ vars.APP_DEPLOY_ROLE_ARN != '' &&
-      !(github.event_name == 'release' && startsWith(github.event.release.tag_name, 'mobile-foundation-')) }}
-    # Resolve the environment from the trigger: dev push -> staging; release tag
-    # or main push -> production; workflow_dispatch -> the chosen input.
+    if: ${{ vars.APP_DEPLOY_ROLE_ARN != '' }}
+    # Resolve the environment from the trigger: dev push -> staging; main push ->
+    # production; workflow_dispatch -> the chosen input (the environment's branch rule
+    # still applies, so production can only be dispatched from main).
     environment: >-
       ${{
         github.event_name == 'workflow_dispatch' && inputs.env
-        || ((github.event_name == 'release' || github.ref == 'refs/heads/main') && 'production' || 'staging')
+        || (github.ref == 'refs/heads/main' && 'production' || 'staging')
       }}
     env:
       # The CloudFormation stack that carries the ECS cluster/service outputs
@@ -80,7 +75,7 @@ jobs:
       DAD_ENV: >-
         ${{
           github.event_name == 'workflow_dispatch' && inputs.env
-          || ((github.event_name == 'release' || github.ref == 'refs/heads/main') && 'production' || 'staging')
+          || (github.ref == 'refs/heads/main' && 'production' || 'staging')
         }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -200,12 +195,13 @@ jobs:
           CLUSTER: ${{ steps.names.outputs.cluster }}
         run: ./scripts/ecs-rollout.sh "$CLUSTER" api web nginx
 
-      # 4) workers: roll the six worker services last, only when workers are on.
-      #    Gated on DONOR_GO_WORKERS_ENABLED (environment variable).
-      - name: roll workers and wait for the rollout (gated on DONOR_GO_WORKERS_ENABLED)
-        if: ${{ vars.DONOR_GO_WORKERS_ENABLED == 'true' }}
+      # 4) workers: roll the six worker services last. Whether they run is DAD-infra's
+      #    `workersEnabled` (their desired count), the one switch; services ECS reports at
+      #    a desired count of 0 are skipped (ROLLOUT_SKIP_IDLE), not tracked here.
+      - name: roll workers and wait for the rollout (skips any switched off)
         env:
           CLUSTER: ${{ steps.names.outputs.cluster }}
+          ROLLOUT_SKIP_IDLE: "true"
         run: |
           ./scripts/ecs-rollout.sh "$CLUSTER" \
             stripe-worker projection-worker login-email-worker \

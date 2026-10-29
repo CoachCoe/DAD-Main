@@ -8,6 +8,9 @@
 # Environment (optional):
 #   ROLLOUT_TIMEOUT_SECONDS  give up on a service after this long   (default 1200)
 #   ROLLOUT_POLL_SECONDS     seconds between status checks          (default 15)
+#   ROLLOUT_SKIP_IDLE        `true` skips services whose desired count is 0 (they are switched
+#                            off in DAD-infra's config, the one owner of that switch) and
+#                            rolls the rest. When every service is idle it exits 0.
 #   DAD_TASKDEFS_FILE        file of `<family>=<task definition ARN>` lines, as printed by
 #                            ecs-pin-image.sh. When set, each service is deployed on the
 #                            pinned revision of family `dad-<service>` (--task-definition);
@@ -42,6 +45,30 @@ services=("$@")
 timeout="${ROLLOUT_TIMEOUT_SECONDS:-1200}"
 interval="${ROLLOUT_POLL_SECONDS:-15}"
 taskdefs_file="${DAD_TASKDEFS_FILE:-}"
+
+# Drop services that are switched off (desired count 0) when asked to. They are not
+# deployed: when DAD-infra switches them on, CloudFormation starts them at the image tag
+# recorded for the last successful release.
+if [ "${ROLLOUT_SKIP_IDLE:-false}" = "true" ]; then
+  active=()
+  for svc in "${services[@]}"; do
+    desired="$(aws ecs describe-services \
+      --cluster "$cluster" \
+      --services "$svc" \
+      --query 'services[0].desiredCount' \
+      --output text)"
+    case "$desired" in
+      0) echo "$svc: desired count 0 (switched off); skipping" ;;
+      '' | None) echo "::error::$svc: no such service in $cluster" >&2; exit 1 ;;
+      *) active+=("$svc") ;;
+    esac
+  done
+  if [ "${#active[@]}" -eq 0 ]; then
+    echo "every service is switched off; nothing to roll"
+    exit 0
+  fi
+  services=("${active[@]}")
+fi
 
 # Print the pinned task definition ARN for the service's family (dad-<service>).
 pinned_taskdef() {
