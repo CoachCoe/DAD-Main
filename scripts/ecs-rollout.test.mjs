@@ -101,7 +101,10 @@ test("fails when OUR deployment ends FAILED, even though a rollback deployment e
     STUB_REASON: "ECS deployment circuit breaker: tasks failed to start.",
   });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /api: deployment dep-api FAILED and was rolled back: ECS deployment circuit breaker: tasks failed to start\./);
+  assert.match(
+    r.stderr,
+    /api: deployment dep-api FAILED and was rolled back: ECS deployment circuit breaker: tasks failed to start\./,
+  );
   // The rolloutState query itself (not just the later rolloutStateReason lookup) must
   // filter on the id this run started, never on "whichever deployment is PRIMARY".
   assert.match(
