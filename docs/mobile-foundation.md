@@ -27,7 +27,7 @@ call the API host directly with `X-DAD-Client: native`, no cookies or Origin, an
 access token when authenticated. Browser-only giving and staff operations stay on the web.
 
 After checks pass on the release commit, tag it `mobile-foundation-v<version>` (using the
-version in the file, for example `mobile-foundation-v2.3.0`) and push that tag. The mobile-foundation workflow verifies the tag
+version in the file, for example `mobile-foundation-v2.4.0`) and push that tag. The mobile-foundation workflow verifies the tag
 matches the declared version and publishes the individual files as GitHub Release assets.
 Existing release assets are never overwritten. The workflow also retains a candidate
 bundle as an Actions artifact on normal branch and PR builds; those artifacts are not
@@ -40,7 +40,7 @@ the vendored contract without network access to this private repository. An auth
 maintainer can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v2.3.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
+gh release download mobile-foundation-v2.4.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
@@ -48,6 +48,25 @@ additions, and major versions for breaking contract/token/link changes. A mobile
 pins its dependency; changing the backend must preserve supported installed clients.
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
+
+## Compatible additions in version 2.4
+
+Version 2.4 adds one optional request pair and corrects two documented behaviours; no
+operation is added or removed.
+
+- `POST /donor/password/sign-in` accepts optional `device_name` (up to 64 characters) and
+  `platform` (`IOS` or `ANDROID`) with the same rules as phone, OIDC, passkey and claim
+  sign-in, so a password session can be labelled in the donor's session list. Browser
+  requests ignore them. Signup issues no session; its emailed link is exchanged through
+  `POST /donor/claim`, which already takes both fields.
+- `POST /donor/signup` answers `200 {"sent":true}` (as the server always has), not the
+  `202 {"message"}` the contract used to describe. Clients must accept any 2xx and ignore
+  the body.
+- `POST /donor/me/password` answers a missing or wrong `current_password` with
+  `422` and `code` `CURRENT_PASSWORD_INCORRECT` instead of `401`, so a typo no longer looks
+  like a lost session. `detail` is unchanged. A `401` still means the session is gone.
+  Clients should treat a `401` with the same `detail` from an older server the same way,
+  and must tolerate an unknown `code` in an error body.
 
 ## Compatible additions in version 2.3
 
