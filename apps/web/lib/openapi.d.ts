@@ -8150,6 +8150,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @description The calling partner user's own id, as listed by partnerUsers. */
+                        user_id: string;
                         organization: string;
                         /** @description The organization's description, as its administrators wrote it (§7.2). */
                         description: string;

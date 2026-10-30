@@ -7429,6 +7429,10 @@
         "schema": {
          "type": "object",
          "properties": {
+          "user_id": {
+           "type": "string",
+           "description": "The calling partner user's own id, as listed by partnerUsers."
+          },
           "organization": {
            "type": "string"
           },
@@ -7498,6 +7502,7 @@
           }
          },
          "required": [
+          "user_id",
           "organization",
           "description",
           "role",

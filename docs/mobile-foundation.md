@@ -49,6 +49,14 @@ pins its dependency; changing the backend must preserve supported installed clie
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
 
+## Compatible additions in version 2.3
+
+Version 2.3 adds response fields only; no operation is added or removed. The partner
+overview carries `user_id`, the calling partner user's own id, so a client can recognise
+itself in the users list and withhold self-removal (the server also refuses it). The
+donor dashboard carries `rankings_opted_out`. Clients must ignore response fields they
+do not know.
+
 ## Compatible additions in version 2.2
 
 Version 2.2 adds donor signup and password authentication, optional checkout signup

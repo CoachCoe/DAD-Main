@@ -25,11 +25,14 @@ const minimumGroup = 5
 // EnrolledPercent also without a workforce size. UpdatedAt is when any figure
 // last changed, nil before the partner has a published initiative. Role is the
 // caller's own, so a client can offer only the actions it may take (§7.2).
+// UserID is the calling user's own id, so a client can recognise itself in the
+// users list (an admin cannot remove themselves).
 type PartnerOverview struct {
 	HasLogo               bool       `json:"has_logo"`
 	CommittedVerified     bool       `json:"committed_verified"`
 	DeployedVerified      bool       `json:"deployed_verified"`
 	PeopleReachedVerified bool       `json:"people_reached_verified"`
+	UserID                string     `json:"user_id"`
 	Organization          string     `json:"organization"`
 	Description           string     `json:"description"`
 	Role                  string     `json:"role"`
@@ -93,6 +96,7 @@ type PartnerDashboardService struct{ PartnerPortalService }
 func partnerOverview(actor PartnerActor, t queries.PartnerOverviewTotalsRow) PartnerOverview {
 	o := PartnerOverview{
 		HasLogo: t.HasLogo, CommittedVerified: t.CommittedVerified, DeployedVerified: t.DeployedVerified, PeopleReachedVerified: t.PeopleReachedVerified,
+		UserID:         actor.UserID.String(),
 		Organization:   actor.Organization,
 		Description:    t.Description,
 		Role:           actor.Role,
