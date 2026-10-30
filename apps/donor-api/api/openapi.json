@@ -12110,7 +12110,11 @@
           "type": "null"
          }
         ],
-        "description": "The donor's own ranking (S-4), or null when unranked."
+        "description": "The donor's own ranking (S-4), or null when unranked or opted out."
+       },
+       "rankings_opted_out": {
+        "type": "boolean",
+        "description": "True when the donor opted out of rankings. A null `rank` with this false means opted in but not yet ranked."
        },
        "network": {
         "anyOf": [
@@ -12135,6 +12139,7 @@
        "state",
        "streak",
        "rank",
+       "rankings_opted_out",
        "network",
        "impact"
       ],

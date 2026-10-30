@@ -3023,8 +3023,10 @@ export interface components {
             /** @constant */
             state: "ready";
             streak: components["schemas"]["StreakSummary"] | null;
-            /** @description The donor's own ranking (S-4), or null when unranked. */
+            /** @description The donor's own ranking (S-4), or null when unranked or opted out. */
             rank: components["schemas"]["Ranking"] | null;
+            /** @description True when the donor opted out of rankings. A null `rank` with this false means opted in but not yet ranked. */
+            rankings_opted_out: boolean;
             /** @description The donor's active-network headline (I-2), or null when they have no active referrals. */
             network: components["schemas"]["NetworkCard"] | null;
             impact: components["schemas"]["ImpactSummary"];

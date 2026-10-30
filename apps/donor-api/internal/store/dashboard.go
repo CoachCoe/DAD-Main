@@ -22,8 +22,11 @@ type DonorDashboard struct {
 	State         string           `json:"state"`
 	Streak        *StreakSummary   `json:"streak"`
 	Rank          *Ranking         `json:"rank"`
-	Network       *NetworkCard     `json:"network"`
-	Impact        ImpactSummary    `json:"impact"`
+	// RankingsOptedOut tells an opted-out donor from an opted-in one who has no
+	// rank yet; both have a null Rank.
+	RankingsOptedOut bool          `json:"rankings_opted_out"`
+	Network          *NetworkCard  `json:"network"`
+	Impact           ImpactSummary `json:"impact"`
 }
 
 // ImpactSummary is the donor's own impact totals (PRD I-1, I-3): what they have
@@ -131,6 +134,11 @@ func dashboard(ctx context.Context, q *queries.Queries, donor queries.Donor, now
 		return DonorDashboard{}, err
 	}
 	result.Rank = rank
+	preference, err := q.DonorPreference(ctx, id)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return DonorDashboard{}, err
+	}
+	result.RankingsOptedOut = preference.RankingsOptedOut
 	// Network headline (I-2): active-network count + annualized giving.
 	net, err := q.NetworkTotals(ctx, id)
 	if err != nil {
