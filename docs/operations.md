@@ -208,6 +208,10 @@ plaintext task-definition `environment` value. For a variable `X_URL`, with pref
 | URL plus separate password | `X_URL` without a password, and `X_PASSWORD`; the separate password replaces any in the URL |
 | Parts | `X_HOST`, `X_NAME`, `X_USER`, `X_PASSWORD`, optional `X_PORT` (default `5432`) and `X_SSLMODE` |
 
+On AWS every task uses the middle form: a password-less `X_URL` plus `X_PASSWORD` as an
+ECS secret (see `docs/aws-deployment.md` section 5.1). The DAD-Main release that accepts
+it is deployed before the DAD-infra change that relies on it.
+
 A set `X_URL` always wins over the parts. The password is never logged: the process
 reports only variable names in its errors.
 
@@ -252,7 +256,7 @@ with both environment files.
 ### Rotating database passwords
 
 1. Generate a new password (`openssl rand -hex 32`) and put it in the process's URL in
-   `.env.database`.
+   `.env.database` (or, with a password-less URL, in its `X_PASSWORD` variable or secret).
 2. Run `./scripts/deploy.sh provision-roles`. The login accepts only the new password
    from now on: connections already open stay open, but the running process cannot open
    new ones, so go straight on.

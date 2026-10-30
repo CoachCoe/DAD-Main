@@ -168,7 +168,7 @@ right task definition and command overrides; it is documented, not auto-run.
   `docs/operations.md#connection-pooling`).
 - CDK provisions the RDS instance, the master credentials (Secrets Manager), a dedicated
   **owner login** concept, and generates **per-process passwords** stored one-secret-per
-  login in Secrets Manager. CDK does **not** create the per-process Postgres roles
+  login in Secrets Manager and injected into tasks as ECS secrets. CDK does **not** create the per-process Postgres roles
   (`dad_api`, `dad_worker_stripe`, `dad_worker_projections`, `dad_worker_login_email`,
   `dad_worker_email_changes`, `dad_worker_messages`, `dad_worker_push`, `dad_monitor`,
   `dad_reconcile`, `dad_staff_cli`, `dad_rekey`) — the app's `migrate` and
@@ -181,17 +181,32 @@ right task definition and command overrides; it is documented, not auto-run.
 
 ### 5.1 Per-process DB URL construction
 
-Each process URL is assembled as:
+Each process URL carries the login but not the password:
 
 ```
-postgresql://<process-login>:<password>@<rds-proxy-endpoint>:5432/<db-name>?default_query_exec_mode=exec&sslmode=verify-full
+postgresql://<process-login>@<rds-proxy-endpoint>:5432/<db-name>?default_query_exec_mode=exec&sslmode=verify-full
 ```
 
-where `<process-login>` and `<password>` come from that process's Secrets Manager secret,
-`<rds-proxy-endpoint>` is the proxy's read/write endpoint, and `<db-name>` is the
-application database (default `dad`, per `.env.database.example` `POSTGRES_DB=dad`). The
-owner URL `DONOR_GO_DATABASE_URL` is built the same way with the owner login and is used
-only by migrate and provision-roles. Login names mirror `.env.database.example`
+The password reaches the process as an ECS secret under `<PREFIX>_DATABASE_PASSWORD`,
+where `<PREFIX>_DATABASE` is the URL variable without `_URL` (for example
+`DONOR_API_DATABASE_PASSWORD` beside `DONOR_API_DATABASE_URL`), injected from the
+`password` key of that login's Secrets Manager secret. No task definition holds a
+database password in `environment`. The password-less URL form is used rather than
+separate host/name/user parts because it keeps `default_query_exec_mode=exec`, which the
+RDS Proxy needs. A full URL that already contains a password still wins over the
+separate secret; see `docs/operations.md#supplying-a-password-as-a-secret`.
+
+`<process-login>` comes from that process's Secrets Manager secret, `<rds-proxy-endpoint>`
+is the proxy's read/write endpoint, and `<db-name>` is the application database (default
+`dad`, per `.env.database.example` `POSTGRES_DB=dad`). The owner URL
+`DONOR_GO_DATABASE_URL` takes the same form with `DONOR_GO_DATABASE_PASSWORD` and is used
+only by migrate and provision-roles.
+
+Deploy order: the DAD-Main release containing commit 7506cbf, which accepts both forms,
+goes out first; the DAD-infra change that switches task definitions to the password-less
+form (5c952e2) goes out after it. Deploying DAD-infra first leaves the processes unable
+to find a password. See `DAD-infra/docs/bootstrap.md`, "Database passwords are ECS
+secrets". Login names mirror `.env.database.example`
 (`dad_api_login`, `dad_worker_stripe_login`, … `dad_reconcile_login`).
 
 ## 6. Supporting services
@@ -200,7 +215,7 @@ only by migrate and provision-roles. Login names mirror `.env.database.example`
   image). Lifecycle policy expires untagged/old images.
 - **Secrets Manager:** Stripe test keys (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`),
   the two encryption keys (`DONOR_EMAIL_ENCRYPTION_KEY`, `DONOR_CONTENT_ENCRYPTION_KEY`),
-  per-process DB passwords, SES SMTP credentials (`DONOR_SMTP_HOST`, `DONOR_SMTP_PORT`,
+  per-process DB passwords (`<PREFIX>_DATABASE_PASSWORD`), SES SMTP credentials (`DONOR_SMTP_HOST`, `DONOR_SMTP_PORT`,
   `DONOR_SMTP_USERNAME`, `DONOR_SMTP_PASSWORD`, `DONOR_EMAIL_FROM`), plus optional api
   secrets modeled with empty defaults so the app's graceful-degradation 503s apply when
   unset: `DONOR_EVENT_CHECKIN_SECRET`, `DONOR_FOUNDING_CLAIM_KEY`, `DONOR_SMS_*`,
