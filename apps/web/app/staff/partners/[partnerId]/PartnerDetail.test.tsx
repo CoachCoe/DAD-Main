@@ -53,6 +53,14 @@ function posted(fetch: ReturnType<typeof stubApi>, suffix: string) {
   return call ? JSON.parse(String(call[1]?.body ?? "null")) : undefined;
 }
 
+// A save reloads the page, which swaps the content for a loading state until the
+// refetch lands; interacting before then acts on elements about to be replaced.
+async function reloaded(fetch: ReturnType<typeof stubApi>, loads: number) {
+  await waitFor(() =>
+    expect(fetch.mock.calls.filter(([u, i]) => String(u).endsWith("/partners/p-1") && !i?.method)).toHaveLength(loads),
+  );
+}
+
 it("shows the partner's match position, initiatives, and users", async () => {
   stubApi();
   render(<PartnerDetail partner="p-1" />);
@@ -82,7 +90,8 @@ it("records a match payment and removes a user", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Record payment" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Recorded a $250.00 match payment"));
   expect(posted(fetch, "/p-1/match-payment")).toEqual({ year: match.year, amount_minor: 25_000 });
-  fireEvent.click(screen.getByRole("button", { name: "Remove dana@delta.example" }));
+  await reloaded(fetch, 2);
+  fireEvent.click(await screen.findByRole("button", { name: "Remove dana@delta.example" }));
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Removed dana@delta.example."));
   expect(fetch.mock.calls.some(([u, i]) => String(u).endsWith("/p-1/users/u-1/remove") && i?.method === "POST")).toBe(
     true,
