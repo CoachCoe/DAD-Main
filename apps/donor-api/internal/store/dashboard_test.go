@@ -226,7 +226,14 @@ func TestDashboardSeparatesRankingOptOutFromNoRankYet(t *testing.T) {
 	for id, want := range map[pgtype.UUID]bool{optedIn: false, optedOut: true} {
 		result, err := dashboard(ctx, q, queries.Donor{ID: id}, now)
 		if err != nil || result.Rank != nil || result.RankingsOptedOut != want {
-			t.Fatalf("donor %s: rank=%+v opted_out=%v err=%v; want no rank and opted_out=%v", id, result.Rank, result.RankingsOptedOut, err, want)
+			t.Fatalf(
+				"donor %s: rank=%+v opted_out=%v err=%v; want no rank and opted_out=%v",
+				id,
+				result.Rank,
+				result.RankingsOptedOut,
+				err,
+				want,
+			)
 		}
 	}
 }
