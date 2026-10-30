@@ -43,14 +43,8 @@ func (s ContentService) AuthorizeSourceUpload(ctx context.Context, token string)
 	return nil
 }
 
-type PublicationSummary struct {
-	At pgtype.Timestamptz `json:"at"`
-	ID pgtype.UUID        `json:"id"`
-}
-
 type ContentInventory struct {
-	Publications []PublicationSummary        `json:"publications"`
-	Sources      []queries.ContentSourcesRow `json:"sources"`
+	Sources []queries.ContentSourcesRow `json:"sources"`
 }
 
 type StoredSource struct {
@@ -66,15 +60,7 @@ func (s ContentService) Inventory(ctx context.Context, token string) (ContentInv
 		if err != nil {
 			return ContentInventory{}, err
 		}
-		rows, err := q.ContentPublications(ctx)
-		if err != nil {
-			return ContentInventory{}, err
-		}
-		out := ContentInventory{Sources: sources, Publications: make([]PublicationSummary, 0, len(rows))}
-		for _, row := range rows {
-			out.Publications = append(out.Publications, PublicationSummary{ID: row.ID, At: row.CreatedAt})
-		}
-		return out, nil
+		return ContentInventory{Sources: sources}, nil
 	})
 }
 

@@ -11,35 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const contentPublications = `-- name: ContentPublications :many
-SELECT id,created_at FROM donor_content_publications ORDER BY created_at DESC,id LIMIT 20
-`
-
-type ContentPublicationsRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) ContentPublications(ctx context.Context) ([]ContentPublicationsRow, error) {
-	rows, err := q.db.Query(ctx, contentPublications)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ContentPublicationsRow{}
-	for rows.Next() {
-		var i ContentPublicationsRow
-		if err := rows.Scan(&i.ID, &i.CreatedAt); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const contentSourceByID = `-- name: ContentSourceByID :one
 SELECT actor_id, name, sha256, encrypted_data, id, created_at FROM donor_content_sources WHERE id=$1
 `
@@ -132,36 +103,5 @@ func (q *Queries) InsertContentSource(ctx context.Context, arg InsertContentSour
 		arg.Sha256,
 		arg.EncryptedData,
 	)
-	return err
-}
-
-const insertPublication = `-- name: InsertPublication :exec
-INSERT INTO donor_content_publications(id,actor_id,payload,created_at) VALUES($1,$2,$3,$4)
-`
-
-type InsertPublicationParams struct {
-	ID        pgtype.UUID        `json:"id"`
-	ActorID   pgtype.UUID        `json:"actor_id"`
-	Payload   []byte             `json:"payload"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) InsertPublication(ctx context.Context, arg InsertPublicationParams) error {
-	_, err := q.db.Exec(ctx, insertPublication,
-		arg.ID,
-		arg.ActorID,
-		arg.Payload,
-		arg.CreatedAt,
-	)
-	return err
-}
-
-const publishContentHead = `-- name: PublishContentHead :exec
-INSERT INTO donor_content_head(id,publication_id) VALUES('r1',$1)
-ON CONFLICT(id) DO UPDATE SET publication_id=EXCLUDED.publication_id
-`
-
-func (q *Queries) PublishContentHead(ctx context.Context, publicationID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, publishContentHead, publicationID)
 	return err
 }

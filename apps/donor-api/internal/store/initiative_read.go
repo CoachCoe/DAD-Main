@@ -232,3 +232,24 @@ func (reader InitiativeReader) PublishedBySlug(ctx context.Context, slug string)
 	}
 	return publicInitiative(queries.PublishedInitiativesRow(r)), nil
 }
+
+// OverallSpend is spend by category across every published initiative, with
+// the grand total. Totals only — never line items (PRD §5.2).
+type OverallSpend struct {
+	TotalMinor int64           `json:"total_minor"`
+	Categories []SpendCategory `json:"categories"`
+}
+
+// OverallSpend sums each spend category across all published initiatives.
+func (reader InitiativeReader) OverallSpend(ctx context.Context) (OverallSpend, error) {
+	rows, err := queries.New(reader.DB).PublishedSpendByCategory(ctx)
+	if err != nil {
+		return OverallSpend{}, err
+	}
+	out := OverallSpend{Categories: make([]SpendCategory, 0, len(rows))}
+	for _, row := range rows {
+		out.TotalMinor += row.AmountMinor
+		out.Categories = append(out.Categories, SpendCategory{Category: row.Category, AmountMinor: row.AmountMinor})
+	}
+	return out, nil
+}

@@ -71,6 +71,15 @@ SELECT category, amount_minor FROM donor_initiative_spend
 WHERE initiative_id=$1
 ORDER BY category;
 
+-- name: PublishedSpendByCategory :many
+-- Overall spend: each category's total across every published initiative.
+SELECT s.category, SUM(s.amount_minor)::bigint AS amount_minor
+FROM donor_initiative_spend s
+JOIN donor_initiatives i ON i.id = s.initiative_id
+WHERE i.publish_state = 'PUBLISHED'
+GROUP BY s.category
+ORDER BY s.category;
+
 -- name: InitiativeSpendTotal :one
 SELECT COALESCE(SUM(amount_minor), 0)::bigint AS total_minor
 FROM donor_initiative_spend WHERE initiative_id=$1;

@@ -70,7 +70,7 @@ test("mobile initiative spend and event journeys retain their public reads", () 
     assert.deepEqual(mobile.paths[path]?.get, original.paths[path].get, path);
   }
   assert.equal(mobile.paths["/health/ready"], undefined);
-  assert.equal(mobile.paths["/donor/public/content"], undefined);
+  assert.equal(mobile.paths["/donor/public/spend"], undefined);
 });
 
 test("token generators preserve semantic names and reject invalid numeric values", () => {

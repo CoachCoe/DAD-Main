@@ -13,13 +13,8 @@ import (
 
 	"dad/donor-api/internal/buildinfo"
 	"dad/donor-api/internal/payments"
-	"dad/donor-api/internal/store"
 	"dad/donor-api/internal/wallet"
 )
-
-type ContentSource interface {
-	PublicContent(context.Context) (store.PublicContent, error)
-}
 
 type WebhookReceiver interface {
 	Receive(context.Context, []byte, string) error
@@ -33,7 +28,6 @@ type Services struct {
 	TrustedProxies []netip.Prefix
 	Ready          func(context.Context) error
 
-	Content  ContentSource
 	Checkout CheckoutSource
 	Webhook  WebhookReceiver
 	// Partner portal: the public application, the authenticated
@@ -179,23 +173,6 @@ func (a *api) ready(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "payments": "test_mode_only", "commit": buildinfo.Revision()})
-}
-
-func (a *api) publicContent(w http.ResponseWriter, r *http.Request) {
-	const unavailable = "Donor database unavailable"
-	if a.Content == nil {
-		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
-		return
-	}
-	ctx, cancel := withTimeout(r, 3*time.Second)
-	defer cancel()
-	body, err := a.Content.PublicContent(ctx)
-	if err != nil {
-		writeError(w, r, http.StatusServiceUnavailable, unavailable, err)
-		return
-	}
-	w.Header().Set("Cache-Control", "public, max-age=60")
-	writeJSON(w, http.StatusOK, body)
 }
 
 func (a *api) stripeWebhook(w http.ResponseWriter, r *http.Request) {

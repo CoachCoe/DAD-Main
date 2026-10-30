@@ -148,10 +148,11 @@
     }
    }
   },
-  "/donor/public/content": {
+  "/donor/public/spend": {
    "get": {
-    "operationId": "publicContent",
-    "summary": "Published initiatives and impact ledger",
+    "operationId": "overallSpend",
+    "summary": "Published spend by category",
+    "description": "Category totals across every published initiative, with the grand total. Individual transactions are never exposed.",
     "tags": [
      "Public"
     ],
@@ -162,7 +163,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/PublicContent"
+         "$ref": "#/components/schemas/OverallSpend"
         }
        }
       }
@@ -4430,7 +4431,7 @@
   "/donor/staff/content": {
    "get": {
     "operationId": "contentInventory",
-    "summary": "Published content and source documents",
+    "summary": "Source documents",
     "tags": [
      "Content"
     ],
@@ -4622,69 +4623,6 @@
      },
      "422": {
       "$ref": "#/components/responses/Unprocessable"
-     },
-     "503": {
-      "$ref": "#/components/responses/Unavailable"
-     }
-    }
-   }
-  },
-  "/donor/staff/content/publish": {
-   "post": {
-    "operationId": "publish",
-    "summary": "Publish the ledger",
-    "description": "A refused publication answers 422 `{\"detail\":\"The spreadsheet has problems\",\"errors\":[{sheet,row,column,reason}]}` listing every problem found.",
-    "tags": [
-     "Content"
-    ],
-    "security": [
-     {
-      "staffCookieAuth": []
-     }
-    ],
-    "x-rate-limit": "staff",
-    "x-clients": [
-     "browser"
-    ],
-    "requestBody": {
-     "required": true,
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/PublicationRequest"
-       }
-      }
-     },
-     "description": "At most 8 MiB. Authorized before the body is read."
-    },
-    "responses": {
-     "200": {
-      "description": "OK",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Publication"
-        }
-       }
-      }
-     },
-     "401": {
-      "$ref": "#/components/responses/Unauthorized"
-     },
-     "403": {
-      "$ref": "#/components/responses/Forbidden"
-     },
-     "413": {
-      "$ref": "#/components/responses/PayloadTooLarge"
-     },
-     "415": {
-      "$ref": "#/components/responses/UnsupportedMediaType"
-     },
-     "422": {
-      "$ref": "#/components/responses/Unprocessable"
-     },
-     "429": {
-      "$ref": "#/components/responses/TooManyRequests"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -11919,7 +11857,7 @@
       "items": {
        "$ref": "#/components/schemas/PublicationProblem"
       },
-      "description": "Present only on a 422 from POST /donor/staff/content/publish: every problem found, up to 100."
+      "description": "Present only on a 422 from POST /donor/staff/founding-claims: every problem found, up to 100."
      }
     },
     "required": [
@@ -11932,7 +11870,7 @@
     "properties": {
      "sheet": {
       "type": "string",
-      "description": "`initiatives` or `ledger`, or empty for a request field named by `column`."
+      "description": "The spreadsheet the problem is in, or empty for a request field named by `column`."
      },
      "row": {
       "type": "integer",
@@ -11983,93 +11921,6 @@
      "expires_in",
      "refresh_token",
      "refresh_expires_in"
-    ],
-    "additionalProperties": false
-   },
-   "PublicContent": {
-    "type": "object",
-    "properties": {
-     "cadence": {
-      "type": [
-       "string",
-       "null"
-      ],
-      "description": "Publication cadence label."
-     },
-     "ledger": {
-      "type": "array",
-      "items": {
-       "$ref": "#/components/schemas/LedgerFigure"
-      },
-      "description": "Published impact ledger figures, in spreadsheet order."
-     },
-     "ledger_as_of": {
-      "type": [
-       "string",
-       "null"
-      ],
-      "description": "Date the ledger figures describe.",
-      "format": "date"
-     },
-     "publication_id": {
-      "type": "string",
-      "format": "uuid"
-     },
-     "published_at": {
-      "type": "string",
-      "format": "date-time"
-     },
-     "state": {
-      "type": "string",
-      "enum": [
-       "unpublished",
-       "published"
-      ]
-     }
-    },
-    "required": [
-     "cadence",
-     "ledger",
-     "ledger_as_of",
-     "state"
-    ],
-    "additionalProperties": false
-   },
-   "LedgerFigure": {
-    "type": "object",
-    "properties": {
-     "id": {
-      "type": "string",
-      "description": "Unique within the publication."
-     },
-     "metric": {
-      "type": "string"
-     },
-     "value": {
-      "type": "integer",
-      "format": "int64",
-      "description": "In `unit`; USD_CENTS is integer cents."
-     },
-     "unit": {
-      "type": "string",
-      "enum": [
-       "USD_CENTS",
-       "PEOPLE",
-       "INITIATIVES",
-       "PARTNERS"
-      ]
-     },
-     "illustrative": {
-      "type": "boolean",
-      "description": "An illustrative example, not a reported outcome."
-     }
-    },
-    "required": [
-     "id",
-     "metric",
-     "value",
-     "unit",
-     "illustrative"
     ],
     "additionalProperties": false
    },
@@ -13957,24 +13808,6 @@
     ],
     "additionalProperties": false
    },
-   "PublicationSummary": {
-    "type": "object",
-    "properties": {
-     "at": {
-      "type": "string",
-      "format": "date-time"
-     },
-     "id": {
-      "type": "string",
-      "format": "uuid"
-     }
-    },
-    "required": [
-     "at",
-     "id"
-    ],
-    "additionalProperties": false
-   },
    "StoredSource": {
     "type": "object",
     "properties": {
@@ -14000,12 +13833,6 @@
    "ContentInventory": {
     "type": "object",
     "properties": {
-     "publications": {
-      "type": "array",
-      "items": {
-       "$ref": "#/components/schemas/PublicationSummary"
-      }
-     },
      "sources": {
       "type": "array",
       "items": {
@@ -14014,40 +13841,8 @@
      }
     },
     "required": [
-     "publications",
      "sources"
     ],
-    "additionalProperties": false
-   },
-   "Publication": {
-    "type": "object",
-    "properties": {
-     "publication_id": {
-      "type": "string",
-      "format": "uuid"
-     }
-    },
-    "required": [
-     "publication_id"
-    ],
-    "additionalProperties": false
-   },
-   "PublicationRequest": {
-    "type": "object",
-    "properties": {
-     "ledger_csv": {
-      "type": "string",
-      "description": "Impact ledger spreadsheet export (CSV)."
-     },
-     "as_of": {
-      "type": "string",
-      "format": "date"
-     },
-     "cadence": {
-      "type": "string"
-     }
-    },
-    "required": [],
     "additionalProperties": false
    },
    "PasskeyInfo": {
@@ -14310,6 +14105,26 @@
     },
     "required": [
      "initiative_id",
+     "total_minor",
+     "categories"
+    ],
+    "additionalProperties": false
+   },
+   "OverallSpend": {
+    "type": "object",
+    "properties": {
+     "total_minor": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "categories": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/SpendCategory"
+      }
+     }
+    },
+    "required": [
      "total_minor",
      "categories"
     ],

@@ -133,3 +133,65 @@ func TestContentInitiativesMoveToTheEditor(t *testing.T) {
 		t.Fatalf("%d planned initiatives joined the daily rotation, err %v", rotating, err)
 	}
 }
+
+// TestOverallSpendSumsCategoryTotalsAcrossPublishedInitiatives covers the
+// public spend page (PRD §5.2): category totals only, summed over published
+// initiatives, and a draft initiative's spend never counts.
+func TestOverallSpendSumsCategoryTotalsAcrossPublishedInitiatives(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	_, admin := staffFixture(t, pool, "SUPER_ADMIN")
+	s := InitiativeService{Staff: &StaffService{DB: as(t, dbroles.API)}}
+	cleanInitiatives(t, pool)
+	reader := InitiativeReader{DB: as(t, dbroles.API)}
+
+	empty, err := reader.OverallSpend(ctx)
+	if err != nil || empty.TotalMinor != 0 || empty.Categories == nil || len(empty.Categories) != 0 {
+		t.Fatalf("no published initiatives: %+v, %v", empty, err)
+	}
+
+	for _, c := range []struct {
+		slug    string
+		publish bool
+		spend   map[string]int64
+	}{
+		{"overall-a", true, map[string]int64{"Direct aid": 100_00, "Logistics": 20_00}},
+		{"overall-b", true, map[string]int64{"Direct aid": 50_00}},
+		{"overall-draft", false, map[string]int64{"Direct aid": 999_00, "Fundraising": 1_00}},
+	} {
+		id, err := s.Create(ctx, admin, withBoardApproval(t, pool, validInitiative(c.slug)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for category, amount := range c.spend {
+			in := SpendInput{Category: category, AmountMinor: amount, VerificationNote: "Verified", VerifiedOn: "2026-10-01"}
+			if err = s.SetSpend(ctx, admin, id, in); err != nil {
+				t.Fatal(err)
+			}
+			if c.publish {
+				if err = s.PublishSpend(ctx, admin, id, category); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if c.publish {
+			if err = s.Publish(ctx, admin, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	got, err := reader.OverallSpend(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SpendCategory{{Category: "Direct aid", AmountMinor: 150_00}, {Category: "Logistics", AmountMinor: 20_00}}
+	if got.TotalMinor != 170_00 || len(got.Categories) != len(want) {
+		t.Fatalf("overall spend = %+v, want total 17000 over %v", got, want)
+	}
+	for i := range want {
+		if got.Categories[i] != want[i] {
+			t.Fatalf("category %d = %+v, want %+v", i, got.Categories[i], want[i])
+		}
+	}
+}

@@ -437,6 +437,41 @@ func (q *Queries) PublishedInitiatives(ctx context.Context) ([]PublishedInitiati
 	return items, nil
 }
 
+const publishedSpendByCategory = `-- name: PublishedSpendByCategory :many
+SELECT s.category, SUM(s.amount_minor)::bigint AS amount_minor
+FROM donor_initiative_spend s
+JOIN donor_initiatives i ON i.id = s.initiative_id
+WHERE i.publish_state = 'PUBLISHED'
+GROUP BY s.category
+ORDER BY s.category
+`
+
+type PublishedSpendByCategoryRow struct {
+	Category    string `json:"category"`
+	AmountMinor int64  `json:"amount_minor"`
+}
+
+// Overall spend: each category's total across every published initiative.
+func (q *Queries) PublishedSpendByCategory(ctx context.Context) ([]PublishedSpendByCategoryRow, error) {
+	rows, err := q.db.Query(ctx, publishedSpendByCategory)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PublishedSpendByCategoryRow{}
+	for rows.Next() {
+		var i PublishedSpendByCategoryRow
+		if err := rows.Scan(&i.Category, &i.AmountMinor); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordInitiativeExposure = `-- name: RecordInitiativeExposure :exec
 INSERT INTO donor_initiative_exposures (donor_id, initiative_id, first_shown_on, last_shown_on)
 VALUES ($1,$2,$3,$3)

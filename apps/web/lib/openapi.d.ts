@@ -39,15 +39,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/public/content": {
+    "/donor/public/spend": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Published initiatives and impact ledger */
-        get: operations["publicContent"];
+        /**
+         * Published spend by category
+         * @description Category totals across every published initiative, with the grand total. Individual transactions are never exposed.
+         */
+        get: operations["overallSpend"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1159,7 +1162,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Published content and source documents */
+        /** Source documents */
         get: operations["contentInventory"];
         put?: never;
         post?: never;
@@ -1214,26 +1217,6 @@ export interface paths {
         get: operations["downloadSource"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/donor/staff/content/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Publish the ledger
-         * @description A refused publication answers 422 `{"detail":"The spreadsheet has problems","errors":[{sheet,row,column,reason}]}` listing every problem found.
-         */
-        post: operations["publish"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2933,11 +2916,11 @@ export interface components {
              * @enum {string}
              */
             code?: "PAYMENTS_UNCONFIGURED" | "EMAIL_UNCONFIGURED" | "SOURCE_STORAGE_UNCONFIGURED";
-            /** @description Present only on a 422 from POST /donor/staff/content/publish: every problem found, up to 100. */
+            /** @description Present only on a 422 from POST /donor/staff/founding-claims: every problem found, up to 100. */
             errors?: components["schemas"]["PublicationProblem"][];
         };
         PublicationProblem: {
-            /** @description `initiatives` or `ledger`, or empty for a request field named by `column`. */
+            /** @description The spreadsheet the problem is in, or empty for a request field named by `column`. */
             sheet: string;
             /**
              * Format: int32
@@ -2964,37 +2947,6 @@ export interface components {
              * @description Seconds until the session ends unless refreshed: 60 days after the latest refresh, and never more than a year after sign-in, when the donor signs in again by email.
              */
             refresh_expires_in: number;
-        };
-        PublicContent: {
-            /** @description Publication cadence label. */
-            cadence: string | null;
-            /** @description Published impact ledger figures, in spreadsheet order. */
-            ledger: components["schemas"]["LedgerFigure"][];
-            /**
-             * Format: date
-             * @description Date the ledger figures describe.
-             */
-            ledger_as_of: string | null;
-            /** Format: uuid */
-            publication_id?: string;
-            /** Format: date-time */
-            published_at?: string;
-            /** @enum {string} */
-            state: "unpublished" | "published";
-        };
-        LedgerFigure: {
-            /** @description Unique within the publication. */
-            id: string;
-            metric: string;
-            /**
-             * Format: int64
-             * @description In `unit`; USD_CENTS is integer cents.
-             */
-            value: number;
-            /** @enum {string} */
-            unit: "USD_CENTS" | "PEOPLE" | "INITIATIVES" | "PARTNERS";
-            /** @description An illustrative example, not a reported outcome. */
-            illustrative: boolean;
         };
         ReferralSummary: {
             /** @enum {string} */
@@ -3671,12 +3623,6 @@ export interface components {
         ExportDatasets: {
             datasets: string[];
         };
-        PublicationSummary: {
-            /** Format: date-time */
-            at: string;
-            /** Format: uuid */
-            id: string;
-        };
         StoredSource: {
             /** Format: uuid */
             id: string;
@@ -3684,19 +3630,7 @@ export interface components {
             sha256: string;
         };
         ContentInventory: {
-            publications: components["schemas"]["PublicationSummary"][];
             sources: components["schemas"]["StoredSource"][];
-        };
-        Publication: {
-            /** Format: uuid */
-            publication_id: string;
-        };
-        PublicationRequest: {
-            /** @description Impact ledger spreadsheet export (CSV). */
-            ledger_csv?: string;
-            /** Format: date */
-            as_of?: string;
-            cadence?: string;
         };
         /** @description A passkey the donor can sign in with. Credential material is never returned. */
         PasskeyInfo: {
@@ -3773,6 +3707,11 @@ export interface components {
         };
         InitiativeSpend: {
             initiative_id: string;
+            /** Format: int64 */
+            total_minor: number;
+            categories: components["schemas"]["SpendCategory"][];
+        };
+        OverallSpend: {
             /** Format: int64 */
             total_minor: number;
             categories: components["schemas"]["SpendCategory"][];
@@ -4615,7 +4554,7 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
-    publicContent: {
+    overallSpend: {
         parameters: {
             query?: never;
             header?: never;
@@ -4630,7 +4569,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PublicContent"];
+                    "application/json": components["schemas"]["OverallSpend"];
                 };
             };
             503: components["responses"]["Unavailable"];
@@ -6790,38 +6729,6 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             422: components["responses"]["Unprocessable"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
-    publish: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description At most 8 MiB. Authorized before the body is read. */
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PublicationRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Publication"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            413: components["responses"]["PayloadTooLarge"];
-            415: components["responses"]["UnsupportedMediaType"];
-            422: components["responses"]["Unprocessable"];
-            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
     };

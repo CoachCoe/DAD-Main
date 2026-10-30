@@ -194,26 +194,6 @@ func (q *Queries) MarkClaimed(ctx context.Context, arg MarkClaimedParams) error 
 	return err
 }
 
-const publishedContent = `-- name: PublishedContent :one
-SELECT p.id, p.created_at, p.payload
-FROM donor_content_publications p
-JOIN donor_content_head h ON h.publication_id = p.id
-WHERE h.id = 'r1'
-`
-
-type PublishedContentRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	Payload   []byte             `json:"payload"`
-}
-
-func (q *Queries) PublishedContent(ctx context.Context) (PublishedContentRow, error) {
-	row := q.db.QueryRow(ctx, publishedContent)
-	var i PublishedContentRow
-	err := row.Scan(&i.ID, &i.CreatedAt, &i.Payload)
-	return i, err
-}
-
 const redeemLoginLink = `-- name: RedeemLoginLink :one
 UPDATE donor_login_links SET consumed_at = $2
 WHERE id = $1 AND consumed_at IS NULL AND expires_at > $2 RETURNING id

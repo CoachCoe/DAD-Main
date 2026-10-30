@@ -180,7 +180,7 @@ func (c *contract) lookup(pointer string) any {
 func TestContractSchemasMatchGoTypes(t *testing.T) {
 	responses := map[string]any{
 		"GET /donor/partner/application-status":                      store.ApplicationStatus{},
-		"GET /donor/public/content":                                  store.PublicContent{},
+		"GET /donor/public/spend":                                    store.OverallSpend{},
 		"POST /donor/checkouts":                                      payments.CheckoutResult{},
 		"GET /donor/me/dashboard":                                    store.DonorDashboard{},
 		"GET /donor/me/profile":                                      store.Profile{},
@@ -237,7 +237,6 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/staff/partners":                                  store.StaffPartnerPage{},
 		"GET /donor/staff/partners/{partnerID}":                      store.StaffPartnerDetail{},
 		"POST /donor/staff/content/sources":                          store.StoredSource{},
-		"POST /donor/staff/content/publish":                          store.Publication{},
 		"GET /initiatives/{initiative_id}/spend":                     store.InitiativeSpend{},
 		"GET /donor/me/today-initiative":                             store.TodayInitiative{},
 		"GET /donor/me/network":                                      store.NetworkSummary{},
@@ -269,7 +268,6 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/staff/accounts/{staff_id}/role":                 roleBody{},
 		"POST /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund": refundBody{},
 		"POST /donor/staff/donors/{donor_id}/cancellation":           staffCancelBody{},
-		"POST /donor/staff/content/publish":                          store.PublicationRequest{},
 		"POST /donor/me/events/check-in":                             checkInBody{},
 		"POST /donor/staff/events":                                   store.EventInput{},
 		"POST /donor/staff/events/{event_id}":                        store.EventInput{},

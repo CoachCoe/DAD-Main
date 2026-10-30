@@ -1,9 +1,3 @@
--- name: PublishedContent :one
-SELECT p.id, p.created_at, p.payload
-FROM donor_content_publications p
-JOIN donor_content_head h ON h.publication_id = p.id
-WHERE h.id = 'r1';
-
 -- name: DonorByEmail :one
 SELECT * FROM donors WHERE email = $1;
 

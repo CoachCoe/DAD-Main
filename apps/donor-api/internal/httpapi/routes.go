@@ -32,7 +32,7 @@ func (a *api) routes() []route {
 	return []route{
 		a.public("GET /health/live", a.live),
 		a.public("GET /health/ready", a.ready),
-		a.public("GET /donor/public/content", a.publicContent),
+		a.public("GET /donor/public/spend", a.overallSpend),
 		{"POST /donor/stripe/webhook", stripeAuth, a.stripeWebhook},
 		a.visitor("POST /donor/checkouts", a.beginCheckout),
 		a.public("GET /donor/referrals/{code}", a.referrer),
@@ -180,7 +180,6 @@ func (a *api) routes() []route {
 		a.staffWrite("POST /donor/staff/partners/{partnerID}/match-payment", a.staffPartnerMatchPayment),
 		a.staffWrite("POST /donor/staff/content/sources", a.uploadSource),
 		a.staffRead("GET /donor/staff/content/sources/{source_id}", a.downloadSource),
-		a.staffWrite("POST /donor/staff/content/publish", a.publish),
 		a.staffWrite("POST /donor/staff/content/wording", a.setRecognitionWording),
 		a.staffWrite("POST /donor/staff/founding-claims", a.importFoundingClaims),
 
