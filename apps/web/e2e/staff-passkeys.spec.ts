@@ -89,7 +89,7 @@ test("the staff host serves only the back office, and the public host none of it
 
   await page.goto(staffURL("/"));
   await expect(page).toHaveURL(staffURL("/staff"));
-  for (const path of ["/ledger", "/account/dashboard", "/donate", "/Staff/sign-in", "/staff/nowhere"]) {
+  for (const path of ["/spend", "/account/dashboard", "/donate", "/Staff/sign-in", "/staff/nowhere"]) {
     expect((await page.goto(staffURL(path)))?.status()).toBe(404);
     await expect(page.getByText("This page isn’t part of the staff back office.")).toBeVisible();
     await expect(page.getByRole("link", { name: "Go to staff home" })).toHaveAttribute("href", "/staff");

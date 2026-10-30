@@ -25,15 +25,13 @@ it("explains the donor release, monthly billing, direct referral credit, and lau
   expect(screen.getByText(/No real donation is collected/)).toBeInTheDocument();
 });
 
-it("links the explanation to giving, source-cited figures, and partner interest", () => {
+it("links the explanation to giving, spend by category, and partner interest", () => {
   render(<HowItWorks />);
   expect(screen.getByRole("link", { name: "Try giving" })).toHaveAttribute("href", "/donate");
-  expect(screen.getByRole("link", { name: "Read the impact ledger" })).toHaveAttribute("href", "/ledger");
+  expect(screen.getByRole("link", { name: "See spend by category" })).toHaveAttribute("href", "/spend");
   expect(screen.getByRole("link", { name: "Partner application" })).toHaveAttribute("href", "/apply");
   expect(screen.getByRole("link", { name: "Partner sign-in" })).toHaveAttribute("href", "/partner/sign-in");
-  expect(screen.getByText(/reported figures cite a source document/)).toHaveTextContent(
-    "illustrative figures are labeled",
-  );
+  expect(screen.getByText(/totals by category/)).toHaveTextContent("never as individual transactions");
 });
 
 it("keeps /about as a permanent alias of the single About / how it works screen", () => {

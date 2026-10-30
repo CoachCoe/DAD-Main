@@ -94,7 +94,7 @@ export default function Staff({ q }: { q: string | null }) {
               )}
               {actor.permissions.includes("content.publish") && (
                 <>
-                  <Link href="/staff/content">Publish spreadsheet content</Link>
+                  <Link href="/staff/content">Source documents</Link>
                   <Link href="/staff/content/wording">Badge and milestone wording</Link>
                 </>
               )}

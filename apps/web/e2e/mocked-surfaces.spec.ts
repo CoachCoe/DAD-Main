@@ -291,8 +291,8 @@ test("staff pages separate a missing session from a missing permission", async (
 });
 
 test("public pages carry their own titles and private pages are not indexed", async ({ page }) => {
-  await page.goto("/ledger");
-  await expect(page).toHaveTitle("Impact ledger · Dynamic Aid Delivery");
+  await page.goto("/spend");
+  await expect(page).toHaveTitle("Spend by category · Dynamic Aid Delivery");
   await page.goto("/account/sign-in");
   await expect(page).toHaveTitle(/^Claim your account or sign in · /);
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);

@@ -568,12 +568,6 @@ details[open] > summary::after {
   line-height: 1;
   color: var(--ink-soft);
 }
-.illustrative {
-  border-style: dashed;
-}
-.illustrative .metricValue {
-  color: var(--ink-soft);
-}
 .badge {
   display: inline-block;
   margin-left: var(--space-2);

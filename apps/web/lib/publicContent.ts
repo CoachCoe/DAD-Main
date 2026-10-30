@@ -3,13 +3,13 @@ import type { Schema } from "./api";
 import { donorApiBase } from "./donorApi";
 
 /**
- * The published snapshot, or null when the API cannot supply one. Rendering waits for a
- * request because the API address is runtime configuration, but the response itself is
- * shared for a minute: staff publication promises public pages refresh within that.
+ * Spend by category across every published initiative, or null when the API cannot supply
+ * it. Rendering waits for a request because the API address is runtime configuration, but
+ * the response itself is shared for a minute.
  */
-export async function loadPublicContent(): Promise<Schema<"PublicContent"> | null> {
-  const response = await loadPublic("/donor/public/content");
-  return response?.ok ? ((await response.json()) as Schema<"PublicContent">) : null;
+export async function loadOverallSpend(): Promise<Schema<"OverallSpend"> | null> {
+  const response = await loadPublic("/donor/public/spend");
+  return response?.ok ? ((await response.json()) as Schema<"OverallSpend">) : null;
 }
 
 /** Every published initiative, or null when the API cannot supply them. */

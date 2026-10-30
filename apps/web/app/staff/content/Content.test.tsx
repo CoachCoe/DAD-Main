@@ -1,45 +1,59 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import Content from "./Content";
 
 afterEach(() => vi.unstubAllGlobals());
 
-it("lists each spreadsheet problem by row and column when publication is rejected", async () => {
+const source = { id: "8f9e0d1c-2b3a-4c5d-8e6f-7a8b9c0d1e2f", name: "approval.pdf", sha256: "a".repeat(64) };
+
+// jsdom's required-file validation cannot see files set this way, so submit the form directly.
+function submitUpload() {
+  const form = screen.getByRole("button", { name: "Upload private source" }).closest("form");
+  if (!form) throw new Error("Missing upload form");
+  fireEvent.submit(form);
+}
+
+it("lists stored source documents and offers no spreadsheet publication", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ sources: [source] })));
+  render(<Content />);
+  expect(await screen.findByRole("link", { name: "approval.pdf" })).toHaveAttribute(
+    "href",
+    `/api/donor/staff/content/sources/${source.id}`,
+  );
+  expect(screen.queryByLabelText("Ledger CSV")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Confirm publication" })).not.toBeInTheDocument();
+});
+
+it("stores an uploaded source and reports its ID for citing as a board approval", async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ sources: [] }))
+    .mockResolvedValueOnce(Response.json(source))
+    .mockResolvedValueOnce(Response.json({ sources: [source] }));
+  vi.stubGlobal("fetch", fetch);
+  render(<Content />);
+  fireEvent.change(await screen.findByLabelText("Source file"), {
+    target: { files: [new File(["signed"], "approval.pdf")] },
+  });
+  submitUpload();
+  expect(
+    await screen.findByText(`Source stored: ${source.id}. Cite this ID as an initiative's board approval.`),
+  ).toBeVisible();
+  expect(fetch.mock.calls[1][0]).toContain("/donor/staff/content/sources?name=approval.pdf");
+});
+
+it("explains a rejected upload for a role without permission", async () => {
   vi.stubGlobal(
     "fetch",
     vi
       .fn()
-      .mockResolvedValueOnce(Response.json({ sources: [], publications: [] }))
-      .mockResolvedValueOnce(
-        Response.json(
-          {
-            detail: "The spreadsheet has problems.",
-            errors: [
-              { sheet: "Ledger", row: 3, column: "unit", reason: "Unknown unit DOLLARS" },
-              { row: 7, column: "source_id", reason: "No stored source" },
-            ],
-          },
-          { status: 422 },
-        ),
-      ),
+      .mockResolvedValueOnce(Response.json({ sources: [] }))
+      .mockResolvedValueOnce(Response.json({ detail: "Forbidden" }, { status: 403 })),
   );
   render(<Content />);
-  // jsdom's File has no text(); browsers do.
-  const csv = (name: string) =>
-    Object.assign(new File(["header\n"], name, { type: "text/csv" }), { text: async () => "header\n" });
-  fireEvent.change(await screen.findByLabelText("Ledger CSV"), { target: { files: [csv("ledger.csv")] } });
-  fireEvent.change(screen.getByLabelText("Ledger as-of date"), { target: { value: "2026-09-30" } });
-  fireEvent.change(screen.getByLabelText("Update cadence"), { target: { value: "monthly" } });
-  fireEvent.click(screen.getByRole("checkbox"));
-  // jsdom's required-file validation cannot see files set this way, so submit directly.
-  const form = screen.getByRole("button", { name: "Confirm publication" }).closest("form");
-  if (!form) throw new Error("Missing publication form");
-  fireEvent.submit(form);
-  const problems = await screen.findByRole("list", { name: "Spreadsheet problems" });
-  expect(
-    within(problems)
-      .getAllByRole("listitem")
-      .map((item) => item.textContent),
-  ).toEqual(["Ledger sheet, Row 3, column unitUnknown unit DOLLARS", "Row 7, column source_idNo stored source"]);
-  expect(screen.getByRole("alert")).toHaveTextContent("The spreadsheet has problems.");
+  fireEvent.change(await screen.findByLabelText("Source file"), {
+    target: { files: [new File(["signed"], "approval.pdf")] },
+  });
+  submitUpload();
+  expect(await screen.findByRole("alert")).toHaveTextContent("does not permit storing source documents");
 });

@@ -1,23 +1,22 @@
 import type { Metadata } from "next";
 import { Page } from "@/components/donor/Page";
-import { ContentUnavailable, Ledger } from "@/components/donor/PublicContent";
-import { loadPublicContent } from "@/lib/publicContent";
+import { ContentUnavailable, SpendByCategory } from "@/components/donor/PublicContent";
+import { loadOverallSpend } from "@/lib/publicContent";
 
 export const metadata: Metadata = {
-  title: "Impact ledger",
-  description:
-    "DAD’s staff-updated impact ledger: dated figures, each traceable to a source document, with illustrative figures labeled.",
+  title: "Spend by category",
+  description: "What DAD has spent across its published initiatives, shown as totals by category.",
 };
 
-export default async function LedgerPage() {
-  const content = await loadPublicContent();
+export default async function SpendPage() {
+  const spend = await loadOverallSpend();
   return (
-    <Page wide eyebrow="Transparency" title="Impact ledger">
+    <Page wide eyebrow="Transparency" title="Spend by category">
       <p className="lead">
-        A staff-updated record, with a stated cadence and a source document behind every reported figure. DAD launches
-        in April 2027.
+        Totals by category across DAD&apos;s published initiatives. DAD shows category totals only, not individual
+        transactions. DAD launches in April 2027.
       </p>
-      {content ? <Ledger content={content} /> : <ContentUnavailable />}
+      {spend ? <SpendByCategory spend={spend} /> : <ContentUnavailable />}
     </Page>
   );
 }
