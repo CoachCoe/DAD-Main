@@ -144,10 +144,10 @@ jobs:
           docker push "$REGISTRY/dad/web:$IMAGE_TAG"
           docker push "$REGISTRY/dad/nginx:$IMAGE_TAG"
 
-      # Register a task-definition revision per family pinned to this image tag. The CDK
-      # task definitions carry a placeholder tag, and an ECS service or run-task runs a
-      # specific revision, so the SHA-tagged images above are only deployed once a
-      # revision points at them. The `family=ARN` lines it prints are saved to a file the
+      # Register a task-definition revision per family pinned to this image tag. An ECS
+      # service or run-task runs a specific revision, and CDK's revisions carry the tag of
+      # the last successful release (step 5), so the SHA-tagged images above are only
+      # deployed once a revision points at them. The `family=ARN` lines it prints are saved to a file the
       # steps below read through DAD_TASKDEFS_FILE (run-task.sh and ecs-rollout.sh).
       - name: Pin task definitions to this image tag
         env:
@@ -187,8 +187,7 @@ jobs:
       #    each new deployment reaching COMPLETED. The services have container health
       #    checks and the ECS deployment circuit breaker with rollback (DAD-infra
       #    apps/dad-main), so a deployment whose tasks fail to start or stay healthy ends
-      #    FAILED and this step fails. This replaces the old ECS Exec smoke checks: no
-      #    shell into a running task, no Session Manager plugin, no extra IAM.
+      #    FAILED and this step fails. No shell into a running task is needed.
       #    See scripts/ecs-rollout.sh for why it keys on the deployment it started.
       - name: roll api/web/nginx and wait for the rollout (the up step)
         env:

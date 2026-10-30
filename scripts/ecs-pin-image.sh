@@ -13,8 +13,9 @@
 # on stdout (everything else goes to stderr). The file those lines are saved to is what
 # ecs-rollout.sh and run-task.sh read through DAD_TASKDEFS_FILE.
 #
-# Why: the CDK task definitions reference a placeholder tag, and the pipeline pushes
-# images tagged with the git SHA. An ECS service runs a specific task-definition revision,
+# Why: the CDK task definitions carry the tag of the last successful release (DAD-infra
+# reads it from /dad/<env>/image-tag), and the pipeline pushes images tagged with the new
+# git SHA. An ECS service runs a specific task-definition revision,
 # so deploying a new image means registering a revision that points at it. Pinning to the
 # SHA (never a moving tag) also makes a circuit-breaker rollback restore the previous
 # image instead of re-pulling the same tag.
