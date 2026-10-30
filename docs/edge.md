@@ -234,7 +234,7 @@ short because a cached page outliving a deploy references `/_next/static` files 
 build no longer has; purge these URLs after `./scripts/deploy.sh up`. Next's client
 router fetches the same URLs with an `RSC` header for a different payload, which
 Cloudflare does not vary on, hence the exclusion. `/_next/static/*` is cached by default
-and immutable. `/r/{code}`, `/ledger`, `/initiatives/*`, `/donate/thanks`, `/account`,
+and immutable. `/r/{code}`, `/spend`, `/initiatives/*`, `/donate/thanks`, `/account`,
 and `/staff` are rendered per request (`private, no-store`) and are never cached. A
 referral landing (`/r/{code}`) therefore always costs one render and one referral
 capture at the origin: it is the hottest origin path during a referral spike. The

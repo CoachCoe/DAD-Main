@@ -672,24 +672,15 @@ recovery for an enabled administrator:
 It works like the back-office recovery action and is audited as `staff.recovery_invited`
 with no actor. Protect the printed invitation, and review the audit history afterwards.
 
-At `/staff/content`, upload private source documents, then publish complete CSV snapshots
-of the impact ledger. Initiatives are created, edited and published at `/staff/initiatives`;
+At `/staff/content`, upload private source documents. Initiatives, their headline metrics and
+their spend by category are created, edited and published at `/staff/initiatives`;
 initiatives published from the spreadsheet before it was retired for them were copied there.
-Sources are limited to 10 MiB, encrypted, SHA-256 checked, and permission-protected.
-Without `DONOR_CONTENT_ENCRYPTION_KEY`, uploads return 503 before the file is read;
-publishing still works. Donor records have linkable URLs (`/staff/donors/{id}`), and
-search keeps its query in `/staff?q=`.
-The CSV is limited to 512 KiB and 500 rows. Exact column order:
-
-```csv
-metric,value,unit,source_id,illustrative
-```
-
-Ledger values are nonnegative integers with unit `USD_CENTS`, `PEOPLE`, `INITIATIVES`, or
-`PARTNERS`. Real figures require a source; examples require `illustrative=true`. Supply an
-as-of date (YYYY-MM-DD) and stated update cadence. Invalid publications leave the current
-snapshot intact. Staff are responsible for actual accuracy; uploading a source cannot
-establish it.
+The public `/spend` page shows only category totals summed across published initiatives; no
+individual transactions are published. Sources are limited to 10 MiB, encrypted, SHA-256
+checked, and permission-protected. Without `DONOR_CONTENT_ENCRYPTION_KEY`, uploads return 503
+before the file is read. Donor records have linkable URLs (`/staff/donors/{id}`), and
+search keeps its query in `/staff?q=`. Staff are responsible for actual accuracy; uploading a
+source cannot establish it.
 
 Publishing an initiative requires its board approval: the ID of the approval document
 stored here and the date the board approved it. A published initiative's approval can be

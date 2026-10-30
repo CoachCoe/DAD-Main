@@ -174,7 +174,7 @@ endpoints, `-url` reads a comma-separated list in equal measure:
 
 ```sh
 cd apps/donor-api
-go run ./cmd/loadtest -url "http://localhost:8002/donor/public/content" -duration 30s -concurrency 128 -max-p99 250ms
+go run ./cmd/loadtest -url "http://localhost:8002/donor/public/spend" -duration 30s -concurrency 128 -max-p99 250ms
 ```
 
 The runner reports throughput, statuses, and latency percentiles overall and per
