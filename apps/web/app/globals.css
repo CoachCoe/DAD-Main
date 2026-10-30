@@ -126,6 +126,9 @@ pre {
   font-size: var(--text-sm);
   color: var(--muted);
 }
+.analyticsChoice {
+  padding: var(--space-5) var(--gutter);
+}
 .hash {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
