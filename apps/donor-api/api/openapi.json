@@ -11555,6 +11555,95 @@
      }
     }
    }
+  },
+  "/donor/staff/failed-payments": {
+   "get": {
+    "operationId": "failedPayments",
+    "summary": "Failed payments and accounts in grace (PRD \u00a78)",
+    "tags": [
+     "Staff donors"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/FailedPaymentState"
+     },
+     {
+      "$ref": "#/components/parameters/Cursor"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FailedPaymentPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/staff/deletions": {
+   "get": {
+    "operationId": "accountDeletions",
+    "summary": "Completed account deletions (PRD \u00a78)",
+    "tags": [
+     "Staff donors"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/Cursor"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AccountDeletionPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
   }
  },
  "components": {
@@ -11626,6 +11715,31 @@
      "format": "int64",
      "minimum": 0,
      "default": 0
+    }
+   },
+   "Cursor": {
+    "name": "cursor",
+    "in": "query",
+    "required": false,
+    "description": "Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows.",
+    "schema": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "FailedPaymentState": {
+    "name": "state",
+    "in": "query",
+    "required": false,
+    "description": "Which unresolved failed renewals to list: those still inside the 7-day grace window, those past it, or all.",
+    "schema": {
+     "type": "string",
+     "enum": [
+      "all",
+      "in_grace",
+      "lapsed"
+     ],
+     "default": "all"
     }
    }
   },
@@ -16192,6 +16306,139 @@
      "badges",
      "milestones"
     ]
+   },
+   "FailedPayment": {
+    "type": "object",
+    "properties": {
+     "amount_minor": {
+      "type": [
+       "integer",
+       "null"
+      ],
+      "format": "int64",
+      "description": "Amount of the failed charge, or null when the failure was not recorded.",
+      "minimum": 1
+     },
+     "disabled": {
+      "type": "boolean"
+     },
+     "donor_id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "email": {
+      "type": "string"
+     },
+     "failed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the renewal was due and failed."
+     },
+     "grace_ends_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "period_id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "public_name": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "in_grace",
+       "lapsed"
+      ]
+     }
+    },
+    "required": [
+     "amount_minor",
+     "disabled",
+     "donor_id",
+     "email",
+     "failed_at",
+     "grace_ends_at",
+     "period_id",
+     "public_name",
+     "state"
+    ],
+    "additionalProperties": false
+   },
+   "FailedPaymentPage": {
+    "type": "object",
+    "properties": {
+     "next_cursor": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Cursor of the next page, or null on the last page."
+     },
+     "payments": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/FailedPayment"
+      }
+     }
+    },
+    "required": [
+     "next_cursor",
+     "payments"
+    ],
+    "additionalProperties": false
+   },
+   "AccountDeletion": {
+    "type": "object",
+    "properties": {
+     "deleted_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "donor_id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "retained_gifts": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Gift records kept for legal and tax purposes.",
+      "minimum": 0
+     }
+    },
+    "required": [
+     "deleted_at",
+     "donor_id",
+     "retained_gifts"
+    ],
+    "additionalProperties": false
+   },
+   "AccountDeletionPage": {
+    "type": "object",
+    "properties": {
+     "deletions": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/AccountDeletion"
+      }
+     },
+     "next_cursor": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Cursor of the next page, or null on the last page."
+     }
+    },
+    "required": [
+     "deletions",
+     "next_cursor"
+    ],
+    "additionalProperties": false
    }
   }
  }

@@ -221,6 +221,8 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/staff/donors/{donor_id}/actions":                 store.ActionPage{},
 		"GET /donor/staff/donors/{donor_id}/actions/pending":         store.PendingAction{},
 		"GET /donor/staff/audit":                                     store.AuditPage{},
+		"GET /donor/staff/failed-payments":                           store.FailedPaymentPage{},
+		"GET /donor/staff/deletions":                                 store.AccountDeletionPage{},
 		"POST /donor/staff/messages/{message_id}/resend":             store.QueuedMessage{},
 		"GET /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund":  store.RefundQuote{},
 		"POST /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund": store.StaffRefund{},
