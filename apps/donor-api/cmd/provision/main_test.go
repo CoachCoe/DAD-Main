@@ -115,7 +115,9 @@ func TestProvisionCreatesALoginPerRole(t *testing.T) {
 		t.Fatalf("provisioning again: %v", err)
 	}
 	if _, err := connect(t, previous); err == nil {
-		t.Error("the replaced password still signs in")
+		t.Error(
+			"the replaced password still signs in; the server must authenticate by password (a trust rule in pg_hba.conf, as in a default local install, accepts any), so use the container in the README",
+		)
 	}
 	api, err := connect(t, env[dbroles.API.Variable()])
 	if err != nil {

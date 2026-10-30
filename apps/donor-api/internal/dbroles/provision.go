@@ -78,9 +78,20 @@ func Provision(ctx context.Context, tx pgx.Tx, logins []Login) error {
 			return err
 		}
 	}
+	// PostgreSQL 16 records whether a membership inherits or may SET ROLE. Before
+	// it, every membership does both, so every member reaches the role.
+	reaches := "true"
+	var perMembership bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid='pg_auth_members'::regclass AND attname='inherit_option')").
+		Scan(&perMembership); err != nil {
+		return err
+	}
+	if perMembership {
+		reaches = "(a.inherit_option OR a.set_option)"
+	}
 	for _, login := range logins {
 		rows, err := tx.Query(ctx, `SELECT m.rolname FROM pg_auth_members a JOIN pg_roles m ON m.oid=a.member
-WHERE a.roleid=(SELECT oid FROM pg_roles WHERE rolname=$1) AND (a.inherit_option OR a.set_option) AND m.rolname<>$2 ORDER BY m.rolname`, login.Role.Name, login.User)
+WHERE a.roleid=(SELECT oid FROM pg_roles WHERE rolname=$1) AND `+reaches+` AND m.rolname<>$2 ORDER BY m.rolname`, login.Role.Name, login.User)
 		if err != nil {
 			return err
 		}
