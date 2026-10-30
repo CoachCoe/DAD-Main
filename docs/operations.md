@@ -194,6 +194,23 @@ UPDATE`, which PostgreSQL allows only with `UPDATE` on some column) holds `UPDAT
 `DONOR_GO_DATABASE_URL` is the schema owner's URL, used only by `migrate` and
 `provision-roles`.
 
+### Supplying a password as a secret
+
+Each URL variable (`DONOR_API_DATABASE_URL`, `DONOR_WORKER_STRIPE_DATABASE_URL`,
+`DONOR_GO_DATABASE_URL`, and the rest) can also be given as parts, so the password
+reaches the process as its own secret (an ECS `secrets` entry) and never sits in a
+plaintext task-definition `environment` value. For a variable `X_URL`, with prefix `X`
+(the variable without `_URL`, for example `DONOR_API_DATABASE`):
+
+| Form | Variables |
+|---|---|
+| Full URL (unchanged) | `X_URL` |
+| URL plus separate password | `X_URL` without a password, and `X_PASSWORD`; the separate password replaces any in the URL |
+| Parts | `X_HOST`, `X_NAME`, `X_USER`, `X_PASSWORD`, optional `X_PORT` (default `5432`) and `X_SSLMODE` |
+
+A set `X_URL` always wins over the parts. The password is never logged: the process
+reports only variable names in its errors.
+
 The privileges are declared table by table in `apps/donor-api/internal/dbroles/privileges.go`,
 in `GRANT` syntax, derived from the statements each process runs. Every `migrate` run
 creates any missing role and brings privileges to the declaration in the same transaction

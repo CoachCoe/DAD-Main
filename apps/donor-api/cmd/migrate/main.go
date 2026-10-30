@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/migrations"
 	"dad/donor-api/internal/store"
 )
@@ -18,7 +19,7 @@ func run(args []string, getenv func(string) string) error {
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return errors.New("invalid migrate arguments")
 	}
-	dsn := getenv("DONOR_GO_DATABASE_URL")
+	dsn := dbroles.ConnectionURL(dbroles.OwnerVariable, getenv)
 	if dsn == "" {
 		return errors.New("DONOR_GO_DATABASE_URL is required")
 	}
