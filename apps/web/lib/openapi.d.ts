@@ -2886,6 +2886,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/staff/failed-payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Failed payments and accounts in grace (PRD §8) */
+        get: operations["failedPayments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/deletions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Completed account deletions (PRD §8) */
+        get: operations["accountDeletions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -4359,6 +4393,50 @@ export interface components {
             badges: components["schemas"]["BadgeRule"][];
             milestones: number[];
         };
+        FailedPayment: {
+            /**
+             * Format: int64
+             * @description Amount of the failed charge, or null when the failure was not recorded.
+             */
+            amount_minor: number | null;
+            disabled: boolean;
+            /** Format: uuid */
+            donor_id: string;
+            email: string;
+            /**
+             * Format: date-time
+             * @description When the renewal was due and failed.
+             */
+            failed_at: string;
+            /** Format: date-time */
+            grace_ends_at: string;
+            /** Format: uuid */
+            period_id: string;
+            public_name: string | null;
+            /** @enum {string} */
+            state: "in_grace" | "lapsed";
+        };
+        FailedPaymentPage: {
+            /** @description Cursor of the next page, or null on the last page. */
+            next_cursor: string | null;
+            payments: components["schemas"]["FailedPayment"][];
+        };
+        AccountDeletion: {
+            /** Format: date-time */
+            deleted_at: string;
+            /** Format: uuid */
+            donor_id: string;
+            /**
+             * Format: int64
+             * @description Gift records kept for legal and tax purposes.
+             */
+            retained_gifts: number;
+        };
+        AccountDeletionPage: {
+            deletions: components["schemas"]["AccountDeletion"][];
+            /** @description Cursor of the next page, or null on the last page. */
+            next_cursor: string | null;
+        };
     };
     responses: {
         /** @description Signed in. */
@@ -4473,6 +4551,10 @@ export interface components {
         IdempotencyKey: string;
         /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
         Offset: number;
+        /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+        Cursor: string;
+        /** @description Which unresolved failed renewals to list: those still inside the 7-day grace window, those past it, or all. */
+        FailedPaymentState: "all" | "in_grace" | "lapsed";
     };
     requestBodies: never;
     headers: never;
@@ -9880,6 +9962,62 @@ export interface operations {
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    failedPayments: {
+        parameters: {
+            query?: {
+                /** @description Which unresolved failed renewals to list: those still inside the 7-day grace window, those past it, or all. */
+                state?: components["parameters"]["FailedPaymentState"];
+                /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailedPaymentPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    accountDeletions: {
+        parameters: {
+            query?: {
+                /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDeletionPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };

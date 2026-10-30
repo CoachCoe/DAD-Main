@@ -299,3 +299,90 @@ test("public pages carry their own titles and private pages are not indexed", as
   await page.goto(staffURL("/staff/sign-in"));
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);
 });
+
+const failedPayment = (id: string, overrides: Record<string, unknown> = {}) => ({
+  amount_minor: 3000,
+  disabled: false,
+  donor_id: `donor-${id}`,
+  email: `${id}@example.org`,
+  failed_at: "2026-10-20T12:00:00Z",
+  grace_ends_at: "2026-10-27T12:00:00Z",
+  period_id: `period-${id}`,
+  public_name: null,
+  state: "in_grace",
+  ...overrides,
+});
+
+test("staff see failed payments, filter and page them, and reach the donor record", async ({ page }) => {
+  const errors = collectErrors(page);
+  const requests: string[] = [];
+  await page.route("**/api/donor/staff/failed-payments*", (route) => {
+    const url = new URL(route.request().url());
+    requests.push(url.search);
+    if (url.searchParams.get("state") === "lapsed")
+      return route.fulfill({
+        json: { payments: [failedPayment("gone", { state: "lapsed", amount_minor: null })], next_cursor: null },
+      });
+    return route.fulfill({
+      json: url.searchParams.get("cursor")
+        ? { payments: [failedPayment("older")], next_cursor: null }
+        : { payments: [failedPayment("newer")], next_cursor: "page-2" },
+    });
+  });
+  await page.route("**/api/donor/staff/donors/donor-older", (route) => route.fulfill({ status: 404, json: {} }));
+  await page.goto(staffURL("/staff/failed-payments"));
+  await expect(page.getByRole("heading", { level: 1, name: "Failed payments" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "newer@example.org" })).toBeVisible();
+  await expectAccessible(page);
+  await page.getByRole("button", { name: "Older failures" }).click();
+  await expect(page.getByRole("link", { name: "older@example.org" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "older@example.org" })).toHaveAttribute(
+    "href",
+    "/staff/donors/donor-older",
+  );
+  await page.getByRole("button", { name: "Newer failures" }).click();
+  await expect(page.getByRole("link", { name: "newer@example.org" })).toBeVisible();
+  await page.getByLabel("Show").selectOption("lapsed");
+  await expect(page.getByRole("link", { name: "gone@example.org" })).toBeVisible();
+  await expect(page.getByText("Not recorded")).toBeVisible();
+  // Development StrictMode replays the first load, so collapse back-to-back repeats.
+  expect(requests.filter((search, index) => search !== requests[index - 1])).toEqual([
+    "?state=all",
+    "?state=all&cursor=page-2",
+    "?state=all",
+    "?state=lapsed",
+  ]);
+  await expectAccessible(page);
+  expect(errors).toEqual([]);
+});
+
+test("staff see the account-deletion record, empty and with a missing permission", async ({ page }) => {
+  const errors = collectErrors(page);
+  await page.route("**/api/donor/staff/deletions*", (route) =>
+    route.fulfill({
+      json: {
+        deletions: [{ deleted_at: "2026-10-20T12:00:00Z", donor_id: "donor-gone", retained_gifts: 4 }],
+        next_cursor: null,
+      },
+    }),
+  );
+  await page.goto(staffURL("/staff/deletions"));
+  await expect(page.getByRole("link", { name: "donor-gone" })).toHaveAttribute("href", "/staff/donors/donor-gone");
+  await expect(page.getByRole("cell", { name: "4" })).toBeVisible();
+  await expectAccessible(page);
+  await page.unroute("**/api/donor/staff/deletions*");
+  await page.route("**/api/donor/staff/deletions*", (route) =>
+    route.fulfill({ json: { deletions: [], next_cursor: null } }),
+  );
+  await page.reload();
+  await expect(page.getByText("No accounts have been deleted.")).toBeVisible();
+  await expectAccessible(page);
+  await page.unroute("**/api/donor/staff/deletions*");
+  await page.route("**/api/donor/staff/deletions*", (route) =>
+    route.fulfill({ status: 403, json: { detail: "Forbidden" } }),
+  );
+  await page.reload();
+  await expect(page.getByRole("main").getByRole("alert")).toContainText("require donors and money access");
+  await expect(page.getByRole("link", { name: "Staff sign-in" })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
