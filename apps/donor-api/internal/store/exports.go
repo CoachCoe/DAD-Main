@@ -99,7 +99,6 @@ var exportDatasets = map[string]exportDataset{
 		"partner.manage",
 	},
 	"content-sources": {"donor_content_sources", "id actor_id name sha256 created_at", "content.publish"},
-	"publications":    {"donor_content_publications", "id actor_id payload created_at", "content.publish"},
 }
 
 type ExportDatasets struct {

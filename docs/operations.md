@@ -277,7 +277,9 @@ privileges, give it a URL that assumes the role, which a superuser may, such as
 could still reset the role, a process accepts that only with the same setting, and checks
 that the role is its own. For the closest match to a deployment, set every process URL to
 a login of its own and run `make provision`. Tests and browser tests run the API, workers,
-and commands with assumed roles, so the test database's user must be a superuser.
+and commands with assumed roles, so the test database's user must be a superuser. The
+role tests also require a database migrated to the checkout and fail saying so when it is
+behind; the local recipe is under Checks in the README.
 
 Roles belong to the whole PostgreSQL cluster, not one database, so run each environment
 in its own cluster: provisioning refuses a role whose privileges reach another
@@ -675,6 +677,9 @@ with no actor. Protect the printed invitation, and review the audit history afte
 At `/staff/content`, upload private source documents. Initiatives, their headline metrics and
 their spend by category are created, edited and published at `/staff/initiatives`;
 initiatives published from the spreadsheet before it was retired for them were copied there.
+The spreadsheet's publish and public-content endpoints are gone, and migration 0077 drops
+its `donor_content_publications` and `donor_content_head` tables; the publication history
+is discarded by design, and the board-approval source documents stay in `donor_content_sources`.
 The public `/spend` page shows only category totals summed across published initiatives; no
 individual transactions are published. Sources are limited to 10 MiB, encrypted, SHA-256
 checked, and permission-protected. Without `DONOR_CONTENT_ENCRYPTION_KEY`, uploads return 503

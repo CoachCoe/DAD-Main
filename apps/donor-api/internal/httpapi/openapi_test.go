@@ -375,3 +375,20 @@ func (c *contract) checkShape(t *testing.T, where string, typ reflect.Type, sche
 		c.checkShape(t, where+"."+name, fieldType, property, encoded)
 	}
 }
+
+// The all-in-one content publication was replaced by initiatives; its routes
+// must stay unserved and undocumented.
+func TestRetiredContentRoutesAreNotServed(t *testing.T) {
+	retired := []string{"POST /donor/staff/content/publish", "GET /donor/public/content"}
+	documented := loadContract(t).operations()
+	for _, route := range allRoutes() {
+		if slices.Contains(retired, route.pattern) {
+			t.Errorf("%s is served", route.pattern)
+		}
+	}
+	for _, pattern := range retired {
+		if _, ok := documented[pattern]; ok {
+			t.Errorf("%s is still documented", pattern)
+		}
+	}
+}

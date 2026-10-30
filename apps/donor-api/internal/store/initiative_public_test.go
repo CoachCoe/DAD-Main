@@ -96,6 +96,14 @@ func TestContentInitiativesMoveToTheEditor(t *testing.T) {
 		sql  string
 		args []any
 	}{
+		// Migration 0077 dropped these tables; recreate them for this transaction
+		// only so the historical copy migrations can still be exercised.
+		{`CREATE TABLE donor_content_publications (
+			id UUID PRIMARY KEY, actor_id UUID NOT NULL REFERENCES donor_staff (id),
+			payload JSON NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`, nil},
+		{`CREATE TABLE donor_content_head (
+			id VARCHAR(16) PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			publication_id UUID REFERENCES donor_content_publications (id))`, nil},
 		{"INSERT INTO donor_content_sources(id,actor_id,name,sha256,encrypted_data) VALUES($1,$2,'approval.pdf',repeat('0',64),'x')", []any{source, actor}},
 		{"INSERT INTO donor_content_publications(id,actor_id,payload,created_at) VALUES($1,$2,$3,now())", []any{publication, actor, payload}},
 		{"INSERT INTO donor_content_head(id,publication_id) VALUES('r1',$1) ON CONFLICT(id) DO UPDATE SET publication_id=EXCLUDED.publication_id", []any{publication}},

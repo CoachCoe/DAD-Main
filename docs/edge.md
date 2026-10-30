@@ -122,7 +122,7 @@ an IPv6 client by its /64, which one subscriber typically holds whole
 (`deploy/nginx/conf/client-key.js`, run by the image's njs module). The general zone tracks
 about half a million clients before evicting the least recent. Bodies are
 limited to 256 KiB (the API's JSON and webhook limit), except staff source uploads at
-10 MiB and publications, which nginx admits at 10 MiB and the API refuses above 8 MiB. Exports stream unbuffered.
+10 MiB. Exports stream unbuffered.
 
 ## Cloudflare configuration
 
