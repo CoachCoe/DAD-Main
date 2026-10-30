@@ -98,7 +98,7 @@ describe("hosts", () => {
     [`${staff}/icon.svg/extra`, "staff not found"],
     [`${site}/icon.svg`, "served"],
     [`${staff}/`, `redirect ${staff}/staff`],
-    [`${staff}/ledger`, "staff not found"],
+    [`${staff}/spend`, "staff not found"],
     [`${staff}/account/dashboard`, "staff not found"],
     [`${staff}/Staff/sign-in`, "staff not found"],
     [`${staff}/api/donor/me`, "404"],
@@ -140,10 +140,10 @@ describe("hosts", () => {
     const account = visit(`${staff}/account/dashboard`);
     expect(account.headers.get("Content-Security-Policy")).toMatch(/'nonce-[^']+' 'strict-dynamic'/);
     expect(account.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
-    // next.config.ts already gives /ledger the static policy, which the page renders under.
-    const ledger = visit(`${staff}/ledger`);
-    expect(ledger.headers.has("Content-Security-Policy")).toBe(false);
-    expect(ledger.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
+    // next.config.ts already gives /spend the static policy, which the page renders under.
+    const spend = visit(`${staff}/spend`);
+    expect(spend.headers.has("Content-Security-Policy")).toBe(false);
+    expect(spend.headers.get("X-Robots-Tag")).toBe("noindex, nofollow");
     // The public not-found page is prerendered, so it has no nonce to carry.
     expect(visit(`${site}/Staff/sign-in`).headers.get("Content-Security-Policy")).toContain(
       "script-src 'self' 'unsafe-inline'",
@@ -153,7 +153,7 @@ describe("hosts", () => {
   it("drops a client's claim that a page is unserved", () => {
     vi.stubEnv("DONOR_STAFF_ORIGIN", staff);
     expect(answer(visit(`${staff}/staff`, { "x-dad-unserved": "public" }))).toBe("served");
-    expect(answer(visit(`${site}/ledger`, { "x-dad-unserved": "staff" }))).toBe("served");
+    expect(answer(visit(`${site}/spend`, { "x-dad-unserved": "staff" }))).toBe("served");
   });
 
   it("upgrades insecure requests by the origin of the host answering", () => {
@@ -187,7 +187,7 @@ describe("proxy scope", () => {
     expect(sets(url)).toBe(true);
   });
 
-  it.each(["/", "/ledger", "/accounts", "/partners", "/apply", "/staffing", "/api/donor/me", "/_next/static/chunk.js"])(
+  it.each(["/", "/spend", "/accounts", "/partners", "/apply", "/staffing", "/api/donor/me", "/_next/static/chunk.js"])(
     "leaves %s to the static policy",
     (url) => {
       expect(sets(url)).toBe(false);

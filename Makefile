@@ -1,5 +1,8 @@
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.8.0
 SQLC := sqlc/sqlc:1.31.1@sha256:70f53171d27b2424e9358869975455a6e955a5aa8e58a998a270a6e34e525537
+SQLC_GO := github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+# SQLC_MODE=docker or go forces one way to run sqlc; by default Docker is used when its daemon answers.
+SQLC_MODE ?=
 GOLINES := go tool -modfile=tools/go.mod golines -m 140
 GENERATED := apps/donor-api/internal/store/queries apps/web/lib/openapi.d.ts apps/web/design/tokens.ts
 
@@ -50,7 +53,11 @@ reconcile:
 	cd apps/donor-api && go run ./cmd/reconcile $(RECONCILE_ARGS)
 
 generate:
-	docker run --rm -v "$(CURDIR)/apps/donor-api:/src" -w /src $(SQLC) generate
+	@if [ "$(SQLC_MODE)" = go ] || { [ "$(SQLC_MODE)" != docker ] && ! docker info >/dev/null 2>&1; }; then \
+		echo "sqlc $(SQLC_GO) (go run)"; cd apps/donor-api && go run $(SQLC_GO) generate; \
+	else \
+		echo "sqlc $(SQLC) (docker)"; docker run --rm -v "$(CURDIR)/apps/donor-api:/src" -w /src $(SQLC) generate; \
+	fi
 	cd apps/web && npm run --silent generate:api
 	node scripts/mobile-foundation.mjs generate
 
@@ -140,10 +147,10 @@ loadtest-seeded:
 	$(LOADTEST) -duration 60s -concurrency 256 -max-p99 250ms
 	$(LOADTEST) -duration 5m -concurrency 32 -max-p99 100ms
 	$(LOADTEST) -duration 60s -concurrency 256 \
-		-mix "referral-lookup=0,referral-capture=0,referral-missing=0,content=0,dashboard=0,gifts=0,sharing=0,profile=0,recurring=0,annual-summary=0,events=55,event-detail=45" \
+		-mix "referral-lookup=0,referral-capture=0,referral-missing=0,spend=0,dashboard=0,gifts=0,sharing=0,profile=0,recurring=0,annual-summary=0,events=55,event-detail=45" \
 		-max-p99 400ms
 	$(LOADTEST) -duration 5m -concurrency 32 \
-		-mix "referral-lookup=0,referral-capture=0,referral-missing=0,content=0,gifts=0,sharing=0,profile=0,recurring=0,annual-summary=0,dashboard=40,today-initiative=30,team=30" \
+		-mix "referral-lookup=0,referral-capture=0,referral-missing=0,spend=0,gifts=0,sharing=0,profile=0,recurring=0,annual-summary=0,dashboard=40,today-initiative=30,team=30" \
 		-max-p99 150ms
 
 deploy-build:

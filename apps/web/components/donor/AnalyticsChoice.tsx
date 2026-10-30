@@ -22,7 +22,7 @@ export function AnalyticsChoice() {
   }, [path]);
   if (!ready) return null;
   return (
-    <aside aria-label="Usage analytics" className="note">
+    <aside aria-label="Usage analytics" className="note analyticsChoice">
       {!chosen ? (
         <>
           <p>
@@ -30,28 +30,33 @@ export function AnalyticsChoice() {
             names, email addresses or payment details are sent. Observations are kept for 13 months. You can change this
             choice here.
           </p>
-          <button
-            type="button"
-            onClick={() => {
-              analyticsChoice(true);
-              setChosen(true);
-              observe("app_opened");
-            }}
-          >
-            Allow usage analytics
-          </button>{" "}
-          <button
-            type="button"
-            onClick={() => {
-              analyticsChoice(false);
-              setChosen(true);
-            }}
-          >
-            Decline usage analytics
-          </button>
+          <div className="actions">
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => {
+                analyticsChoice(true);
+                setChosen(true);
+                observe("app_opened");
+              }}
+            >
+              Allow usage analytics
+            </button>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => {
+                analyticsChoice(false);
+                setChosen(true);
+              }}
+            >
+              Decline usage analytics
+            </button>
+          </div>
         </>
       ) : (
         <button
+          className="quiet"
           type="button"
           onClick={() => {
             analyticsChoice(false);

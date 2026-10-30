@@ -11,12 +11,17 @@ import (
 	"dad/donor-api/internal/store"
 )
 
+// maxCursorLength bounds a keyset cursor before it is decoded.
+const maxCursorLength = 200
+
 type AdminSource interface {
 	ResetStreak(context.Context, string, pgtype.UUID, string) error
 	RecomputeRecognition(context.Context, string, pgtype.UUID, string) error
 	SearchDonors(context.Context, string, string, int64) (store.DonorSearch, error)
 	DonorDetail(context.Context, string, pgtype.UUID, int64, int64) (store.DonorDetail, error)
 	AuditEvents(context.Context, string, int64) (store.AuditPage, error)
+	FailedPayments(context.Context, string, string, string) (store.FailedPaymentPage, error)
+	AccountDeletions(context.Context, string, string) (store.AccountDeletionPage, error)
 	DonorMessages(context.Context, string, pgtype.UUID, int64) (store.MessagePage, error)
 	DonorActions(context.Context, string, pgtype.UUID, int64) (store.ActionPage, error)
 	PendingAction(context.Context, string, pgtype.UUID, pgtype.UUID, string) (store.PendingAction, error)
@@ -113,6 +118,27 @@ func (a *api) auditEvents(w http.ResponseWriter, r *http.Request, session string
 		return
 	}
 	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.AuditEvents(ctx, session, offset) })
+}
+
+func (a *api) failedPayments(w http.ResponseWriter, r *http.Request, session string) {
+	query := r.URL.Query()
+	cursor := query.Get("cursor")
+	if len(cursor) > maxCursorLength {
+		invalidFields(w, r)
+		return
+	}
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) {
+		return a.Admin.FailedPayments(ctx, session, query.Get("state"), cursor)
+	})
+}
+
+func (a *api) accountDeletions(w http.ResponseWriter, r *http.Request, session string) {
+	cursor := r.URL.Query().Get("cursor")
+	if len(cursor) > maxCursorLength {
+		invalidFields(w, r)
+		return
+	}
+	a.admin().serve(w, r, func(ctx context.Context) (any, error) { return a.Admin.AccountDeletions(ctx, session, cursor) })
 }
 
 func (a *api) requestClaim(w http.ResponseWriter, r *http.Request, session string) {

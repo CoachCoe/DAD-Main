@@ -32,7 +32,7 @@ func (a *api) routes() []route {
 	return []route{
 		a.public("GET /health/live", a.live),
 		a.public("GET /health/ready", a.ready),
-		a.public("GET /donor/public/content", a.publicContent),
+		a.public("GET /donor/public/spend", a.overallSpend),
 		{"POST /donor/stripe/webhook", stripeAuth, a.stripeWebhook},
 		a.visitor("POST /donor/checkouts", a.beginCheckout),
 		a.public("GET /donor/referrals/{code}", a.referrer),
@@ -124,6 +124,8 @@ func (a *api) routes() []route {
 		a.staffRead("GET /donor/staff/donors/{donor_id}/actions", a.donorActions),
 		a.staffRead("GET /donor/staff/donors/{donor_id}/actions/pending", a.pendingAction),
 		a.staffRead("GET /donor/staff/audit", a.auditEvents),
+		a.staffRead("GET /donor/staff/failed-payments", a.failedPayments),
+		a.staffRead("GET /donor/staff/deletions", a.accountDeletions),
 		a.staffRead("GET /donor/staff/report", a.report),
 		a.staffWrite("POST /donor/staff/donors/{donor_id}/claim-email", a.requestClaim),
 		a.staffWrite("POST /donor/staff/donors/{donor_id}/recognition/reset", a.resetStreak),
@@ -178,7 +180,6 @@ func (a *api) routes() []route {
 		a.staffWrite("POST /donor/staff/partners/{partnerID}/match-payment", a.staffPartnerMatchPayment),
 		a.staffWrite("POST /donor/staff/content/sources", a.uploadSource),
 		a.staffRead("GET /donor/staff/content/sources/{source_id}", a.downloadSource),
-		a.staffWrite("POST /donor/staff/content/publish", a.publish),
 		a.staffWrite("POST /donor/staff/content/wording", a.setRecognitionWording),
 		a.staffWrite("POST /donor/staff/founding-claims", a.importFoundingClaims),
 

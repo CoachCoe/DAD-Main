@@ -46,6 +46,10 @@ const nextConfig: NextConfig = {
       fallback: [],
     };
   },
+  // The impact ledger became the spend-by-category page; keep old links working.
+  async redirects() {
+    return [{ source: "/ledger", destination: "/spend", permanent: true }];
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

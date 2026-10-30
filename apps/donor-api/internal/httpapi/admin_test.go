@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -132,5 +133,75 @@ func TestStaffErrorsMapToStatuses(t *testing.T) {
 		if status, detail := staffStatus(tc.err); status != tc.status || detail != tc.detail {
 			t.Errorf("%v: got %d %q, want %d %q", tc.err, status, detail, tc.status, tc.detail)
 		}
+	}
+}
+
+type queueStub struct {
+	AdminSource
+	state, cursor string
+	calls         int
+}
+
+func (s *queueStub) FailedPayments(_ context.Context, session, state, cursor string) (store.FailedPaymentPage, error) {
+	if session != "staff-session" {
+		return store.FailedPaymentPage{}, store.ErrStaffDenied
+	}
+	s.calls++
+	s.state, s.cursor = state, cursor
+	next := "next-page"
+	return store.FailedPaymentPage{Payments: []store.FailedPayment{}, NextCursor: &next}, nil
+}
+
+func (s *queueStub) AccountDeletions(_ context.Context, session, cursor string) (store.AccountDeletionPage, error) {
+	if session != "staff-session" {
+		return store.AccountDeletionPage{}, store.ErrStaffForbidden
+	}
+	s.calls++
+	s.cursor = cursor
+	return store.AccountDeletionPage{Deletions: []store.AccountDeletion{}}, nil
+}
+
+func TestStaffQueuesForwardFiltersAndBoundTheCursor(t *testing.T) {
+	stub := &queueStub{}
+	server := NewServer("", Services{Admin: stub})
+	get := func(target string, session string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", target, nil)
+		if session != "" {
+			r.AddCookie(&http.Cookie{Name: staffCookie, Value: session})
+		}
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, r)
+		return response
+	}
+	if response := get("/donor/staff/failed-payments?state=lapsed&cursor=abc", "staff-session"); response.Code != 200 ||
+		stub.state != "lapsed" || stub.cursor != "abc" {
+		t.Fatalf("filters not forwarded: %d %s", response.Code, response.Body)
+	}
+	var body struct {
+		Payments   []any   `json:"payments"`
+		NextCursor *string `json:"next_cursor"`
+	}
+	if response := get("/donor/staff/failed-payments", "staff-session"); json.Unmarshal(response.Body.Bytes(), &body) != nil ||
+		body.NextCursor == nil || *body.NextCursor != "next-page" || body.Payments == nil {
+		t.Fatalf("page not served as documented: %s", response.Body)
+	}
+	if response := get("/donor/staff/deletions?cursor=xyz", "staff-session"); response.Code != 200 || stub.cursor != "xyz" {
+		t.Fatalf("deletion cursor not forwarded: %d", response.Code)
+	}
+	calls := stub.calls
+	long := strings.Repeat("a", maxCursorLength+1)
+	for _, path := range []string{"/donor/staff/failed-payments", "/donor/staff/deletions"} {
+		if response := get(path+"?cursor="+long, "staff-session"); response.Code != 422 {
+			t.Fatalf("%s accepted an oversize cursor: %d", path, response.Code)
+		}
+		if response := get(path, ""); response.Code != 401 {
+			t.Fatalf("%s served without a staff session: %d", path, response.Code)
+		}
+	}
+	if stub.calls != calls {
+		t.Fatal("an invalid request reached the store")
+	}
+	if response := get("/donor/staff/deletions", "other"); response.Code != 403 {
+		t.Fatalf("store refusal not mapped to 403: %d", response.Code)
 	}
 }

@@ -26,8 +26,8 @@ in the first mobile product. Backend authorization remains authoritative. Native
 call the API host directly with `X-DAD-Client: native`, no cookies or Origin, and a bearer
 access token when authenticated. Browser-only giving and staff operations stay on the web.
 
-After checks pass on the release commit, tag it `mobile-foundation-v2.1.0` (using the
-version in the file) and push that tag. The mobile-foundation workflow verifies the tag
+After checks pass on the release commit, tag it `mobile-foundation-v<version>` (using the
+version in the file, for example `mobile-foundation-v2.3.0`) and push that tag. The mobile-foundation workflow verifies the tag
 matches the declared version and publishes the individual files as GitHub Release assets.
 Existing release assets are never overwritten. The workflow also retains a candidate
 bundle as an Actions artifact on normal branch and PR builds; those artifacts are not
@@ -40,7 +40,7 @@ the vendored contract without network access to this private repository. An auth
 maintainer can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v2.1.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
+gh release download mobile-foundation-v2.3.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
@@ -48,6 +48,14 @@ additions, and major versions for breaking contract/token/link changes. A mobile
 pins its dependency; changing the backend must preserve supported installed clients.
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
+
+## Compatible additions in version 2.3
+
+Version 2.3 adds response fields only; no operation is added or removed. The partner
+overview carries `user_id`, the calling partner user's own id, so a client can recognise
+itself in the users list and withhold self-removal (the server also refuses it). The
+donor dashboard carries `rankings_opted_out`. Clients must ignore response fields they
+do not know.
 
 ## Compatible additions in version 2.2
 

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
-import { loadInitiative, loadPublicContent } from "./publicContent";
+import { loadInitiative, loadOverallSpend } from "./publicContent";
 
 vi.mock("next/server", () => ({ connection: async () => {} }));
 afterEach(() => {
@@ -8,7 +8,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-it("bounds a stalled content request and returns the unavailable state", async () => {
+it("bounds a stalled spend request and returns the unavailable state", async () => {
   const controller = new AbortController();
   const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
   vi.stubGlobal(
@@ -20,17 +20,17 @@ it("bounds a stalled content request and returns the unavailable state", async (
         }),
     ),
   );
-  const pending = loadPublicContent();
+  const pending = loadOverallSpend();
   await vi.waitFor(() => expect(timeout).toHaveBeenCalledWith(3000));
   controller.abort(new DOMException("Timed out", "TimeoutError"));
   await expect(pending).resolves.toBeNull();
 });
 
-it("retains the published snapshot's shared cache lifetime", async () => {
-  const content = { state: "unpublished", initiatives: [], ledger: [], ledger_as_of: null, cadence: null };
+it("retains the published spend's shared cache lifetime", async () => {
+  const content = { total_minor: 0, categories: [] };
   const fetch = vi.fn().mockResolvedValue(Response.json(content));
   vi.stubGlobal("fetch", fetch);
-  await expect(loadPublicContent()).resolves.toEqual(content);
+  await expect(loadOverallSpend()).resolves.toEqual(content);
   expect(fetch.mock.calls[0][1].next).toEqual({ revalidate: 60 });
 });
 

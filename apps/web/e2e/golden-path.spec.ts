@@ -27,7 +27,7 @@ test("every public header destination works at this viewport", async ({ page }) 
   await page.goto("/");
   for (const [name, path] of [
     ["Initiatives", "/initiatives"],
-    ["Impact ledger", "/ledger"],
+    ["Spend", "/spend"],
     ["How it works", "/how-it-works"],
     ["My account", "/account/dashboard"],
   ]) {

@@ -32,6 +32,7 @@ type InitiativeSource interface {
 // InitiativeReadSource is the public read of published initiatives and their spend.
 type InitiativeReadSource interface {
 	Spend(context.Context, pgtype.UUID) (store.InitiativeSpend, error)
+	OverallSpend(context.Context) (store.OverallSpend, error)
 	Published(context.Context) ([]store.PublicInitiative, error)
 	PublishedBySlug(context.Context, string) (store.PublicInitiative, error)
 }
@@ -215,6 +216,12 @@ func (a *api) initiativeSpend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.publicInitiativeRead(w, r, func(ctx context.Context) (any, error) { return a.InitiativeRead.Spend(ctx, id) })
+}
+
+// overallSpend is the public, unauthenticated read of spend by category
+// across every published initiative: category totals only (PRD §5.2).
+func (a *api) overallSpend(w http.ResponseWriter, r *http.Request) {
+	a.publicInitiativeRead(w, r, func(ctx context.Context) (any, error) { return a.InitiativeRead.OverallSpend(ctx) })
 }
 
 // publishedInitiatives lists every published initiative for the public pages.

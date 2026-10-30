@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 const destinations = [
   ["/initiatives", "Initiatives"],
-  ["/ledger", "Impact ledger"],
+  ["/spend", "Spend"],
   ["/how-it-works", "How it works"],
   ["/account/dashboard", "My account"],
 ] as const;

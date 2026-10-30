@@ -106,7 +106,7 @@ it("reads the coded 503 shape and per-row CSV errors from the API", async () => 
     status: 503,
     code: "PAYMENTS_UNCONFIGURED",
   });
-  await expect(api("/donor/staff/content/publish", { method: "POST", body: "{}" })).rejects.toMatchObject({
+  await expect(api("/donor/staff/founding-claims", { method: "POST", body: "{}" })).rejects.toMatchObject({
     status: 422,
     errors: [{ row: 3, column: "unit", reason: "unknown unit" }],
   });

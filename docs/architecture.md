@@ -129,11 +129,13 @@ in the access-controlled database. Stable Message-IDs survive retries;
 provider acknowledgement loss can still cause duplicate mail. Optional messages check
 current consent before delivery. Logs avoid payloads and donor identifiers.
 
-## Public content
+## Public spend and initiatives
 
-Staff publish the impact ledger as a spreadsheet CSV snapshot. Source documents are
-private, encrypted, and integrity-checked; public data contains no source bytes or private
-donor information. Ledger values carry an as-of date and visibly mark illustrative figures.
+The public spend page shows totals by category only (PRD §5.2): each category summed across
+the published initiatives, plus a grand total, from `GET /donor/public/spend`. There is no
+public line-item ledger. Staff enter and publish each initiative's category totals in the
+initiative editor. Source documents are private, encrypted, and integrity-checked; public
+data contains no source bytes or private donor information.
 Initiatives live in the database, edited and published in the staff initiative editor; the
 public initiative pages read the published ones. Publishing is manual; there is no CMS or
 live outcome pipeline.

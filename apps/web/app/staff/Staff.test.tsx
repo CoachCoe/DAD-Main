@@ -134,3 +134,22 @@ it("says when staff accounts cannot be loaded", async () => {
     await screen.findByText("Staff accounts could not be loaded right now. Please retry in a moment."),
   ).toHaveAttribute("role", "alert");
 });
+
+it("offers the donor money queues only with donor access", async () => {
+  serve(reply(200, { donors: [], next_offset: null }));
+  const { unmount } = render(<Staff q={null} />);
+  expect(await screen.findByRole("link", { name: "Failed payments" })).toHaveAttribute(
+    "href",
+    "/staff/failed-payments",
+  );
+  expect(screen.getByRole("link", { name: "Account deletions" })).toHaveAttribute("href", "/staff/deletions");
+  unmount();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => reply(200, { ...actor, permissions: ["partner.manage"] })),
+  );
+  render(<Staff q={null} />);
+  expect(await screen.findByRole("link", { name: "Partners" })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Failed payments" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Account deletions" })).not.toBeInTheDocument();
+});

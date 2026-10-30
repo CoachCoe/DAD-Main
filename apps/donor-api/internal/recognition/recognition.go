@@ -396,12 +396,6 @@ func countStreak(
 // set, then every 365 days after the last.
 var LadderMilestones = []int64{7, 30, 100, 365, 500, 1000, 1095, 1460}
 
-// LadderMilestone reports whether a run of days is a streak milestone (S-3).
-func LadderMilestone(days int64) bool {
-	last := LadderMilestones[len(LadderMilestones)-1]
-	return slices.Contains(LadderMilestones, days) || (days > last && (days-last)%365 == 0)
-}
-
 // ladderBarDays is the width of the streak card's segmented bar (PRD S-2).
 const ladderBarDays = 30
 

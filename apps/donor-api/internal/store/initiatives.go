@@ -258,7 +258,7 @@ func (s InitiativeService) SetMetric(
 				!plainText(in.Label, false) {
 				return struct{}{}, ErrStaffInput
 			}
-			if !slices.Contains(ledgerUnits, in.Unit) {
+			if !slices.Contains(metricUnits, in.Unit) {
 				return struct{}{}, ErrStaffInput
 			}
 			if utf8.RuneCountInString(in.VerificationNote) > 2000 ||
@@ -554,3 +554,6 @@ func (s InitiativeService) PublishSpend(ctx context.Context, token string, id pg
 	)
 	return err
 }
+
+// metricUnits is the unit vocabulary of a headline metric.
+var metricUnits = []string{"USD_CENTS", "PEOPLE", "INITIATIVES", "PARTNERS"}

@@ -121,6 +121,14 @@ make check-ingress smoke-ingress check-images
 DONOR_GO_DATABASE_URL="$TEST_DATABASE_URL" make test-browser-e2e
 ```
 
+The database must be created fresh for this checkout (a name starting `donor_go`) and
+migrated with the command above; an older database fails the role-catalog tests with
+"TEST_DATABASE_URL is not migrated to this checkout". Use PostgreSQL 16 with password
+authentication, as in the container above. A default local install (such as Homebrew
+PostgreSQL 14) also works for the role-catalog tests, but `cmd/provision`'s
+password-replacement test fails there because its `pg_hba.conf` trusts every local login.
+Run packages that share the database one at a time: `go test -race -p 1 ./...`.
+
 Browser tests run against `next dev` by default; set `E2E_PRODUCTION=1` to run them
 against a production build (`npm run build && npm start`), where account and staff pages
 use the nonce-based CSP, as do partner-portal pages. Next allows
@@ -149,7 +157,10 @@ For a local production preview, run `HOSTNAME=127.0.0.1 PORT=3000 npm start` fro
 
 SQL lives in `apps/donor-api/db`. `make generate` runs pinned sqlc and regenerates the web
 app's API types from the OpenAPI contract; commit each source with its generated code.
-`make check-generated` fails if either has drifted.
+`make check-generated` fails if either has drifted. sqlc runs in its pinned Docker image
+when the Docker daemon answers, and otherwise as `go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1`
+(needs a C compiler); force either with `make generate SQLC_MODE=docker` or `SQLC_MODE=go`.
+Both produce identical files.
 Applied migrations are immutable and checksum-checked.
 
 With the iOS and Android toolchains and sibling checkouts installed,
@@ -174,7 +185,7 @@ endpoints, `-url` reads a comma-separated list in equal measure:
 
 ```sh
 cd apps/donor-api
-go run ./cmd/loadtest -url "http://localhost:8002/donor/public/content" -duration 30s -concurrency 128 -max-p99 250ms
+go run ./cmd/loadtest -url "http://localhost:8002/donor/public/spend" -duration 30s -concurrency 128 -max-p99 250ms
 ```
 
 The runner reports throughput, statuses, and latency percentiles overall and per

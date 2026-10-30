@@ -39,7 +39,7 @@ describe("security headers", () => {
 
   it.each([
     ["http://127.0.0.1:3000", "/"],
-    ["http://127.0.0.1:3000", "/ledger"],
+    ["http://127.0.0.1:3000", "/spend"],
     ["http://127.0.0.1:3000", "/donate"],
     ["http://127.0.0.1:3000", "/r/code"],
     ["http://127.0.0.1:3000", "/api/donor/me"],
@@ -59,7 +59,7 @@ describe("security headers", () => {
     ["http://staff.localhost:3000", "/staff/donors/abc"],
     ["http://staff.localhost:3000", "/account/dashboard"],
     ["http://staff.localhost:3000", "/partner"],
-    ["http://staff.localhost:3000", "/ledger"],
+    ["http://staff.localhost:3000", "/spend"],
   ])("gives %s%s exactly one content security policy", async (origin, path) => {
     // Browsers enforce every CSP header they receive, so the static policy must stay off
     // the paths where proxy.ts sets a nonce policy, and no path may be left with neither.

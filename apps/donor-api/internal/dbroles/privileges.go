@@ -234,8 +234,6 @@ var grants = map[string]map[Role]string{
 	"donor_team_month_standings":    {API: "SELECT", ProjectionWorker: "SELECT, INSERT"},
 	"donor_partner_match_payments":  {API: "SELECT, INSERT"},
 	"donor_content_sources":         {API: "SELECT, INSERT", Rekey: "SELECT (id, encrypted_data), UPDATE (encrypted_data)"},
-	"donor_content_publications":    {API: "SELECT, INSERT"},
-	"donor_content_head":            {API: "SELECT, INSERT, UPDATE"},
 	"donor_initiative_partners":     {API: "SELECT, INSERT, UPDATE, DELETE", ProjectionWorker: "SELECT"},
 	"donor_initiative_spend_drafts": {API: "SELECT, INSERT, UPDATE, DELETE"},
 	"donor_streak_resets":           {API: "SELECT, INSERT", StripeWorker: "SELECT", ProjectionWorker: "SELECT"},

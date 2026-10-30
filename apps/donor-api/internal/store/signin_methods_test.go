@@ -28,7 +28,6 @@ func TestPhoneSignIn(t *testing.T) {
 	sends := &sync.WaitGroup{}
 	svc := PhoneService{DB: api, Sender: sender, sends: sends}
 
-	// Unconfigured service refuses.
 	if err := (PhoneService{DB: api}).BeginSignIn(ctx, phone); !errors.Is(err, ErrSignInUnavailable) {
 		t.Fatalf("unconfigured BeginSignIn = %v; want ErrSignInUnavailable", err)
 	}
@@ -183,7 +182,6 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 	}}
 	svc := OIDCService{DB: api, Verifier: oidc.NewVerifier(settings), Settings: settings}
 
-	// Unconfigured provider refuses.
 	empty := OIDCService{DB: api, Verifier: nil, Settings: &oidc.Settings{}}
 	if _, err := empty.SignIn(ctx, oidc.Google, "x", Client{}); !errors.Is(err, ErrSignInUnavailable) {
 		t.Fatalf("unconfigured = %v; want ErrSignInUnavailable", err)
@@ -231,7 +229,6 @@ func TestOIDCSignInLinksAndAuthenticates(t *testing.T) {
 		t.Fatalf("new verified identity: %+v %v", newProfile, err)
 	}
 
-	// An unverifiable token is refused.
 	if _, err := svc.SignIn(ctx, oidc.Google, "bad.token.sig", Client{}); !errors.Is(err, ErrSignInCode) {
 		t.Fatalf("bad token = %v; want ErrSignInCode", err)
 	}

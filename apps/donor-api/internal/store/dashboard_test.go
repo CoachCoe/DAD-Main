@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/store/queries"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -202,15 +203,37 @@ func TestDashboardJSONContract(t *testing.T) {
 		want  string
 	}{
 		{DonorDashboard{Mode: "test", State: "preparing"}, `{"mode":"test","state":"preparing"}`},
-		{DonorDashboard{Mode: "test", State: "ready", ComputedAt: at}, `{"computed_at":"2027-01-02T03:04:05Z","founding_donor":false,"mode":"test","referrals":null,"state":"ready","streak":null,"rank":null,"network":null,"impact":{"given_minor":null,"currency":"","initiatives_funded":0,"events_volunteered":0}}`},
+		{DonorDashboard{Mode: "test", State: "ready", ComputedAt: at}, `{"computed_at":"2027-01-02T03:04:05Z","founding_donor":false,"mode":"test","referrals":null,"state":"ready","streak":null,"rank":null,"rankings_opted_out":false,"network":null,"impact":{"given_minor":null,"currency":"","initiatives_funded":0,"events_volunteered":0}}`},
 		{DonorDashboard{Mode: "test", State: "ready", ComputedAt: at, FoundingDonor: true,
 			Referrals: &ReferralSummary{Link: 1, IRL: 2, LinkMinor: 300, IRLMinor: 400, TotalMinor: 700, Currency: "USD"},
 			Streak:    &StreakSummary{Current: 3, AtRisk: true, GraceEndsAt: &grace}},
-			`{"computed_at":"2027-01-02T03:04:05Z","founding_donor":true,"mode":"test","referrals":{"currency":"USD","irl":2,"irl_minor":400,"link":1,"link_minor":300,"total_minor":700},"state":"ready","streak":{"at_risk":true,"current":3,"grace_ends_at":"2027-01-16T03:04:05Z"},"rank":null,"network":null,"impact":{"given_minor":null,"currency":"","initiatives_funded":0,"events_volunteered":0}}`},
+			`{"computed_at":"2027-01-02T03:04:05Z","founding_donor":true,"mode":"test","referrals":{"currency":"USD","irl":2,"irl_minor":400,"link":1,"link_minor":300,"total_minor":700},"state":"ready","streak":{"at_risk":true,"current":3,"grace_ends_at":"2027-01-16T03:04:05Z"},"rank":null,"rankings_opted_out":false,"network":null,"impact":{"given_minor":null,"currency":"","initiatives_funded":0,"events_volunteered":0}}`},
 	} {
 		got, err := json.Marshal(c.board)
 		if err != nil || string(got) != c.want {
 			t.Fatalf("got %s %v\nwant %s", got, err, c.want)
+		}
+	}
+}
+
+func TestDashboardSeparatesRankingOptOutFromNoRankYet(t *testing.T) {
+	pool := database(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	optedIn := rankDonor(t, pool, 5, now.Add(-30*24*time.Hour), "Austin", false)
+	optedOut := rankDonor(t, pool, 5, now.Add(-30*24*time.Hour), "Austin", true)
+	q := queries.New(as(t, dbroles.API))
+	for id, want := range map[pgtype.UUID]bool{optedIn: false, optedOut: true} {
+		result, err := dashboard(ctx, q, queries.Donor{ID: id}, now)
+		if err != nil || result.Rank != nil || result.RankingsOptedOut != want {
+			t.Fatalf(
+				"donor %s: rank=%+v opted_out=%v err=%v; want no rank and opted_out=%v",
+				id,
+				result.Rank,
+				result.RankingsOptedOut,
+				err,
+				want,
+			)
 		}
 	}
 }

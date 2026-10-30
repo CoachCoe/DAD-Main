@@ -222,6 +222,9 @@ func TestPartnerProfileEditedByAdminsOnly(t *testing.T) {
 	if err != nil || ov.Organization != "Zeta Group" || ov.Description != "Clean water in three counties." {
 		t.Fatalf("saved profile reads back as %q / %q (%v)", ov.Organization, ov.Description, err)
 	}
+	if ov.UserID != viewerID.String() {
+		t.Fatalf("overview user id %q, want the caller's own %q", ov.UserID, viewerID.String())
+	}
 	if ov.CommittedVerified || ov.DeployedVerified || ov.PeopleReachedVerified {
 		t.Fatalf("unknown figures were labeled verified: %+v", ov)
 	}

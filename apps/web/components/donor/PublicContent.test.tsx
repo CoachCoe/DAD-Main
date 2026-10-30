@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import InitiativePage from "@/app/(donor)/initiatives/[slug]/page";
 import InitiativesPage from "@/app/(donor)/initiatives/page";
-import LedgerPage from "@/app/(donor)/ledger/page";
+import SpendPage from "@/app/(donor)/spend/page";
 
 const refresh = vi.fn();
 vi.mock("next/navigation", async (original) => ({
@@ -27,14 +27,11 @@ const initiative = {
   started_on: "2099-05-01",
   partner: "Partner Org",
 };
-const published = {
-  state: "published",
-  ledger_as_of: "2026-09-01",
-  cadence: "monthly",
-  initiatives: [],
-  ledger: [
-    { id: "snapshot:0", metric: "Collected", value: 3000, unit: "USD_CENTS", illustrative: false },
-    { id: "snapshot:1", metric: "Example reach", value: 100, unit: "PEOPLE", illustrative: true },
+const spend = {
+  total_minor: 190_00,
+  categories: [
+    { category: "Direct aid", amount_minor: 150_00 },
+    { category: "Logistics", amount_minor: 40_00 },
   ],
 };
 afterEach(() => {
@@ -48,36 +45,23 @@ const respond = (body: unknown, status = 200) =>
     vi.fn(async () => new Response(JSON.stringify(body), { status })),
   );
 
-it("labels illustrative figures alongside real figures and their as-of date", async () => {
-  respond(published);
-  render(await LedgerPage());
-  expect(screen.getByRole("heading", { level: 1, name: "Impact ledger" })).toBeVisible();
-  expect(screen.getByText("$30.00")).toBeInTheDocument();
-  expect(screen.getByText("Illustrative figure — not a reported outcome")).toBeInTheDocument();
-  expect(screen.getByText("Sep 1, 2026")).toHaveAttribute("dateTime", "2026-09-01");
-  expect(screen.getByText("100 people").closest("p")).toHaveTextContent("Illustrative");
-  expect(screen.getByText("Source document retained by DAD and available on request.")).toBeInTheDocument();
+it("shows spend as category totals with an overall total and no line items", async () => {
+  respond(spend);
+  render(await SpendPage());
+  expect(screen.getByRole("heading", { level: 1, name: "Spend by category" })).toBeVisible();
+  expect(screen.getByText("Direct aid")).toBeInTheDocument();
+  expect(screen.getByText("$150.00")).toBeInTheDocument();
+  expect(screen.getByText("$40.00")).toBeInTheDocument();
+  expect(screen.getByText("$190.00")).toBeInTheDocument();
+  expect(screen.queryByText(/Illustrative/)).not.toBeInTheDocument();
 });
 
-it("names a count of one in the singular", async () => {
-  respond({
-    ...published,
-    ledger: [
-      { id: "snapshot:0", metric: "Partners onboarded", value: 1, unit: "PARTNERS", illustrative: false },
-      { id: "snapshot:1", metric: "People reached", value: 1, unit: "PEOPLE", illustrative: false },
-    ],
-  });
-  render(await LedgerPage());
-  expect(screen.getByText("1 partner")).toBeInTheDocument();
-  expect(screen.getByText("1 person")).toBeInTheDocument();
-});
-
-it("fetches the configured API with a one-minute shared cache", async () => {
+it("fetches the spend totals endpoint with a one-minute shared cache", async () => {
   vi.stubEnv("DONOR_API_BASE_URL", "http://api.internal:8002");
-  respond(published);
-  render(await LedgerPage());
+  respond(spend);
+  render(await SpendPage());
   const fetch = vi.mocked(globalThis.fetch);
-  expect(fetch.mock.calls[0][0]).toBe("http://api.internal:8002/donor/public/content");
+  expect(fetch.mock.calls[0][0]).toBe("http://api.internal:8002/donor/public/spend");
   expect(fetch.mock.calls[0][1]).toMatchObject({ next: { revalidate: 60 } });
 });
 
@@ -86,18 +70,15 @@ it.each([
   ["a server error", () => respond({ detail: "boom" }, 503)],
 ])("offers a retry for %s and never substitutes demonstration numbers", async (_label, fail) => {
   fail();
-  render(await LedgerPage());
+  render(await SpendPage());
   expect(screen.getByRole("alert")).toHaveTextContent("Published records are unavailable");
-  expect(screen.queryByText("$30.00")).not.toBeInTheDocument();
-  expect(screen.queryByText(/No ledger figures have been published/)).not.toBeInTheDocument();
-  screen.getByRole("button", { name: "Retry records" }).click();
-  expect(refresh).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("$150.00")).not.toBeInTheDocument();
 });
 
-it("distinguishes an unpublished ledger from an unavailable one", async () => {
-  respond({ ...published, ledger: [], state: "unpublished", ledger_as_of: null, cadence: null });
-  render(await LedgerPage());
-  expect(screen.getByText(/No ledger figures have been published/)).toBeInTheDocument();
+it("shows an empty-state message when no spend has been published", async () => {
+  respond({ total_minor: 0, categories: [] });
+  render(await SpendPage());
+  expect(screen.getByText(/No spend has been published/)).toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 

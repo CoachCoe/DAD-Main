@@ -180,7 +180,7 @@ func (c *contract) lookup(pointer string) any {
 func TestContractSchemasMatchGoTypes(t *testing.T) {
 	responses := map[string]any{
 		"GET /donor/partner/application-status":                      store.ApplicationStatus{},
-		"GET /donor/public/content":                                  store.PublicContent{},
+		"GET /donor/public/spend":                                    store.OverallSpend{},
 		"POST /donor/checkouts":                                      payments.CheckoutResult{},
 		"GET /donor/me/dashboard":                                    store.DonorDashboard{},
 		"GET /donor/me/profile":                                      store.Profile{},
@@ -221,6 +221,8 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/staff/donors/{donor_id}/actions":                 store.ActionPage{},
 		"GET /donor/staff/donors/{donor_id}/actions/pending":         store.PendingAction{},
 		"GET /donor/staff/audit":                                     store.AuditPage{},
+		"GET /donor/staff/failed-payments":                           store.FailedPaymentPage{},
+		"GET /donor/staff/deletions":                                 store.AccountDeletionPage{},
 		"POST /donor/staff/messages/{message_id}/resend":             store.QueuedMessage{},
 		"GET /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund":  store.RefundQuote{},
 		"POST /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund": store.StaffRefund{},
@@ -235,7 +237,6 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"GET /donor/staff/partners":                                  store.StaffPartnerPage{},
 		"GET /donor/staff/partners/{partnerID}":                      store.StaffPartnerDetail{},
 		"POST /donor/staff/content/sources":                          store.StoredSource{},
-		"POST /donor/staff/content/publish":                          store.Publication{},
 		"GET /initiatives/{initiative_id}/spend":                     store.InitiativeSpend{},
 		"GET /donor/me/today-initiative":                             store.TodayInitiative{},
 		"GET /donor/me/network":                                      store.NetworkSummary{},
@@ -267,7 +268,6 @@ func TestContractSchemasMatchGoTypes(t *testing.T) {
 		"POST /donor/staff/accounts/{staff_id}/role":                 roleBody{},
 		"POST /donor/staff/donors/{donor_id}/gifts/{gift_id}/refund": refundBody{},
 		"POST /donor/staff/donors/{donor_id}/cancellation":           staffCancelBody{},
-		"POST /donor/staff/content/publish":                          store.PublicationRequest{},
 		"POST /donor/me/events/check-in":                             checkInBody{},
 		"POST /donor/staff/events":                                   store.EventInput{},
 		"POST /donor/staff/events/{event_id}":                        store.EventInput{},
@@ -373,5 +373,22 @@ func (c *contract) checkShape(t *testing.T, where string, typ reflect.Type, sche
 	for name, fieldType := range fields {
 		property, _ := properties[name].(map[string]any)
 		c.checkShape(t, where+"."+name, fieldType, property, encoded)
+	}
+}
+
+// The all-in-one content publication was replaced by initiatives; its routes
+// must stay unserved and undocumented.
+func TestRetiredContentRoutesAreNotServed(t *testing.T) {
+	retired := []string{"POST /donor/staff/content/publish", "GET /donor/public/content"}
+	documented := loadContract(t).operations()
+	for _, route := range allRoutes() {
+		if slices.Contains(retired, route.pattern) {
+			t.Errorf("%s is served", route.pattern)
+		}
+	}
+	for _, pattern := range retired {
+		if _, ok := documented[pattern]; ok {
+			t.Errorf("%s is still documented", pattern)
+		}
 	}
 }

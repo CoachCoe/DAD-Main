@@ -12,7 +12,7 @@ final class NullableTests: XCTestCase {
     func testDashboardRetainsUnknownAndPopulatedFinancialStates() throws {
         var body: [String: Any] = [
             "mode": "test", "state": "ready", "computed_at": "2026-10-26T12:00:00Z", "founding_donor": false,
-            "referrals": NSNull(), "streak": NSNull(), "rank": NSNull(), "network": NSNull(),
+            "referrals": NSNull(), "streak": NSNull(), "rank": NSNull(), "rankings_opted_out": false, "network": NSNull(),
             "impact": ["given_minor": NSNull(), "currency": "USD", "initiatives_funded": 0, "events_volunteered": 0],
         ]
         guard case .case2(let unknown) = try decode(Components.Schemas.DonorDashboard.self, body) else {
@@ -21,8 +21,15 @@ final class NullableTests: XCTestCase {
         XCTAssertNil(unknown.referrals)
         XCTAssertNil(unknown.streak)
         XCTAssertNil(unknown.rank)
+        XCTAssertFalse(unknown.rankings_opted_out)
         XCTAssertNil(unknown.network)
         XCTAssertNil(unknown.impact.given_minor)
+        body["rankings_opted_out"] = true
+        guard case .case2(let optedOut) = try decode(Components.Schemas.DonorDashboard.self, body) else {
+            return XCTFail("opted-out dashboard lost its response variant")
+        }
+        XCTAssertTrue(optedOut.rankings_opted_out)
+        body["rankings_opted_out"] = false
         body["streak"] = ["at_risk": true, "current": 30, "grace_ends_at": NSNull(), "ladder": NSNull()]
         body["rank"] = ["national_percentile": 2, "city": "Boston", "city_rank": 4, "computed_at": "2026-10-26T12:00:00Z"]
         body["network"] = ["active_count": 3, "annualized_minor": 108000, "currency": "USD"]

@@ -148,10 +148,11 @@
     }
    }
   },
-  "/donor/public/content": {
+  "/donor/public/spend": {
    "get": {
-    "operationId": "publicContent",
-    "summary": "Published initiatives and impact ledger",
+    "operationId": "overallSpend",
+    "summary": "Published spend by category",
+    "description": "Category totals across every published initiative, with the grand total. Individual transactions are never exposed.",
     "tags": [
      "Public"
     ],
@@ -162,7 +163,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/PublicContent"
+         "$ref": "#/components/schemas/OverallSpend"
         }
        }
       }
@@ -4430,7 +4431,7 @@
   "/donor/staff/content": {
    "get": {
     "operationId": "contentInventory",
-    "summary": "Published content and source documents",
+    "summary": "Source documents",
     "tags": [
      "Content"
     ],
@@ -4622,69 +4623,6 @@
      },
      "422": {
       "$ref": "#/components/responses/Unprocessable"
-     },
-     "503": {
-      "$ref": "#/components/responses/Unavailable"
-     }
-    }
-   }
-  },
-  "/donor/staff/content/publish": {
-   "post": {
-    "operationId": "publish",
-    "summary": "Publish the ledger",
-    "description": "A refused publication answers 422 `{\"detail\":\"The spreadsheet has problems\",\"errors\":[{sheet,row,column,reason}]}` listing every problem found.",
-    "tags": [
-     "Content"
-    ],
-    "security": [
-     {
-      "staffCookieAuth": []
-     }
-    ],
-    "x-rate-limit": "staff",
-    "x-clients": [
-     "browser"
-    ],
-    "requestBody": {
-     "required": true,
-     "content": {
-      "application/json": {
-       "schema": {
-        "$ref": "#/components/schemas/PublicationRequest"
-       }
-      }
-     },
-     "description": "At most 8 MiB. Authorized before the body is read."
-    },
-    "responses": {
-     "200": {
-      "description": "OK",
-      "content": {
-       "application/json": {
-        "schema": {
-         "$ref": "#/components/schemas/Publication"
-        }
-       }
-      }
-     },
-     "401": {
-      "$ref": "#/components/responses/Unauthorized"
-     },
-     "403": {
-      "$ref": "#/components/responses/Forbidden"
-     },
-     "413": {
-      "$ref": "#/components/responses/PayloadTooLarge"
-     },
-     "415": {
-      "$ref": "#/components/responses/UnsupportedMediaType"
-     },
-     "422": {
-      "$ref": "#/components/responses/Unprocessable"
-     },
-     "429": {
-      "$ref": "#/components/responses/TooManyRequests"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -7429,6 +7367,10 @@
         "schema": {
          "type": "object",
          "properties": {
+          "user_id": {
+           "type": "string",
+           "description": "The calling partner user's own id, as listed by partnerUsers."
+          },
           "organization": {
            "type": "string"
           },
@@ -7498,6 +7440,7 @@
           }
          },
          "required": [
+          "user_id",
           "organization",
           "description",
           "role",
@@ -11555,6 +11498,95 @@
      }
     }
    }
+  },
+  "/donor/staff/failed-payments": {
+   "get": {
+    "operationId": "failedPayments",
+    "summary": "Failed payments and accounts in grace (PRD \u00a78)",
+    "tags": [
+     "Staff donors"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/FailedPaymentState"
+     },
+     {
+      "$ref": "#/components/parameters/Cursor"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/FailedPaymentPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
+  "/donor/staff/deletions": {
+   "get": {
+    "operationId": "accountDeletions",
+    "summary": "Completed account deletions (PRD \u00a78)",
+    "tags": [
+     "Staff donors"
+    ],
+    "security": [
+     {
+      "staffCookieAuth": []
+     }
+    ],
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/Cursor"
+     }
+    ],
+    "responses": {
+     "200": {
+      "description": "OK",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/AccountDeletionPage"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
   }
  },
  "components": {
@@ -11626,6 +11658,31 @@
      "format": "int64",
      "minimum": 0,
      "default": 0
+    }
+   },
+   "Cursor": {
+    "name": "cursor",
+    "in": "query",
+    "required": false,
+    "description": "Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows.",
+    "schema": {
+     "type": "string",
+     "maxLength": 200
+    }
+   },
+   "FailedPaymentState": {
+    "name": "state",
+    "in": "query",
+    "required": false,
+    "description": "Which unresolved failed renewals to list: those still inside the 7-day grace window, those past it, or all.",
+    "schema": {
+     "type": "string",
+     "enum": [
+      "all",
+      "in_grace",
+      "lapsed"
+     ],
+     "default": "all"
     }
    }
   },
@@ -11800,7 +11857,7 @@
       "items": {
        "$ref": "#/components/schemas/PublicationProblem"
       },
-      "description": "Present only on a 422 from POST /donor/staff/content/publish: every problem found, up to 100."
+      "description": "Present only on a 422 from POST /donor/staff/founding-claims: every problem found, up to 100."
      }
     },
     "required": [
@@ -11813,7 +11870,7 @@
     "properties": {
      "sheet": {
       "type": "string",
-      "description": "`initiatives` or `ledger`, or empty for a request field named by `column`."
+      "description": "The spreadsheet the problem is in, or empty for a request field named by `column`."
      },
      "row": {
       "type": "integer",
@@ -11864,93 +11921,6 @@
      "expires_in",
      "refresh_token",
      "refresh_expires_in"
-    ],
-    "additionalProperties": false
-   },
-   "PublicContent": {
-    "type": "object",
-    "properties": {
-     "cadence": {
-      "type": [
-       "string",
-       "null"
-      ],
-      "description": "Publication cadence label."
-     },
-     "ledger": {
-      "type": "array",
-      "items": {
-       "$ref": "#/components/schemas/LedgerFigure"
-      },
-      "description": "Published impact ledger figures, in spreadsheet order."
-     },
-     "ledger_as_of": {
-      "type": [
-       "string",
-       "null"
-      ],
-      "description": "Date the ledger figures describe.",
-      "format": "date"
-     },
-     "publication_id": {
-      "type": "string",
-      "format": "uuid"
-     },
-     "published_at": {
-      "type": "string",
-      "format": "date-time"
-     },
-     "state": {
-      "type": "string",
-      "enum": [
-       "unpublished",
-       "published"
-      ]
-     }
-    },
-    "required": [
-     "cadence",
-     "ledger",
-     "ledger_as_of",
-     "state"
-    ],
-    "additionalProperties": false
-   },
-   "LedgerFigure": {
-    "type": "object",
-    "properties": {
-     "id": {
-      "type": "string",
-      "description": "Unique within the publication."
-     },
-     "metric": {
-      "type": "string"
-     },
-     "value": {
-      "type": "integer",
-      "format": "int64",
-      "description": "In `unit`; USD_CENTS is integer cents."
-     },
-     "unit": {
-      "type": "string",
-      "enum": [
-       "USD_CENTS",
-       "PEOPLE",
-       "INITIATIVES",
-       "PARTNERS"
-      ]
-     },
-     "illustrative": {
-      "type": "boolean",
-      "description": "An illustrative example, not a reported outcome."
-     }
-    },
-    "required": [
-     "id",
-     "metric",
-     "value",
-     "unit",
-     "illustrative"
     ],
     "additionalProperties": false
    },
@@ -12110,7 +12080,11 @@
           "type": "null"
          }
         ],
-        "description": "The donor's own ranking (S-4), or null when unranked."
+        "description": "The donor's own ranking (S-4), or null when unranked or opted out."
+       },
+       "rankings_opted_out": {
+        "type": "boolean",
+        "description": "True when the donor opted out of rankings. A null `rank` with this false means opted in but not yet ranked."
        },
        "network": {
         "anyOf": [
@@ -12135,6 +12109,7 @@
        "state",
        "streak",
        "rank",
+       "rankings_opted_out",
        "network",
        "impact"
       ],
@@ -13833,24 +13808,6 @@
     ],
     "additionalProperties": false
    },
-   "PublicationSummary": {
-    "type": "object",
-    "properties": {
-     "at": {
-      "type": "string",
-      "format": "date-time"
-     },
-     "id": {
-      "type": "string",
-      "format": "uuid"
-     }
-    },
-    "required": [
-     "at",
-     "id"
-    ],
-    "additionalProperties": false
-   },
    "StoredSource": {
     "type": "object",
     "properties": {
@@ -13876,12 +13833,6 @@
    "ContentInventory": {
     "type": "object",
     "properties": {
-     "publications": {
-      "type": "array",
-      "items": {
-       "$ref": "#/components/schemas/PublicationSummary"
-      }
-     },
      "sources": {
       "type": "array",
       "items": {
@@ -13890,40 +13841,8 @@
      }
     },
     "required": [
-     "publications",
      "sources"
     ],
-    "additionalProperties": false
-   },
-   "Publication": {
-    "type": "object",
-    "properties": {
-     "publication_id": {
-      "type": "string",
-      "format": "uuid"
-     }
-    },
-    "required": [
-     "publication_id"
-    ],
-    "additionalProperties": false
-   },
-   "PublicationRequest": {
-    "type": "object",
-    "properties": {
-     "ledger_csv": {
-      "type": "string",
-      "description": "Impact ledger spreadsheet export (CSV)."
-     },
-     "as_of": {
-      "type": "string",
-      "format": "date"
-     },
-     "cadence": {
-      "type": "string"
-     }
-    },
-    "required": [],
     "additionalProperties": false
    },
    "PasskeyInfo": {
@@ -14186,6 +14105,26 @@
     },
     "required": [
      "initiative_id",
+     "total_minor",
+     "categories"
+    ],
+    "additionalProperties": false
+   },
+   "OverallSpend": {
+    "type": "object",
+    "properties": {
+     "total_minor": {
+      "type": "integer",
+      "format": "int64"
+     },
+     "categories": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/SpendCategory"
+      }
+     }
+    },
+    "required": [
      "total_minor",
      "categories"
     ],
@@ -16187,6 +16126,139 @@
      "badges",
      "milestones"
     ]
+   },
+   "FailedPayment": {
+    "type": "object",
+    "properties": {
+     "amount_minor": {
+      "type": [
+       "integer",
+       "null"
+      ],
+      "format": "int64",
+      "description": "Amount of the failed charge, or null when the failure was not recorded.",
+      "minimum": 1
+     },
+     "disabled": {
+      "type": "boolean"
+     },
+     "donor_id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "email": {
+      "type": "string"
+     },
+     "failed_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the renewal was due and failed."
+     },
+     "grace_ends_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "period_id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "public_name": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "state": {
+      "type": "string",
+      "enum": [
+       "in_grace",
+       "lapsed"
+      ]
+     }
+    },
+    "required": [
+     "amount_minor",
+     "disabled",
+     "donor_id",
+     "email",
+     "failed_at",
+     "grace_ends_at",
+     "period_id",
+     "public_name",
+     "state"
+    ],
+    "additionalProperties": false
+   },
+   "FailedPaymentPage": {
+    "type": "object",
+    "properties": {
+     "next_cursor": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Cursor of the next page, or null on the last page."
+     },
+     "payments": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/FailedPayment"
+      }
+     }
+    },
+    "required": [
+     "next_cursor",
+     "payments"
+    ],
+    "additionalProperties": false
+   },
+   "AccountDeletion": {
+    "type": "object",
+    "properties": {
+     "deleted_at": {
+      "type": "string",
+      "format": "date-time"
+     },
+     "donor_id": {
+      "type": "string",
+      "format": "uuid"
+     },
+     "retained_gifts": {
+      "type": "integer",
+      "format": "int64",
+      "description": "Gift records kept for legal and tax purposes.",
+      "minimum": 0
+     }
+    },
+    "required": [
+     "deleted_at",
+     "donor_id",
+     "retained_gifts"
+    ],
+    "additionalProperties": false
+   },
+   "AccountDeletionPage": {
+    "type": "object",
+    "properties": {
+     "deletions": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/AccountDeletion"
+      }
+     },
+     "next_cursor": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "description": "Cursor of the next page, or null on the last page."
+     }
+    },
+    "required": [
+     "deletions",
+     "next_cursor"
+    ],
+    "additionalProperties": false
    }
   }
  }

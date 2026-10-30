@@ -94,13 +94,19 @@ export default function Staff({ q }: { q: string | null }) {
               )}
               {actor.permissions.includes("content.publish") && (
                 <>
-                  <Link href="/staff/content">Publish spreadsheet content</Link>
+                  <Link href="/staff/content">Source documents</Link>
                   <Link href="/staff/content/wording">Badge and milestone wording</Link>
                 </>
               )}
               {actor.permissions.includes("initiative.manage") && <Link href="/staff/initiatives">Initiatives</Link>}
               {actor.permissions.includes("event.manage") && <Link href="/staff/events">Events</Link>}
               {actor.permissions.includes("audit.read") && <Link href="/staff/audit">Audit history</Link>}
+              {actor.permissions.includes("donor.read") && (
+                <>
+                  <Link href="/staff/failed-payments">Failed payments</Link>
+                  <Link href="/staff/deletions">Account deletions</Link>
+                </>
+              )}
               {actor.permissions.includes("badge.manage") && (
                 <Link href="/staff/founding-claims">Waitlist Founding Donors</Link>
               )}

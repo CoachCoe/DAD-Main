@@ -128,7 +128,7 @@ func TestSeededMixActsLikeBrowsersAppsAndVisitors(t *testing.T) {
 	if len(problems) > 0 {
 		t.Fatal(problems[0])
 	}
-	if r.Failed != 0 || seen["lookup"] == 0 || seen["missing"] == 0 || seen["capture"] < 2 || seen["/donor/public/content"] == 0 {
+	if r.Failed != 0 || seen["lookup"] == 0 || seen["missing"] == 0 || seen["capture"] < 2 || seen["/donor/public/spend"] == 0 {
 		t.Fatalf("mix incomplete: %v %+v", seen, r.stats)
 	}
 	if seen["native"] == 0 || seen["native"] == seen["signed in"] {
@@ -279,7 +279,7 @@ func TestRunReadsTheSeedFixture(t *testing.T) {
 		"-fixture",
 		path,
 		"-mix",
-		"profile=1,referral-lookup=0,referral-capture=0,referral-missing=0,content=0,dashboard=0,gifts=0,sharing=0,recurring=0,annual-summary=0",
+		"profile=1,referral-lookup=0,referral-capture=0,referral-missing=0,spend=0,dashboard=0,gifts=0,sharing=0,recurring=0,annual-summary=0",
 		"-duration",
 		"100ms",
 		"-concurrency",
@@ -305,7 +305,7 @@ func TestParsersRejectUnsafeInput(t *testing.T) {
 		}
 	}
 	if b, err := parseBudgets("250ms,dashboard=400ms"); err != nil || b.of("dashboard") != 400*time.Millisecond ||
-		b.of("content") != 250*time.Millisecond {
+		b.of("spend") != 250*time.Millisecond {
 		t.Fatalf("budgets misread: %+v %v", b, err)
 	}
 	for _, invalid := range []string{"fast", "-1ms", "dashboard=0", "1s,2s", "1s,dashboard"} {

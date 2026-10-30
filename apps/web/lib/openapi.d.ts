@@ -39,15 +39,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/donor/public/content": {
+    "/donor/public/spend": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Published initiatives and impact ledger */
-        get: operations["publicContent"];
+        /**
+         * Published spend by category
+         * @description Category totals across every published initiative, with the grand total. Individual transactions are never exposed.
+         */
+        get: operations["overallSpend"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1159,7 +1162,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Published content and source documents */
+        /** Source documents */
         get: operations["contentInventory"];
         put?: never;
         post?: never;
@@ -1214,26 +1217,6 @@ export interface paths {
         get: operations["downloadSource"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/donor/staff/content/publish": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Publish the ledger
-         * @description A refused publication answers 422 `{"detail":"The spreadsheet has problems","errors":[{sheet,row,column,reason}]}` listing every problem found.
-         */
-        post: operations["publish"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2886,6 +2869,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/staff/failed-payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Failed payments and accounts in grace (PRD §8) */
+        get: operations["failedPayments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/donor/staff/deletions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Completed account deletions (PRD §8) */
+        get: operations["accountDeletions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2899,11 +2916,11 @@ export interface components {
              * @enum {string}
              */
             code?: "PAYMENTS_UNCONFIGURED" | "EMAIL_UNCONFIGURED" | "SOURCE_STORAGE_UNCONFIGURED";
-            /** @description Present only on a 422 from POST /donor/staff/content/publish: every problem found, up to 100. */
+            /** @description Present only on a 422 from POST /donor/staff/founding-claims: every problem found, up to 100. */
             errors?: components["schemas"]["PublicationProblem"][];
         };
         PublicationProblem: {
-            /** @description `initiatives` or `ledger`, or empty for a request field named by `column`. */
+            /** @description The spreadsheet the problem is in, or empty for a request field named by `column`. */
             sheet: string;
             /**
              * Format: int32
@@ -2930,37 +2947,6 @@ export interface components {
              * @description Seconds until the session ends unless refreshed: 60 days after the latest refresh, and never more than a year after sign-in, when the donor signs in again by email.
              */
             refresh_expires_in: number;
-        };
-        PublicContent: {
-            /** @description Publication cadence label. */
-            cadence: string | null;
-            /** @description Published impact ledger figures, in spreadsheet order. */
-            ledger: components["schemas"]["LedgerFigure"][];
-            /**
-             * Format: date
-             * @description Date the ledger figures describe.
-             */
-            ledger_as_of: string | null;
-            /** Format: uuid */
-            publication_id?: string;
-            /** Format: date-time */
-            published_at?: string;
-            /** @enum {string} */
-            state: "unpublished" | "published";
-        };
-        LedgerFigure: {
-            /** @description Unique within the publication. */
-            id: string;
-            metric: string;
-            /**
-             * Format: int64
-             * @description In `unit`; USD_CENTS is integer cents.
-             */
-            value: number;
-            /** @enum {string} */
-            unit: "USD_CENTS" | "PEOPLE" | "INITIATIVES" | "PARTNERS";
-            /** @description An illustrative example, not a reported outcome. */
-            illustrative: boolean;
         };
         ReferralSummary: {
             /** @enum {string} */
@@ -3023,8 +3009,10 @@ export interface components {
             /** @constant */
             state: "ready";
             streak: components["schemas"]["StreakSummary"] | null;
-            /** @description The donor's own ranking (S-4), or null when unranked. */
+            /** @description The donor's own ranking (S-4), or null when unranked or opted out. */
             rank: components["schemas"]["Ranking"] | null;
+            /** @description True when the donor opted out of rankings. A null `rank` with this false means opted in but not yet ranked. */
+            rankings_opted_out: boolean;
             /** @description The donor's active-network headline (I-2), or null when they have no active referrals. */
             network: components["schemas"]["NetworkCard"] | null;
             impact: components["schemas"]["ImpactSummary"];
@@ -3635,12 +3623,6 @@ export interface components {
         ExportDatasets: {
             datasets: string[];
         };
-        PublicationSummary: {
-            /** Format: date-time */
-            at: string;
-            /** Format: uuid */
-            id: string;
-        };
         StoredSource: {
             /** Format: uuid */
             id: string;
@@ -3648,19 +3630,7 @@ export interface components {
             sha256: string;
         };
         ContentInventory: {
-            publications: components["schemas"]["PublicationSummary"][];
             sources: components["schemas"]["StoredSource"][];
-        };
-        Publication: {
-            /** Format: uuid */
-            publication_id: string;
-        };
-        PublicationRequest: {
-            /** @description Impact ledger spreadsheet export (CSV). */
-            ledger_csv?: string;
-            /** Format: date */
-            as_of?: string;
-            cadence?: string;
         };
         /** @description A passkey the donor can sign in with. Credential material is never returned. */
         PasskeyInfo: {
@@ -3737,6 +3707,11 @@ export interface components {
         };
         InitiativeSpend: {
             initiative_id: string;
+            /** Format: int64 */
+            total_minor: number;
+            categories: components["schemas"]["SpendCategory"][];
+        };
+        OverallSpend: {
             /** Format: int64 */
             total_minor: number;
             categories: components["schemas"]["SpendCategory"][];
@@ -4357,6 +4332,50 @@ export interface components {
             badges: components["schemas"]["BadgeRule"][];
             milestones: number[];
         };
+        FailedPayment: {
+            /**
+             * Format: int64
+             * @description Amount of the failed charge, or null when the failure was not recorded.
+             */
+            amount_minor: number | null;
+            disabled: boolean;
+            /** Format: uuid */
+            donor_id: string;
+            email: string;
+            /**
+             * Format: date-time
+             * @description When the renewal was due and failed.
+             */
+            failed_at: string;
+            /** Format: date-time */
+            grace_ends_at: string;
+            /** Format: uuid */
+            period_id: string;
+            public_name: string | null;
+            /** @enum {string} */
+            state: "in_grace" | "lapsed";
+        };
+        FailedPaymentPage: {
+            /** @description Cursor of the next page, or null on the last page. */
+            next_cursor: string | null;
+            payments: components["schemas"]["FailedPayment"][];
+        };
+        AccountDeletion: {
+            /** Format: date-time */
+            deleted_at: string;
+            /** Format: uuid */
+            donor_id: string;
+            /**
+             * Format: int64
+             * @description Gift records kept for legal and tax purposes.
+             */
+            retained_gifts: number;
+        };
+        AccountDeletionPage: {
+            deletions: components["schemas"]["AccountDeletion"][];
+            /** @description Cursor of the next page, or null on the last page. */
+            next_cursor: string | null;
+        };
     };
     responses: {
         /** @description Signed in. */
@@ -4471,6 +4490,10 @@ export interface components {
         IdempotencyKey: string;
         /** @description Rows to skip. Pages hold up to 50 rows; pass the previous page's `next_offset` until it is null. */
         Offset: number;
+        /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+        Cursor: string;
+        /** @description Which unresolved failed renewals to list: those still inside the 7-day grace window, those past it, or all. */
+        FailedPaymentState: "all" | "in_grace" | "lapsed";
     };
     requestBodies: never;
     headers: never;
@@ -4531,7 +4554,7 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
-    publicContent: {
+    overallSpend: {
         parameters: {
             query?: never;
             header?: never;
@@ -4546,7 +4569,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PublicContent"];
+                    "application/json": components["schemas"]["OverallSpend"];
                 };
             };
             503: components["responses"]["Unavailable"];
@@ -6709,38 +6732,6 @@ export interface operations {
             503: components["responses"]["Unavailable"];
         };
     };
-    publish: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description At most 8 MiB. Authorized before the body is read. */
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PublicationRequest"];
-            };
-        };
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Publication"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            413: components["responses"]["PayloadTooLarge"];
-            415: components["responses"]["UnsupportedMediaType"];
-            422: components["responses"]["Unprocessable"];
-            429: components["responses"]["TooManyRequests"];
-            503: components["responses"]["Unavailable"];
-        };
-    };
     beginDonorPasskeySignIn: {
         parameters: {
             query?: never;
@@ -8066,6 +8057,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
+                        /** @description The calling partner user's own id, as listed by partnerUsers. */
+                        user_id: string;
                         organization: string;
                         /** @description The organization's description, as its administrators wrote it (§7.2). */
                         description: string;
@@ -9878,6 +9871,62 @@ export interface operations {
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    failedPayments: {
+        parameters: {
+            query?: {
+                /** @description Which unresolved failed renewals to list: those still inside the 7-day grace window, those past it, or all. */
+                state?: components["parameters"]["FailedPaymentState"];
+                /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailedPaymentPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    accountDeletions: {
+        parameters: {
+            query?: {
+                /** @description Opaque position from the previous page's `next_cursor`; omit for the first page. Keyset-paged lists hold up to 50 rows. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountDeletionPage"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["Unprocessable"];
             503: components["responses"]["Unavailable"];
         };
     };

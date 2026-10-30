@@ -53,6 +53,48 @@ func (q *Queries) RecentDonorMessage(ctx context.Context, arg RecentDonorMessage
 	return exists, err
 }
 
+const staffAccountDeletions = `-- name: StaffAccountDeletions :many
+SELECT x.donor_id, x.deleted_at,
+  (SELECT count(*) FROM donor_gifts g WHERE g.donor_id = x.donor_id)::bigint AS retained_gifts
+FROM donor_deletions x
+WHERE $1::timestamptz IS NULL
+  OR (x.deleted_at, x.donor_id) < ($1::timestamptz, $2::uuid)
+ORDER BY x.deleted_at DESC, x.donor_id DESC
+LIMIT 51
+`
+
+type StaffAccountDeletionsParams struct {
+	CursorAt pgtype.Timestamptz `json:"cursor_at"`
+	CursorID pgtype.UUID        `json:"cursor_id"`
+}
+
+type StaffAccountDeletionsRow struct {
+	DonorID       pgtype.UUID        `json:"donor_id"`
+	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
+	RetainedGifts int64              `json:"retained_gifts"`
+}
+
+// Self-service erasures (donor_deletions), newest first, keyset-paged.
+func (q *Queries) StaffAccountDeletions(ctx context.Context, arg StaffAccountDeletionsParams) ([]StaffAccountDeletionsRow, error) {
+	rows, err := q.db.Query(ctx, staffAccountDeletions, arg.CursorAt, arg.CursorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StaffAccountDeletionsRow{}
+	for rows.Next() {
+		var i StaffAccountDeletionsRow
+		if err := rows.Scan(&i.DonorID, &i.DeletedAt, &i.RetainedGifts); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const staffActionPage = `-- name: StaffActionPage :many
 SELECT id,actor_id,kind,target_id,amount_minor,period_end,reason,status,completed_at
 FROM donor_staff_actions WHERE donor_id=$1 ORDER BY created_at DESC,id
@@ -207,6 +249,82 @@ func (q *Queries) StaffDonorSearch(ctx context.Context, arg StaffDonorSearchPara
 			&i.PublicName,
 			&i.ClaimedAt,
 			&i.Disabled,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const staffFailedPayments = `-- name: StaffFailedPayments :many
+SELECT p.id AS period_id, p.donor_id, p.due_at, d.email, d.public_name, d.disabled,
+  (p.due_at + interval '168 hours')::timestamptz AS grace_ends_at,
+  coalesce(o.amount_minor, 0)::bigint AS amount_minor
+FROM donor_billing_periods p
+JOIN donors d ON d.id = p.donor_id
+LEFT JOIN LATERAL (
+  SELECT amount_minor FROM donor_billing_observations
+  WHERE period_id = p.id AND status = 'FAILED' ORDER BY occurred_at, id LIMIT 1
+) o ON true
+WHERE p.status = 'FAILED'
+  AND ($1::text = 'all'
+    OR ($1::text = 'in_grace' AND p.due_at + interval '168 hours' > $2::timestamptz)
+    OR ($1::text = 'lapsed' AND p.due_at + interval '168 hours' <= $2::timestamptz))
+  AND ($3::timestamptz IS NULL
+    OR (p.due_at, p.id) < ($3::timestamptz, $4::uuid))
+ORDER BY p.due_at DESC, p.id DESC
+LIMIT 51
+`
+
+type StaffFailedPaymentsParams struct {
+	State     string             `json:"state"`
+	AsOf      pgtype.Timestamptz `json:"as_of"`
+	CursorDue pgtype.Timestamptz `json:"cursor_due"`
+	CursorID  pgtype.UUID        `json:"cursor_id"`
+}
+
+type StaffFailedPaymentsRow struct {
+	PeriodID    pgtype.UUID        `json:"period_id"`
+	DonorID     pgtype.UUID        `json:"donor_id"`
+	DueAt       pgtype.Timestamptz `json:"due_at"`
+	Email       string             `json:"email"`
+	PublicName  pgtype.Text        `json:"public_name"`
+	Disabled    bool               `json:"disabled"`
+	GraceEndsAt pgtype.Timestamptz `json:"grace_ends_at"`
+	AmountMinor int64              `json:"amount_minor"`
+}
+
+// Unresolved failed renewals, newest first, keyset-paged on (due_at, id). The
+// grace window is the fixed 7*24h the recognition rules use, so a DST change
+// cannot move its end. state is all, in_grace or lapsed. amount_minor is 0
+// when no failure was observed (observed amounts are always positive).
+func (q *Queries) StaffFailedPayments(ctx context.Context, arg StaffFailedPaymentsParams) ([]StaffFailedPaymentsRow, error) {
+	rows, err := q.db.Query(ctx, staffFailedPayments,
+		arg.State,
+		arg.AsOf,
+		arg.CursorDue,
+		arg.CursorID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StaffFailedPaymentsRow{}
+	for rows.Next() {
+		var i StaffFailedPaymentsRow
+		if err := rows.Scan(
+			&i.PeriodID,
+			&i.DonorID,
+			&i.DueAt,
+			&i.Email,
+			&i.PublicName,
+			&i.Disabled,
+			&i.GraceEndsAt,
+			&i.AmountMinor,
 		); err != nil {
 			return nil, err
 		}

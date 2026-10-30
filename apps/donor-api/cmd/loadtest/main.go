@@ -2,7 +2,7 @@
 // burst (high concurrency, short) or a soak (moderate concurrency, long).
 //
 // Given a seed fixture it runs a weighted mix of what a referral spike
-// brings: referral landings and their captures, public content, and signed-in
+// brings: referral landings and their captures, public spend totals, and signed-in
 // donors reading their dashboards and giving history through browser cookies
 // or the app's bearer sessions. Given -url instead it reads those endpoints in
 // equal measure. It reports latency percentiles, statuses and errors per
@@ -83,7 +83,7 @@ type fixture struct {
 // dashboard-soak mixes in the Makefile, so the referral-spike shape is
 // unchanged unless asked for.
 var defaultMix = map[string]int{
-	"referral-lookup": 30, "referral-capture": 12, "referral-missing": 3, "content": 15,
+	"referral-lookup": 30, "referral-capture": 12, "referral-missing": 3, "spend": 15,
 	"dashboard": 18, "gifts": 7, "sharing": 5, "profile": 4, "recurring": 4, "annual-summary": 2,
 	"events": 0, "event-detail": 0, "event-reserve": 0, "today-initiative": 0, "team": 0,
 }
@@ -132,7 +132,7 @@ func seededMix(api, origin string, f fixture, weights map[string]int) ([]scenari
 			}
 			return newRequest(http.MethodGet, api+"/donor/referrals/"+base64.RawURLEncoding.EncodeToString(unknown), nil)
 		}},
-		{name: "content", expect: http.StatusOK, build: get(api + "/donor/public/content")},
+		{name: "spend", expect: http.StatusOK, build: get(api + "/donor/public/spend")},
 		{name: "dashboard", expect: http.StatusOK, signedIn: true, build: get(api + "/donor/me/dashboard")},
 		{name: "gifts", expect: http.StatusOK, signedIn: true, build: get(api + "/donor/me/gifts?offset=0")},
 		{name: "sharing", expect: http.StatusOK, signedIn: true, build: get(api + "/donor/me/sharing")},

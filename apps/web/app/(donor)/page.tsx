@@ -68,7 +68,7 @@ export default function DonorHome() {
           </p>
           <nav aria-label="Explore" className="links">
             <Link href="/initiatives">Explore planned initiatives</Link>
-            <Link href="/ledger">Read the impact ledger</Link>
+            <Link href="/spend">See spend by category</Link>
             <Link href="/apply">Become a partner</Link>
           </nav>
         </section>

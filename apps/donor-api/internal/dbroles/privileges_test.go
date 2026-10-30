@@ -11,6 +11,7 @@ import (
 
 	"dad/donor-api/internal/dbroles"
 	"dad/donor-api/internal/dbroles/dbrolestest"
+	"dad/donor-api/internal/migrations"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,6 +28,10 @@ func owner(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	if err = migrations.Verify(ctx, pool); err != nil {
+		t.Fatalf("TEST_DATABASE_URL is not migrated to this checkout (%v); run `make migrate` (or go run ./cmd/migrate with "+
+			"DONOR_GO_DATABASE_URL set to it) on a database created for this checkout", err)
+	}
 	return pool
 }
 

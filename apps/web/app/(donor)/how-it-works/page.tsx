@@ -43,8 +43,8 @@ export default function HowItWorks() {
       </p>
       <h2>Clear records, honest limits</h2>
       <p>
-        The impact ledger is updated by staff on a stated cadence. Figures carry an as-of date, illustrative figures are
-        labeled, and reported figures cite a source document.
+        DAD publishes spend as totals by category, never as individual transactions. Staff verify each figure against
+        finance records before it is published.
       </p>
       <h2>Programs start at launch</h2>
       <p>
@@ -59,8 +59,8 @@ export default function HowItWorks() {
         <Link className="button" href="/donate">
           Try giving
         </Link>
-        <Link className="secondary" href="/ledger">
-          Read the impact ledger
+        <Link className="secondary" href="/spend">
+          See spend by category
         </Link>
       </div>
       <p>

@@ -37,6 +37,18 @@ test("an invited administrator creates a passkey, then signs out and back in wit
   await expect(page).toHaveURL(staffURL("/staff"));
   await expect(page.getByText("Signed in as E2E Administrator · SUPER_ADMIN")).toBeVisible();
 
+  // The donor money queues are served by the real API to a super admin.
+  await page.getByRole("link", { name: "Failed payments" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Failed payments" })).toBeVisible();
+  await expect(page.getByRole("table").or(page.getByText(/^No failed payments/))).toBeVisible();
+  await expectAccessible(page);
+  await page.getByRole("link", { name: "Staff back office" }).click();
+  await page.getByRole("link", { name: "Account deletions" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Account deletions" })).toBeVisible();
+  await expect(page.getByRole("table").or(page.getByText("No accounts have been deleted."))).toBeVisible();
+  await expectAccessible(page);
+  await page.getByRole("link", { name: "Staff back office" }).click();
+
   // An audited download starts from the back office itself, never from another host.
   await page.getByRole("link", { name: "Exports and enrolment queue" }).click();
   const download = page.waitForEvent("download");
@@ -77,7 +89,7 @@ test("the staff host serves only the back office, and the public host none of it
 
   await page.goto(staffURL("/"));
   await expect(page).toHaveURL(staffURL("/staff"));
-  for (const path of ["/ledger", "/account/dashboard", "/donate", "/Staff/sign-in", "/staff/nowhere"]) {
+  for (const path of ["/spend", "/account/dashboard", "/donate", "/Staff/sign-in", "/staff/nowhere"]) {
     expect((await page.goto(staffURL(path)))?.status()).toBe(404);
     await expect(page.getByText("This page isn’t part of the staff back office.")).toBeVisible();
     await expect(page.getByRole("link", { name: "Go to staff home" })).toHaveAttribute("href", "/staff");

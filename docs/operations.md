@@ -194,6 +194,27 @@ UPDATE`, which PostgreSQL allows only with `UPDATE` on some column) holds `UPDAT
 `DONOR_GO_DATABASE_URL` is the schema owner's URL, used only by `migrate` and
 `provision-roles`.
 
+### Supplying a password as a secret
+
+Each URL variable (`DONOR_API_DATABASE_URL`, `DONOR_WORKER_STRIPE_DATABASE_URL`,
+`DONOR_GO_DATABASE_URL`, and the rest) can also be given as parts, so the password
+reaches the process as its own secret (an ECS `secrets` entry) and never sits in a
+plaintext task-definition `environment` value. For a variable `X_URL`, with prefix `X`
+(the variable without `_URL`, for example `DONOR_API_DATABASE`):
+
+| Form | Variables |
+|---|---|
+| Full URL (unchanged) | `X_URL` |
+| URL plus separate password | `X_URL` without a password, and `X_PASSWORD`; the separate password replaces any in the URL |
+| Parts | `X_HOST`, `X_NAME`, `X_USER`, `X_PASSWORD`, optional `X_PORT` (default `5432`) and `X_SSLMODE` |
+
+On AWS every task uses the middle form: a password-less `X_URL` plus `X_PASSWORD` as an
+ECS secret (see `docs/aws-deployment.md` section 5.1). The DAD-Main release that accepts
+it is deployed before the DAD-infra change that relies on it.
+
+A set `X_URL` always wins over the parts. The password is never logged: the process
+reports only variable names in its errors.
+
 The privileges are declared table by table in `apps/donor-api/internal/dbroles/privileges.go`,
 in `GRANT` syntax, derived from the statements each process runs. Every `migrate` run
 creates any missing role and brings privileges to the declaration in the same transaction
@@ -235,7 +256,7 @@ with both environment files.
 ### Rotating database passwords
 
 1. Generate a new password (`openssl rand -hex 32`) and put it in the process's URL in
-   `.env.database`.
+   `.env.database` (or, with a password-less URL, in its `X_PASSWORD` variable or secret).
 2. Run `./scripts/deploy.sh provision-roles`. The login accepts only the new password
    from now on: connections already open stay open, but the running process cannot open
    new ones, so go straight on.
@@ -256,7 +277,9 @@ privileges, give it a URL that assumes the role, which a superuser may, such as
 could still reset the role, a process accepts that only with the same setting, and checks
 that the role is its own. For the closest match to a deployment, set every process URL to
 a login of its own and run `make provision`. Tests and browser tests run the API, workers,
-and commands with assumed roles, so the test database's user must be a superuser.
+and commands with assumed roles, so the test database's user must be a superuser. The
+role tests also require a database migrated to the checkout and fail saying so when it is
+behind; the local recipe is under Checks in the README.
 
 Roles belong to the whole PostgreSQL cluster, not one database, so run each environment
 in its own cluster: provisioning refuses a role whose privileges reach another
@@ -651,24 +674,18 @@ recovery for an enabled administrator:
 It works like the back-office recovery action and is audited as `staff.recovery_invited`
 with no actor. Protect the printed invitation, and review the audit history afterwards.
 
-At `/staff/content`, upload private source documents, then publish complete CSV snapshots
-of the impact ledger. Initiatives are created, edited and published at `/staff/initiatives`;
+At `/staff/content`, upload private source documents. Initiatives, their headline metrics and
+their spend by category are created, edited and published at `/staff/initiatives`;
 initiatives published from the spreadsheet before it was retired for them were copied there.
-Sources are limited to 10 MiB, encrypted, SHA-256 checked, and permission-protected.
-Without `DONOR_CONTENT_ENCRYPTION_KEY`, uploads return 503 before the file is read;
-publishing still works. Donor records have linkable URLs (`/staff/donors/{id}`), and
-search keeps its query in `/staff?q=`.
-The CSV is limited to 512 KiB and 500 rows. Exact column order:
-
-```csv
-metric,value,unit,source_id,illustrative
-```
-
-Ledger values are nonnegative integers with unit `USD_CENTS`, `PEOPLE`, `INITIATIVES`, or
-`PARTNERS`. Real figures require a source; examples require `illustrative=true`. Supply an
-as-of date (YYYY-MM-DD) and stated update cadence. Invalid publications leave the current
-snapshot intact. Staff are responsible for actual accuracy; uploading a source cannot
-establish it.
+The spreadsheet's publish and public-content endpoints are gone, and migration 0077 drops
+its `donor_content_publications` and `donor_content_head` tables; the publication history
+is discarded by design, and the board-approval source documents stay in `donor_content_sources`.
+The public `/spend` page shows only category totals summed across published initiatives; no
+individual transactions are published. Sources are limited to 10 MiB, encrypted, SHA-256
+checked, and permission-protected. Without `DONOR_CONTENT_ENCRYPTION_KEY`, uploads return 503
+before the file is read. Donor records have linkable URLs (`/staff/donors/{id}`), and
+search keeps its query in `/staff?q=`. Staff are responsible for actual accuracy; uploading a
+source cannot establish it.
 
 Publishing an initiative requires its board approval: the ID of the approval document
 stored here and the date the board approved it. A published initiative's approval can be

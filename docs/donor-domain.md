@@ -175,7 +175,7 @@ unconfirmed. They must be verified before live donations.
 
 Go implements the donor API, Stripe inbox, recurring controls, projections, account
 email, notification outbox, staff passkeys and permissions, audited refunds/cancellation,
-exports, private source documents, spreadsheet publication, partner applications, and
+exports, private source documents, spend by category, partner applications, and
 the partner portal.
 TypeScript implements the public, donor, and staff web surfaces. See [architecture](architecture.md)
 and [operations](operations.md) for runtime behavior and instructions.

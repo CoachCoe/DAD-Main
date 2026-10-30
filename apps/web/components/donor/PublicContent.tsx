@@ -16,51 +16,26 @@ export function ContentUnavailable() {
   );
 }
 
-const counted: Record<Exclude<Schema<"LedgerFigure">["unit"], "USD_CENTS">, [string, string]> = {
-  PEOPLE: ["person", "people"],
-  INITIATIVES: ["initiative", "initiatives"],
-  PARTNERS: ["partner", "partners"],
-};
-
-function figure({ value, unit }: Schema<"LedgerFigure">) {
-  if (unit === "USD_CENTS") return formatMoney(value);
-  return `${value.toLocaleString("en-US")} ${counted[unit][value === 1 ? 0 : 1]}`;
-}
-
-export function Ledger({ content }: { content: Schema<"PublicContent"> }) {
+export function SpendByCategory({ spend }: { spend: Schema<"OverallSpend"> }) {
+  if (!spend.categories.length)
+    return (
+      <p className="callout">
+        No spend has been published yet. Category totals appear here once DAD publishes an initiative&apos;s spend.
+      </p>
+    );
   return (
     <>
-      {content.ledger_as_of && (
-        <p className="note">
-          As of <time dateTime={content.ledger_as_of}>{formatDay(content.ledger_as_of)}</time> · Updated{" "}
-          {content.cadence}.
-        </p>
-      )}
-      {content.ledger.length ? (
-        <div className="metrics">
-          {content.ledger.map((item) => (
-            <article key={item.id} className={item.illustrative ? "metric illustrative" : "metric"}>
-              <h2>{item.metric}</h2>
-              {/* The label sits on the figure itself, so no crop or screenshot can separate them. */}
-              <p className="metricValue">
-                {figure(item)}
-                {item.illustrative && <span className="badge">Illustrative</span>}
-              </p>
-              <p>
-                {item.illustrative ? (
-                  <strong>Illustrative figure — not a reported outcome</strong>
-                ) : (
-                  "Source document retained by DAD and available on request."
-                )}
-              </p>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="callout">
-          No ledger figures have been published yet. Figures will appear with their source records and an as-of date.
-        </p>
-      )}
+      <p className="note">
+        Total across all categories: <strong>{formatMoney(spend.total_minor)}</strong>
+      </p>
+      <div className="metrics">
+        {spend.categories.map((item) => (
+          <article key={item.category} className="metric">
+            <h2>{item.category}</h2>
+            <p className="metricValue">{formatMoney(item.amount_minor)}</p>
+          </article>
+        ))}
+      </div>
     </>
   );
 }

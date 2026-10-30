@@ -25,7 +25,7 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	if len(args) != 0 {
 		return errors.New("provision takes no arguments")
 	}
-	ownerURL := getenv(dbroles.OwnerVariable)
+	ownerURL := dbroles.ConnectionURL(dbroles.OwnerVariable, getenv)
 	if ownerURL == "" {
 		return errors.New(dbroles.OwnerVariable + " is required")
 	}
@@ -36,7 +36,7 @@ func run(args []string, getenv func(string) string, out io.Writer) error {
 	var logins []dbroles.Login
 	var missing []string
 	for _, role := range dbroles.Roles {
-		url := getenv(role.Variable())
+		url := dbroles.ConnectionURL(role.Variable(), getenv)
 		if url == "" {
 			missing = append(missing, role.Variable())
 			continue
