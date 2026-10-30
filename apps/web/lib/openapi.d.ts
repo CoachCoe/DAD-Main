@@ -2820,7 +2820,7 @@ export interface paths {
         put?: never;
         /**
          * /donor/signup
-         * @description 503 `EMAIL_UNCONFIGURED` when the deployment has no email. Never reveals whether the address exists. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim.
+         * @description Starts account creation by emailing a verification link; no session is issued here. Answers 200 `{"sent":true}` whether or not the address already has an account, so it never reveals which. 503 `EMAIL_UNCONFIGURED` when the deployment has no email. The link (`/account/claim#token=…`) is single-use and expires after 15 minutes; the app should handle it as a universal/app link and call POST /donor/claim, which takes the optional `device_name` and `platform` that label the resulting session.
          */
         post: operations["postDonorSignup"];
         delete?: never;
@@ -2840,7 +2840,7 @@ export interface paths {
         put?: never;
         /**
          * /donor/password/sign-in
-         * @description Verifies the SMS code and signs the donor in. 401 covers a wrong, expired, or over-tried code and a phone with no account alike, so none reveals whether an account exists. 503 when no SMS provider is configured.
+         * @description Signs in with an email and password. 401 covers a wrong password, an unknown email, an unclaimed account and a disabled account alike, so none reveals whether an account exists. A browser request receives an HttpOnly cookie; a native request (`X-DAD-Client: native`, no Origin, no cookies) receives NativeSession and may describe its device so the donor can recognize the session later.
          */
         post: operations["postDonorPasswordSignIn"];
         delete?: never;
@@ -2860,7 +2860,7 @@ export interface paths {
         put?: never;
         /**
          * /donor/me/password
-         * @description Saves the donor's notification, rankings, network and volunteer choices. The required fields are always replaced; an optional field left out keeps its saved value. 409 when `version` is stale: re-read the profile and retry.
+         * @description Sets or changes the signed-in donor's password. `current_password` is required unless the session proved its password within the last 15 minutes; leave it empty when setting a first password right after signing in by email link. 401 means the session is missing, expired or revoked: sign in again. 422 with `code` `CURRENT_PASSWORD_INCORRECT` means the session is fine but `current_password` was missing or wrong: keep the donor signed in and let them retry (attempts are rate limited). Contract versions before 2.4 answered 401 with the same `detail` ("The email or password is incorrect"); a client that must still talk to such a server should treat that 401 on this route as a wrong current password when the access token is otherwise valid.
          */
         post: operations["postDonorMePassword"];
         delete?: never;
@@ -2912,10 +2912,10 @@ export interface components {
             /** @description Human-readable explanation, safe to show to the user. Never contains credentials, donor data, or internal error text. */
             detail: string;
             /**
-             * @description Present only on a 503 for a feature this deployment has deliberately not configured. Such a 503 is not transient: do not retry; show the feature as unavailable.
+             * @description Present on a 503 for a feature this deployment has deliberately not configured (not transient: do not retry; show the feature as unavailable), and on the 422 of POST /donor/me/password when `current_password` is missing or wrong.
              * @enum {string}
              */
-            code?: "PAYMENTS_UNCONFIGURED" | "EMAIL_UNCONFIGURED" | "SOURCE_STORAGE_UNCONFIGURED";
+            code?: "PAYMENTS_UNCONFIGURED" | "EMAIL_UNCONFIGURED" | "SOURCE_STORAGE_UNCONFIGURED" | "CURRENT_PASSWORD_INCORRECT";
             /** @description Present only on a 422 from POST /donor/staff/founding-claims: every problem found, up to 100. */
             errors?: components["schemas"]["PublicationProblem"][];
         };
@@ -9792,14 +9792,15 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Accepted, whether or not the address has an account. */
-            202: {
+            /** @description Link emailed (or silently not, for an address that already has a donor profile). */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        message: string;
+                        /** @constant */
+                        sent: true;
                     };
                 };
             };
@@ -9823,6 +9824,13 @@ export interface operations {
                 "application/json": {
                     email: string;
                     password: string;
+                    /** @description Native requests only, optional: the device's user-visible name, shown to the donor in their session list. Ignored for browser requests. */
+                    device_name?: string;
+                    /**
+                     * @description Native requests only, optional. Ignored for browser requests.
+                     * @enum {string}
+                     */
+                    platform?: "IOS" | "ANDROID";
                 };
             };
         };
@@ -9869,7 +9877,15 @@ export interface operations {
             409: components["responses"]["Conflict"];
             413: components["responses"]["PayloadTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
-            422: components["responses"]["Unprocessable"];
+            /** @description The body or password is invalid (12 to 72 bytes), or `code` is `CURRENT_PASSWORD_INCORRECT` for a missing or wrong `current_password`. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
