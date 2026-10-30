@@ -83,6 +83,13 @@ export function TodayInitiative({ onShown }: { onShown?: (distinctShown: number)
         </ul>
       )}
       <Spend initiative={data.initiative_id} />
+      <details>
+        <summary>Why this initiative?</summary>
+        <p>
+          Each day we show you one initiative in turn. This is display only: every gift is unrestricted and supports DAD
+          as a whole, and none is designated to this initiative.
+        </p>
+      </details>
     </article>
   );
 }
