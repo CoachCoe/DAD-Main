@@ -315,7 +315,6 @@ func TestReportRequiresPermissionAndValidWindow(t *testing.T) {
 	if _, err := svc.Report(ctx, token, repWinStart, repWinEnd); err != nil {
 		t.Errorf("valid report: %v", err)
 	}
-	// An unauthenticated token is denied.
 	if _, err := svc.Report(ctx, "not-a-real-token", repWinStart, repWinEnd); err != ErrStaffDenied {
 		t.Errorf("bad token: got %v, want ErrStaffDenied", err)
 	}

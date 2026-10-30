@@ -85,7 +85,6 @@ func TestInitiativeDraftPublishLifecycleAndMetricVerificationGate(t *testing.T) 
 		t.Fatalf("SUPPORT created an initiative: %v", err)
 	}
 
-	// Invalid input is refused.
 	bad := validInitiative("Bad Slug!")
 	if _, err := s.Create(ctx, adminToken, bad); !errors.Is(err, ErrStaffInput) {
 		t.Fatalf("bad slug accepted: %v", err)
@@ -176,7 +175,6 @@ func TestInitiativeDraftPublishLifecycleAndMetricVerificationGate(t *testing.T) 
 		t.Fatalf("removed a published initiative's board approval: %v", err)
 	}
 
-	// Delete the metric.
 	if err := s.DeleteMetric(ctx, adminToken, id, 0); err != nil {
 		t.Fatal(err)
 	}
