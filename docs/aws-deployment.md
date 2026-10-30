@@ -278,8 +278,10 @@ Two pipelines:
    - **Decision:** the app pipeline uses direct `aws ecs update-service`; CDK is reserved
      for infra only.
 
-Why a pin step exists: the CDK task definitions carry a placeholder image tag, and an ECS
-service or `run-task` runs a specific task-definition revision. The pipeline therefore
+Why a pin step exists: the CDK task definitions carry the image tag of the last
+successful release (DAD-infra reads it from the SSM parameter `/dad/<env>/image-tag`,
+which `deploy.yml` writes as its last step), and an ECS service or `run-task` runs a
+specific task-definition revision. The pipeline therefore
 registers revisions that point at the SHA-tagged images instead of redeploying a moving
 tag. Because every revision names an immutable SHA, a circuit-breaker rollback restores
 the previous image. Each revision is copied from the family's latest active one, so
@@ -292,8 +294,7 @@ container health checks (api `/health/live` on 8002, nginx `/health` on 8081, we
 `scripts/ecs-rollout.sh` starts each new deployment, remembers its id, and waits for that
 deployment to reach `COMPLETED`; a deployment that ends `FAILED` (rolled back) fails the
 step. It follows its own deployment id because a rollback is a new deployment that itself
-reports `COMPLETED`. This replaces the earlier `deploy.sh smoke`-style checks run through
-ECS Exec, which needed a shell in running tasks. The api check is liveness, not the
+reports `COMPLETED`. No shell into a running task is needed. The api check is liveness, not the
 database-backed `/health/ready`, so a database outage does not make ECS replace every api
 task; `migrate` runs first and proves database connectivity.
 
