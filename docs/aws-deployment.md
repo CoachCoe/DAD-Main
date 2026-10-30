@@ -9,14 +9,18 @@ repository files: `docker-compose.prod.yml`, `scripts/deploy.sh`, `docs/operatio
 Where the design's assumptions differed from the repository, the repository wins and the
 reconciliation is noted inline.
 
-The IaC is AWS CDK (TypeScript). This is the design; the CDK app and the concrete
-implementation plan live in `infra/` (`infra/PLAN.md`).
+The IaC is AWS CDK (TypeScript). This is the design; the CDK app lives in the
+[DAD-infra](https://github.com/CoachCoe/DAD-infra) repository at `apps/dad-main/`, and
+the estate-wide design (accounts, shared packages, the DAD-Quality runner) is in
+DAD-infra `docs/design/aws-infra-design.md`.
 
 ## 1. Region and accounts
 
 - **Region:** `us-east-2` (Ohio) for all resources, including SES.
-- **IaC:** AWS CDK in TypeScript, one app, environment selected by CDK context
-  `-c env=staging|production`.
+- **IaC:** AWS CDK in TypeScript, one app (`apps/dad-main` in DAD-infra), environment
+  selected by CDK context `-c env=staging|production`. Account ids and region come from
+  DAD-infra's shared `packages/config`; DAD-Main-specific values (hostnames, counts, task
+  sizes) are an app-level extension of it.
 - **Accounts / environments:**
   - `staging` → AWS account `853377042897` (org "sandbox"). Primary focus for the test.
   - `production` → AWS account `216833405626` (org "production").
@@ -106,9 +110,12 @@ values are `login-email`, `email-changes`, `messages` respectively (the service 
 the kind are not identical). The ECS service names mirror the Compose service names.
 
 Staging desired counts: `web`=1, each worker=1, `api`=1, `nginx`>=1 (default 1, raise for
-AZ coverage). All counts are per-env config. Workers only run when
-`DONOR_GO_WORKERS_ENABLED=true`; the app pipeline enables them last (see §8), mirroring
-`scripts/deploy.sh workers` which refuses to start workers while the flag is unset.
+AZ coverage). All counts are per-env config. Whether the workers run at all is one switch,
+`workersEnabled` in DAD-infra's per-env config (off until an environment is ready): it
+sets their desired count, and the app pipeline skips services at a desired count of 0
+(see §8). That mirrors `scripts/deploy.sh workers`, which refuses to start workers until
+they are enabled. The worker binary itself also requires `DONOR_GO_WORKERS_ENABLED=true`,
+so the task definitions always set it; it is not the switch.
 
 ### 4.2 api networking and trust
 
@@ -137,8 +144,8 @@ run-task definitions, not services, and CDK does **not** execute them:
 | `rekey` | `rekey` | `DONOR_EMAIL_ENCRYPTION_KEY`, `DONOR_CONTENT_ENCRYPTION_KEY`, `DONOR_REKEY_DATABASE_URL` | key rotation |
 | `monitor` | `monitor` | `DONOR_MONITOR_DATABASE_URL` | queue-age check |
 
-A thin wrapper `infra/scripts/run-task.sh` wraps `aws ecs run-task` with the right task
-definition and command overrides; it is documented, not auto-run.
+A thin wrapper `scripts/run-task.sh` (in this repo) wraps `aws ecs run-task` with the
+right task definition and command overrides; it is documented, not auto-run.
 
 ### 4.4 Scheduled task — reconcile
 
@@ -236,32 +243,60 @@ Security-group chain (mirrors the Compose network isolation):
 ## 8. CI/CD (GitHub Actions)
 
 Extends existing workflows without breaking `ci.yml`. Auth is **GitHub OIDC → per-account
-IAM deploy roles** (no static keys). The OIDC provider + roles come from a dedicated CDK
-`pipeline-iam` / bootstrap stack (documented one-time per-account apply). Action pinning
+IAM deploy roles** (no static keys). The OIDC provider is the shared construct in
+DAD-infra's `packages/pipeline-iam` (an account has exactly one GitHub OIDC provider, so
+it is defined once and shared with DAD-Quality's stack); the DAD-Main deploy roles come
+from the `pipeline-iam` stack in `apps/dad-main` (documented one-time per-account
+apply). Action pinning
 follows the repo convention in `ci.yml`: pin by full commit SHA with a `# vX.Y.Z` comment;
 where a SHA cannot be resolved offline, pin by major tag with a NOTE.
 
 Two pipelines:
 
-1. **Infra pipeline — `.github/workflows/infra.yml`** (CDK only):
-   - PRs touching `infra/` → `cdk diff`.
+1. **Infra pipeline — DAD-infra `.github/workflows/dad-main-infra.yml`** (CDK only; it
+   lives in the DAD-infra repo, path-filtered to `apps/dad-main/**`):
+   - PRs touching `apps/dad-main/**` or `packages/**` → offline `cdk synth` of both
+     environments (no AWS credentials).
    - merge to `dev` → `cdk deploy -c env=staging` (sandbox role).
-   - release tag / merge to `main` → `cdk deploy -c env=production`, gated by a GitHub
-     Environment protection rule (manual approval).
+   - merge to `main` → `cdk deploy -c env=production`, gated by a GitHub Environment
+     protection rule (manual approval).
 
 2. **App pipeline — `.github/workflows/deploy.yml`** (direct ECS, CDK reserved for infra):
    - build `dad/api` + `dad/web` (+ `dad/nginx`), push to ECR tagged with the git SHA.
+   - **pin task definitions to that tag** (`scripts/ecs-pin-image.sh`): register a new
+     revision of every task-definition family (the nine services and the six maintenance
+     tasks) with only the image tag changed, and save the resulting `family=ARN` lines for
+     the later steps (`DAD_TASKDEFS_FILE`).
    - then **direct ECS deploy** in the exact `scripts/deploy.sh` order:
-     `migrate` run-task → `provision-roles` run-task → `aws ecs update-service` for
-     api/web/nginx (the `up` step) → smoke checks → workers (`update-service` for the six
-     worker services) **behind `DONOR_GO_WORKERS_ENABLED`**.
-   - staging auto on merge to `dev`; production on release tag / merge to `main`, gated by
-     manual approval.
+     `migrate` run-task → `provision-roles` run-task (each waited on, and failing unless
+     the container exits 0) → deploy api/web/nginx on their pinned revisions and wait for
+     the rollout to complete (the `up` step) → the same for the six worker services,
+     skipping any DAD-infra has switched off (desired count 0).
+   - staging auto on merge to `dev`; production **only** on merge to `main`, gated by
+     manual approval. There is no release- or tag-triggered path to production (releases,
+     including the `mobile-foundation-*` contract releases, never start a deploy).
    - **Decision:** the app pipeline uses direct `aws ecs update-service`; CDK is reserved
      for infra only.
 
-Smoke checks mirror `scripts/deploy.sh smoke`: api `/health/ready` on 8002, nginx
-`/health` on 8081, web `/` on 3000.
+Why a pin step exists: the CDK task definitions carry the image tag of the last
+successful release (DAD-infra reads it from the SSM parameter `/dad/<env>/image-tag`,
+which `deploy.yml` writes as its last step), and an ECS service or `run-task` runs a
+specific task-definition revision. The pipeline therefore
+registers revisions that point at the SHA-tagged images instead of redeploying a moving
+tag. Because every revision names an immutable SHA, a circuit-breaker rollback restores
+the previous image. Each revision is copied from the family's latest active one, so
+everything but the image tag (command, environment, secrets, health check, roles, sizing,
+tags) is whatever CDK last defined.
+
+The deploy gate is the ECS rollout itself. The api, web, and nginx task definitions carry
+container health checks (api `/health/live` on 8002, nginx `/health` on 8081, web `/` on
+3000), and every service uses the deployment circuit breaker with rollback.
+`scripts/ecs-rollout.sh` starts each new deployment, remembers its id, and waits for that
+deployment to reach `COMPLETED`; a deployment that ends `FAILED` (rolled back) fails the
+step. It follows its own deployment id because a rollback is a new deployment that itself
+reports `COMPLETED`. No shell into a running task is needed. The api check is liveness, not the
+database-backed `/health/ready`, so a database outage does not make ECS replace every api
+task; `migrate` runs first and proves database connectivity.
 
 Document required GitHub Environments (`staging`, `production`) and protection rules, and
 the repo/environment variables each workflow needs (account ids, region, cluster/service

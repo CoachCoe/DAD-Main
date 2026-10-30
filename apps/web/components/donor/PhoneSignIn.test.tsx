@@ -12,7 +12,9 @@ it("requests a code without disclosing whether the phone belongs to an account",
   fireEvent.change(screen.getByLabelText("Phone number"), { target: { value: "+14155550123" } });
   fireEvent.click(screen.getByRole("button", { name: "Text me a code" }));
   expect(await screen.findByLabelText("Verification code")).toHaveAttribute("autocomplete", "one-time-code");
-  expect(screen.getByLabelText("Verification code")).toHaveFocus();
+  // Focus is applied by an effect after the `sent` render commits, so retry until it lands
+  // rather than asserting on the tick the input first appears (flaked under CI load).
+  await waitFor(() => expect(screen.getByLabelText("Verification code")).toHaveFocus());
   expect(screen.getByRole("status")).toHaveTextContent("If this number is linked to an account");
   expect(fetch).toHaveBeenCalledWith(
     "/api/donor/phone/sign-in/options",

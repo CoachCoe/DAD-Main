@@ -22,6 +22,7 @@ certs/
 apps/atm-ledger/dist/
 apps/atm-ledger/worker-configuration.d.ts
 .worktrees/
+.audit-work/
 
 # Local dev-server config for the agent preview pane.
 .claude/

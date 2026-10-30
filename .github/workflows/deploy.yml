@@ -1,19 +1,21 @@
 name: Deploy (app)
 
 # Application rollout pipeline. This does the DIRECT ECS deploy and does NOT use
-# CDK (CDK is reserved for infra changes in infra.yml). The step order mirrors
+# CDK (CDK is reserved for infra changes, which live in the DAD-infra repo's
+# dad-main-infra.yml). The step order mirrors
 # scripts/deploy.sh exactly:
 #
-#   build/push images -> migrate (run-task) -> provision-roles (run-task)
-#     -> ecs update-service api/web/nginx ("up") -> smoke checks
-#     -> workers (ecs update-service for the six worker services),
-#        behind DONOR_GO_WORKERS_ENABLED
+#   build/push images -> pin task definitions to the image tag
+#     -> migrate (run-task, waited on) -> provision-roles (run-task, waited on)
+#     -> roll api/web/nginx ("up") and wait for each new deployment to COMPLETE
+#     -> workers (roll the six worker services the same way, unless DAD-infra has
+#        them switched off: desired count 0)
 #
-# Staging runs automatically on a merge to dev. Production runs on a release tag
-# or a merge to main, gated by the `production` GitHub Environment manual-approval
-# protection rule (configured in repo settings, not in YAML).
+# Staging runs automatically on a merge to dev. Production runs only on a merge to main
+# (there is no release- or tag-triggered path), gated by the `production` GitHub
+# Environment's branch rule and required reviewer (configured in repo settings).
 #
-# Cluster and service names are read from CDK CloudFormation outputs / SSM at
+# Cluster and network ids are read from the CDK CloudFormation outputs at
 # runtime, never hardcoded. ECS service names match docker-compose.prod.yml
 # exactly: api, web, nginx, stripe-worker, projection-worker, login-email-worker,
 # email-change-worker, message-worker, push-worker.
@@ -29,8 +31,6 @@ on:
       - "deploy/**"
       - "docker-compose.prod.yml"
       - ".github/workflows/deploy.yml"
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       env:
@@ -58,14 +58,16 @@ jobs:
     # is configured as the per-environment variable APP_DEPLOY_ROLE_ARN. Before
     # bootstrap the variable is empty, so the job is skipped (green) instead of
     # hard-failing on a role that does not exist yet. The pipeline "wakes up" on
-    # the first push/release after the variable is set. See infra/README.md.
+    # the first push after the variable is set. See docs/aws-deployment.md
+    # and https://github.com/CoachCoe/DAD-infra (apps/dad-main).
     if: ${{ vars.APP_DEPLOY_ROLE_ARN != '' }}
-    # Resolve the environment from the trigger: dev push -> staging; release tag
-    # or main push -> production; workflow_dispatch -> the chosen input.
+    # Resolve the environment from the trigger: dev push -> staging; main push ->
+    # production; workflow_dispatch -> the chosen input (the environment's branch rule
+    # still applies, so production can only be dispatched from main).
     environment: >-
       ${{
         github.event_name == 'workflow_dispatch' && inputs.env
-        || ((github.event_name == 'release' || github.ref == 'refs/heads/main') && 'production' || 'staging')
+        || (github.ref == 'refs/heads/main' && 'production' || 'staging')
       }}
     env:
       # The CloudFormation stack that carries the ECS cluster/service outputs
@@ -73,7 +75,7 @@ jobs:
       DAD_ENV: >-
         ${{
           github.event_name == 'workflow_dispatch' && inputs.env
-          || ((github.event_name == 'release' || github.ref == 'refs/heads/main') && 'production' || 'staging')
+          || (github.ref == 'refs/heads/main' && 'production' || 'staging')
         }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,27 +87,31 @@ jobs:
           role-to-assume: ${{ vars.APP_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve cluster/subnets/security-groups from CDK outputs / SSM
+      - name: Resolve cluster/subnets/security-groups from CDK stack outputs
         id: names
-        # Prefer the CloudFormation outputs the CDK stacks publish; fall back to
-        # SSM parameters the stacks also write. Never hardcode names.
+        # The CloudFormation outputs published by DAD-infra's apps/dad-main stacks
+        # (dad-<name>-<env>) are the only source; names are never hardcoded. The app
+        # deploy role reads them via cloudformation:DescribeStacks (DAD-infra
+        # pipeline-iam-stack). A missing stack or output fails the step with a message
+        # that names it, rather than being swallowed.
         run: |
           set -euo pipefail
           out() {
-            # out <stack-suffix> <OutputKey> <ssm-fallback-path>
-            local stack="dad-$1-${DAD_ENV}" key="$2" ssm="$3" val
+            # out <stack-suffix> <OutputKey>
+            local stack="dad-$1-${DAD_ENV}" key="$2" val
+            # No stderr redirect: an AccessDenied or ValidationError should be visible.
             val="$(aws cloudformation describe-stacks --stack-name "$stack" \
               --query "Stacks[0].Outputs[?OutputKey=='$key'].OutputValue" \
-              --output text 2>/dev/null || true)"
+              --output text)" || val=""
             if [ -z "$val" ] || [ "$val" = "None" ]; then
-              val="$(aws ssm get-parameter --name "$ssm" \
-                --query 'Parameter.Value' --output text)"
+              echo "::error::Stack '$stack' has no output '$key'. Is DAD-infra apps/dad-main deployed for ${DAD_ENV}?" >&2
+              exit 1
             fi
             printf '%s' "$val"
           }
-          cluster="$(out ecs-cluster ClusterName /dad/${DAD_ENV}/ecs/cluster-name)"
-          subnets="$(out network ComputeSubnetIds /dad/${DAD_ENV}/network/compute-subnet-ids)"
-          sgs="$(out network WorkersSecurityGroupId /dad/${DAD_ENV}/network/workers-sg-id)"
+          cluster="$(out ecs-cluster ClusterName)"
+          subnets="$(out network ComputeSubnetIds)"
+          sgs="$(out network WorkersSecurityGroupId)"
           {
             echo "cluster=$cluster"
             echo "subnets=$subnets"
@@ -138,15 +144,35 @@ jobs:
           docker push "$REGISTRY/dad/web:$IMAGE_TAG"
           docker push "$REGISTRY/dad/nginx:$IMAGE_TAG"
 
+      # Register a task-definition revision per family pinned to this image tag. An ECS
+      # service or run-task runs a specific revision, and CDK's revisions carry the tag of
+      # the last successful release (step 5), so the SHA-tagged images above are only
+      # deployed once a revision points at them. The `family=ARN` lines it prints are saved to a file the
+      # steps below read through DAD_TASKDEFS_FILE (run-task.sh and ecs-rollout.sh).
+      - name: Pin task definitions to this image tag
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          ./scripts/ecs-pin-image.sh "$IMAGE_TAG" \
+            dad-api dad-web dad-nginx \
+            dad-stripe-worker dad-projection-worker dad-login-email-worker \
+            dad-email-change-worker dad-message-worker dad-push-worker \
+            dad-maint-migrate dad-maint-provision-roles dad-maint-staff \
+            dad-maint-rekey dad-maint-monitor dad-maint-reconcile \
+            > "$RUNNER_TEMP/taskdefs.txt"
+          echo "DAD_TASKDEFS_FILE=$RUNNER_TEMP/taskdefs.txt" >> "$GITHUB_ENV"
+
       # --- Rollout order mirrors scripts/deploy.sh exactly ---
 
-      # 1) migrate: run the schema migrations first (owner DONOR_GO_DATABASE_URL).
+      # 1) migrate: run the schema migrations first (owner DONOR_GO_DATABASE_URL). The
+      #    script waits for the task and fails unless its container exits 0.
       - name: migrate (ECS run-task)
         env:
           DAD_CLUSTER: ${{ steps.names.outputs.cluster }}
           DAD_SUBNETS: ${{ steps.names.outputs.subnets }}
           DAD_SECURITY_GROUPS: ${{ steps.names.outputs.sgs }}
-        run: ./infra/scripts/run-task.sh "$DAD_ENV" migrate
+        run: ./scripts/run-task.sh "$DAD_ENV" migrate
 
       # 2) provision-roles: runs AFTER migrate; creates/grants the per-process
       #    Postgres roles (owner + all per-process DONOR_*_DATABASE_URL).
@@ -155,58 +181,42 @@ jobs:
           DAD_CLUSTER: ${{ steps.names.outputs.cluster }}
           DAD_SUBNETS: ${{ steps.names.outputs.subnets }}
           DAD_SECURITY_GROUPS: ${{ steps.names.outputs.sgs }}
-        run: ./infra/scripts/run-task.sh "$DAD_ENV" provision-roles
+        run: ./scripts/run-task.sh "$DAD_ENV" provision-roles
 
-      # 3) the "up" step: roll the long-running services api, web, nginx.
-      - name: update-service api/web/nginx (the up step)
+      # 3) the "up" step: roll the long-running services api, web, nginx, and gate on
+      #    each new deployment reaching COMPLETED. The services have container health
+      #    checks and the ECS deployment circuit breaker with rollback (DAD-infra
+      #    apps/dad-main), so a deployment whose tasks fail to start or stay healthy ends
+      #    FAILED and this step fails. No shell into a running task is needed.
+      #    See scripts/ecs-rollout.sh for why it keys on the deployment it started.
+      - name: roll api/web/nginx and wait for the rollout (the up step)
         env:
           CLUSTER: ${{ steps.names.outputs.cluster }}
-        run: |
-          set -euo pipefail
-          for svc in api web nginx; do
-            aws ecs update-service \
-              --cluster "$CLUSTER" \
-              --service "$svc" \
-              --force-new-deployment
-          done
-          aws ecs wait services-stable --cluster "$CLUSTER" --services api web nginx
+        run: ./scripts/ecs-rollout.sh "$CLUSTER" api web nginx
 
-      # 4) smoke checks, mirroring `deploy.sh smoke` (api /health/ready on 8002,
-      #    nginx /health on 8081, web / on 3000). Uses ECS Exec against one
-      #    running task of each service, the same shape as `compose exec`.
-      #    ECS Exec must be enabled on the services (enableExecuteCommand).
-      - name: smoke checks
+      # 4) workers: roll the six worker services last. Whether they run is DAD-infra's
+      #    `workersEnabled` (their desired count), the one switch; services ECS reports at
+      #    a desired count of 0 are skipped (ROLLOUT_SKIP_IDLE), not tracked here.
+      - name: roll workers and wait for the rollout (skips any switched off)
         env:
           CLUSTER: ${{ steps.names.outputs.cluster }}
+          ROLLOUT_SKIP_IDLE: "true"
         run: |
-          set -euo pipefail
-          task_for() {
-            aws ecs list-tasks --cluster "$CLUSTER" --service-name "$1" \
-              --desired-status RUNNING --query 'taskArns[0]' --output text
-          }
-          exec_in() {
-            # exec_in <service> <container> <shell-command>
-            aws ecs execute-command --cluster "$CLUSTER" \
-              --task "$(task_for "$1")" --container "$2" \
-              --interactive --command "$3"
-          }
-          exec_in api   api   'wget -q -O - http://127.0.0.1:8002/health/ready'
-          exec_in nginx nginx 'wget -q -O /dev/null http://127.0.0.1:8081/health'
-          exec_in web   web   'node -e '\''fetch("http://127.0.0.1:3000/").then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))'\'''
+          ./scripts/ecs-rollout.sh "$CLUSTER" \
+            stripe-worker projection-worker login-email-worker \
+            email-change-worker message-worker push-worker
 
-      # 5) workers: roll the six worker services last, only when workers are on.
-      #    Gated on DONOR_GO_WORKERS_ENABLED (environment variable).
-      - name: update-service workers (gated on DONOR_GO_WORKERS_ENABLED)
-        if: ${{ vars.DONOR_GO_WORKERS_ENABLED == 'true' }}
+      # 5) record the release. Reached only if every step above succeeded, so a failed or
+      #    rolled-back rollout never moves it. DAD-infra reads this parameter (as a
+      #    CloudFormation parameter) to tag every task definition, so a later `cdk deploy`
+      #    recreates them at the last good release instead of a placeholder image. The
+      #    parameter is created at bootstrap (DAD-infra docs/bootstrap.md).
+      - name: Record the deployed image tag
         env:
-          CLUSTER: ${{ steps.names.outputs.cluster }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          set -euo pipefail
-          workers="stripe-worker projection-worker login-email-worker email-change-worker message-worker push-worker"
-          for svc in $workers; do
-            aws ecs update-service \
-              --cluster "$CLUSTER" \
-              --service "$svc" \
-              --force-new-deployment
-          done
-          aws ecs wait services-stable --cluster "$CLUSTER" --services $workers
+          aws ssm put-parameter \
+            --name "/dad/${DAD_ENV}/image-tag" \
+            --type String \
+            --value "$IMAGE_TAG" \
+            --overwrite

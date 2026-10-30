@@ -65,7 +65,7 @@ test-native-clients:
 	bash scripts/check-native-clients.sh
 
 check-deploy-secrets:
-	node --test scripts/check-deploy-secrets.test.mjs
+	node --test scripts/check-deploy-secrets.test.mjs scripts/ecs-rollout.test.mjs scripts/ecs-pin-image.test.mjs scripts/run-task.test.mjs
 
 bundle-mobile: check-mobile
 	node scripts/mobile-foundation.mjs bundle "$${MOBILE_BUNDLE_DIR:?set MOBILE_BUNDLE_DIR outside the repository}"
@@ -115,7 +115,7 @@ lint-web:
 	cd scripts && ../apps/web/node_modules/.bin/biome check --error-on-warnings .
 
 lint-scripts:
-	@if command -v shellcheck >/dev/null || [ -n "$$CI" ]; then shellcheck scripts/*.sh deploy/nginx/*.envsh; else echo "shellcheck not installed; skipping script lint" >&2; fi
+	@if command -v shellcheck >/dev/null || [ -n "$$CI" ]; then shellcheck scripts/*.sh deploy/nginx/*.sh deploy/nginx/*.envsh; else echo "shellcheck not installed; skipping script lint" >&2; fi
 
 check-ingress:
 	./scripts/check-ingress.sh config
@@ -131,6 +131,7 @@ check-images:
 	docker build -f apps/web/Dockerfile -t dad/web:check \
 		--build-arg DONOR_PUBLIC_ORIGIN=https://public.test --build-arg DONOR_STAFF_ORIGIN=https://staff.test .
 	./scripts/check-ingress.sh web dad/web:check
+	./scripts/check-nginx-image.sh
 
 seed:
 	cd apps/donor-api && go run ./cmd/seed -database-url "$(SEED_DATABASE_URL)" -confirm "$(SEED_CONFIRM)" -donors "$(SEED_DONORS)" -fixture "$(LOAD_FIXTURE)"
