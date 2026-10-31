@@ -32,7 +32,12 @@ func (s *checkoutStub) BeginCheckout(ctx context.Context, r payments.CheckoutReq
 	return payments.CheckoutResult{CheckoutID: r.RequestID.String(), URL: "https://checkout.stripe.com/c/test"}, s.err
 }
 
-func (s *checkoutStub) BeginNativeCheckout(ctx context.Context, session string, key pgtype.UUID, amount int64) (payments.NativeCheckoutResult, error) {
+func (s *checkoutStub) BeginNativeCheckout(
+	ctx context.Context,
+	session string,
+	key pgtype.UUID,
+	amount int64,
+) (payments.NativeCheckoutResult, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		panic("unbounded checkout")
 	}
