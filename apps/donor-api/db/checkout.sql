@@ -23,3 +23,8 @@ ON CONFLICT (donor_id) DO NOTHING RETURNING id;
 -- name: AcknowledgeCheckout :exec
 UPDATE donor_stripe_checkouts SET stripe_session_id=$2,hosted_url=$3,
 status=CASE WHEN status='PENDING' THEN 'OPEN' ELSE status END WHERE id=$1;
+
+-- name: ReservedAttempt :one
+-- The checkout attempt holding the donor's recurring slot, locked.
+SELECT a.* FROM donor_recurring_reservations r JOIN donor_stripe_checkouts a ON a.id=r.attempt_id
+WHERE r.donor_id=$1 FOR UPDATE OF a;

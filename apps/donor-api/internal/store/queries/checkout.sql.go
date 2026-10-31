@@ -120,6 +120,29 @@ func (q *Queries) ReserveRecurring(ctx context.Context, arg ReserveRecurringPara
 	return id, err
 }
 
+const reservedAttempt = `-- name: ReservedAttempt :one
+SELECT a.checkout_id, a.request_hash, a.request_params, a.stripe_session_id, a.stripe_subscription_id, a.hosted_url, a.status, a.id, a.created_at FROM donor_recurring_reservations r JOIN donor_stripe_checkouts a ON a.id=r.attempt_id
+WHERE r.donor_id=$1 FOR UPDATE OF a
+`
+
+// The checkout attempt holding the donor's recurring slot, locked.
+func (q *Queries) ReservedAttempt(ctx context.Context, donorID pgtype.UUID) (DonorStripeCheckout, error) {
+	row := q.db.QueryRow(ctx, reservedAttempt, donorID)
+	var i DonorStripeCheckout
+	err := row.Scan(
+		&i.CheckoutID,
+		&i.RequestHash,
+		&i.RequestParams,
+		&i.StripeSessionID,
+		&i.StripeSubscriptionID,
+		&i.HostedUrl,
+		&i.Status,
+		&i.ID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const stripeCheckout = `-- name: StripeCheckout :one
 SELECT checkout_id, request_hash, request_params, stripe_session_id, stripe_subscription_id, hosted_url, status, id, created_at FROM donor_stripe_checkouts WHERE id=$1
 `

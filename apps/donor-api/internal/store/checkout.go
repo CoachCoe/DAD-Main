@@ -167,8 +167,101 @@ func (s CheckoutService) prepare(
 	digest string,
 	now time.Time,
 ) (queries.DonorStripeCheckout, error) {
-	return transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (queries.DonorStripeCheckout, error) {
-		return prepareAttempt(ctx, queries.New(tx), s.FoundingClaims, site, request, digest, now)
+	empty := queries.DonorStripeCheckout{}
+	for range 3 {
+		attempt, err := transact(ctx, s.DB, pgx.TxOptions{}, func(tx pgx.Tx) (queries.DonorStripeCheckout, error) {
+			return prepareAttempt(ctx, queries.New(tx), s.FoundingClaims, site, request, digest, now)
+		})
+		if reused, ok := errors.AsType[openCheckout](err); ok {
+			return reused.attempt, nil
+		}
+		stale, ok := errors.AsType[staleCheckout](err)
+		if !ok {
+			return attempt, err
+		}
+		if err = s.retire(ctx, stale.attempt); err != nil {
+			return empty, err
+		}
+	}
+	return empty, payments.ErrCheckoutConflict
+}
+
+// openCheckout is returned out of prepareAttempt, rolling back the request's
+// own rows, when the donor's earlier unpaid native checkout already answers
+// it: same amount, same return pages, and time left to pay.
+type openCheckout struct{ attempt queries.DonorStripeCheckout }
+
+func (openCheckout) Error() string { return "an equivalent checkout is already open" }
+
+// staleCheckout is returned the same way when the donor's earlier unpaid
+// native checkout holds the recurring slot but cannot answer the request, so
+// it must be expired at the processor before the slot is free.
+type staleCheckout struct{ attempt queries.DonorStripeCheckout }
+
+func (staleCheckout) Error() string { return "an unpaid checkout holds the recurring slot" }
+
+// reuseMargin is the time an open checkout must have left to be handed back.
+const reuseMargin = 5 * time.Minute
+
+// heldCheckout decides what the recurring slot's holder means for a native
+// request: the holder itself, a holder to expire, or a conflict. Only an
+// open, unpaid native checkout is ever touched; a paid or pending one, or any
+// request from the website, is the conflict it always was.
+func heldCheckout(ctx context.Context, q *queries.Queries, donor queries.Donor, request payments.CheckoutRequest, now time.Time) error {
+	held, err := q.ReservedAttempt(ctx, donor.ID)
+	if err != nil || request.NativeReturn == "" || held.Status != "OPEN" || !held.HostedUrl.Valid || !held.StripeSessionID.Valid {
+		return payments.ErrCheckoutConflict
+	}
+	draft, err := q.CheckoutDraft(ctx, held.CheckoutID)
+	if err != nil {
+		return err
+	}
+	object, err := payments.DecodeObject(held.RequestParams)
+	if err != nil {
+		return err
+	}
+	expires, err := object.Unix("expires_at")
+	if err != nil {
+		return err
+	}
+	sameReturn := object.Text("success_url") == publicSite(request.NativeReturn).nativeCheckoutReturn()
+	if draft.DonorID == donor.ID && draft.AmountMinor == request.Amount && sameReturn && expires.After(now.Add(reuseMargin)) {
+		return openCheckout{held}
+	}
+	return staleCheckout{held}
+}
+
+// retire expires an unpaid checkout at the processor, then frees its
+// reservation. No database lock is held across the processor call, so a
+// failure leaves the reservation untouched and a retry finds it again. If the
+// donor paid first the gift is active, and the webhook records it.
+func (s CheckoutService) retire(ctx context.Context, stale queries.DonorStripeCheckout) error {
+	status, err := s.Gateway.ExpireCheckout(ctx, stale.StripeSessionID.String, "dad-checkout-expire-"+stale.ID.String())
+	if err != nil {
+		return payments.ErrProcessorUnavailable
+	}
+	if status != "expired" {
+		return payments.ErrCheckoutConflict
+	}
+	return pgx.BeginFunc(ctx, s.DB, func(tx pgx.Tx) error {
+		q := queries.New(tx)
+		current, err := q.LockStripeCheckout(ctx, stale.ID)
+		if err != nil {
+			return err
+		}
+		if current.Status == "COMPLETE" {
+			return payments.ErrCheckoutConflict
+		}
+		if current.Status == "OPEN" {
+			err = q.RecordCheckoutSession(
+				ctx,
+				queries.RecordCheckoutSessionParams{ID: current.ID, StripeSessionID: current.StripeSessionID, Status: "EXPIRED"},
+			)
+			if err != nil {
+				return err
+			}
+		}
+		return q.ReleaseReservation(ctx, current.ID)
 	})
 }
 
@@ -248,7 +341,7 @@ func prepareAttempt(
 		}
 		if _, err = q.ReserveRecurring(ctx, queries.ReserveRecurringParams{ID: reservation, DonorID: donor.ID, AttemptID: request.RequestID}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return empty, payments.ErrCheckoutConflict
+				return empty, heldCheckout(ctx, q, donor, request, now)
 			}
 			return empty, err
 		}

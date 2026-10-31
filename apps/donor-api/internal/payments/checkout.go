@@ -65,6 +65,10 @@ type RemoteCheckout struct {
 
 type CheckoutGateway interface {
 	CreateCheckout(context.Context, []byte, string) (RemoteCheckout, error)
+	// ExpireCheckout closes an open hosted checkout so it can no longer be paid
+	// and reports the session's resulting status: "expired", or "complete" if
+	// the donor paid first. Any other outcome is an error.
+	ExpireCheckout(ctx context.Context, sessionID, idempotencyKey string) (string, error)
 }
 
 // ValidateOrigin accepts an exact HTTPS origin, or plain HTTP on a loopback
