@@ -27,7 +27,7 @@ call the API host directly with `X-DAD-Client: native`, no cookies or Origin, an
 access token when authenticated. Browser-only giving and staff operations stay on the web.
 
 After checks pass on the release commit, tag it `mobile-foundation-v<version>` (using the
-version in the file, for example `mobile-foundation-v2.6.0`) and push that tag. The mobile-foundation workflow verifies the tag
+version in the file, for example `mobile-foundation-v2.7.0`) and push that tag. The mobile-foundation workflow verifies the tag
 matches the declared version and publishes the individual files as GitHub Release assets.
 Existing release assets are never overwritten. The workflow also retains a candidate
 bundle as an Actions artifact on normal branch and PR builds; those artifacts are not
@@ -40,7 +40,7 @@ the vendored contract without network access to this private repository. An auth
 maintainer can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v2.6.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
+gh release download mobile-foundation-v2.7.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
@@ -48,6 +48,46 @@ additions, and major versions for breaking contract/token/link changes. A mobile
 pins its dependency; changing the backend must preserve supported installed clients.
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
+
+## Compatible additions in version 2.7
+
+Version 2.7 closes the gaps native event screens hit. Every addition is a new response
+field; no request, existing field or enum value changes.
+
+- `EventView.time_zone` (required, string) is the venue's IANA zone, for example
+  `America/Chicago`. It is on the list, detail and invite-only reads. `starts_at` and
+  `ends_at` stay instants; format them in this zone, not the device's, so a donor sees the
+  time printed at the venue (PRD E-3). Staff set it on the event (`time_zone` on the staff
+  event input and reads). Left empty it takes the zone of the event's ZIP, else
+  `America/New_York`, and an unknown name is refused with `422`. Events that existed before
+  2.7 read `America/New_York` until staff correct them.
+- `EventView.checked_in_at` (required, date-time or `null`) is when the signed-in donor
+  checked in. `reservation_status` stays `RESERVED` after check-in, so use `checked_in_at`
+  to show the checked-in state on a later read. It is `null` before check-in and on the
+  anonymous read.
+- The `checkInEvent` token is documented: exactly 66 characters, `<22 base64url>.<43
+  base64url>` over `A-Z a-z 0-9 - _` plus one `.`, the event id and its signature. Pass
+  the QR's text through unchanged. Any other length or shape answers `422`, the same as a
+  token for an event outside its check-in window or for a donor without a seat.
+- Retrying is safe without an `Idempotency-Key`: reserving again returns the donor's
+  current `RESERVED` or `WAITLISTED` status unchanged, cancelling again returns
+  `CANCELLED`, and scanning again returns `already_checked_in: true`. Cancelling with no
+  reservation is `404`, and reserve or cancel once the event has started is `409`.
+
+### Forward compatibility of enums
+
+OpenAPI lists the values the server sends today, and the web relies on those types, so
+the enums stay. A later minor version may add values, so a client MUST tolerate a value it
+does not know rather than fail to decode the response. This covers `EventView.type`,
+`EventView.reservation_status`, `ReservationResult.status`, `Subscription.status` and every
+other enum in the bundle. Show an unknown event type as a generic event, an unknown
+reservation status as no reservation action, and treat an unknown `Subscription.status`
+as not active. Strict generated decoders (the Swift generator rejects an unlisted enum
+string) need a tolerant wrapper or the enum stripped from the vendored schema.
+
+`Subscription.status` does not gain `trialing` or `paused`. Monthly gifts start with no
+trial and are never paused, and the server refuses to record a subscription whose Stripe
+status is outside the documented six, so those values cannot reach a client.
 
 ## Compatible additions in version 2.6
 
