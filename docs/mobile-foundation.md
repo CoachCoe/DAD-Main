@@ -27,7 +27,7 @@ call the API host directly with `X-DAD-Client: native`, no cookies or Origin, an
 access token when authenticated. Browser-only giving and staff operations stay on the web.
 
 After checks pass on the release commit, tag it `mobile-foundation-v<version>` (using the
-version in the file, for example `mobile-foundation-v2.4.0`) and push that tag. The mobile-foundation workflow verifies the tag
+version in the file, for example `mobile-foundation-v2.5.0`) and push that tag. The mobile-foundation workflow verifies the tag
 matches the declared version and publishes the individual files as GitHub Release assets.
 Existing release assets are never overwritten. The workflow also retains a candidate
 bundle as an Actions artifact on normal branch and PR builds; those artifacts are not
@@ -40,7 +40,7 @@ the vendored contract without network access to this private repository. An auth
 maintainer can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v2.4.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
+gh release download mobile-foundation-v2.5.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
@@ -48,6 +48,29 @@ additions, and major versions for breaking contract/token/link changes. A mobile
 pins its dependency; changing the backend must preserve supported installed clients.
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
+
+## Compatible additions in version 2.5
+
+Version 2.5 documents statuses the API already served and gives shared inline response
+bodies their own names. No operation, field or behaviour changes.
+
+- Every authenticated read documents `429` (`RateLimitedByIngress`): the ingress rate
+  limit can reject any request before it reaches the API, with no JSON body and possibly no
+  `Retry-After`. The API itself applies no limiter to reads. Clients should back off and
+  retry, and must not decode the body.
+- `POST /donor/me/events/{event_id}/reserve` and `/cancel` document `403` and `429`, and
+  `POST /donor/me/events/check-in` documents `403`; the origin and rate-limit guard
+  already produced them.
+- Named response schemas replace inline duplicates, so generators no longer name one
+  operation's body after another: `SignupSent` (`postDonorSignup`), `SignInResult`
+  (`finishDonorPasskeySignIn` and the shared `SignedIn` response used by
+  `finishPhoneSignIn`, `oidcSignIn` and `postDonorPasswordSignIn`),
+  `PartnerSignInLinkSent` (`partnerRequestSignIn`), `PartnerSaved`
+  (`partnerSaveProfile`, `partnerSaveLogo`), `PartnerSignedOut` (`partnerSignOut`) and
+  `InviteOnlyEvents` (`inviteOnlyEvents`). Wire bodies are unchanged. Generated type names
+  change: the Kotlin `BeginPhoneSignIn200Response`, `FinishDonorPasskeySignIn200Response`,
+  `Login202Response`, `EmployeeWorkforce200Response`, `LogoutAll200Response` and
+  `DonorEvents200Response` no longer name those operations' bodies.
 
 ## Compatible additions in version 2.4
 
