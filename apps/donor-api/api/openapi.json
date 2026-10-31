@@ -6746,7 +6746,10 @@
         "properties": {
          "token": {
           "type": "string",
-          "description": "The event's QR check-in token."
+          "description": "The event's QR check-in token, exactly as the QR code encodes it: 66 characters, `<22 base64url characters>.<43 base64url characters>` (alphabet `A-Z a-z 0-9 - _`, one `.`), the event id then its HMAC-SHA256 signature. The same code serves every attendee. Pass it through unchanged; any other length or shape answers 422, as does a token for an event that is cancelled, not yet started, ended, or where the donor holds no seat.",
+          "minLength": 66,
+          "maxLength": 66,
+          "pattern": "^[A-Za-z0-9_-]{22}\\.[A-Za-z0-9_-]{43}$"
          }
         },
         "required": [
@@ -12878,7 +12881,7 @@
      },
      "status": {
       "type": "string",
-      "description": "Stripe's subscription status. `active`, `past_due` and `unpaid` renew; `incomplete` awaits the first payment; `canceled` and `incomplete_expired` have ended.",
+      "description": "Stripe's subscription status. `active`, `past_due` and `unpaid` renew; `incomplete` awaits the first payment; `canceled` and `incomplete_expired` have ended. Clients must tolerate a value not listed here and treat it as not active.",
       "enum": [
        "active",
        "past_due",
@@ -14649,7 +14652,8 @@
        "VOLUNTEER",
        "COMMUNITY",
        "INVITE_ONLY"
-      ]
+      ],
+      "description": "Event kind. Clients must tolerate a value not listed here."
      },
      "description": {
       "type": "string"
@@ -14670,6 +14674,10 @@
      "ends_at": {
       "type": "string",
       "format": "date-time"
+     },
+     "time_zone": {
+      "type": "string",
+      "description": "IANA time zone of the venue, such as `America/New_York`. Show `starts_at` and `ends_at` in this zone, not the device's."
      },
      "capacity": {
       "type": "integer",
@@ -14701,7 +14709,19 @@
         "type": "null"
        }
       ],
-      "description": "The signed-in donor's own status for this event; null on an anonymous read or no active reservation."
+      "description": "The signed-in donor's own status for this event; null on an anonymous read or no active reservation. Clients must tolerate a value not listed here."
+     },
+     "checked_in_at": {
+      "anyOf": [
+       {
+        "type": "string",
+        "format": "date-time"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "description": "When the signed-in donor checked in (E-8); null until they do, and on an anonymous read. `reservation_status` stays `RESERVED` after check-in."
      },
      "invitation_note": {
       "anyOf": [
@@ -14757,9 +14777,11 @@
      "city",
      "starts_at",
      "ends_at",
+     "time_zone",
      "capacity",
      "spots_left",
      "reservation_status",
+     "checked_in_at",
      "invitation_note",
      "report_issue_url",
      "cancelled",
@@ -14778,7 +14800,8 @@
        "RESERVED",
        "WAITLISTED",
        "CANCELLED"
-      ]
+      ],
+      "description": "The donor's place after the call. Clients must tolerate a value not listed here."
      }
     },
     "required": [
@@ -14865,6 +14888,10 @@
      "booking_opens_at": {
       "type": "string",
       "description": "When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3)."
+     },
+     "time_zone": {
+      "type": "string",
+      "description": "IANA time zone of the venue, such as `America/New_York`. Empty takes the zone of `zip`, else `America/New_York`; an unknown name is rejected."
      }
     },
     "additionalProperties": false
@@ -15781,6 +15808,10 @@
       "type": "string",
       "description": "When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3)."
      },
+     "time_zone": {
+      "type": "string",
+      "description": "IANA time zone of the venue, such as `America/New_York`. Empty takes the zone of `zip`, else `America/New_York`; an unknown name is rejected."
+     },
      "id": {
       "type": "string",
       "format": "uuid"
@@ -15833,6 +15864,7 @@
      "capacity",
      "qualifying_perk",
      "booking_opens_at",
+     "time_zone",
      "id",
      "publish_state",
      "cancelled_at",
@@ -15971,6 +16003,10 @@
       "type": "string",
       "description": "When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3)."
      },
+     "time_zone": {
+      "type": "string",
+      "description": "IANA time zone of the venue, such as `America/New_York`. Empty takes the zone of `zip`, else `America/New_York`; an unknown name is rejected."
+     },
      "id": {
       "type": "string",
       "format": "uuid"
@@ -16029,6 +16065,7 @@
      "capacity",
      "qualifying_perk",
      "booking_opens_at",
+     "time_zone",
      "id",
      "publish_state",
      "cancelled_at",

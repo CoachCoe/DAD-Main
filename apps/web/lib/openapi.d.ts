@@ -3293,7 +3293,7 @@ export interface components {
             /** Format: date-time */
             period_end: string;
             /**
-             * @description Stripe's subscription status. `active`, `past_due` and `unpaid` renew; `incomplete` awaits the first payment; `canceled` and `incomplete_expired` have ended.
+             * @description Stripe's subscription status. `active`, `past_due` and `unpaid` renew; `incomplete` awaits the first payment; `canceled` and `incomplete_expired` have ended. Clients must tolerate a value not listed here and treat it as not active.
              * @enum {string}
              */
             status: "active" | "past_due" | "unpaid" | "incomplete" | "canceled" | "incomplete_expired";
@@ -3862,7 +3862,10 @@ export interface components {
             id: string;
             slug: string;
             title: string;
-            /** @enum {string} */
+            /**
+             * @description Event kind. Clients must tolerate a value not listed here.
+             * @enum {string}
+             */
             type: "VOLUNTEER" | "COMMUNITY" | "INVITE_ONLY";
             description: string;
             venue: string;
@@ -3872,6 +3875,8 @@ export interface components {
             starts_at: string;
             /** Format: date-time */
             ends_at: string;
+            /** @description IANA time zone of the venue, such as `America/New_York`. Show `starts_at` and `ends_at` in this zone, not the device's. */
+            time_zone: string;
             /**
              * Format: int32
              * @description Number of spots; 0 means uncapped.
@@ -3879,8 +3884,10 @@ export interface components {
             capacity: number;
             /** @description Spots remaining (capacity minus reserved), floored at 0; null when uncapped. */
             spots_left: number | null;
-            /** @description The signed-in donor's own status for this event; null on an anonymous read or no active reservation. */
+            /** @description The signed-in donor's own status for this event; null on an anonymous read or no active reservation. Clients must tolerate a value not listed here. */
             reservation_status: ("RESERVED" | "WAITLISTED") | null;
+            /** @description When the signed-in donor checked in (E-8); null until they do, and on an anonymous read. `reservation_status` stays `RESERVED` after check-in. */
+            checked_in_at: string | null;
             /** @description "Invitation earned at ..." for an INVITE_ONLY event unlocked by a badge perk (E-5); null otherwise. */
             invitation_note: string | null;
             /** @description mailto link to report an issue about this event to DAD (E-10); null when no support email is configured. */
@@ -3894,7 +3901,10 @@ export interface components {
         };
         /** @description The outcome of a reserve or cancel (E-4). */
         ReservationResult: {
-            /** @enum {string} */
+            /**
+             * @description The donor's place after the call. Clients must tolerate a value not listed here.
+             * @enum {string}
+             */
             status: "RESERVED" | "WAITLISTED" | "CANCELLED";
         };
         /** @description The outcome of a QR check-in (E-8). */
@@ -3927,6 +3937,8 @@ export interface components {
             qualifying_perk?: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
             /** @description When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3). */
             booking_opens_at?: string;
+            /** @description IANA time zone of the venue, such as `America/New_York`. Empty takes the zone of `zip`, else `America/New_York`; an unknown name is rejected. */
+            time_zone?: string;
         };
         ReportMetric: {
             /** @description Whether the server can compute this metric. */
@@ -4225,6 +4237,8 @@ export interface components {
             qualifying_perk: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
             /** @description When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3). */
             booking_opens_at: string;
+            /** @description IANA time zone of the venue, such as `America/New_York`. Empty takes the zone of `zip`, else `America/New_York`; an unknown name is rejected. */
+            time_zone: string;
             /** Format: uuid */
             id: string;
             /** @enum {string} */
@@ -4279,6 +4293,8 @@ export interface components {
             qualifying_perk: "" | "FOUNDING_EVENTS" | "MILESTONE_EVENTS" | "TEAM_CAPTAIN";
             /** @description When reservations open to everyone (RFC 3339, before starts_at), or empty for when the event is published. Team Captains may reserve from 48 hours earlier (B-3). */
             booking_opens_at: string;
+            /** @description IANA time zone of the venue, such as `America/New_York`. Empty takes the zone of `zip`, else `America/New_York`; an unknown name is rejected. */
+            time_zone: string;
             /** Format: uuid */
             id: string;
             /** @enum {string} */
@@ -7812,7 +7828,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The event's QR check-in token. */
+                    /** @description The event's QR check-in token, exactly as the QR code encodes it: 66 characters, `<22 base64url characters>.<43 base64url characters>` (alphabet `A-Z a-z 0-9 - _`, one `.`), the event id then its HMAC-SHA256 signature. The same code serves every attendee. Pass it through unchanged; any other length or shape answers 422, as does a token for an event that is cancelled, not yet started, ended, or where the donor holds no seat. */
                     token: string;
                 };
             };
