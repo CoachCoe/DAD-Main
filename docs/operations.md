@@ -654,6 +654,26 @@ when they change. Apple's CDN caches the iOS file for up to a day, so allow that
 after a change before testing on a device. The iOS app needs the Associated Domains
 entitlement with `applinks:` and `webcredentials:` entries for the public host.
 
+## Starting a monthly gift from the app
+
+`POST /donor/me/recurring/checkout` opens Stripe-hosted Checkout for a signed-in donor with
+no active or pending monthly gift. It is the website's guest checkout run for the donor's own
+account, so the same verified webhooks complete the gift; only the pages Checkout returns to
+differ. They are `/app/return?result=success&session_id=…` after payment and
+`/app/return?result=cancel` if the donor backs out, both served by the web app, which shows
+a short "return to the app" notice. The app watches for that address, or opens from it once
+the association below covers the path.
+
+| Variable | Meaning |
+|---|---|
+| `DONOR_NATIVE_RETURN_ORIGIN` | Optional. The exact HTTPS origin (HTTP on localhost) the return pages are served from. Defaults to `DONOR_PUBLIC_ORIGIN`; set it only if the web app's `/app/return` page lives on another origin. A path, trailing slash or plain-HTTP remote host stops the API at startup. |
+
+The return address is frozen into each Checkout session when it is created, so a change
+applies to checkouts begun afterwards. To have the installed app open from the return page
+rather than watch for it, add `/app/return` to the Apple association's `components` and the
+Android intent filter's path list, then redeploy the web image; the associations in the
+section above do not cover it today.
+
 ## Staff and content
 
 Staff sign in with passkeys on the staff host. Provision the first administrator with
