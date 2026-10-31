@@ -688,6 +688,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/donor/me/recurring/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a monthly gift in Stripe-hosted Checkout
+         * @description For a signed-in donor with no active or pending monthly gift. The donor's account supplies the email, so the body carries only the amount. Idempotent: retry with the same `Idempotency-Key` and amount to get the same session; a different amount under a used key is 409. Open `url` in the system browser (ASWebAuthenticationSession or a Custom Tab). Checkout returns to `<DONOR_NATIVE_RETURN_ORIGIN>/app/return?result=success&session_id=<session_id>` after payment, or `?result=cancel` if the donor backs out; the app may watch for that address. The gift becomes active only when Stripe's verified webhook arrives, so after returning poll GET /donor/me/recurring until `subscription` is present. 409 means a monthly gift is already active or a checkout is still open (it lapses after `expires_at`). 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.
+         */
+        post: operations["startRecurringCheckout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/donor/me/payment-method": {
         parameters: {
             query?: never;
@@ -3272,7 +3292,11 @@ export interface components {
             id: string;
             /** Format: date-time */
             period_end: string;
-            status: string;
+            /**
+             * @description Stripe's subscription status. `active`, `past_due` and `unpaid` renew; `incomplete` awaits the first payment; `canceled` and `incomplete_expired` have ended.
+             * @enum {string}
+             */
+            status: "active" | "past_due" | "unpaid" | "incomplete" | "canceled" | "incomplete_expired";
             /** Format: date-time */
             stops_at: string | null;
         };
@@ -3358,6 +3382,20 @@ export interface components {
             /**
              * Format: uri
              * @description Stripe-hosted Checkout page.
+             */
+            url: string;
+        };
+        NativeCheckout: {
+            /**
+             * Format: date-time
+             * @description When the hosted page stops accepting payment; after this a new Idempotency-Key starts a new checkout.
+             */
+            expires_at: string;
+            /** @description The Stripe Checkout session, echoed back on the return address. */
+            session_id: string;
+            /**
+             * Format: uri
+             * @description Stripe-hosted Checkout page. Open it in the system browser.
              */
             url: string;
         };
@@ -5763,6 +5801,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AmountChange"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            413: components["responses"]["PayloadTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            422: components["responses"]["Unprocessable"];
+            429: components["responses"]["TooManyRequests"];
+            503: components["responses"]["Unavailable"];
+        };
+    };
+    startRecurringCheckout: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description A fresh version 4 UUID per distinct command. Retrying with the same key and body returns the original outcome and never repeats the effect; the same key with a different body is a 409. */
+                "Idempotency-Key": components["parameters"]["IdempotencyKey"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: int64
+                     * @description The monthly charge in integer USD cents: a whole number of dollars a day from $1 to $30, times 30 (3000 to 90000 in steps of 3000).
+                     */
+                    amount_minor: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Created; open `url` in the system browser. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NativeCheckout"];
                 };
             };
             401: components["responses"]["Unauthorized"];
