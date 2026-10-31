@@ -674,6 +674,17 @@ rather than watch for it, add `/app/return` to the Apple association's `componen
 Android intent filter's path list, then redeploy the web image; the associations in the
 section above do not cover it today.
 
+A donor who closes the hosted page without paying keeps their recurring reservation until
+the session lapses (an hour). Starting again from the app does not wait for that. Under the
+donor's row lock the API finds the open session holding the reservation: if the amount and
+return pages match and it has more than five minutes left, it returns that session; otherwise
+it expires the session at Stripe (outside any database lock), then marks the attempt
+`EXPIRED`, releases the reservation and creates the replacement. If Stripe reports the session
+already paid, the answer is `409` and the webhook activates the gift; if the expiry call
+fails, the reservation is untouched and the app retries. The website's guest checkout does not
+do this and still answers `409` while a checkout is open. The `checkout.session.expired` webhook
+for a replaced session is harmless: it releases only the reservation of its own attempt.
+
 ## Staff and content
 
 Staff sign in with passkeys on the staff host. Provision the first administrator with

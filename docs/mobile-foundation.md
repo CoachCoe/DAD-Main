@@ -59,10 +59,19 @@ stays web-only: it is keyed by an email and returns to website pages.
   dollars a day, $1 to $30, times 30), and an `Idempotency-Key`. It acts for the signed-in
   donor, so the body carries no email. `201` returns `{url, session_id, expires_at}`: open
   `url` in the system browser. `401` signed out, `403` not a native request, `409` a monthly
-  gift is already active or a checkout is still open (or the key was used with another
-  amount), `422` invalid amount or key, `429`, `503` (`PAYMENTS_UNCONFIGURED` when the
-  deployment has no processor). Retrying with the same key and amount returns the same
-  session until it lapses at `expires_at`.
+  gift is already active, the key was used with another amount, or another start for the
+  donor is mid-flight (retry), `422` invalid amount or key, `429`, `503` (`PAYMENTS_UNCONFIGURED` when the
+  deployment has no processor, or the earlier session could not be expired; retry).
+  Retrying with the same key and amount returns the same session until it lapses at
+  `expires_at`.
+- Version 2.6.1 changes no schema, only this behaviour: from 2.6.1 a new start no longer
+  answers `409` while the donor's own earlier checkout is open and unpaid.
+- Closing the hosted page without paying never locks the donor out. Starting again, with
+  any new key, while their earlier checkout is still open and unpaid returns that same
+  session (same `url`, `session_id`, `expires_at`) when the amount matches, so show it
+  again. A different amount expires the earlier session at Stripe and returns a new one.
+  If the earlier session was paid just as the request arrived the answer is `409`: poll
+  `GET /donor/me/recurring` for the active gift.
 - Checkout returns to `<origin>/app/return?result=success&session_id=<id>` or
   `<origin>/app/return?result=cancel`. The origin is `DONOR_NATIVE_RETURN_ORIGIN`, else the
   public origin. Neither address proves payment: poll `GET /donor/me/recurring` until its
