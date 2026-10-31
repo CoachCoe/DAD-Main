@@ -27,7 +27,7 @@ call the API host directly with `X-DAD-Client: native`, no cookies or Origin, an
 access token when authenticated. Browser-only giving and staff operations stay on the web.
 
 After checks pass on the release commit, tag it `mobile-foundation-v<version>` (using the
-version in the file, for example `mobile-foundation-v2.5.0`) and push that tag. The mobile-foundation workflow verifies the tag
+version in the file, for example `mobile-foundation-v2.6.0`) and push that tag. The mobile-foundation workflow verifies the tag
 matches the declared version and publishes the individual files as GitHub Release assets.
 Existing release assets are never overwritten. The workflow also retains a candidate
 bundle as an Actions artifact on normal branch and PR builds; those artifacts are not
@@ -40,7 +40,7 @@ the vendored contract without network access to this private repository. An auth
 maintainer can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v2.5.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
+gh release download mobile-foundation-v2.6.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
@@ -48,6 +48,33 @@ additions, and major versions for breaking contract/token/link changes. A mobile
 pins its dependency; changing the backend must preserve supported installed clients.
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
+
+## Compatible additions in version 2.6
+
+Version 2.6 adds the one operation the apps lacked to start a monthly gift. `beginCheckout`
+stays web-only: it is keyed by an email and returns to website pages.
+
+- `POST /donor/me/recurring/checkout` (`startRecurringCheckout`, native only, `account`
+  rate limit) takes `{amount_minor}`, validated like every gift amount (a whole number of
+  dollars a day, $1 to $30, times 30), and an `Idempotency-Key`. It acts for the signed-in
+  donor, so the body carries no email. `201` returns `{url, session_id, expires_at}`: open
+  `url` in the system browser. `401` signed out, `403` not a native request, `409` a monthly
+  gift is already active or a checkout is still open (or the key was used with another
+  amount), `422` invalid amount or key, `429`, `503` (`PAYMENTS_UNCONFIGURED` when the
+  deployment has no processor). Retrying with the same key and amount returns the same
+  session until it lapses at `expires_at`.
+- Checkout returns to `<origin>/app/return?result=success&session_id=<id>` or
+  `<origin>/app/return?result=cancel`. The origin is `DONOR_NATIVE_RETURN_ORIGIN`, else the
+  public origin. Neither address proves payment: poll `GET /donor/me/recurring` until its
+  `subscription` is present, because the gift becomes active only when Stripe's verified
+  webhook arrives. `/app/return` is not in `links.json` or the web app's association files,
+  so a browser shows a notice and the app must watch for the address (an
+  `ASWebAuthenticationSession` callback matcher or a Custom Tab redirect). To open the app
+  from it instead, add the path to the Apple `components` and the Android intent filter in
+  the same release as the app change.
+- `Subscription.status` documents its fixed set: `active`, `past_due`, `unpaid`,
+  `incomplete`, `canceled`, `incomplete_expired`. Only the first three renew. Treat an
+  unknown value as not active.
 
 ## Compatible additions in version 2.5
 
