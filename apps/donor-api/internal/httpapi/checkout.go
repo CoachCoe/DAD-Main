@@ -7,12 +7,15 @@ import (
 	"net/http"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"dad/donor-api/internal/payments"
 	"dad/donor-api/internal/store"
 )
 
 type CheckoutSource interface {
 	BeginCheckout(context.Context, payments.CheckoutRequest) (payments.CheckoutResult, error)
+	BeginNativeCheckout(context.Context, string, pgtype.UUID, int64) (payments.NativeCheckoutResult, error)
 }
 
 type checkoutBody struct {
@@ -65,6 +68,48 @@ func (a *api) beginCheckout(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusForbidden, "Giving is unavailable for this account", nil)
 	case errors.Is(err, store.EmailRoleError{}):
 		writeError(w, r, http.StatusConflict, "This email signs in to a DAD partner or staff account. Give with a different email.", nil)
+	case errors.Is(err, payments.ErrCheckoutInput):
+		invalidFields(w, r)
+	case err != nil:
+		writeError(w, r, http.StatusServiceUnavailable, unavailable, err)
+	default:
+		writeJSON(w, http.StatusCreated, result)
+	}
+}
+
+type nativeCheckoutBody struct {
+	Amount int64 `json:"amount_minor"`
+}
+
+func (b nativeCheckoutBody) valid() bool { return store.ValidGiftAmount(b.Amount) }
+
+// startRecurringCheckout opens hosted checkout for the signed-in donor's first
+// monthly gift, which the website's guest checkout cannot do for an app: it
+// is keyed by an email the account already holds and returns to a web page.
+func (a *api) startRecurringCheckout(w http.ResponseWriter, r *http.Request, session string) {
+	const unavailable = "Checkout is temporarily unavailable; retry the same request"
+	key, ok := idempotencyKey(w, r)
+	if !ok {
+		return
+	}
+	body, ok := decodeValid[nativeCheckoutBody](w, r)
+	if !ok {
+		return
+	}
+	if a.Checkout == nil {
+		writeError(w, r, http.StatusServiceUnavailable, unavailable, nil)
+		return
+	}
+	ctx, cancel := withTimeout(r, providerTimeout)
+	defer cancel()
+	result, err := a.Checkout.BeginNativeCheckout(ctx, session, key, body.Amount)
+	switch {
+	case errors.Is(err, payments.ErrUnconfigured):
+		paymentsOff.write(w)
+	case errors.Is(err, payments.ErrCheckoutConflict):
+		writeError(w, r, http.StatusConflict, "A monthly gift is already active or in progress", nil)
+	case errors.Is(err, store.ErrDenied):
+		writeError(w, r, http.StatusUnauthorized, "Sign in required", nil)
 	case errors.Is(err, payments.ErrCheckoutInput):
 		invalidFields(w, r)
 	case err != nil:

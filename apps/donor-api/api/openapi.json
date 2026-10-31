@@ -2641,6 +2641,93 @@
     }
    }
   },
+  "/donor/me/recurring/checkout": {
+   "post": {
+    "operationId": "startRecurringCheckout",
+    "summary": "Start a monthly gift in Stripe-hosted Checkout",
+    "description": "For a signed-in donor with no active or pending monthly gift. The donor's account supplies the email, so the body carries only the amount. Idempotent: retry with the same `Idempotency-Key` and amount to get the same session; a different amount under a used key is 409. Open `url` in the system browser (ASWebAuthenticationSession or a Custom Tab). Checkout returns to `<DONOR_NATIVE_RETURN_ORIGIN>/app/return?result=success&session_id=<session_id>` after payment, or `?result=cancel` if the donor backs out; the app may watch for that address. The gift becomes active only when Stripe's verified webhook arrives, so after returning poll GET /donor/me/recurring until `subscription` is present. 409 means a monthly gift is already active or a checkout is still open (it lapses after `expires_at`). 503 `PAYMENTS_UNCONFIGURED` when the deployment has no payment processor.",
+    "tags": [
+     "Recurring"
+    ],
+    "security": [
+     {
+      "cookieAuth": []
+     },
+     {
+      "bearerAuth": []
+     }
+    ],
+    "x-rate-limit": "account",
+    "x-clients": [
+     "native"
+    ],
+    "parameters": [
+     {
+      "$ref": "#/components/parameters/IdempotencyKey"
+     }
+    ],
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "type": "object",
+        "properties": {
+         "amount_minor": {
+          "type": "integer",
+          "format": "int64",
+          "description": "The monthly charge in integer USD cents: a whole number of dollars a day from $1 to $30, times 30 (3000 to 90000 in steps of 3000).",
+          "minimum": 3000,
+          "maximum": 90000,
+          "multipleOf": 3000
+         }
+        },
+        "required": [
+         "amount_minor"
+        ],
+        "additionalProperties": false
+       }
+      }
+     }
+    },
+    "responses": {
+     "201": {
+      "description": "Created; open `url` in the system browser.",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/NativeCheckout"
+        }
+       }
+      }
+     },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
+     "409": {
+      "$ref": "#/components/responses/Conflict"
+     },
+     "413": {
+      "$ref": "#/components/responses/PayloadTooLarge"
+     },
+     "415": {
+      "$ref": "#/components/responses/UnsupportedMediaType"
+     },
+     "422": {
+      "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
+     },
+     "503": {
+      "$ref": "#/components/responses/Unavailable"
+     }
+    }
+   }
+  },
   "/donor/me/payment-method": {
    "get": {
     "operationId": "paymentMethod",
@@ -12790,7 +12877,16 @@
       "format": "date-time"
      },
      "status": {
-      "type": "string"
+      "type": "string",
+      "description": "Stripe's subscription status. `active`, `past_due` and `unpaid` renew; `incomplete` awaits the first payment; `canceled` and `incomplete_expired` have ended.",
+      "enum": [
+       "active",
+       "past_due",
+       "unpaid",
+       "incomplete",
+       "canceled",
+       "incomplete_expired"
+      ]
      },
      "stops_at": {
       "type": [
@@ -13039,6 +13135,31 @@
     },
     "required": [
      "checkoutId",
+     "url"
+    ],
+    "additionalProperties": false
+   },
+   "NativeCheckout": {
+    "type": "object",
+    "properties": {
+     "expires_at": {
+      "type": "string",
+      "description": "When the hosted page stops accepting payment; after this a new Idempotency-Key starts a new checkout.",
+      "format": "date-time"
+     },
+     "session_id": {
+      "type": "string",
+      "description": "The Stripe Checkout session, echoed back on the return address."
+     },
+     "url": {
+      "type": "string",
+      "description": "Stripe-hosted Checkout page. Open it in the system browser.",
+      "format": "uri"
+     }
+    },
+    "required": [
+     "expires_at",
+     "session_id",
      "url"
     ],
     "additionalProperties": false

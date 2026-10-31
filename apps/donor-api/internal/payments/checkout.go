@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -39,11 +40,21 @@ type CheckoutRequest struct {
 	Amount    int64
 	Frequency string
 	Visitor   *string
+	// NativeReturn is the origin a native client's hosted checkout returns to,
+	// in place of the website's thank-you and donate pages.
+	NativeReturn string
 }
 
 type CheckoutResult struct {
 	CheckoutID string `json:"checkoutId"`
 	URL        string `json:"url"`
+}
+
+// NativeCheckoutResult is a hosted checkout opened for a signed-in donor.
+type NativeCheckoutResult struct {
+	ExpiresAt time.Time `json:"expires_at"`
+	SessionID string    `json:"session_id"`
+	URL       string    `json:"url"`
 }
 
 type RemoteCheckout struct {

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,9 @@ type CheckoutService struct {
 	DB      *pgxpool.Pool
 	Gateway payments.CheckoutGateway
 	Origin  string
+	// NativeReturnOrigin is the origin the donor apps' hosted checkout returns
+	// to; it defaults to Origin.
+	NativeReturnOrigin string
 	// FoundingClaims matches a giver's address to the website waitlist (D-6).
 	FoundingClaims FoundingClaimKey
 }
@@ -30,7 +34,68 @@ type CheckoutService struct {
 // its frozen processor parameters commit before the processor is called, and
 // a retry with the same request ID returns the same session.
 func (s CheckoutService) BeginCheckout(ctx context.Context, request payments.CheckoutRequest) (payments.CheckoutResult, error) {
-	empty := payments.CheckoutResult{}
+	hosted, err := s.begin(ctx, request)
+	if err != nil {
+		return payments.CheckoutResult{}, err
+	}
+	return payments.CheckoutResult{CheckoutID: hosted.checkoutID, URL: hosted.url}, nil
+}
+
+// BeginNativeCheckout opens a hosted monthly checkout for the signed-in donor
+// behind token, whose account supplies the email the web flow asks for. It is
+// the same checkout the website begins, so the processor's webhooks complete
+// the gift the same way; only the pages it returns to differ.
+func (s CheckoutService) BeginNativeCheckout(
+	ctx context.Context,
+	token string,
+	requestID pgtype.UUID,
+	amount int64,
+) (payments.NativeCheckoutResult, error) {
+	empty := payments.NativeCheckoutResult{}
+	if s.Gateway == nil {
+		return empty, payments.ErrUnconfigured
+	}
+	origin := cmp.Or(s.NativeReturnOrigin, s.Origin)
+	if _, err := site(origin); err != nil {
+		return empty, err
+	}
+	donor, err := authenticate(ctx, queries.New(s.DB), token, time.Now().UTC())
+	if err != nil {
+		return empty, err
+	}
+	hosted, err := s.begin(ctx, payments.CheckoutRequest{
+		Session:      token,
+		RequestID:    requestID,
+		Email:        donor.Email,
+		Amount:       amount,
+		Frequency:    "MONTHLY",
+		NativeReturn: origin,
+	})
+	if err != nil {
+		return empty, err
+	}
+	return payments.NativeCheckoutResult{ExpiresAt: hosted.expiresAt, SessionID: hosted.sessionID, URL: hosted.url}, nil
+}
+
+// hostedCheckout is a checkout whose processor session is recorded.
+type hostedCheckout struct {
+	checkoutID string
+	sessionID  string
+	url        string
+	expiresAt  time.Time
+}
+
+// checkoutExpiry is when the frozen parameters let the hosted checkout lapse.
+func checkoutExpiry(params []byte) (time.Time, error) {
+	object, err := payments.DecodeObject(params)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return object.Unix("expires_at")
+}
+
+func (s CheckoutService) begin(ctx context.Context, request payments.CheckoutRequest) (hostedCheckout, error) {
+	empty := hostedCheckout{}
 	if s.Gateway == nil {
 		return empty, payments.ErrUnconfigured
 	}
@@ -54,8 +119,14 @@ func (s CheckoutService) BeginCheckout(ctx context.Context, request payments.Che
 	if err != nil {
 		return empty, err
 	}
+	expires, err := checkoutExpiry(attempt.RequestParams)
+	if err != nil {
+		return empty, err
+	}
+	hosted := hostedCheckout{checkoutID: attempt.CheckoutID.String(), expiresAt: expires}
 	if attempt.HostedUrl.Valid {
-		return payments.CheckoutResult{CheckoutID: attempt.CheckoutID.String(), URL: attempt.HostedUrl.String}, nil
+		hosted.sessionID, hosted.url = attempt.StripeSessionID.String, attempt.HostedUrl.String
+		return hosted, nil
 	}
 	remote, err := s.Gateway.CreateCheckout(ctx, attempt.RequestParams, "dad-checkout-"+request.RequestID.String())
 	if err != nil {
@@ -81,7 +152,8 @@ func (s CheckoutService) BeginCheckout(ctx context.Context, request payments.Che
 	if err != nil {
 		return empty, err
 	}
-	return payments.CheckoutResult{CheckoutID: attempt.CheckoutID.String(), URL: remote.URL}, nil
+	hosted.sessionID, hosted.url = remote.ID, remote.URL
+	return hosted, nil
 }
 
 // prepare records the guest donor, their checkout with any valid referral
@@ -276,6 +348,11 @@ func checkoutParams(site publicSite, email string, draft queries.InsertCheckoutP
 		"product_data": map[string]string{"name": "DAD monthly giving"},
 		"recurring":    map[string]string{"interval": "month"},
 	}
+	success, cancel := site.checkoutReturn(request.Amount, request.Frequency), site.donate()
+	if request.NativeReturn != "" {
+		native := publicSite(request.NativeReturn)
+		success, cancel = native.nativeCheckoutReturn(), native.nativeCheckoutCancel()
+	}
 	params := map[string]any{
 		"mode":                         "subscription",
 		"customer_email":               email,
@@ -283,8 +360,8 @@ func checkoutParams(site publicSite, email string, draft queries.InsertCheckoutP
 		"metadata":                     metadata,
 		"line_items":                   []any{map[string]any{"price_data": price, "quantity": 1}},
 		"allowed_payment_method_types": []string{"card"},
-		"success_url":                  site.checkoutReturn(request.Amount, request.Frequency),
-		"cancel_url":                   site.donate(),
+		"success_url":                  success,
+		"cancel_url":                   cancel,
 		"expires_at":                   draft.CreatedAt.Time.Add(checkoutLifetime).Unix(),
 		"subscription_data":            map[string]any{"metadata": metadata},
 	}
