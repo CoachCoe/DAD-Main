@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -138,6 +139,57 @@ func TestContractClientsMatchTheGuard(t *testing.T) {
 		server.Handler.ServeHTTP(response, r)
 		if admitted := response.Code != http.StatusForbidden; admitted != slices.Contains(op.Clients, "native") {
 			t.Errorf("%s: app request got %d, but x-clients is %v", pattern, response.Code, op.Clients)
+		}
+	}
+}
+
+// Statuses the typed wrappers produce before any handler runs must be
+// documented: an anonymous request, a foreign origin, a cross-site staff read,
+// an app-only route reached from a browser, and an exhausted rate budget.
+func TestContractDocumentsWrapperStatuses(t *testing.T) {
+	ops := loadContract(t).operations()
+	for _, route := range allRoutes() {
+		op, ok := ops[route.pattern]
+		if !ok || route.auth == stripeAuth {
+			continue
+		}
+		if route.auth != noAuth && route.auth != staffAuth && route.pattern != "POST /donor/logout" {
+			// Reads take no limiter here, but the ingress rejects floods before the API.
+			for _, status := range []string{"401", "429"} {
+				if _, documented := op.Responses[status]; !documented {
+					t.Errorf("%s: authenticated route does not document %s", route.pattern, status)
+				}
+			}
+		}
+		origin := originFor(route.pattern)
+		probes := map[string]func(*http.Request){
+			"browser": func(r *http.Request) { r.Header.Set("Origin", origin) },
+			"foreign": func(r *http.Request) { r.Header.Set("Origin", "https://evil.example.org") },
+			"app":     func(r *http.Request) { r.Header.Set("X-DAD-Client", "native") },
+			"cross-site": func(r *http.Request) {
+				r.Header.Set("Origin", origin)
+				r.Header.Set("Sec-Fetch-Site", "cross-site")
+			},
+		}
+		server := NewServer("", Services{})
+		for name, mark := range probes {
+			rounds := 1
+			if name == "browser" || name == "app" {
+				rounds = 130
+			}
+			for range rounds {
+				r := routeRequest(route.pattern, "{}")
+				mark(r)
+				response := httptest.NewRecorder()
+				server.Handler.ServeHTTP(response, r)
+				switch response.Code {
+				case http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+					if _, documented := op.Responses[strconv.Itoa(response.Code)]; !documented {
+						t.Errorf("%s: %s request got %d, which is not documented", route.pattern, name, response.Code)
+						rounds = 0
+					}
+				}
+			}
 		}
 	}
 }

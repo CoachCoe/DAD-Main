@@ -4376,6 +4376,28 @@ export interface components {
             /** @description Cursor of the next page, or null on the last page. */
             next_cursor: string | null;
         };
+        SignupSent: {
+            /** @constant */
+            sent: true;
+        };
+        PartnerSignInLinkSent: {
+            message: string;
+        };
+        PartnerSaved: {
+            /** @constant */
+            saved: true;
+        };
+        PartnerSignedOut: {
+            /** @constant */
+            signed_out: true;
+        };
+        InviteOnlyEvents: {
+            events: components["schemas"]["EventView"][];
+        };
+        SignInResult: {
+            /** @constant */
+            signed_in: true;
+        } | components["schemas"]["NativeSession"];
     };
     responses: {
         /** @description Signed in. */
@@ -4386,10 +4408,7 @@ export interface components {
                 [name: string]: unknown;
             };
             content: {
-                "application/json": {
-                    /** @constant */
-                    signed_in: true;
-                } | components["schemas"]["NativeSession"];
+                "application/json": components["schemas"]["SignInResult"];
             };
         };
         /** @description The request could not be verified. */
@@ -4483,6 +4502,13 @@ export interface components {
             content: {
                 "application/json": components["schemas"]["Problem"];
             };
+        };
+        /** @description The ingress rate limit rejected the request before it reached the API. The body is not guaranteed to be JSON and `Retry-After` may be absent. Back off and retry. */
+        RateLimitedByIngress: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content?: never;
         };
     };
     parameters: {
@@ -5051,6 +5077,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5164,6 +5191,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5186,6 +5214,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5401,6 +5430,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5423,6 +5453,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5481,6 +5512,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5507,6 +5539,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5535,6 +5568,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5562,6 +5596,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["Unprocessable"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5587,6 +5622,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5662,6 +5698,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5684,6 +5721,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -5756,6 +5794,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -6893,10 +6932,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @constant */
-                        signed_in: true;
-                    } | components["schemas"]["NativeSession"];
+                    "application/json": components["schemas"]["SignInResult"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -6927,6 +6963,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -7429,6 +7466,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -7597,6 +7635,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -7710,6 +7749,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             415: components["responses"]["UnsupportedMediaType"];
             422: components["responses"]["Unprocessable"];
             429: components["responses"]["TooManyRequests"];
@@ -7731,12 +7771,11 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        events: components["schemas"]["EventView"][];
-                    };
+                    "application/json": components["schemas"]["InviteOnlyEvents"];
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -7762,6 +7801,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -7786,8 +7826,10 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -7812,8 +7854,10 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -7836,6 +7880,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -7858,6 +7903,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -7995,9 +8041,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        message: string;
-                    };
+                    "application/json": components["schemas"]["PartnerSignInLinkSent"];
                 };
             };
             403: components["responses"]["Forbidden"];
@@ -8087,6 +8131,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8140,6 +8185,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8169,6 +8215,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8199,6 +8246,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8273,6 +8321,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8296,6 +8345,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8319,6 +8369,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8377,10 +8428,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @constant */
-                        signed_out: true;
-                    };
+                    "application/json": components["schemas"]["PartnerSignedOut"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -8642,6 +8690,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8713,6 +8762,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8738,6 +8788,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -8797,10 +8848,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @constant */
-                        saved: true;
-                    };
+                    "application/json": components["schemas"]["PartnerSaved"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -9241,6 +9289,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -9265,6 +9314,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -9290,10 +9340,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @constant */
-                        saved: true;
-                    };
+                    "application/json": components["schemas"]["PartnerSaved"];
                 };
             };
             401: components["responses"]["Unauthorized"];
@@ -9470,6 +9517,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -9606,6 +9654,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
     };
@@ -9798,10 +9847,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        /** @constant */
-                        sent: true;
-                    };
+                    "application/json": components["schemas"]["SignupSent"];
                 };
             };
             403: components["responses"]["Forbidden"];

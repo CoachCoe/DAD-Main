@@ -1199,6 +1199,9 @@
      "401": {
       "$ref": "#/components/responses/Unauthorized"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -1436,6 +1439,9 @@
      "401": {
       "$ref": "#/components/responses/Unauthorized"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -1552,6 +1558,9 @@
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -1956,6 +1965,9 @@
      "422": {
       "$ref": "#/components/responses/Unprocessable"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -1990,6 +2002,9 @@
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -2109,6 +2124,9 @@
      "409": {
       "$ref": "#/components/responses/Conflict"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -2151,6 +2169,9 @@
      },
      "422": {
       "$ref": "#/components/responses/Unprocessable"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -2208,6 +2229,9 @@
      "422": {
       "$ref": "#/components/responses/Unprocessable"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -2264,6 +2288,9 @@
      "422": {
       "$ref": "#/components/responses/Unprocessable"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -2311,6 +2338,9 @@
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -2459,6 +2489,9 @@
      "401": {
       "$ref": "#/components/responses/Unauthorized"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -2494,6 +2527,9 @@
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -2634,6 +2670,9 @@
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -4977,26 +5016,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "oneOf": [
-          {
-           "type": "object",
-           "description": "Browser request: the session is set only as the `dad_donor_session` cookie.",
-           "properties": {
-            "signed_in": {
-             "type": "boolean",
-             "const": true
-            }
-           },
-           "required": [
-            "signed_in"
-           ],
-           "additionalProperties": false
-          },
-          {
-           "$ref": "#/components/schemas/NativeSession",
-           "description": "Native request."
-          }
-         ]
+         "$ref": "#/components/schemas/SignInResult"
         }
        }
       },
@@ -5061,6 +5081,9 @@
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -6079,6 +6102,9 @@
      "404": {
       "$ref": "#/components/responses/NotFound"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -6403,6 +6429,9 @@
      "401": {
       "$ref": "#/components/responses/Unauthorized"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -6655,6 +6684,9 @@
      "401": {
       "$ref": "#/components/responses/Unauthorized"
      },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
      "415": {
       "$ref": "#/components/responses/UnsupportedMediaType"
      },
@@ -6692,25 +6724,16 @@
       "content": {
        "application/json": {
         "schema": {
-         "type": "object",
-         "properties": {
-          "events": {
-           "type": "array",
-           "items": {
-            "$ref": "#/components/schemas/EventView"
-           }
-          }
-         },
-         "required": [
-          "events"
-         ],
-         "additionalProperties": false
+         "$ref": "#/components/schemas/InviteOnlyEvents"
         }
        }
       }
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -6760,6 +6783,9 @@
      },
      "404": {
       "$ref": "#/components/responses/NotFound"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -6812,11 +6838,17 @@
      "401": {
       "$ref": "#/components/responses/Unauthorized"
      },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
      "404": {
       "$ref": "#/components/responses/NotFound"
      },
      "409": {
       "$ref": "#/components/responses/Conflict"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -6870,11 +6902,17 @@
      "401": {
       "$ref": "#/components/responses/Unauthorized"
      },
+     "403": {
+      "$ref": "#/components/responses/Forbidden"
+     },
      "404": {
       "$ref": "#/components/responses/NotFound"
      },
      "409": {
       "$ref": "#/components/responses/Conflict"
+     },
+     "429": {
+      "$ref": "#/components/responses/TooManyRequests"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -6911,6 +6949,9 @@
      "401": {
       "$ref": "#/components/responses/Unauthorized"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -6945,6 +6986,9 @@
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -7243,16 +7287,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "type": "object",
-         "properties": {
-          "message": {
-           "type": "string"
-          }
-         },
-         "required": [
-          "message"
-         ],
-         "additionalProperties": false
+         "$ref": "#/components/schemas/PartnerSignInLinkSent"
         }
        }
       }
@@ -7469,6 +7504,9 @@
      "403": {
       "$ref": "#/components/responses/Forbidden"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -7625,6 +7663,9 @@
      "403": {
       "$ref": "#/components/responses/Forbidden"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -7689,6 +7730,9 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -7760,6 +7804,9 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -7939,6 +7986,9 @@
      "403": {
       "$ref": "#/components/responses/Forbidden"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -7978,6 +8028,9 @@
      "403": {
       "$ref": "#/components/responses/Forbidden"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -8016,6 +8069,9 @@
      },
      "404": {
       "$ref": "#/components/responses/NotFound"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -8151,17 +8207,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "type": "object",
-         "properties": {
-          "signed_out": {
-           "type": "boolean",
-           "const": true
-          }
-         },
-         "required": [
-          "signed_out"
-         ],
-         "additionalProperties": false
+         "$ref": "#/components/schemas/PartnerSignedOut"
         }
        }
       }
@@ -8801,6 +8847,9 @@
      "401": {
       "$ref": "#/components/responses/Unauthorized"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -8958,6 +9007,9 @@
      "403": {
       "$ref": "#/components/responses/Forbidden"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -9008,6 +9060,9 @@
      },
      "403": {
       "$ref": "#/components/responses/Forbidden"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -9146,17 +9201,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "type": "object",
-         "properties": {
-          "saved": {
-           "type": "boolean",
-           "const": true
-          }
-         },
-         "required": [
-          "saved"
-         ],
-         "additionalProperties": false
+         "$ref": "#/components/schemas/PartnerSaved"
         }
        }
       }
@@ -10136,6 +10181,9 @@
      "403": {
       "$ref": "#/components/responses/Forbidden"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -10189,6 +10237,9 @@
      "404": {
       "$ref": "#/components/responses/NotFound"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
      }
@@ -10240,17 +10291,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "type": "object",
-         "properties": {
-          "saved": {
-           "type": "boolean",
-           "const": true
-          }
-         },
-         "required": [
-          "saved"
-         ],
-         "additionalProperties": false
+         "$ref": "#/components/schemas/PartnerSaved"
         }
        }
       }
@@ -10588,14 +10629,17 @@
        }
       }
      },
+     "401": {
+      "$ref": "#/components/responses/Unauthorized"
+     },
      "404": {
       "$ref": "#/components/responses/NotFound"
      },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
+     },
      "503": {
       "$ref": "#/components/responses/Unavailable"
-     },
-     "401": {
-      "$ref": "#/components/responses/Unauthorized"
      }
     }
    }
@@ -10888,6 +10932,9 @@
      },
      "401": {
       "$ref": "#/components/responses/Unauthorized"
+     },
+     "429": {
+      "$ref": "#/components/responses/RateLimitedByIngress"
      },
      "503": {
       "$ref": "#/components/responses/Unavailable"
@@ -11306,17 +11353,7 @@
       "content": {
        "application/json": {
         "schema": {
-         "type": "object",
-         "properties": {
-          "sent": {
-           "type": "boolean",
-           "const": true
-          }
-         },
-         "required": [
-          "sent"
-         ],
-         "additionalProperties": false
+         "$ref": "#/components/schemas/SignupSent"
         }
        }
       }
@@ -11713,26 +11750,7 @@
     "content": {
      "application/json": {
       "schema": {
-       "oneOf": [
-        {
-         "type": "object",
-         "description": "Browser request: the session is set only as the `dad_donor_session` cookie.",
-         "properties": {
-          "signed_in": {
-           "type": "boolean",
-           "const": true
-          }
-         },
-         "required": [
-          "signed_in"
-         ],
-         "additionalProperties": false
-        },
-        {
-         "$ref": "#/components/schemas/NativeSession",
-         "description": "Native request."
-        }
-       ]
+       "$ref": "#/components/schemas/SignInResult"
       }
      }
     },
@@ -11853,6 +11871,9 @@
       }
      }
     }
+   },
+   "RateLimitedByIngress": {
+    "description": "The ingress rate limit rejected the request before it reached the API. The body is not guaranteed to be JSON and `Retry-After` may be absent. Back off and retry."
    }
   },
   "schemas": {
@@ -16281,6 +16302,94 @@
      "next_cursor"
     ],
     "additionalProperties": false
+   },
+   "SignupSent": {
+    "type": "object",
+    "properties": {
+     "sent": {
+      "type": "boolean",
+      "const": true
+     }
+    },
+    "required": [
+     "sent"
+    ],
+    "additionalProperties": false
+   },
+   "PartnerSignInLinkSent": {
+    "type": "object",
+    "properties": {
+     "message": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "message"
+    ],
+    "additionalProperties": false
+   },
+   "PartnerSaved": {
+    "type": "object",
+    "properties": {
+     "saved": {
+      "type": "boolean",
+      "const": true
+     }
+    },
+    "required": [
+     "saved"
+    ],
+    "additionalProperties": false
+   },
+   "PartnerSignedOut": {
+    "type": "object",
+    "properties": {
+     "signed_out": {
+      "type": "boolean",
+      "const": true
+     }
+    },
+    "required": [
+     "signed_out"
+    ],
+    "additionalProperties": false
+   },
+   "InviteOnlyEvents": {
+    "type": "object",
+    "properties": {
+     "events": {
+      "type": "array",
+      "items": {
+       "$ref": "#/components/schemas/EventView"
+      }
+     }
+    },
+    "required": [
+     "events"
+    ],
+    "additionalProperties": false
+   },
+   "SignInResult": {
+    "oneOf": [
+     {
+      "type": "object",
+      "description": "Browser request: the session is set only as the `dad_donor_session` cookie.",
+      "properties": {
+       "signed_in": {
+        "type": "boolean",
+        "const": true
+       }
+      },
+      "required": [
+       "signed_in"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "$ref": "#/components/schemas/NativeSession",
+      "description": "Native request."
+     }
+    ]
    }
   }
  }
