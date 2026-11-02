@@ -23,7 +23,10 @@ export default function DonorHome() {
           </p>
           <div className="actions">
             <RoleLink className="button" href="/donate">
-              Give $1 a day <span aria-hidden="true" className="arrow">→</span>
+              Give $1 a day{" "}
+              <span aria-hidden="true" className="arrow">
+                →
+              </span>
             </RoleLink>
             <Link className="secondary" href="/how-it-works">
               See how it works
@@ -72,7 +75,10 @@ export default function DonorHome() {
           <p className="note">
             Run an aid organization?{" "}
             <RoleLink className="quiet" href="/apply">
-              Become a partner <span aria-hidden="true" className="arrow">→</span>
+              Become a partner{" "}
+              <span aria-hidden="true" className="arrow">
+                →
+              </span>
             </RoleLink>
           </p>
         </section>
