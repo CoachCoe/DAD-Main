@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Inter, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { webTokenVariables } from "@/design/web";
+import { launchMonthLabel } from "@/lib/launch";
 
 // Inter and Space Grotesk are variable fonts, so they load their whole weight axis and
 // must not be given a `weight`. IBM Plex Mono is static and has to name its weights.
@@ -22,7 +23,7 @@ const mono = IBM_Plex_Mono({
 
 export const metadata: Metadata = {
   title: { default: "Dynamic Aid Delivery — Join the founding donors", template: "%s · Dynamic Aid Delivery" },
-  description: "Give, invite people you know, and see your circle’s impact. DAD launches in April 2027.",
+  description: `Give, invite people you know, and see your circle’s impact. DAD launches in ${launchMonthLabel()}.`,
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

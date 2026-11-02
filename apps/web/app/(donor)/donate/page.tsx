@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
+import { launchDateLabel } from "@/lib/launch";
 import Donate from "./Donate";
 
 export const metadata: Metadata = {
   title: "Give",
-  description: "Give about a dollar a day — $30/month. DAD launches in April 2027.",
+  description: `Give about a dollar a day — $30/month. DAD launches on ${launchDateLabel()}.`,
 };
 
 export default function DonatePage() {

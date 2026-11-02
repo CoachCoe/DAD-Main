@@ -15,7 +15,11 @@ it("captures the IRL marker from the browser, names the code's owner, and offers
   vi.stubGlobal("fetch", fetch);
   render(<ReferralLanding code="code" kind="IRL" referrer={{ state: "found", name: "Sam" }} />);
   expect(screen.getByRole("heading", { name: "Sam invited you to DAD" })).toBeVisible();
-  expect(screen.getByRole("link", { name: "Continue to giving" })).toHaveAttribute("href", "/donate");
+  expect(screen.getByRole("link", { name: "Give $1 a day with Sam" })).toHaveAttribute("href", "/donate");
+  expect(screen.getByText("$30/month")).toBeVisible();
+  expect(screen.getByText(/April 22, 2027/)).toBeVisible();
+  expect(screen.getByText(/December 31, 2026/)).toBeVisible();
+  expect(screen.queryByText(/sandbox/i)).not.toBeInTheDocument();
   await waitFor(() => expect(fetch).toHaveBeenCalled());
   expect(fetch.mock.calls[0][0]).toBe("/api/donor/referrals/code");
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ kind: "IRL" });
@@ -27,7 +31,7 @@ it("holds a tap made before the referral is saved, rather than losing the attrib
     vi.fn(() => new Promise(() => {})),
   );
   render(<ReferralLanding code="code" kind="LINK" referrer={{ state: "found", name: "Sam" }} />);
-  const link = screen.getByRole("link", { name: "Continue to giving" });
+  const link = screen.getByRole("link", { name: "Give $1 a day with Sam" });
   expect(fireEvent.click(link)).toBe(false);
   expect(await screen.findByRole("link", { name: "Saving your referral…" })).toHaveAttribute("aria-disabled", "true");
   expect(screen.getByRole("status")).toHaveTextContent("Saving your referral…");
@@ -65,7 +69,7 @@ it("leads with the unavailable message for a replaced code", async () => {
   expect(screen.getByRole("link", { name: "Continue without a referral" })).toHaveAttribute("href", "/donate");
   await waitFor(() => expect(fetch).toHaveBeenCalled());
   expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ kind: "LINK" });
-  expect(screen.queryByRole("link", { name: "Continue to giving" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Give $1 a day with Sam" })).not.toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
@@ -73,6 +77,7 @@ it("falls back to the capture when the server could not look the code up", async
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({ captured: false, public_name: null })));
   render(<ReferralLanding code="old" kind="LINK" />);
   expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Join the beginning");
+  expect(screen.getByRole("link", { name: "Give $1 a day" })).toHaveAttribute("href", "/donate");
   expect(await screen.findByRole("heading", { name: "This referral link is no longer available" })).toBeVisible();
 });
 
@@ -81,7 +86,7 @@ it("keeps an offline failure distinct from successful capture", async () => {
   render(<ReferralLanding code="code" kind="LINK" />);
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("couldn’t confirm your referral"));
   expect(screen.getByRole("alert")).toHaveTextContent("offline");
-  expect(screen.queryByRole("link", { name: "Continue to giving" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Give $1 a day with Sam" })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Retry referral" })).toBeVisible();
 });
 
@@ -95,6 +100,6 @@ it("explains rate limiting separately from being offline, and retries", async ()
   await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Wait a minute"));
   expect(screen.getByRole("alert")).not.toHaveTextContent("offline");
   fireEvent.click(screen.getByRole("button", { name: "Retry referral" }));
-  expect(await screen.findByRole("link", { name: "Continue to giving" })).toBeVisible();
+  expect(await screen.findByRole("link", { name: "Give $1 a day with Sam" })).toBeVisible();
   expect(screen.getByRole("alert")).toBeEmptyDOMElement();
 });

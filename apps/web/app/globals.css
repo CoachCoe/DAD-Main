@@ -328,25 +328,40 @@ fieldset:disabled .segmented label {
 
 .presets {
   display: grid;
-  gap: var(--space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
 }
+/* Both figures share one size and weight: the monthly charge is never played down. */
 .presets button {
-  min-height: 52px;
-  padding: var(--space-2) var(--space-4);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 84px;
+  padding: var(--space-3) var(--space-4);
   border: 1.5px solid var(--ghost-line);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-card);
   background: var(--card);
   font-family: var(--font-display);
   font-weight: 700;
   font-size: var(--text-md);
+  line-height: 1.4;
   cursor: pointer;
+}
+.presetCheck {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  color: var(--brand);
 }
 .presets button:hover {
   border-color: var(--ink);
 }
 .presets button[aria-pressed="true"] {
   background: var(--ink);
-  border-color: var(--ink);
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px var(--brand);
   color: var(--paper);
 }
 .presets button:disabled {
@@ -354,6 +369,54 @@ fieldset:disabled .segmented label {
   cursor: default;
 }
 
+/* The live gift summary on Give. */
+.giveSummary {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-field);
+  background: var(--brand-wash);
+  color: var(--ink);
+}
+.fieldHint {
+  margin-top: var(--space-2);
+}
+.fieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+/* Rides the bottom edge of the viewport on phones. position: sticky works here because no
+   ancestor (page, panel, form) sets overflow; fixed would cover errors and the footer. */
+.giveSubmit {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+.giveSubmit .button {
+  gap: var(--space-2);
+}
+.giveSubmit svg {
+  flex: none;
+}
+.giveNotes {
+  text-align: center;
+}
+/* Keeps a focused field clear of the sticky submit (WCAG 2.4.11). */
+.giveForm :is(input, button) {
+  scroll-margin-bottom: 9rem;
+}
+/* Reserved height so the Founding line fills in without moving the form. */
+.giveFounding .foundingLine {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-height: 3em;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
 .page {
   width: 100%;
   max-width: 1160px;
@@ -568,6 +631,140 @@ details[open] > summary::after {
   line-height: 1;
   color: var(--ink-soft);
 }
+/* The dashboard's top band. The sub-line reserves two lines so the loading and loaded bands match. */
+.dashBand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.dashSub {
+  min-height: 3em;
+  font-size: var(--text-lg);
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+/* Rows on phones, three columns once there is room; the skeleton uses the same markup. */
+.statStrip {
+  display: grid;
+  gap: var(--space-2) var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--card);
+}
+.stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 2rem;
+}
+.stat dt {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.stat dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.metricValue.zero {
+  color: var(--muted);
+}
+.metric .metricLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 44px;
+  margin-top: auto;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--brand-ink);
+}
+span.metricLink {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* The Founding card is the one dark card on the dashboard. */
+.metric.earned {
+  border-color: var(--ink-deep);
+  background: var(--ink-deep);
+}
+.earned h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--dkmut);
+}
+.earnedStar {
+  flex: none;
+  color: var(--brand);
+}
+.earned .metricValue {
+  color: var(--paper);
+}
+.earned p:not(.metricValue) {
+  color: var(--dkmut);
+}
+.todayGrid {
+  display: grid;
+  gap: var(--space-4);
+}
+.todayMain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.todayMetrics {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  padding: 0;
+}
+.todayMetrics li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.todayMetrics .metricValue {
+  display: block;
+  font-size: var(--text-xl);
+}
+.verified {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--ok-ink);
+}
+.accountNav {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.accountNav h2 {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ink-soft);
+}
+.accountNav ul {
+  list-style: none;
+  padding: 0;
+}
+.accountNav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
 .badge {
   display: inline-block;
   margin-left: var(--space-2);
@@ -754,6 +951,63 @@ footer nav {
   column-gap: var(--space-5);
 }
 footer a:hover {
+  color: var(--paper);
+}
+footer .tagline {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  letter-spacing: var(--track-display);
+  color: var(--paper);
+}
+/* Scrolls away with the page: the sticky header is the only chrome that stays. */
+.previewBanner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--gutter);
+  background: var(--ink-deep);
+  color: var(--dkmut);
+  border-bottom: 1px solid var(--dkline);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.previewBanner p {
+  margin: 0;
+}
+/* Dropped (and so hidden from assistive tech) on narrow screens so the link always fits. */
+.previewMore {
+  display: none;
+}
+.previewBanner a {
+  position: relative;
+  flex: none;
+  color: var(--paper);
+  text-decoration: underline;
+}
+/* Grows the hit area to 44px without making the banner taller. */
+.previewBanner a::after {
+  content: "";
+  position: absolute;
+  inset: -14px -8px;
+}
+.previewBanner :focus-visible {
+  outline-color: var(--brand);
+}
+@media (min-width: 480px) {
+  .previewMore {
+    display: inline;
+  }
+}
+.previewLabel {
+  flex: none;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
   color: var(--paper);
 }
 
@@ -948,10 +1202,65 @@ footer a:hover {
   color: var(--dkmut);
 }
 
+/* A framing in a fact row sits inline; the row's own span rule would stack its parts. */
+.heroFacts dd .framing {
+  display: inline-flex;
+}
+.heroFacts dd .framing span {
+  display: inline;
+}
+/* Reserves the Founding line's height before hydration fills it, so it never shifts the
+   page: two lines on a phone, one from the 600px breakpoint up. */
+.hero .foundingLine {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-height: 3em;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--dkmut);
+}
+.foundingLine svg {
+  flex: none;
+  margin-top: 0.25em;
+  color: var(--brand);
+}
+/* The inline-flex button collapses the space before a trailing arrow. */
+.arrow {
+  margin-inline-start: var(--space-2);
+}
+.steps {
+  padding: 0;
+  list-style: none;
+}
+.stepNumber {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--track-label);
+  color: var(--brand-ink);
+}
+.steps h3 {
+  font-family: var(--font-sans);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
 /* From here up, a page sits on a card; below it, the page itself is the surface. */
 @media (min-width: 600px) {
   .page {
     padding-top: var(--space-6);
+  }
+  .fieldRow {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+  .giveSubmit {
+    position: static;
+    padding: 0;
+    border-top: 0;
+    background: none;
+  }
+  .giveFounding .foundingLine {
+    min-height: 1.5em;
   }
   .panel {
     padding: var(--space-6);
@@ -973,6 +1282,22 @@ footer a:hover {
   .metrics.pair .metricValue {
     font-size: var(--text-3xl);
   }
+  .dashSub {
+    min-height: 1.5em;
+  }
+  .statStrip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .stat {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: var(--space-1);
+  }
+  .todayGrid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    align-items: start;
+  }
   .actions > :is(.button, .secondary) {
     flex: 0 1 auto;
   }
@@ -981,6 +1306,9 @@ footer a:hover {
 @media (min-width: 880px) {
   :root {
     --header-height: 72px;
+  }
+  .accountNav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .brand {
     font-size: 19px;
@@ -1026,6 +1354,9 @@ footer a:hover {
     flex-wrap: wrap;
     justify-content: space-between;
     column-gap: var(--space-6);
+  }
+  .hero .foundingLine {
+    min-height: 1.5em;
   }
   .hero {
     grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);

@@ -41,6 +41,17 @@ it("opens native sharing with the Link URL and accurate billing disclosure", asy
   );
 });
 
+it("copies the bare link, announces it, and previews the invitation", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(sharing)));
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText }, onLine: true });
+  render(<SharePage />);
+  expect(await screen.findByRole("heading", { name: "Sam invited you to DAD" })).toBeVisible();
+  expect(screen.getByText(/April 22, 2027\./, { selector: "p" })).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Link copied."));
+  expect(writeText).toHaveBeenCalledWith(sharing.link);
+});
 it("requires a focused confirmation step before replacing the link, and restores focus on return", async () => {
   const fetch = vi.fn().mockResolvedValue(response(sharing));
   vi.stubGlobal("fetch", fetch);

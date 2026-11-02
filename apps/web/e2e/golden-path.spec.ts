@@ -12,13 +12,14 @@ async function expectNoHorizontalScroll(page: Page) {
 
 test("a mobile or desktop visitor can reach giving without an account", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Grow your circle");
-  await expect(page.getByText(/DAD launches on 22 April 2027/)).toBeVisible();
-  await expect(page.getByText(/DAD launches on 22 April 2027/)).toContainText("before 1 January 2027 (New York time)");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("A dollar a day");
+  await expect(page.getByRole("complementary", { name: "DAD at a glance" })).toContainText("April 22, 2027");
   await expect(page.getByRole("complementary", { name: "DAD at a glance" })).toContainText("$30/month");
-  await page.getByRole("link", { name: "Try giving", exact: true }).click();
+  await page.getByRole("link", { name: /Give \$1 a day/ }).click();
   await expect(page).toHaveURL(/\/donate$/);
   await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page.getByLabel("Full name")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Continue to secure checkout · \$30\/month$/ })).toBeVisible();
   await expect(page.getByText(/\$30\/month/).first()).toBeVisible();
   await expectNoHorizontalScroll(page);
 });
@@ -26,9 +27,9 @@ test("a mobile or desktop visitor can reach giving without an account", async ({
 test("every public header destination works at this viewport", async ({ page }) => {
   await page.goto("/");
   for (const [name, path] of [
-    ["Initiatives", "/initiatives"],
-    ["Spend", "/spend"],
     ["How it works", "/how-it-works"],
+    ["Initiatives", "/initiatives"],
+    ["Every dollar", "/spend"],
     ["My account", "/account/dashboard"],
   ]) {
     await navigateByHeader(page, name);

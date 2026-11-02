@@ -10,6 +10,16 @@ export function formatDay(isoDate: string): string {
   return calendarDay.format(new Date(`${isoDate.slice(0, 10)}T00:00:00Z`));
 }
 
+const longCalendarDay = new Intl.DateTimeFormat("en-US", {
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+});
+/** Same as formatDay with the month spelled out ("September 30, 2026"), matching the launch dates. */
+export function formatLongDay(isoDate: string): string {
+  return longCalendarDay.format(new Date(`${isoDate.slice(0, 10)}T00:00:00Z`));
+}
 /** The reader's local date of an instant, e.g. "Oct 1, 2026". */
 export function formatDate(instant: string): string {
   return new Date(instant).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });

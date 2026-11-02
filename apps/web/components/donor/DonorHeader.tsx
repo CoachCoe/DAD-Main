@@ -4,9 +4,9 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 const destinations = [
-  ["/initiatives", "Initiatives"],
-  ["/spend", "Spend"],
   ["/how-it-works", "How it works"],
+  ["/initiatives", "Initiatives"],
+  ["/spend", "Every dollar"],
   ["/account/dashboard", "My account"],
 ] as const;
 
