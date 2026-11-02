@@ -109,11 +109,9 @@ export default function ReferralLanding({
 
 function About() {
   return (
-    <>
-      <p>
-        A first gift completed on or before {foundingDeadlineLabel()} (New York time) earns a permanent Founding Donor
-        badge.
-      </p>
-    </>
+    <p>
+      A first gift completed on or before {foundingDeadlineLabel()} (New York time) earns a permanent Founding Donor
+      badge.
+    </p>
   );
 }
