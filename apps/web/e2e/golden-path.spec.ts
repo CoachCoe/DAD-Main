@@ -26,9 +26,9 @@ test("a mobile or desktop visitor can reach giving without an account", async ({
 test("every public header destination works at this viewport", async ({ page }) => {
   await page.goto("/");
   for (const [name, path] of [
-    ["Initiatives", "/initiatives"],
-    ["Spend", "/spend"],
     ["How it works", "/how-it-works"],
+    ["Initiatives", "/initiatives"],
+    ["Every dollar", "/spend"],
     ["My account", "/account/dashboard"],
   ]) {
     await navigateByHeader(page, name);

@@ -62,6 +62,8 @@ describe("the palette meets accessible text contrast thresholds", () => {
   it.each([
     ["--dkmut, secondary text on the dark header and hero", "dkmut", "ink", 4.5],
     ["--dkmut, footer text", "dkmut", "ink-deep", 4.5],
+    ["--dkmut, the preview banner text", "dkmut", "ink-deep", 4.5],
+    ["--paper, the preview banner link and label", "paper", "ink-deep", 4.5],
     ["--muted, notes inside cards", "muted", "card", 4.5],
     ["--ink, label text on a brand-filled primary button", "ink", "brand", 4.5],
     ["--paper, label text on a selected amount preset", "paper", "ink", 4.5],
