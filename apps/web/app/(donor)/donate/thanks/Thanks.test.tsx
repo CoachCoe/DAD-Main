@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { expect, it } from "vitest";
 import ThankYouPage from "./page";
 
@@ -16,13 +16,16 @@ it("restates a monthly gift with the charge and daily framing at equal weight", 
 
 it("carries the Founding Donor timing, receipt notice, and claim call to action", async () => {
   await renderWith({ session_id: "cs_test", amount_minor: "9000", frequency: "MONTHLY" });
-  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Thank you");
-  expect(screen.getByText(/launches in April 2027/)).toHaveTextContent(
-    "A first gift completed before January 2027 earns a permanent Founding Donor badge.",
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("You’re in. Welcome to the beginning.");
+  expect(screen.getByText(/launches April 22, 2027/)).toHaveTextContent(
+    "A first gift completed on or before December 31, 2026 (New York time) earns a permanent Founding Donor badge.",
   );
+  expect(screen.getByRole("heading", { level: 2, name: "What happens next" })).toBeVisible();
+  expect(document.querySelector("main .button, .button")).toBeNull();
   expect(screen.getByText(/receipt email follows/)).toBeVisible();
+  expect(screen.getByText(/test gift record, not a tax receipt/)).toBeVisible();
   expect(screen.getByText(/giving streak and your personal referral link/)).toBeVisible();
-  expect(screen.getByRole("link", { name: "Claim your account" })).toHaveAttribute("href", "/account/sign-in");
+  expect(screen.getByRole("link", { name: "request a new claim link" })).toHaveAttribute("href", "/account/sign-in");
 });
 
 it.each([
@@ -40,7 +43,14 @@ it.each([
   { amount_minor: "3000", frequency: ["MONTHLY", "ONE_TIME"] },
 ])("falls back to a generic thank-you for missing or invalid parameters: %o", async (params) => {
   await renderWith(params);
-  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Thank you");
+  expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("You’re in. Welcome to the beginning.");
   expect(screen.queryByText(/Your gift:/)).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Claim your account" })).toBeVisible();
+  expect(screen.getByRole("link", { name: "request a new claim link" })).toBeVisible();
+});
+it("hands only the email to sign-in and clears the remembered choice", async () => {
+  sessionStorage.setItem("dad.donate.choice", JSON.stringify({ amount: "1", email: "d@example.org", zip: "10001" }));
+  await renderWith({});
+  await waitFor(() => expect(sessionStorage.getItem("dad.donate.choice")).toBeNull());
+  expect(sessionStorage.getItem("dad.signin.email")).toBe("d@example.org");
+  sessionStorage.clear();
 });

@@ -157,8 +157,8 @@ test("public account links load a new document with the private CSP", async ({ p
   const violations = await recordViolations(page);
   for (const [source, label, destination] of [
     ["/", "My account", "/account/dashboard"],
-    ["/donate/thanks", "Claim your account", "/account/sign-in"],
-    ["/donate/thanks", "Invite someone to give with you", "/account/share"],
+    ["/donate/thanks", "request a new claim link", "/account/sign-in"],
+    ["/donate/thanks", "invite someone to give with you", "/account/share"],
     ["/how-it-works", "Partner sign-in", "/partner/sign-in"],
   ]) {
     await page.goto(source);
