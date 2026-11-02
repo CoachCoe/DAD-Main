@@ -69,6 +69,11 @@ describe("the palette meets accessible text contrast thresholds", () => {
     ["--paper, label text on a selected amount preset", "paper", "ink", 4.5],
     ["--fail, a destructive secondary action on a card", "fail", "card", 4.5],
     ["--ink-soft, badge guidance on paper", "ink-soft", "paper", 4.5],
+    ["--dkmut, the Founding line on the dark hero", "dkmut", "ink", 4.5],
+    ["--brand-ink, the step number on a step card", "brand-ink", "card-quiet", 4.5],
+    ["--brand-ink, the step number on a step card below 600px", "brand-ink", "card", 4.5],
+    ["--ink, a step title on a step card", "ink", "card-quiet", 4.5],
+    ["--muted, a step description on a step card", "muted", "card-quiet", 4.5],
   ])("%s: --%s on --%s reaches %s:1", (_label, foreground, background, minimum) => {
     expect(contrast(token(foreground as string), token(background as string))).toBeGreaterThanOrEqual(
       minimum as number,
@@ -79,6 +84,7 @@ describe("the palette meets accessible text contrast thresholds", () => {
     ["--brand-ink focus ring on the dark hero", "brand-ink", "ink"],
     ["--brand-ink focus ring on paper", "brand-ink", "paper"],
     ["--brand focus ring on the dark header", "brand", "ink"],
+    ["--brand star on the dark hero", "brand", "ink"],
   ])("%s: --%s on --%s reaches the 3:1 non-text minimum", (_label, ring, background) => {
     expect(contrast(token(ring as string), token(background as string))).toBeGreaterThanOrEqual(3);
   });

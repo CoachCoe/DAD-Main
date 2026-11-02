@@ -120,7 +120,7 @@ verified-account linkage. No third-party analytics destination is used.
 
 The shared PRD §9 taxonomy is accepted at `/analytics/events` for web and native
 clients. Web observations include app opens, the home page's donor/partner choice
-(`role_selected`), attribution source, signup, checkout
+(`role_selected`, sent by the hero "Give $1 a day" button and the "Become a partner" link, no properties), attribution source, signup, checkout
 start, sharing after a completed share handoff/copy, IRL-code display, settings,
 reservations, and team actions. Native clients must send the same schema and honor
 their own consent choice. Event UUIDs make client retries idempotent. Financial
