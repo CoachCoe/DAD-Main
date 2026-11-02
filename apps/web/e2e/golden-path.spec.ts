@@ -18,6 +18,8 @@ test("a mobile or desktop visitor can reach giving without an account", async ({
   await page.getByRole("link", { name: /Give \$1 a day/ }).click();
   await expect(page).toHaveURL(/\/donate$/);
   await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page.getByLabel("Full name")).toBeVisible();
+  await expect(page.getByRole("button", { name: /^Continue to secure checkout · \$30\/month$/ })).toBeVisible();
   await expect(page.getByText(/\$30\/month/).first()).toBeVisible();
   await expectNoHorizontalScroll(page);
 });
