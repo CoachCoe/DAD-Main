@@ -1028,6 +1028,10 @@ footer .tagline {
   margin-top: 0.25em;
   color: var(--brand);
 }
+/* The inline-flex button collapses the space before a trailing arrow. */
+.arrow {
+  margin-inline-start: var(--space-2);
+}
 .steps {
   padding: 0;
   list-style: none;
