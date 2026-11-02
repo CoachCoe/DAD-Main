@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { cache } from "react";
 import type { ResponseBody } from "@/lib/api";
 import { donorApiBase } from "@/lib/donorApi";
+import { launchDateLabel } from "@/lib/launch";
 import ReferralLanding, { type Referrer } from "./ReferralLanding";
 
 // Shared by generateMetadata and the page so one visit costs one lookup. A found name is
@@ -28,7 +29,7 @@ const lookUp = cache(async (code: string): Promise<Referrer> => {
 export async function generateMetadata({ params }: PageProps<"/r/[code]">): Promise<Metadata> {
   const referrer = await lookUp(decoded((await params).code));
   const title = referrer.state === "found" ? `${referrer.name} invited you to DAD` : "You’re invited to DAD";
-  const description = "Join with about a dollar a day — $30/month. DAD launches in April 2027.";
+  const description = `Join with about a dollar a day — $30/month. DAD launches ${launchDateLabel()}.`;
   return { title, description, openGraph: { title, description }, robots: { index: false } };
 }
 
