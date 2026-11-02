@@ -171,7 +171,12 @@ export default function Donate() {
                 aria-describedby={
                   amountInvalid ? "donate-error" : chosen ? "donate-amount donate-amount-hint" : "donate-amount-hint"
                 }
-                onChange={(event) => edit(() => setAmount(event.target.value))}
+                onChange={(event) => {
+                  // Pin Other open once the donor edits: typing "1", "3" or "5" on the way to
+                  // "12" would otherwise make the amount a preset and unmount the field mid-keystroke.
+                  setOtherOpen(true);
+                  edit(() => setAmount(event.target.value));
+                }}
               />
             </label>
           )}

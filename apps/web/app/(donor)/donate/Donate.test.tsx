@@ -9,6 +9,7 @@ function openOther() {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   sessionStorage.clear();
 });
@@ -71,6 +72,18 @@ describe("sandbox giving", () => {
     const amount = await screen.findByLabelText("Dollars a day");
     expect(amount).toHaveValue("7");
     expect(amount).not.toHaveFocus();
+    expect(screen.getByRole("button", { name: /^Other/ })).toHaveAttribute("aria-pressed", "true");
+  });
+  it("keeps the amount input mounted and focused while typing a preset digit after a non-preset restore", async () => {
+    sessionStorage.setItem("dad.donate.choice", JSON.stringify({ amount: "7", email: "ben@example.org" }));
+    render(<Donate />);
+    const amount = await screen.findByLabelText("Dollars a day");
+    amount.focus();
+    fireEvent.change(amount, { target: { value: "1" } });
+    expect(screen.getByLabelText("Dollars a day")).toBe(amount);
+    expect(amount).toHaveFocus();
+    fireEvent.change(amount, { target: { value: "12" } });
+    expect(screen.getByLabelText("Dollars a day")).toHaveValue("12");
     expect(screen.getByRole("button", { name: /^Other/ })).toHaveAttribute("aria-pressed", "true");
   });
   it("mounts the amount input for a restored invalid amount so the rejection can focus it", async () => {
@@ -247,11 +260,15 @@ describe("sandbox giving", () => {
     expect(screen.getByRole("alert")).toBeEmptyDOMElement();
   });
 
-  it("leads with the short promise and states the Founding deadline at most once", () => {
+  it("leads with the short promise and states the Founding deadline at most once", async () => {
+    // Fixed clock so the FoundingLine is certain to render its deadline before we count it.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-06-15T16:00:00Z"));
     render(<Donate />);
+    await screen.findByText(/Founding Donor window/);
     expect(screen.getByText("A small monthly gift. About a minute. No account needed.")).toBeVisible();
     expect(screen.queryByText(/before January 2027/)).not.toBeInTheDocument();
-    expect((document.body.textContent?.match(/December 31, 2026/g) ?? []).length).toBeLessThanOrEqual(1);
+    expect((document.body.textContent?.match(/December 31, 2026/g) ?? []).length).toBe(1);
   });
   it("is usable again when the browser restores it from the back/forward cache mid-redirect", async () => {
     vi.stubGlobal(
