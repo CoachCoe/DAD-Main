@@ -328,25 +328,40 @@ fieldset:disabled .segmented label {
 
 .presets {
   display: grid;
-  gap: var(--space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
 }
+/* Both figures share one size and weight: the monthly charge is never played down. */
 .presets button {
-  min-height: 52px;
-  padding: var(--space-2) var(--space-4);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 84px;
+  padding: var(--space-3) var(--space-4);
   border: 1.5px solid var(--ghost-line);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-card);
   background: var(--card);
   font-family: var(--font-display);
   font-weight: 700;
   font-size: var(--text-md);
+  line-height: 1.4;
   cursor: pointer;
+}
+.presetCheck {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  color: var(--brand);
 }
 .presets button:hover {
   border-color: var(--ink);
 }
 .presets button[aria-pressed="true"] {
   background: var(--ink);
-  border-color: var(--ink);
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px var(--brand);
   color: var(--paper);
 }
 .presets button:disabled {
@@ -354,6 +369,54 @@ fieldset:disabled .segmented label {
   cursor: default;
 }
 
+/* The live gift summary on Give. */
+.giveSummary {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-field);
+  background: var(--brand-wash);
+  color: var(--ink);
+}
+.fieldHint {
+  margin-top: var(--space-2);
+}
+.fieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+}
+/* Rides the bottom edge of the viewport on phones. position: sticky works here because no
+   ancestor (page, panel, form) sets overflow; fixed would cover errors and the footer. */
+.giveSubmit {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: var(--space-3) 0;
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+}
+.giveSubmit .button {
+  gap: var(--space-2);
+}
+.giveSubmit svg {
+  flex: none;
+}
+.giveNotes {
+  text-align: center;
+}
+/* Keeps a focused field clear of the sticky submit (WCAG 2.4.11). */
+.giveForm :is(input, button) {
+  scroll-margin-bottom: 9rem;
+}
+/* Reserved height so the Founding line fills in without moving the form. */
+.giveFounding .foundingLine {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-height: 3em;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
 .page {
   width: 100%;
   max-width: 1160px;
@@ -1052,6 +1115,18 @@ footer .tagline {
 @media (min-width: 600px) {
   .page {
     padding-top: var(--space-6);
+  }
+  .fieldRow {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  }
+  .giveSubmit {
+    position: static;
+    padding: 0;
+    border-top: 0;
+    background: none;
+  }
+  .giveFounding .foundingLine {
+    min-height: 1.5em;
   }
   .panel {
     padding: var(--space-6);

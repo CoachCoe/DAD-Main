@@ -74,6 +74,11 @@ describe("the palette meets accessible text contrast thresholds", () => {
     ["--brand-ink, the step number on a step card below 600px", "brand-ink", "card", 4.5],
     ["--ink, a step title on a step card", "ink", "card-quiet", 4.5],
     ["--muted, a step description on a step card", "muted", "card-quiet", 4.5],
+    ["--ink, the live gift summary on its wash", "ink", "brand-wash", 4.5],
+    ["--ink-soft, the Founding line on the Give card", "ink-soft", "card", 4.5],
+    ["--muted, the field hints and notes on Give", "muted", "paper", 4.5],
+    ["--paper, the selected amount tile label", "paper", "ink", 4.5],
+    ["--brand, the selected amount tile check", "brand", "ink", 3],
   ])("%s: --%s on --%s reaches %s:1", (_label, foreground, background, minimum) => {
     expect(contrast(token(foreground as string), token(background as string))).toBeGreaterThanOrEqual(
       minimum as number,
