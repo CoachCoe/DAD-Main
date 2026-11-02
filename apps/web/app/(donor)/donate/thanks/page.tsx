@@ -5,6 +5,7 @@ import { foundingDeadlineLabel, launchDateLabel } from "@/lib/launch";
 import { isGiftAmount } from "@/lib/money";
 
 import { ResendLink } from "./ResendLink";
+
 export const metadata: Metadata = { title: "Thank you", robots: { index: false } };
 
 // The checkout success URL carries what the donor chose. It is display-only: anything
