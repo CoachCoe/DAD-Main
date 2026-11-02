@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Page } from "@/components/donor/Page";
+import { launchDateLabel } from "@/lib/launch";
 
 export const metadata: Metadata = { title: "Terms, privacy, and donor consent" };
 
@@ -23,8 +24,8 @@ export default function LegalPage() {
         shared only after explicit sharing activation.
       </p>
       <p>
-        DAD launches in April 2027. This page is a statement of the preview’s status, not a substitute for approved
-        legal documents.
+        DAD launches {launchDateLabel()}. This page is a statement of the preview’s status, not a substitute for
+        approved legal documents.
       </p>
     </Page>
   );

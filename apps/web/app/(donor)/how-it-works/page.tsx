@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
+import { foundingDeadlineLabel, launchDateLabel, launchMonthLabel } from "@/lib/launch";
 
 export const metadata: Metadata = {
   title: "About DAD and how it works",
-  description:
-    "How giving, referrals, streaks, and the Founding Donor badge work, and what DAD’s April 2027 launch brings.",
+  description: `How giving, referrals, streaks, and the Founding Donor badge work, and what DAD’s ${launchMonthLabel()} launch brings.`,
 };
 
 export default function HowItWorks() {
@@ -38,8 +39,8 @@ export default function HowItWorks() {
         recorded.
       </p>
       <p>
-        DAD launches on 22 April 2027. A first gift completed before 1 January 2027 (New York time) earns a permanent
-        Founding Donor badge.
+        DAD launches on {launchDateLabel()}. A first gift completed by {foundingDeadlineLabel()} (New York time) earns a
+        permanent Founding Donor badge.
       </p>
       <h2>Clear records, honest limits</h2>
       <p>
@@ -52,13 +53,11 @@ export default function HowItWorks() {
         apply now; approved partners use the partner portal to manage their profile, initiatives, employee giving, and
         reports. Donor apps for iOS and Android are being developed separately.
       </p>
-      <p className="note">
-        This environment is a sandbox preview using Stripe test payments. No real donation is collected.
-      </p>
       <div className="actions">
         <Link className="button" href="/donate">
-          Try giving
+          Give $1 a day
         </Link>
+        <GiftFraming minor={3000} />
         <Link className="secondary" href="/spend">
           See spend by category
         </Link>
