@@ -777,12 +777,30 @@ footer .tagline {
 }
 .previewBanner p {
   margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+/* Dropped (and so hidden from assistive tech) on narrow screens so the link always fits. */
+.previewMore {
+  display: none;
 }
 .previewBanner a {
+  position: relative;
+  flex: none;
   color: var(--paper);
   text-decoration: underline;
+}
+/* Grows the hit area to 44px without making the banner taller. */
+.previewBanner a::after {
+  content: "";
+  position: absolute;
+  inset: -14px -8px;
+}
+.previewBanner :focus-visible {
+  outline-color: var(--brand);
+}
+@media (min-width: 480px) {
+  .previewMore {
+    display: inline;
+  }
 }
 .previewLabel {
   flex: none;

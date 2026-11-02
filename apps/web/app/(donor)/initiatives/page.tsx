@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 export default async function InitiativesPage() {
   const initiatives = await loadInitiatives();
   return (
-    <Page wide eyebrow="Building toward April" title="Planned initiatives">
+    <Page wide eyebrow={`Building toward ${launchMonthLabel()}`} title="Planned initiatives">
       <p className="lead">
         Preparing to launch in {launchMonthLabel()}, with partner organizations and board approval.
       </p>

@@ -5,8 +5,9 @@ export function PreviewBanner() {
     <aside className="previewBanner" aria-label="Preview notice">
       <span className="previewLabel">Preview</span>
       <p>
-        Test payments only. No real money moves. <Link href="/legal">Details</Link>
+        Test payments only. <span className="previewMore">No real money moves.</span>
       </p>
+      <Link href="/legal">Details</Link>
     </aside>
   );
 }
