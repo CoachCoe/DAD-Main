@@ -1,12 +1,13 @@
 import { render, screen } from "@testing-library/react";
 import { expect, it } from "vitest";
+import { PreviewBanner } from "@/components/donor/PreviewBanner";
 import About from "../about/page";
 import HowItWorks from "./page";
 
 it("explains the donor release, monthly billing, direct referral credit, and launch timing", () => {
   render(<HowItWorks />);
-  expect(screen.getByText(/22 April 2027/)).toHaveTextContent("Founding Donor badge");
-  expect(screen.getByText(/22 April 2027/)).toHaveTextContent("before 1 January 2027 (New York time)");
+  expect(screen.getByText(/April 22, 2027/)).toHaveTextContent("Founding Donor badge");
+  expect(screen.getByText(/April 22, 2027/)).toHaveTextContent("by December 31, 2026 (New York time)");
   expect(screen.getByText(/about a dollar a day/)).toHaveTextContent(
     "$30/month, and $90, $150, or an amount you choose",
   );
@@ -22,18 +23,25 @@ it("explains the donor release, monthly billing, direct referral credit, and lau
   );
   expect(screen.queryByText(/R2/)).not.toBeInTheDocument();
   expect(screen.getByText(/approved by the board/)).toHaveTextContent("From launch, programs invite");
-  expect(screen.getByText(/No real donation is collected/)).toBeInTheDocument();
+  expect(screen.queryByText(/sandbox preview/)).not.toBeInTheDocument();
 });
 
 it("links the explanation to giving, spend by category, and partner interest", () => {
   render(<HowItWorks />);
-  expect(screen.getByRole("link", { name: "Try giving" })).toHaveAttribute("href", "/donate");
+  expect(screen.getByRole("link", { name: "Give $1 a day" })).toHaveAttribute("href", "/donate");
+  expect(screen.getByText("$30/month")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "See spend by category" })).toHaveAttribute("href", "/spend");
   expect(screen.getByRole("link", { name: "Partner application" })).toHaveAttribute("href", "/apply");
   expect(screen.getByRole("link", { name: "Partner sign-in" })).toHaveAttribute("href", "/partner/sign-in");
   expect(screen.getByText(/totals by category/)).toHaveTextContent("never as individual transactions");
 });
 
+it("leaves the test-payment caveat to the preview banner that frames every page", () => {
+  render(<PreviewBanner />);
+  expect(screen.getByRole("complementary", { name: "Preview notice" })).toHaveTextContent(
+    "Test payments only. No real money moves.",
+  );
+});
 it("keeps /about as a permanent alias of the single About / how it works screen", () => {
   expect(() => About()).toThrow("NEXT_REDIRECT");
 });

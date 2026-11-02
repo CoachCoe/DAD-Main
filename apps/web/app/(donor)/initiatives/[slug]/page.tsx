@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Page } from "@/components/donor/Page";
 import { ContentUnavailable, InitiativeFacts } from "@/components/donor/PublicContent";
+import { launchDateLabel } from "@/lib/launch";
 import { loadInitiative } from "@/lib/publicContent";
 
 async function initiative(slug: string) {
@@ -31,7 +32,7 @@ export default async function InitiativePage({ params }: PageProps<"/initiatives
             Support DAD’s work
           </Link>
           <p className="note">
-            Gifts support DAD as a whole and are not designated to this initiative. DAD launches in April 2027.
+            Gifts support DAD as a whole and are not designated to this initiative. DAD launches {launchDateLabel()}.
           </p>
         </>
       ) : (

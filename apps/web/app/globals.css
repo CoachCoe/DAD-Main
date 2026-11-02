@@ -756,6 +756,63 @@ footer nav {
 footer a:hover {
   color: var(--paper);
 }
+footer .tagline {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  letter-spacing: var(--track-display);
+  color: var(--paper);
+}
+/* Scrolls away with the page: the sticky header is the only chrome that stays. */
+.previewBanner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--gutter);
+  background: var(--ink-deep);
+  color: var(--dkmut);
+  border-bottom: 1px solid var(--dkline);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.previewBanner p {
+  margin: 0;
+}
+/* Dropped (and so hidden from assistive tech) on narrow screens so the link always fits. */
+.previewMore {
+  display: none;
+}
+.previewBanner a {
+  position: relative;
+  flex: none;
+  color: var(--paper);
+  text-decoration: underline;
+}
+/* Grows the hit area to 44px without making the banner taller. */
+.previewBanner a::after {
+  content: "";
+  position: absolute;
+  inset: -14px -8px;
+}
+.previewBanner :focus-visible {
+  outline-color: var(--brand);
+}
+@media (min-width: 480px) {
+  .previewMore {
+    display: inline;
+  }
+}
+.previewLabel {
+  flex: none;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--brand);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--paper);
+}
 
 .header {
   position: sticky;
