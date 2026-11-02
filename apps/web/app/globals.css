@@ -631,6 +631,140 @@ details[open] > summary::after {
   line-height: 1;
   color: var(--ink-soft);
 }
+/* The dashboard's top band. The sub-line reserves two lines so the loading and loaded bands match. */
+.dashBand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.dashSub {
+  min-height: 3em;
+  font-size: var(--text-lg);
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+/* Rows on phones, three columns once there is room; the skeleton uses the same markup. */
+.statStrip {
+  display: grid;
+  gap: var(--space-2) var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--card);
+}
+.stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 2rem;
+}
+.stat dt {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.stat dd {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.metricValue.zero {
+  color: var(--muted);
+}
+.metric .metricLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 44px;
+  margin-top: auto;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--brand-ink);
+}
+span.metricLink {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* The Founding card is the one dark card on the dashboard. */
+.metric.earned {
+  border-color: var(--ink-deep);
+  background: var(--ink-deep);
+}
+.earned h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--dkmut);
+}
+.earnedStar {
+  flex: none;
+  color: var(--brand);
+}
+.earned .metricValue {
+  color: var(--paper);
+}
+.earned p:not(.metricValue) {
+  color: var(--dkmut);
+}
+.todayGrid {
+  display: grid;
+  gap: var(--space-4);
+}
+.todayMain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.todayMetrics {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  padding: 0;
+}
+.todayMetrics li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.todayMetrics .metricValue {
+  display: block;
+  font-size: var(--text-xl);
+}
+.verified {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--ok-ink);
+}
+.accountNav {
+  display: grid;
+  gap: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.accountNav h2 {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ink-soft);
+}
+.accountNav ul {
+  list-style: none;
+  padding: 0;
+}
+.accountNav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
 .badge {
   display: inline-block;
   margin-left: var(--space-2);
@@ -1148,6 +1282,22 @@ footer .tagline {
   .metrics.pair .metricValue {
     font-size: var(--text-3xl);
   }
+  .dashSub {
+    min-height: 1.5em;
+  }
+  .statStrip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .stat {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: var(--space-1);
+  }
+  .todayGrid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    align-items: start;
+  }
   .actions > :is(.button, .secondary) {
     flex: 0 1 auto;
   }
@@ -1156,6 +1306,9 @@ footer .tagline {
 @media (min-width: 880px) {
   :root {
     --header-height: 72px;
+  }
+  .accountNav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .brand {
     font-size: 19px;

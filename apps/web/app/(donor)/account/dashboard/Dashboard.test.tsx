@@ -30,7 +30,10 @@ const today = {
   metrics: [{ label: "Meals served", value: 1200, unit: "PEOPLE", verified_on: "2026-09-30" }],
   distinct_shown: 4,
 };
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 /** Stubs fetch with `dashboard` for the dashboard and `initiative` (default: none today) for today's initiative. */
 function stubFetch(dashboard: (input: RequestInfo | URL) => Promise<unknown>, initiative?: unknown) {
   vi.stubGlobal(
@@ -56,6 +59,15 @@ function stubFetch(dashboard: (input: RequestInfo | URL) => Promise<unknown>, in
     }),
   );
 }
+/** A totals-strip entry from the loaded layout, not the aria-hidden skeleton that precedes it. */
+function loadedStat(label: string): HTMLElement {
+  const stat = screen
+    .getAllByText(label, { selector: "dt" })
+    .map((term) => term.closest<HTMLElement>(".stat"))
+    .find((entry) => entry && !entry.closest('[aria-hidden="true"]'));
+  if (!stat) throw new Error(`Missing ${label} stat`);
+  return stat;
+}
 function respond(value: unknown, initiative?: unknown) {
   stubFetch(() => Promise.resolve({ ok: true, json: async () => value }), initiative);
 }
@@ -69,7 +81,10 @@ it("reserves the metric layout without announcing unverified results", async () 
       }),
   );
   const { container } = render(<DashboardPage />);
-  expect(container.querySelectorAll('[aria-hidden="true"] .metricSkeleton')).toHaveLength(8);
+  expect(container.querySelectorAll('[aria-hidden="true"] .metricSkeleton')).toHaveLength(7);
+  // The skeleton mirrors the loaded layout: the same titles, in the same grids.
+  expect(container.querySelectorAll(".statStrip")).toHaveLength(1);
+  expect(container.querySelectorAll(".metrics.pair .metric")).toHaveLength(2);
   expect(screen.getByRole("status")).toHaveTextContent("Loading your dashboard");
   expect(screen.queryByRole("heading", { name: "Link Referrals" })).not.toBeInTheDocument();
   expect(screen.queryByText("Earned")).not.toBeInTheDocument();
@@ -82,6 +97,7 @@ it("shows the five elements with separate channels and collected-dollar breakdow
   respond(data);
   render(<DashboardPage />);
   expect(await screen.findByRole("heading", { name: "Link Referrals" })).toBeVisible();
+  // Link, IRL, raised, streak, network, Founding Donor, plus the three nav group titles.
   expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(9);
   const link = screen.getByRole("heading", { name: "Link Referrals" }).closest("article");
   const irl = screen.getByRole("heading", { name: "IRL Referrals" }).closest("article");
@@ -90,7 +106,7 @@ it("shows the five elements with separate channels and collected-dollar breakdow
   expect(within(irl).getByText("3")).toBeVisible();
   expect(screen.getByText("$123.45")).toBeVisible();
   expect(screen.getByText("24 days")).toBeVisible();
-  expect(screen.getByText("6 days to your 30-day milestone.")).toBeVisible();
+  expect(screen.getAllByText("6 days to your 30-day milestone.")).toHaveLength(2);
   expect(screen.getByText("Top 2% nationally · #7 in Reno")).toBeVisible();
   expect(screen.getByText("$1,080.00 a year")).toBeVisible();
   expect(screen.getByRole("img", { name: "30 of the last 30 days in your current streak" })).toBeVisible();
@@ -99,7 +115,8 @@ it("shows the five elements with separate channels and collected-dollar breakdow
   expect(screen.getByText("IRL: $23.45")).toBeVisible();
   const badge = screen.getByRole("heading", { name: "Founding Donor" }).closest("article");
   if (!badge) throw new Error("Missing badge card");
-  expect(within(badge).getByText("Earned")).toBeVisible();
+  expect(within(badge).getByText("Earned. Yours for good.")).toBeVisible();
+  expect(within(badge).getByText("You joined before DAD launched. Thank you for starting this with us.")).toBeVisible();
   expect(screen.queryByText(/not yet earned/)).not.toBeInTheDocument();
   expect(screen.queryByText(/Combined referrals/i)).not.toBeInTheDocument();
 });
@@ -107,9 +124,7 @@ it("shows the five elements with separate channels and collected-dollar breakdow
 it("counts today's initiative as funded once its card has loaded", async () => {
   respond(data, { ...today, distinct_shown: 6 });
   render(<DashboardPage />);
-  const funded = (await screen.findByRole("heading", { name: "Initiatives funded" })).closest("article");
-  if (!funded) throw new Error("Missing initiatives funded card");
-  await waitFor(() => expect(within(funded).getByText("6")).toBeVisible());
+  await waitFor(() => expect(within(loadedStat("Initiatives funded")).getByText("6")).toBeVisible());
 });
 
 it("shows the badge only when earned, and otherwise explains how it is earned", async () => {
@@ -119,7 +134,7 @@ it("shows the badge only when earned, and otherwise explains how it is earned", 
   expect(screen.queryByRole("heading", { name: "Founding Donor" })).not.toBeInTheDocument();
   expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(8);
   expect(screen.getByText(/Founding Donor badge: not yet earned/)).toHaveTextContent(
-    "first gift completed before 1 January 2027",
+    "A first gift by December 31, 2026 (New York time)",
   );
 });
 
@@ -196,17 +211,18 @@ it("distinguishes preparing data from an empty account", async () => {
 it("shows the donor's own impact and today's initiative with its spending", async () => {
   respond(data, today);
   render(<DashboardPage />);
-  const given = (await screen.findByRole("heading", { name: "Your giving" })).closest("article");
-  if (!given) throw new Error("Missing giving card");
+  expect(await screen.findByText("$45.00")).toBeVisible();
+  const given = loadedStat("Your giving");
   expect(within(given).getByText("$45.00")).toBeVisible();
-  const funded = screen.getByRole("heading", { name: "Initiatives funded" }).closest("article");
-  const volunteered = screen.getByRole("heading", { name: "Events volunteered" }).closest("article");
-  if (!funded || !volunteered) throw new Error("Missing impact cards");
+  const funded = loadedStat("Initiatives funded");
+  const volunteered = loadedStat("Events volunteered");
   expect(within(funded).getByText("4")).toBeVisible();
   expect(within(volunteered).getByText("1")).toBeVisible();
   expect(await screen.findByRole("heading", { name: "Reno meals" })).toBeVisible();
-  expect(screen.getByText("Food · Reno, NV · Since Mar 1, 2026")).toBeVisible();
-  expect(screen.getByText("Meals served: 1,200 people (verified Sep 30, 2026)")).toBeVisible();
+  expect(screen.getByText("Food · Reno, NV · Since March 1, 2026")).toBeVisible();
+  expect(screen.getByText("1,200 people")).toBeVisible();
+  expect(screen.getByText("Meals served")).toBeVisible();
+  expect(screen.getByText("Verified September 30, 2026")).toBeVisible();
   fireEvent.click(screen.getByText("See every dollar this initiative has spent"));
   expect(await screen.findByText("Food: $900.00")).toBeVisible();
 });
@@ -214,7 +230,80 @@ it("shows the donor's own impact and today's initiative with its spending", asyn
 it("shows giving as updating rather than zero while it is recomputed", async () => {
   respond({ ...data, impact: { ...data.impact, given_minor: null } });
   render(<DashboardPage />);
-  const given = (await screen.findByRole("heading", { name: "Your giving" })).closest("article");
-  if (!given) throw new Error("Missing giving card");
-  expect(within(given).getByText("Updating")).toBeVisible();
+  await waitFor(() => expect(within(loadedStat("Your giving")).getByText("Updating")).toBeVisible());
+});
+
+const quiet = { ...data, streak: { ...data.streak, ladder: { ...data.streak.ladder, days_to_next: 8 } } };
+it("greets without a name and names the single next step", async () => {
+  respond(data);
+  const { unmount } = render(<DashboardPage />);
+  expect(screen.getByRole("heading", { level: 1, name: "Welcome back." })).toBeVisible();
+  // 6 days to go is within the 7-day threshold.
+  expect(await screen.findAllByText("6 days to your 30-day milestone.")).toHaveLength(2);
+  unmount();
+  respond(quiet);
+  render(<DashboardPage />);
+  expect(await screen.findByText("Here is what your giving has done so far.")).toBeVisible();
+});
+it("names a payment problem before anything else and leaves the callout the only primary button", async () => {
+  respond({ ...data, referrals: { ...data.referrals, link: 0, irl: 0 }, streak: { ...data.streak, at_risk: true } });
+  const { container } = render(<DashboardPage />);
+  expect(await screen.findByText("Your latest monthly payment didn’t go through.")).toBeVisible();
+  expect(container.querySelectorAll(".button")).toHaveLength(1);
+  expect(screen.getByRole("link", { name: "Invite someone" })).toHaveClass("secondary");
+});
+it("invites a first referral only when referrals are known to be zero", async () => {
+  respond({ ...data, referrals: { ...data.referrals, link: 0, irl: 0, total_minor: 0 } });
+  const { container } = render(<DashboardPage />);
+  expect(await screen.findByText("Your first invite is one tap away.")).toBeVisible();
+  expect(screen.getByText("No one yet. Your link is ready to share.")).toBeVisible();
+  expect(screen.getByText("No one yet. Your code is ready to scan.")).toBeVisible();
+  expect(screen.getByText("Gifts from people you invite will add up here.")).toBeVisible();
+  expect(container.querySelectorAll(".metricValue.zero")).toHaveLength(3);
+  expect(container.querySelectorAll(".button")).toHaveLength(1);
+});
+it("treats unknown referrals as unknown, not as zero", async () => {
+  respond({ ...quiet, referrals: null });
+  render(<DashboardPage />);
+  expect(await screen.findByText("Here is what your giving has done so far.")).toBeVisible();
+  expect(screen.queryByText(/No one yet/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Your first invite is one tap away.")).not.toBeInTheDocument();
+});
+it("groups the account links and keeps a path to the monthly gift", async () => {
+  respond(data);
+  render(<DashboardPage />);
+  const nav = await screen.findByRole("navigation", { name: "Account" });
+  expect(
+    within(nav)
+      .getAllByRole("heading", { level: 2 })
+      .map((h) => h.textContent),
+  ).toEqual(["Your giving", "Your circle", "You"]);
+  const hrefs = within(nav)
+    .getAllByRole("link")
+    .map((a) => a.getAttribute("href"));
+  expect(hrefs).toEqual([
+    "/account/giving",
+    "/account/recurring",
+    "/account/payment-method",
+    "/account/share",
+    "/account/network",
+    "/account/badges",
+    "/account/events",
+    "/account/employer",
+    "/account/profile",
+  ]);
+  expect(within(nav).getByRole("link", { name: "Share and invite" })).toBeVisible();
+});
+it("counts the Founding days left in New York time, on the last day and after", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-12-31T17:00:00Z"));
+  respond({ ...data, founding_donor: false });
+  const { unmount } = render(<DashboardPage />);
+  expect(await screen.findByText(/Founding Donor badge: not yet earned/)).toHaveTextContent("1 day left.");
+  unmount();
+  vi.setSystemTime(new Date("2027-01-01T05:00:00Z"));
+  render(<DashboardPage />);
+  expect(await screen.findByText(/Founding Donor badge: not yet earned/)).toHaveTextContent(
+    "The Founding window has closed.",
+  );
 });

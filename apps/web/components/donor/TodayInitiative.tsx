@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, failureMessage, type Schema } from "@/lib/api";
-import { formatDate } from "@/lib/dates";
+import { formatLongDay } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 import { useApiResource } from "@/lib/useApiResource";
 
@@ -64,24 +64,43 @@ export function TodayInitiative({ onShown }: { onShown?: (distinctShown: number)
   }, [resource.state, shown, onShown]);
   if (resource.state !== "ready" || !data) return null;
   return (
-    <article className="metric" aria-labelledby="today-initiative">
-      <h2>Today your $1 funded</h2>
-      <h3 id="today-initiative" className="initiativeTitle">
-        {data.title}
-      </h3>
-      <p>
-        {data.type} · {data.location} · Since {formatDate(`${data.started_on}T12:00:00Z`)}
-      </p>
-      {data.metrics.length > 0 && (
-        <ul>
-          {data.metrics.map((metric) => (
-            <li key={metric.label}>
-              {metric.label}: {metricValue(metric)}
-              {metric.verified_on && ` (verified ${formatDate(`${metric.verified_on}T12:00:00Z`)})`}
-            </li>
-          ))}
-        </ul>
-      )}
+    <article className="metric today" aria-labelledby="today-initiative">
+      <div className="todayGrid">
+        <div className="todayMain">
+          <h2>Today your $1 funded</h2>
+          <h3 id="today-initiative" className="initiativeTitle">
+            {data.title}
+          </h3>
+          <p>
+            {data.type} · {data.location} · Since {formatLongDay(data.started_on)}
+          </p>
+        </div>
+        {data.metrics.length > 0 && (
+          <ul className="todayMetrics">
+            {data.metrics.map((metric) => (
+              <li key={metric.label}>
+                <span className="metricValue">{metricValue(metric)}</span>
+                <span>{metric.label}</span>
+                {metric.verified_on && (
+                  <span className="verified">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" focusable="false">
+                      <path
+                        d="M5 12.5l4.5 4.5L19 7.5"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    Verified {formatLongDay(metric.verified_on)}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       <Spend initiative={data.initiative_id} />
       <details>
         <summary>Why this initiative?</summary>
