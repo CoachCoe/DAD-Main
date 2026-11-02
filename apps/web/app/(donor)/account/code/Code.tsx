@@ -8,6 +8,7 @@ import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { observe } from "@/lib/analytics";
 import type { Schema } from "@/lib/api";
+import { launchDateLabel } from "@/lib/launch";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import WalletButtons from "./WalletButtons";
 
@@ -113,7 +114,7 @@ export default function Code() {
               </div>
               <p className="note">
                 Increase your screen brightness and keep the whole code visible. This page keeps your screen on while
-                the code is shown. DAD launches in April 2027; this preview collects no real donations.
+                the code is shown. DAD launches {launchDateLabel()}; this preview collects no real donations.
               </p>
               <WalletButtons />
             </>

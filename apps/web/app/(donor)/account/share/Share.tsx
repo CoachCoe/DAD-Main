@@ -3,15 +3,16 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Announcer } from "@/components/donor/Announcer";
+import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
 import { SignInPrompt } from "@/components/donor/SignInPrompt";
 import { observe } from "@/lib/analytics";
 import { ApiError, api, failureMessage, type RequestBody, type Schema } from "@/lib/api";
+import { launchDateLabel } from "@/lib/launch";
 import { resourceMessages, useApiResource } from "@/lib/useApiResource";
 import { useStepFocus } from "@/lib/useStepFocus";
 
-const text =
-  "Join me in DAD’s sandbox preview. DAD launches in April 2027. About a dollar a day means $30/month. No real donation is collected in this preview.";
+const text = `Join me in DAD’s sandbox preview. DAD launches ${launchDateLabel()}. About a dollar a day means $30/month. No real donation is collected in this preview.`;
 
 export default function Share() {
   const [name, setName] = useState("");
@@ -77,6 +78,19 @@ export default function Share() {
       }
     }
   }
+  // Copying is a separate action from the share sheet, so a desktop visitor can paste the bare link.
+  async function copyLink() {
+    if (!sharing?.link) return;
+    setError("");
+    setMessage("");
+    try {
+      await navigator.clipboard.writeText(sharing.link);
+      observe("invite_shared", { channel: "copy" });
+      setMessage("Link copied.");
+    } catch {
+      setError("Copying isn’t available here. You can select the link below and copy it.");
+    }
+  }
   const absent = signedOut || resource.state === "signedOut";
   return (
     <Page eyebrow="Share" title="Invite someone you know" back={{ href: "/account/dashboard", label: "My dashboard" }}>
@@ -95,14 +109,29 @@ export default function Share() {
                   <button type="button" className="button full" onClick={share}>
                     Share invitation
                   </button>
-                  <label>
-                    Invitation
-                    <textarea readOnly rows={5} value={`${text}\n${sharing.link}`} />
-                  </label>
+                  <div className="callout highlight">
+                    <h2>
+                      {sharing.public_name ? `${sharing.public_name} invited you to DAD` : "You’re invited to DAD"}
+                    </h2>
+                    <p>
+                      <GiftFraming minor={3000} />
+                    </p>
+                    <p>DAD launches {launchDateLabel()}.</p>
+                  </div>
+                  <details>
+                    <summary>See the full message</summary>
+                    <label>
+                      Invitation
+                      <textarea readOnly rows={5} value={`${text}\n${sharing.link}`} />
+                    </label>
+                  </details>
                   <label>
                     Your referral link
                     <input readOnly value={sharing.link} onFocus={(event) => event.target.select()} />
                   </label>
+                  <button type="button" className="secondary" onClick={copyLink}>
+                    Copy link
+                  </button>
                   <p>
                     <Link href="/account/code">Show my referral code in person</Link>
                   </p>

@@ -6,6 +6,7 @@ import { Announcer } from "@/components/donor/Announcer";
 import { GiftFraming } from "@/components/donor/GiftFraming";
 import { Page } from "@/components/donor/Page";
 import { api, classifyFailure, type RequestBody, type ResponseBody } from "@/lib/api";
+import { foundingDeadlineLabel, launchDateLabel } from "@/lib/launch";
 
 export type Referrer = { state: "found"; name: string } | { state: "unavailable" } | { state: "unknown" };
 type Capture = ResponseBody<"/donor/referrals/{code}", "post">;
@@ -81,7 +82,7 @@ export default function ReferralLanding({
 
   return (
     <Page eyebrow="You’re invited" title={name ? `${name} invited you to DAD` : "Join the beginning"}>
-      <p className="lead">Join a growing circle of people giving together. DAD launches in April 2027.</p>
+      <p className="lead">Join a growing circle of people giving together. DAD launches {launchDateLabel()}.</p>
       <div className="callout highlight">
         <GiftFraming minor={3000} />
         <p>Monthly giving, about a dollar a day.</p>
@@ -98,7 +99,7 @@ export default function ReferralLanding({
         </div>
       ) : (
         <Link className="button full" href="/donate" onClick={give} aria-disabled={leaving || undefined}>
-          {leaving ? "Saving your referral…" : "Continue to giving"}
+          {leaving ? "Saving your referral…" : name ? `Give $1 a day with ${name}` : "Give $1 a day"}
         </Link>
       )}
       <About />
@@ -109,8 +110,10 @@ export default function ReferralLanding({
 function About() {
   return (
     <>
-      <p>A first gift completed before 1 January 2027 (New York time) earns a permanent Founding Donor badge.</p>
-      <p className="note">This is a sandbox preview. No real donation is collected or live badge awarded.</p>
+      <p>
+        A first gift completed on or before {foundingDeadlineLabel()} (New York time) earns a permanent Founding Donor
+        badge.
+      </p>
     </>
   );
 }
