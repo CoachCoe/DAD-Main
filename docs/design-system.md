@@ -10,11 +10,18 @@ and Kotlin/Compose applications adapt the generated values to native colors and 
 Typography loading, responsive layout, focus treatment, and browser motion
 preferences remain web concerns in the stylesheet and root layout.
 
-The donor dashboard keeps Link and IRL counts side by side at equal visual weight, with
-realized dollars, streak, and founding recognition in a row of three beneath them. The
-Founding Donor card appears only once earned; otherwise a single line explains how it is
-earned. Responsive grid items must not inherit vertical document-flow spacing.
-
+The donor dashboard opens with "Welcome back." (no name), one sub-line naming the next step
+(a failed payment, a first invite, or a milestone 7 or fewer days away), and Invite someone
+plus Show my code; the at-risk callout owns the one `.button`, so Invite someone becomes
+secondary while it shows. A compact totals strip (giving, initiatives, events) sits above
+Link and IRL counts, which stay side by side at equal visual weight, with realized dollars,
+streak, and founding recognition in a row beneath them. A referral count of zero (never an
+unknown one, which reads "Updating") shows as muted text with a guidance line. The Founding
+Donor card is the one dark card and appears only once earned; otherwise a single line explains
+how it is earned, with the days left computed in the browser. Account links sit in three
+labelled groups (Your giving, Your circle, You) in the `aria-label="Account"` nav. The
+loading skeleton reuses the loaded markup and must keep the nav within 10px of where it lands.
+Responsive grid items must not inherit vertical document-flow spacing.
 Buttons follow one hierarchy: `.button` is the primary brand action (one per view, meaning one inside `<main>`; the
 header's Give button is excluded),
 `.secondary` is the outlined default, `.quiet` is a text-weight action, and
