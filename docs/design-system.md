@@ -15,7 +15,8 @@ realized dollars, streak, and founding recognition in a row of three beneath the
 Founding Donor card appears only once earned; otherwise a single line explains how it is
 earned. Responsive grid items must not inherit vertical document-flow spacing.
 
-Buttons follow one hierarchy: `.button` is the primary brand action (one per view),
+Buttons follow one hierarchy: `.button` is the primary brand action (one per view, meaning one inside `<main>`; the
+header's Give button is excluded),
 `.secondary` is the outlined default, `.quiet` is a text-weight action, and
 `.secondary.danger` confirms destructive steps. Amount presets are outlined until
 selected, and show the monthly amount and daily framing at equal weight. Browser tests cover desktop,
@@ -37,3 +38,17 @@ deliverables. The R1 PRD's 24 donor and 11 partner screens, native component imp
 prototype, responsive/redline specifications, approved Wallet artwork, store assets, and
 manual accessibility conformance still require design and device acceptance. The R2 app
 remains unbuilt; importing these tokens must not introduce recipient or partner surfaces.
+
+## Preview notice and launch constants
+
+`PreviewBanner` (`components/donor/PreviewBanner.tsx`) is the single place the donor site
+says it is a test environment. `SiteFrame` renders it above the sticky header, so it shows
+on donor pages, the partner layout, and not-found, and scrolls away with the page. It is
+an `<aside aria-label="Preview notice">` built from existing dark tokens (`--ink-deep`,
+`--dkmut`, `--dkline`) with a mono label pill, stays on one line on mobile, and links to
+`/legal`. Other pages keep a caveat only where it changes a decision.
+
+`lib/launch.ts` holds `LAUNCH_DATE` and `FOUNDING_DEADLINE` with long-month formatters
+("April 22, 2027"), plus `foundingDaysLeft(now)`, New York calendar days through December
+31 and `null` after. Pages must use these rather than literal dates. The Go
+`recognition.FoundingCutoff` stays the authoritative Founding rule.
