@@ -49,6 +49,33 @@ it("requests email without granting access", async () => {
   expect(screen.queryByText("My giving")).not.toBeInTheDocument();
 });
 
+it("prefills and clears a handed-off email, then locks resend with a quiet countdown", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  sessionStorage.setItem("dad.signin.email", "donor@example.org");
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({ ok: true, json: async () => ({ message: "A link will arrive." }) }),
+  );
+  render(<SignInForm />);
+  expect(screen.getByLabelText("Email")).toHaveValue("donor@example.org");
+  expect(sessionStorage.getItem("dad.signin.email")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Email me a sign-in link" }));
+  const inbox = await screen.findByRole("heading", { name: "Check your inbox" });
+  await waitFor(() => expect(inbox).toHaveFocus());
+  expect(screen.getByRole("status")).toHaveTextContent("A link will arrive. You can resend in 30 seconds.");
+  const resend = screen.getByRole("button", { name: "Resend the link" });
+  expect(resend).toHaveAttribute("aria-disabled", "true");
+  expect(screen.getByText("You can resend in 30 s.")).not.toBe(screen.getByRole("status"));
+  // Each second re-arms the timer after a render, so advance one tick at a time.
+  for (let second = 0; second < 30; second++) {
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+  }
+  expect(screen.getByRole("status")).toHaveTextContent("You can resend now.");
+  expect(screen.getByRole("button", { name: "Resend the link" })).toHaveAttribute("aria-disabled", "false");
+  vi.useRealTimers();
+});
 it("renders protected empty history, and removes it after logout", async () => {
   const fetch = vi
     .fn()
