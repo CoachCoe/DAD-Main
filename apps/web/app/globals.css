@@ -1005,6 +1005,45 @@ footer .tagline {
   color: var(--dkmut);
 }
 
+/* A framing in a fact row sits inline; the row's own span rule would stack its parts. */
+.heroFacts dd .framing {
+  display: inline-flex;
+}
+.heroFacts dd .framing span {
+  display: inline;
+}
+/* Reserves the Founding line's height before hydration fills it, so it never shifts the
+   page: two lines on a phone, one from the 600px breakpoint up. */
+.hero .foundingLine {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-height: 3em;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--dkmut);
+}
+.foundingLine svg {
+  flex: none;
+  margin-top: 0.25em;
+  color: var(--brand);
+}
+.steps {
+  padding: 0;
+  list-style: none;
+}
+.stepNumber {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--track-label);
+  color: var(--brand-ink);
+}
+.steps h3 {
+  font-family: var(--font-sans);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--ink);
+}
 /* From here up, a page sits on a card; below it, the page itself is the surface. */
 @media (min-width: 600px) {
   .page {
@@ -1083,6 +1122,9 @@ footer .tagline {
     flex-wrap: wrap;
     justify-content: space-between;
     column-gap: var(--space-6);
+  }
+  .hero .foundingLine {
+    min-height: 1.5em;
   }
   .hero {
     grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);

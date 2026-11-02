@@ -1,69 +1,83 @@
 import Link from "next/link";
-import { RoleChooser } from "@/components/donor/RoleChooser";
+import { FoundingLine } from "@/components/donor/FoundingLine";
+import { GiftFraming } from "@/components/donor/GiftFraming";
+import { RoleLink } from "@/components/donor/RoleLink";
+import { launchDateLabel, launchMonthLabel } from "@/lib/launch";
+
+const steps = [
+  { number: "01", title: "Give", detail: "Monthly, in about a minute. No account needed." },
+  { number: "02", title: "Claim your account", detail: "One tap from the email we send you." },
+  { number: "03", title: "Invite someone", detail: "Share your link or show your code in person." },
+];
 
 export default function DonorHome() {
   return (
     <>
       <section className="hero">
         <div className="heroCopy">
-          <span className="eyebrow">Dynamic Aid Delivery · Donor preview</span>
-          <h1>Start small. Invite someone. Grow your circle’s impact.</h1>
-          <p>Join with about a dollar a day · $30/month. Monthly giving, no account needed to start.</p>
+          <span className="eyebrow">Aid, delivered.</span>
+          <h1>A dollar a day. Every dollar on the record.</h1>
           <p>
-            DAD launches on 22 April 2027. A first gift completed before 1 January 2027 (New York time) earns a
-            permanent Founding Donor badge.
+            Give monthly in about a minute, no account needed. Then invite the people you know and watch your circle
+            grow.
           </p>
           <div className="actions">
-            <Link className="button" href="/donate">
-              Try giving
-            </Link>
+            <RoleLink className="button" href="/donate">
+              Give $1 a day <span aria-hidden="true">→</span>
+            </RoleLink>
             <Link className="secondary" href="/how-it-works">
-              How DAD works
+              See how it works
             </Link>
           </div>
-          <p className="note">This environment uses Stripe test payments. No real donation is collected.</p>
+          <div>
+            <GiftFraming minor={3000} />
+          </div>
+          <FoundingLine />
         </div>
         <aside className="heroFacts" aria-label="DAD at a glance">
           <dl>
             <div>
-              <dt>Monthly gift</dt>
+              <dt>Your gift</dt>
               <dd>
-                <span>$30/month</span>
-                <span>about $1 a day</span>
+                <GiftFraming minor={3000} />
               </dd>
             </div>
             <div>
-              <dt>Recognition</dt>
-              <dd>
-                Founding Donor<small>Permanent, for a first gift before 1 January 2027 (New York time)</small>
-              </dd>
+              <dt>Where it goes</dt>
+              <dd>Spend by category, published</dd>
             </div>
             <div>
               <dt>Launch</dt>
-              <dd>
-                22 April 2027<small>Aid programs begin</small>
-              </dd>
+              <dd>{launchDateLabel()}</dd>
             </div>
           </dl>
         </aside>
       </section>
       <div className="page">
-        <RoleChooser />
         <section className="panel">
           <h2>One generous invitation at a time</h2>
-          <ol>
-            <li>Give on the web, without creating an account first.</li>
-            <li>Claim your account from the confirmation email.</li>
-            <li>Share your personal link or show your referral code on your phone.</li>
-            <li>See Link and IRL Referrals, collected dollars, your streak in days, and your badge.</li>
+          <ol className="metrics steps">
+            {steps.map((step) => (
+              <li className="metric" key={step.number}>
+                <span className="stepNumber">{step.number}</span>
+                <h3>{step.title}</h3>
+                <p>{step.detail}</p>
+              </li>
+            ))}
           </ol>
           <p>
             Only the people you personally invite count toward your circle. A referral counts when their first gift
             completes.
           </p>
+          <p className="note">
+            Run an aid organization?{" "}
+            <RoleLink className="quiet" href="/apply">
+              Become a partner <span aria-hidden="true">→</span>
+            </RoleLink>
+          </p>
         </section>
         <section className="panel">
-          <h2>Building toward April</h2>
+          <h2>Building toward {launchMonthLabel()}</h2>
           <p>
             DAD assembles aid initiatives with partner organizations and board approval. Programs begin at launch. No
             recipient receives money through this donor release.
@@ -71,7 +85,6 @@ export default function DonorHome() {
           <nav aria-label="Explore" className="links">
             <Link href="/initiatives">Explore planned initiatives</Link>
             <Link href="/spend">See spend by category</Link>
-            <Link href="/apply">Become a partner</Link>
           </nav>
         </section>
       </div>
