@@ -18,6 +18,7 @@ test("mobile contract preserves native operations and excludes privileged and br
     "/donor/partner/overview",
     "/donor/partner/push-device",
     "/donor/partner/application-status",
+    "/donor/partner/applications",
     "/donor/me/events/{event_id}/calendar.ics",
     "/donor/partner/users",
   ]) {

@@ -49,6 +49,41 @@ pins its dependency; changing the backend must preserve supported installed clie
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
 
+## Compatible additions in version 2.11
+
+Version 2.11 lets an installed app submit a partner application and read its status.
+Before it, `applyWithReceipt` was browser-only, so an app could not obtain a receipt and
+`applicationStatus` had nothing to read. No existing field, status or enum value changes.
+
+- `applyWithReceipt` (`POST /donor/partner/applications`) admits native requests. The
+  receipt is chosen by the app, never issued by the server: generate 32 random bytes,
+  encode them as unpadded base64url (43 characters) and keep them in secure storage
+  before sending.
+
+  ```
+  POST /donor/partner/applications
+  X-DAD-Client: native
+  Idempotency-Key: <version 4 UUID>
+  Content-Type: application/json
+
+  {"application": {...}, "receipt": "<43 characters>"}
+  ```
+
+  A success is `200 {"received": true}` with no `Set-Cookie`; the receipt is not echoed.
+  Send no `Origin` or `Cookie` header: a request carrying either is treated as a browser
+  request and refused as such, as on the other native entry routes. Retry a failed attempt
+  with the same `Idempotency-Key` and the same receipt. The route takes the visitor rate
+  budget (60 per minute per client address); a 429 carries `Retry-After`.
+- Read the status with `applicationStatus` (`GET /donor/partner/application-status`),
+  sending `X-DAD-Client: native` and `Authorization: Bearer <receipt>`. A receipt the
+  server does not know answers 401. Keep the receipt while the application is pending and
+  show the status card from it; discard it once the application is decided and shown.
+  Keep it apart from donor and partner session tokens and send it only to this route.
+- `partnerRetainedReport` documents its `404` (an unknown, foreign or malformed report
+  ID); the staff route `removeEventGuest`, outside the bundle, documents its 404 too.
+- The `RateLimitedByIngress` 429 now describes the `Problem` body and `Retry-After` that
+  the ingress sends. Keep tolerating an empty or non-JSON 429 from an older edge.
+
 ## Compatible additions in version 2.10
 
 Version 2.10 lets the apps carry referral and company-code attribution from a link that
