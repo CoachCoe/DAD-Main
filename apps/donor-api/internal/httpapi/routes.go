@@ -41,7 +41,7 @@ func (a *api) routes() []route {
 		a.capture("POST /donor/company/{code}", a.captureCompany),
 		{"POST /analytics/events", noAuth, a.guarded(a.Origin, analyticsLimit, true, a.ingestAnalytics)},
 		a.visitor("POST /donor/public/partner-apply", a.partnerApply),
-		a.visitor("POST /donor/partner/applications", a.applyWithReceipt),
+		a.appVisitor("POST /donor/partner/applications", a.applyWithReceipt),
 		{"GET /donor/partner/application-status", applicationAuth, signedIn(applicationSession, a.applicationStatus)},
 		a.partnerEntry("POST /donor/partner/sign-in", a.partnerSignIn),
 		a.partnerEntry("POST /donor/partner/accept-invite", a.partnerAccept),
@@ -225,6 +225,13 @@ func (a *api) public(pattern string, handler http.HandlerFunc) route {
 // visitor routes are anonymous browser mutations on the public site.
 func (a *api) visitor(pattern string, handler http.HandlerFunc) route {
 	return route{pattern, noAuth, a.guarded(a.Origin, visitorLimit, false, handler)}
+}
+
+// appVisitor is visitor for a route the installed apps also reach, with the
+// same anonymous-visitor budget: a native request carries no Origin or cookie
+// and gets its result in the body.
+func (a *api) appVisitor(pattern string, handler http.HandlerFunc) route {
+	return route{pattern, noAuth, a.guarded(a.Origin, visitorLimit, true, handler)}
 }
 
 // capture routes record an anonymous referral or company-code visit, in a

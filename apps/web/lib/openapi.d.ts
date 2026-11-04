@@ -4591,12 +4591,16 @@ export interface components {
                 "application/json": components["schemas"]["Problem"];
             };
         };
-        /** @description The ingress rate limit rejected the request before it reached the API. The body is not guaranteed to be JSON and `Retry-After` may be absent. Back off and retry. */
+        /** @description The ingress rate limit rejected the request before it reached the API. Current edges answer with the `Problem` body and a `Retry-After` header (5 seconds, 60 on sign-in routes); an older edge, or a CDN rule, may send an empty or non-JSON body and no `Retry-After`, so clients must tolerate that and back off with their own delay. */
         RateLimitedByIngress: {
             headers: {
+                /** @description Whole seconds to wait. May be absent from an older edge. */
+                "Retry-After"?: number;
                 [name: string]: unknown;
             };
-            content?: never;
+            content: {
+                "application/json": components["schemas"]["Problem"];
+            };
         };
     };
     parameters: {
@@ -7866,6 +7870,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["TooManyRequests"];
             503: components["responses"]["Unavailable"];
         };
@@ -9465,6 +9470,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimitedByIngress"];
             503: components["responses"]["Unavailable"];
         };
@@ -9786,13 +9792,13 @@ export interface operations {
                         phone: string;
                         workforce_size: number;
                     };
-                    /** @description Generate 32 cryptographically random bytes and encode as unpadded base64url. Keep this value for idempotent retries. Browsers receive an HttpOnly receipt cookie; native clients store the receipt securely. */
+                    /** @description Generate 32 cryptographically random bytes and encode as unpadded base64url. Keep this value for idempotent retries. Browsers receive an HttpOnly receipt cookie; native clients (`X-DAD-Client: native`, no Origin or Cookie) store the receipt securely and send it as `Authorization: Bearer <receipt>` to `applicationStatus`. */
                     receipt: string;
                 };
             };
         };
         responses: {
-            /** @description OK */
+            /** @description Received. Browsers also get an HttpOnly receipt cookie; a native client gets no cookie and reads the status with the receipt it sent, as a bearer token on `applicationStatus`. */
             200: {
                 headers: {
                     [name: string]: unknown;

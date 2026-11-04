@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -191,6 +192,43 @@ func TestContractDocumentsWrapperStatuses(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// A path ID that is not a UUID answers 404 from the handler, after the wrapper
+// has admitted the caller. Wrappers cannot be probed without a session store,
+// so credentials the handler accepts are presented and any 404 seen must be
+// documented; routes that stop earlier (401, 503) add nothing to check.
+func TestContractDocumentsMalformedPathIDs(t *testing.T) {
+	ops := loadContract(t).operations()
+	server := NewServer("", Services{})
+	var reached int
+	for _, route := range allRoutes() {
+		op, ok := ops[route.pattern]
+		if !ok || route.auth == stripeAuth || !strings.Contains(route.pattern, "_id}") {
+			continue
+		}
+		method, path, _ := strings.Cut(route.pattern, " ")
+		path = regexp.MustCompile(`\{[a-z_]+_id\}`).ReplaceAllString(path, "not-a-uuid")
+		path = wildcard.ReplaceAllString(path, testID)
+		r := httptest.NewRequest(method, path, strings.NewReader("{}"))
+		r.Header.Set("Origin", originFor(route.pattern))
+		r.Header.Set("Idempotency-Key", "00000000-0000-4000-8000-000000000001")
+		for _, name := range []string{donorCookie, partnerCookie, staffCookie} {
+			r.AddCookie(&http.Cookie{Name: name, Value: strings.Repeat("s", 43)})
+		}
+		response := httptest.NewRecorder()
+		server.Handler.ServeHTTP(response, r)
+		if response.Code != http.StatusNotFound {
+			continue
+		}
+		reached++
+		if _, documented := op.Responses["404"]; !documented {
+			t.Errorf("%s: a malformed ID got 404, which is not documented", route.pattern)
+		}
+	}
+	if reached == 0 {
+		t.Fatal("no path-ID route answered 404; the probe no longer reaches the handlers")
 	}
 }
 
