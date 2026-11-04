@@ -47,7 +47,7 @@ server {
         proxy_pass http://web;
     }
 
-    location ~ ^/api/donor/(checkouts|referrals/[^/]+|company/[^/]+|public/partner-apply)$ {
+    location ~ ^/api/donor/(checkouts|referrals/[^/]+|company/[^/]+|public/partner-apply|partner/applications)$ {
         limit_req zone=visitor burst=60 nodelay;
         proxy_pass http://web;
     }

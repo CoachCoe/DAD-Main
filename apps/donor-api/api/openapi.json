@@ -6765,6 +6765,9 @@
      "403": {
       "$ref": "#/components/responses/Forbidden"
      },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
      "429": {
       "$ref": "#/components/responses/TooManyRequests"
      },
@@ -10393,6 +10396,9 @@
      "403": {
       "$ref": "#/components/responses/Forbidden"
      },
+     "404": {
+      "$ref": "#/components/responses/NotFound"
+     },
      "429": {
       "$ref": "#/components/responses/RateLimitedByIngress"
      },
@@ -11006,7 +11012,8 @@
     "security": [],
     "x-rate-limit": "visitor",
     "x-clients": [
-     "browser"
+     "browser",
+     "native"
     ],
     "parameters": [
      {
@@ -11070,7 +11077,7 @@
           "minLength": 43,
           "maxLength": 43,
           "pattern": "^[A-Za-z0-9_-]{43}$",
-          "description": "Generate 32 cryptographically random bytes and encode as unpadded base64url. Keep this value for idempotent retries. Browsers receive an HttpOnly receipt cookie; native clients store the receipt securely."
+          "description": "Generate 32 cryptographically random bytes and encode as unpadded base64url. Keep this value for idempotent retries. Browsers receive an HttpOnly receipt cookie; native clients (`X-DAD-Client: native`, no Origin or Cookie) store the receipt securely and send it as `Authorization: Bearer <receipt>` to `applicationStatus`."
          }
         }
        }
@@ -11079,7 +11086,7 @@
     },
     "responses": {
      "200": {
-      "description": "OK",
+      "description": "Received. Browsers also get an HttpOnly receipt cookie; a native client gets no cookie and reads the status with the receipt it sent, as a bearer token on `applicationStatus`.",
       "content": {
        "application/json": {
         "schema": {
@@ -12085,7 +12092,23 @@
     }
    },
    "RateLimitedByIngress": {
-    "description": "The ingress rate limit rejected the request before it reached the API. The body is not guaranteed to be JSON and `Retry-After` may be absent. Back off and retry."
+    "description": "The ingress rate limit rejected the request before it reached the API. Current edges answer with the `Problem` body and a `Retry-After` header (5 seconds, 60 on sign-in routes); an older edge, or a CDN rule, may send an empty or non-JSON body and no `Retry-After`, so clients must tolerate that and back off with their own delay.",
+    "headers": {
+     "Retry-After": {
+      "description": "Whole seconds to wait. May be absent from an older edge.",
+      "schema": {
+       "type": "integer",
+       "minimum": 1
+      }
+     }
+    },
+    "content": {
+     "application/json": {
+      "schema": {
+       "$ref": "#/components/schemas/Problem"
+      }
+     }
+    }
    }
   },
   "schemas": {
