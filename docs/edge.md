@@ -111,7 +111,7 @@ before each costs a signature check.
 | Class | Paths (POST unless noted) | Cloudflare per IP | nginx per IP | API per client |
 | --- | --- | --- | --- | --- |
 | Auth | `/api/donor/login`, `/claim`, `/email-change/confirm`, `/passkeys/sign-in`, `/phone/sign-in`, `/oidc/{provider}/sign-in`, `/partner/sign-in`, `/partner/accept-invite`; `/api/donor/staff/sign-in`, `/activate`; and each sign-in and activation's `/options` | 30/min, block 10 min | 20/min, burst 20 | 10/min |
-| Visitor | `/api/donor/checkouts`, `/api/donor/referrals/{code}`, `/api/donor/company/{code}`, `/api/donor/public/partner-apply` | 240/min, block 1 min | 120/min, burst 60 | 60/min |
+| Visitor | `/api/donor/checkouts`, `/api/donor/referrals/{code}`, `/api/donor/company/{code}`, `/api/donor/public/partner-apply`, `/api/donor/partner/applications` | 240/min, block 1 min | 120/min, burst 60 | 60/min |
 | General | pages, assets, other API calls | 1,200/min uncached, challenge | 30/s, burst 300 | account writes 30/min, staff writes 60/min |
 | Stripe webhook | `/api/donor/stripe/webhook` | skipped | 20/s, burst 500 | signature verified |
 
