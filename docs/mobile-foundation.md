@@ -355,3 +355,35 @@ Production signing, camera/notification permission timing, analytics activation,
 real-device/provider acceptance remain open. The R1 PRD defines donor and partner scope;
 the native foundations do not yet implement those product journeys. Offline financial
 mutations require a separate design rather than replaying commands blindly.
+
+## Partner sessions in the apps
+
+The partner portal's operations are in the bundle and accept the app's bearer token.
+Native requests send `X-DAD-Client: native`, `Authorization: Bearer <session>` and no
+`Origin` or cookies; a request with a cookie or `Origin` is judged as a browser request
+by its cookie alone. The web proxy's dropping of `Authorization` does not affect the
+apps, which call the API directly.
+
+1. `POST /donor/partner/sign-in` with `{"email": "..."}` answers 202 whether or not the
+   address belongs to a partner user, and emails a `/partner/accept#token=...` link.
+   Invitations and approval emails carry the same link.
+2. `POST /donor/partner/accept-invite` with `{"invite": "<link token>"}` answers
+   `{"session": "<token>"}` to the app; a browser receives the HttpOnly
+   `dad_partner_session` cookie and `{"signed_in": true}` instead. The link works once.
+3. Every partner read and write takes the session as a bearer token. Mutations are
+   rate-limited per account as on the web, sign-in and link exchange at the sign-in
+   limit, and admin-only actions check the partner user's current role. `GET /donor/partner/application-status` instead
+   takes the applicant's private application receipt as its bearer token; it is not a
+   partner session.
+4. `POST /donor/partner/sign-out` revokes the session and clears any push registration.
+
+A partner session lasts 12 hours, on the web and in the app, and has no refresh token:
+when it ends (401 `Partner sign-in required`), the app asks for a new emailed link. The
+partner session is not created with a device name or platform; partner push registration
+records the platform.
+
+A device can hold a donor session and a partner session at once. They are separate
+tokens in separate stores: a donor token never authenticates a partner route and a
+partner token never authenticates a donor route, and signing out of one leaves the other
+signed in. Apps keep the two in separate secure-storage entries and send the partner
+token only to `/donor/partner/` routes.
