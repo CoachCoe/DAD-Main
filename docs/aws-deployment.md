@@ -10,7 +10,7 @@ Where the design's assumptions differed from the repository, the repository wins
 reconciliation is noted inline.
 
 The IaC is AWS CDK (TypeScript). This is the design; the CDK app lives in the
-[DAD-infra](https://github.com/CoachCoe/DAD-infra) repository at `apps/dad-main/`, and
+[DAD-infra](https://github.com/pre-dad/DAD-infra) repository at `apps/dad-main/`, and
 the estate-wide design (accounts, shared packages, the DAD-Quality runner) is in
 DAD-infra `docs/design/aws-infra-design.md`.
 

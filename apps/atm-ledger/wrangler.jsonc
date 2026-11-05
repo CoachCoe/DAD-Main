@@ -41,7 +41,7 @@
 		}
 	],
 	"vars": {
-		"SOURCE": "github:CoachCoe/DAD-Main",
+		"SOURCE": "github:pre-dad/DAD-Main",
 		"REPOSITORY_ID": "1378692308",
 		"OWNER_ID": "17258192",
 		"ADMIN_ACTOR_IDS": "17258192"

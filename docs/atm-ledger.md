@@ -47,7 +47,7 @@ Restrict account access and deployment credentials accordingly.
 There are no shared publisher or triage passwords. The Worker verifies GitHub's signed
 OIDC tokens, issuer, audience, expiry, repository ID, owner ID, workflow path, event,
 hosted-runner claim, and job environment. The audience is
-`atm-ledger:github:CoachCoe/DAD-Main`.
+`atm-ledger:github:pre-dad/DAD-Main`.
 
 | Job environment | Allowed operations |
 |---|---|

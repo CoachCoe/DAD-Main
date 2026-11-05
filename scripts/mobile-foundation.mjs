@@ -190,7 +190,7 @@ export async function bundle(output) {
   const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
   const manifest = {
     version,
-    source_repository: "CoachCoe/DAD-Main",
+    source_repository: "pre-dad/DAD-Main",
     source_revision: revision,
     files: Object.fromEntries(Object.entries(files).map(([name, contents]) => [name, digest(contents)])),
   };

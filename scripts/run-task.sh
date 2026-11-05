@@ -2,7 +2,7 @@
 #
 # run-task.sh — thin wrapper around `aws ecs run-task` for the DAD maintenance
 # task definitions created by DAD-infra apps/dad-main/lib/maintenance-stack.ts
-# (https://github.com/CoachCoe/DAD-infra).
+# (https://github.com/pre-dad/DAD-infra).
 #
 # This script is DOCUMENTED, NOT AUTO-RUN by CDK. An operator invokes it by hand
 # (or the app pipeline invokes `aws ecs run-task` directly in the same shape).
