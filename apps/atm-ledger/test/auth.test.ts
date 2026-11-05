@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { authenticate, authorize } from "../src/auth";
 
 const claims = {
-	repository: "CoachCoe/DAD-Main",
+	repository: "pre-dad/DAD-Main",
 	repository_id: "1378692308",
 	repository_owner_id: "17258192",
 	runner_environment: "github-hosted",
@@ -15,7 +15,7 @@ const claims = {
 	sha: "a".repeat(40),
 	event_name: "push",
 	environment: "atm-ledger-reader",
-	workflow_ref: "CoachCoe/DAD-Main/.github/workflows/atm.yml@refs/heads/dev",
+	workflow_ref: "pre-dad/DAD-Main/.github/workflows/atm.yml@refs/heads/dev",
 };
 
 describe("GitHub OIDC authorization", () => {
@@ -28,11 +28,11 @@ describe("GitHub OIDC authorization", () => {
 		{ event_name: "pull_request_target" },
 		{
 			workflow_ref:
-				"CoachCoe/DAD-Main/.github/workflows/other.yml@refs/heads/dev",
+				"pre-dad/DAD-Main/.github/workflows/other.yml@refs/heads/dev",
 		},
 		{
 			workflow_ref:
-				"CoachCoe/DAD-Main/.github/workflows/atm.yml@refs/heads/untrusted",
+				"pre-dad/DAD-Main/.github/workflows/atm.yml@refs/heads/untrusted",
 		},
 	])(
 		"rejects identities outside the configured trust boundary: %j",
@@ -71,7 +71,7 @@ describe("GitHub OIDC authorization", () => {
 		const verify = createLocalJWKSet({ keys: [jwk] });
 		const sign = (
 			issuer = "https://token.actions.githubusercontent.com",
-			audience = "atm-ledger:github:CoachCoe/DAD-Main",
+			audience = "atm-ledger:github:pre-dad/DAD-Main",
 			expires = "2m",
 		) =>
 			new SignJWT(claims)

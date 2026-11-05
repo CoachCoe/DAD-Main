@@ -40,7 +40,7 @@ the vendored contract without network access to this private repository. An auth
 maintainer can obtain a release with:
 
 ```sh
-gh release download mobile-foundation-v2.7.0 --repo CoachCoe/DAD-Main --dir /tmp/dad-foundation
+gh release download mobile-foundation-v2.7.0 --repo pre-dad/DAD-Main --dir /tmp/dad-foundation
 ```
 
 Use patch versions for equivalent packaging corrections, minor versions for compatible
