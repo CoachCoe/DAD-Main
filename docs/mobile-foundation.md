@@ -49,6 +49,41 @@ pins its dependency; changing the backend must preserve supported installed clie
 Breaking field removals, type changes, and newly required request fields require a
 coordinated compatibility plan. Do not invent financial values for unknown server states.
 
+## Compatible additions in version 2.11
+
+Version 2.11 lets an installed app submit a partner application and read its status.
+Before it, `applyWithReceipt` was browser-only, so an app could not obtain a receipt and
+`applicationStatus` had nothing to read. No existing field, status or enum value changes.
+
+- `applyWithReceipt` (`POST /donor/partner/applications`) admits native requests. The
+  receipt is chosen by the app, never issued by the server: generate 32 random bytes,
+  encode them as unpadded base64url (43 characters) and keep them in secure storage
+  before sending.
+
+  ```
+  POST /donor/partner/applications
+  X-DAD-Client: native
+  Idempotency-Key: <version 4 UUID>
+  Content-Type: application/json
+
+  {"application": {...}, "receipt": "<43 characters>"}
+  ```
+
+  A success is `200 {"received": true}` with no `Set-Cookie`; the receipt is not echoed.
+  Send no `Origin` or `Cookie` header: a request carrying either is treated as a browser
+  request and refused as such, as on the other native entry routes. Retry a failed attempt
+  with the same `Idempotency-Key` and the same receipt. The route takes the visitor rate
+  budget (60 per minute per client address); a 429 carries `Retry-After`.
+- Read the status with `applicationStatus` (`GET /donor/partner/application-status`),
+  sending `X-DAD-Client: native` and `Authorization: Bearer <receipt>`. A receipt the
+  server does not know answers 401. Keep the receipt while the application is pending and
+  show the status card from it; discard it once the application is decided and shown.
+  Keep it apart from donor and partner session tokens and send it only to this route.
+- `partnerRetainedReport` documents its `404` (an unknown, foreign or malformed report
+  ID); the staff route `removeEventGuest`, outside the bundle, documents its 404 too.
+- The `RateLimitedByIngress` 429 now describes the `Problem` body and `Retry-After` that
+  the ingress sends. Keep tolerating an empty or non-JSON 429 from an older edge.
+
 ## Compatible additions in version 2.10
 
 Version 2.10 lets the apps carry referral and company-code attribution from a link that
@@ -355,3 +390,35 @@ Production signing, camera/notification permission timing, analytics activation,
 real-device/provider acceptance remain open. The R1 PRD defines donor and partner scope;
 the native foundations do not yet implement those product journeys. Offline financial
 mutations require a separate design rather than replaying commands blindly.
+
+## Partner sessions in the apps
+
+The partner portal's operations are in the bundle and accept the app's bearer token.
+Native requests send `X-DAD-Client: native`, `Authorization: Bearer <session>` and no
+`Origin` or cookies; a request with a cookie or `Origin` is judged as a browser request
+by its cookie alone. The web proxy's dropping of `Authorization` does not affect the
+apps, which call the API directly.
+
+1. `POST /donor/partner/sign-in` with `{"email": "..."}` answers 202 whether or not the
+   address belongs to a partner user, and emails a `/partner/accept#token=...` link.
+   Invitations and approval emails carry the same link.
+2. `POST /donor/partner/accept-invite` with `{"invite": "<link token>"}` answers
+   `{"session": "<token>"}` to the app; a browser receives the HttpOnly
+   `dad_partner_session` cookie and `{"signed_in": true}` instead. The link works once.
+3. Every partner read and write takes the session as a bearer token. Mutations are
+   rate-limited per account as on the web, sign-in and link exchange at the sign-in
+   limit, and admin-only actions check the partner user's current role. `GET /donor/partner/application-status` instead
+   takes the applicant's private application receipt as its bearer token; it is not a
+   partner session.
+4. `POST /donor/partner/sign-out` revokes the session and clears any push registration.
+
+A partner session lasts 12 hours, on the web and in the app, and has no refresh token:
+when it ends (401 `Partner sign-in required`), the app asks for a new emailed link. The
+partner session is not created with a device name or platform; partner push registration
+records the platform.
+
+A device can hold a donor session and a partner session at once. They are separate
+tokens in separate stores: a donor token never authenticates a partner route and a
+partner token never authenticates a donor route, and signing out of one leaves the other
+signed in. Apps keep the two in separate secure-storage entries and send the partner
+token only to `/donor/partner/` routes.
