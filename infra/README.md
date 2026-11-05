@@ -1,7 +1,7 @@
 # infra/ moved to the DAD-infra monorepo
 
 The CDK infrastructure that used to live here was extracted into the shared
-**DAD-infra** monorepo: https://github.com/CoachCoe/DAD-infra
+**DAD-infra** monorepo: https://github.com/pre-dad/DAD-infra
 
 - CDK app: `apps/dad-main/` within that repo (stacks, bin, tests).
 - Shared config and GitHub OIDC primitives: `packages/config`, `packages/pipeline-iam`.

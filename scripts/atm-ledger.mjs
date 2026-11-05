@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const SOURCE = "github:CoachCoe/DAD-Main";
+const SOURCE = "github:pre-dad/DAD-Main";
 const json = (file) => readFile(file, "utf8").then(JSON.parse);
 async function responseJSON(response) {
   const length = Number(response.headers.get("content-length"));
@@ -103,7 +103,7 @@ async function main() {
         "run",
         "atm.yml",
         "--repo",
-        "CoachCoe/DAD-Main",
+        "pre-dad/DAD-Main",
         "--ref",
         "dev",
         "-f",
