@@ -6,7 +6,7 @@ import { authenticate, authorize } from "../src/auth";
 const claims = {
 	repository: "pre-dad/DAD-Main",
 	repository_id: "1378692308",
-	repository_owner_id: "17258192",
+	repository_owner_id: "353088835",
 	runner_environment: "github-hosted",
 	actor: "CoachCoe",
 	actor_id: "17258192",
