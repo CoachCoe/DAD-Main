@@ -109,8 +109,8 @@ An environment's protection rules may add human approval if the organization req
 The initial import preserved all 22 committed ledger revisions through Git commit
 `397aee9237f2266aeb223219686340a3e416c6af`: 19 execution receipts and two resolved
 findings, each with its original audit record. The owner-authenticated import ran in
-[Actions run 38488982545](https://github.com/CoachCoe/ImpactGraph/actions/runs/38488982545).
-A separate [history export](https://github.com/CoachCoe/ImpactGraph/actions/runs/38489085019)
+[Actions run 38488982545](https://github.com/pre-dad/DAD-Main/actions/runs/38488982545).
+A separate [history export](https://github.com/pre-dad/DAD-Main/actions/runs/38489085019)
 verified every event hash, previous hash, before/after digest, source commit anchor,
 finding audit and receipt against every original Git revision. The source branch tip
 was checked again before activation.

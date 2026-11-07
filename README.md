@@ -213,6 +213,8 @@ enables workers or deletes database volumes implicitly. Test-only readiness is n
 - `apps/donor-api/testdata`: recognition scenarios and fixtures shared by tests.
 - `apps/donor-api/tools`: a module pinning the staticcheck build `make lint-go` runs.
 - `apps/web`: public website, donor account, partner portal, staff console, browser and unit tests.
+- `apps/atm-ledger`: the Cloudflare Worker that stores the ATM acceptance ledger ([atm-ledger](docs/atm-ledger.md)).
+- `design/tokens.json`: the shared design values behind the web and native clients ([design system](docs/design-system.md)).
 - `contracts/mobile`: the generated mobile-foundation bundle the native iOS and Android clients build against, checked by `make check-mobile`.
 - `deploy/nginx`: the production ingress configuration.
 - `scripts`: deployment, backup, restore verification, and ingress checks.

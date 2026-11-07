@@ -36,8 +36,8 @@ released versions. A release must be built from committed, clean sources.
 Each app records the exact release tag and manifest hash, vendors that release's files,
 and verifies both the manifest and file hashes before generation. Updating is an explicit
 reviewed change, not a fetch of `dev` or `latest` during a build. CI can regenerate from
-the vendored contract without network access to this private repository. An authenticated
-maintainer can obtain a release with:
+the vendored contract without network access to this repository. A maintainer
+can obtain a release with:
 
 ```sh
 gh release download mobile-foundation-v2.7.0 --repo pre-dad/DAD-Main --dir /tmp/dad-foundation

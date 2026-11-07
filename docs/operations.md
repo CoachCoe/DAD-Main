@@ -457,6 +457,10 @@ confirmation, reasons, and audit records. Never edit processor identifiers by ha
 Run projection, login-email, email-changes, and message workers separately. Email changes
 use the same mail configuration, require current-address proof before new-address proof,
 and park delivery after five failures. Requesting a replacement invalidates prior proofs.
+The queue workers (`login-email`, `email-changes`, `messages`, `push`) accept
+`--concurrency N` (up to 8) to run N claim loops in one process. Each loop claims a row with
+`FOR UPDATE SKIP LOCKED`, so none is delivered twice; N may not exceed the login's pool size,
+so raise `pool_max_conns` in the worker's database URL and re-run `make provision` first.
 Projection refresh handles grace expiry, recurring boundaries, permanent recognition,
 and prior-year summaries. A projection is recomputed when facts that change it arrive and
 at its next time boundary: a due date, period end, grace deadline, cancellation,
@@ -1064,9 +1068,8 @@ it with the pinned Swift package dependencies. Only matching mobile version tags
 publish a release; pull requests cannot publish artifacts as releases.
 
 Branch protection should require the CI and mobile checks and ATM acceptance.
-A green application test suite alone does not authorize deployment. Retire
-previous persistent self-hosted runners from this repository and revoke any
-credentials stored on those machines through the operator's runner controls.
+A green application test suite alone does not authorize deployment. All
+workflows run on GitHub-hosted runners.
 
 
 ## One email, one role
