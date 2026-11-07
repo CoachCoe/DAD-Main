@@ -66,3 +66,24 @@ func sleep(ctx context.Context, d time.Duration) bool {
 		return true
 	}
 }
+
+// RunConcurrent runs n copies of Run over the same step. The step must claim
+// its work with FOR UPDATE SKIP LOCKED so copies never take the same item.
+// The first copy to return ends the others and its error is returned.
+func RunConcurrent(ctx context.Context, n int, once bool, idle, budget time.Duration, step func(context.Context) (bool, error)) error {
+	if n <= 1 {
+		return Run(ctx, once, idle, budget, step)
+	}
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	results := make(chan error, n)
+	for range n {
+		go func() { results <- Run(ctx, once, idle, budget, step) }()
+	}
+	first := <-results
+	stop()
+	for range n - 1 {
+		<-results
+	}
+	return first
+}
